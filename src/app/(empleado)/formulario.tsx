@@ -144,57 +144,38 @@ export default function GastoForm() {
   const [showCliDropdown, setShowCliDropdown] = useState(false);
 
   useEffect(() => {
+    const alerts: string[] = [];
+
+    // 1. Validar límite de alimentos general de $280 MXN
     const valMonto = Number(monto);
-    if (!valMonto || isNaN(valMonto) || !selectedEstado || !selectedCategoria) {
-      setAlertaLocal(null);
-      return;
+    if (valMonto && !isNaN(valMonto) && selectedCategoria) {
+      const isAlimentos = selectedCategoria.toLowerCase().includes('alimento') ||
+                          selectedCategoria.toLowerCase().includes('comida') ||
+                          selectedCategoria.toLowerCase().includes('consumo');
+
+      if (isAlimentos && valMonto > 280) {
+        alerts.push(`Límite de alimentos excedido: el límite general por comida es de $280 MXN (Consumo: $${valMonto} MXN)`);
+      }
     }
 
-    const isAlimentos = selectedCategoria.toLowerCase().includes('alimento') ||
-                        selectedCategoria.toLowerCase().includes('comida') ||
-                        selectedCategoria.toLowerCase().includes('consumo');
+    // 2. Validar artículos no permitidos localmente
+    const keywordsInfraccion = [
+      'cigarro', 'tabaco', 'papita', 'galleta', 'chucheria', 'dulce', 'fritura', 'chocolate', 'refresco',
+      'soda', 'gansito', 'sabritas', 'barcel', 'marinela', 'coca-cola', 'coca cola', 'pepsi', 'alcohol', 'cerveza'
+    ];
+    const textToCheck = `${justificacion} ${proveedor}`.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const infraccionesDetectadas = keywordsInfraccion.filter(keyword => textToCheck.includes(keyword));
+    
+    if (infraccionesDetectadas.length > 0) {
+      alerts.push(`Artículos no permitidos detectados (${infraccionesDetectadas.join(', ')})`);
+    }
 
-    if (isAlimentos) {
-      const estadoNormalizado = selectedEstado.toUpperCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // Eliminar acentos
-        
-      let limite = 0;
-      let costoTipo = '';
-      
-      const costoBajo = [
-        "CAMPECHE", "CHIAPAS", "CIUDAD DE MEXICO", "ESTADO DE MEXICO", 
-        "GUANAJUATO", "NAYARIT", "PUEBLA", "SONORA", "TLAXCALA", "ZACATECAS"
-      ];
-      const costoMedio = [
-        "AGUASCALIENTES", "BAJA CALIFORNIA SUR", "CHIHUAHUA", "COAHUILA", 
-        "DURANGO", "GUERRERO", "HIDALGO", "JALISCO", "MICHOACAN", 
-        "MORELOS", "OAXACA", "TABASCO", "VERACRUZ"
-      ];
-      const costoAlto = [
-        "BAJA CALIFORNIA", "COLIMA", "NUEVO LEON", "QUERETARO", 
-        "QUINTANA ROO", "SAN LUIS POTOSI", "SINALOA", "TAMAULIPAS", "YUCATAN"
-      ];
-      
-      if (costoBajo.includes(estadoNormalizado)) {
-        limite = 350;
-        costoTipo = 'Bajo';
-      } else if (costoMedio.includes(estadoNormalizado)) {
-        limite = 400;
-        costoTipo = 'Medio';
-      } else if (costoAlto.includes(estadoNormalizado)) {
-        limite = 450;
-        costoTipo = 'Alto';
-      }
-      
-      if (limite > 0 && valMonto > limite) {
-        setAlertaLocal(`Límite de alimentos excedido en ${selectedEstado} (Límite: $${limite} MXN - Consumo: $${valMonto} MXN)`);
-      } else {
-        setAlertaLocal(null);
-      }
+    if (alerts.length > 0) {
+      setAlertaLocal(alerts.join(' | '));
     } else {
       setAlertaLocal(null);
     }
-  }, [monto, selectedEstado, selectedCategoria]);
+  }, [monto, selectedCategoria, justificacion, proveedor]);
 
   const loadCatalogos = async () => {
     try {

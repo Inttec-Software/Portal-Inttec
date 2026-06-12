@@ -32,11 +32,8 @@ export const GeminiService = {
   "categoria": string (una categoría sugerida de gasto como Alimentos, Transporte, Papelería, Peajes, Combustible, etc. de acuerdo a la compra),
   "subcategoria": string (una subcategoría específica sugerida de acuerdo a la categoría anterior, ej: Desayuno, Taxis, Gasolina, Hojas bond, si no hay usa null),
   "estado": string (debe ser exactamente uno de los 32 estados de la República Mexicana: Aguascalientes, Baja California, Baja California Sur, Campeche, Chiapas, Chihuahua, Coahuila, Colima, Ciudad de México, Durango, Guanajuato, Guerrero, Hidalgo, Jalisco, Estado de México, Michoacán, Morelos, Nayarit, Nuevo León, Oaxaca, Puebla, Querétaro, Quintana Roo, San Luis Potosí, Sinaloa, Sonora, Tabasco, Tamaulipas, Tlaxcala, Veracruz, Yucatán, Zacatecas. Identifícalo de forma inteligente según la dirección, RFC, código postal, sucursal, teléfono o texto del ticket. Si no se puede determinar usa null),
-  "alerta_politica": string (si detectas compras de artículos no permitidos como alcohol/bebidas alcohólicas, cigarros, propinas excesivas, o si notas un monto exageradamente inflado o ilógico para productos básicos, describe la advertencia en español.
-  Además, si detectas consumo de alimentos (comida, restaurante, cafetería), identifica el Estado de la República donde se realizó la compra (basado en la dirección, RFC, sucursal o teléfono del ticket). Aplica los siguientes límites diarios por Estado y genera una alerta en español si se excede el límite (ej. "Límite de alimentos excedido en Jalisco: el límite es $400 y se gastó $450"):
-  - Límite de Costo Bajo ($350 MXN): CAMPECHE, CHIAPAS, CIUDAD DE MEXICO, ESTADO DE MEXICO, GUANAJUATO, NAYARIT, PUEBLA, SONORA, TLAXCALA, ZACATECAS.
-  - Límite de Costo Medio ($400 MXN): AGUASCALIENTES, BAJA CALIFORNIA SUR, CHIHUAHUA, COAHUILA, DURANGO, GUERRERO, HIDALGO, JALISCO, MICHOACAN, MORELOS, OAXACA, TABASCO, VERACRUZ.
-  - Límite de Costo Alto ($450 MXN): BAJA CALIFORNIA, COLIMA, NUEVO LEON, QUERETARO, QUINTANA ROO, SAN LUIS POTOSI, SINALOA, TAMAULIPAS, YUCATAN.
+  "alerta_politica": string (si detectas compras de artículos no permitidos como alcohol/bebidas alcohólicas, cigarros, tabaco, propinas excesivas, o comida chatarra/chucherías (como papitas, papas fritas, frituras, galletas, dulces, chocolates, refrescos o gomitas), describe la advertencia en español.
+  Además, si detectas consumo de alimentos (comida, restaurante, cafetería) y el monto total supera los $280 MXN, genera una alerta en español indicando que se excedió el límite general por comida de $280 MXN, ej: "Límite de alimentos excedido: el límite general es de $280 MXN y se gastó $320 MXN".
   Si no se detectan infracciones de política, usa null)
 }`;
 
