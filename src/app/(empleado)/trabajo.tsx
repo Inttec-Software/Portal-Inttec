@@ -390,6 +390,15 @@ export default function MiTrabajoScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Botón Flotante para Registrar Evidencia */}
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => router.push('/(empleado)/evidencia')}
+        style={[styles.fab, { backgroundColor: themeColors.success }]}
+      >
+        <Ionicons name="camera" size={24} color="#ffffff" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -615,5 +624,20 @@ const styles = StyleSheet.create({
   adicionalModalImage: {
     width: '100%',
     height: '100%',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: Spacing.four,
+    right: Spacing.four,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
   },
 });

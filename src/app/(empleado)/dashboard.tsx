@@ -390,15 +390,6 @@ export default function EmpleadoDashboard() {
 
       {/* Floating Action Buttons */}
       <View style={styles.fabContainer}>
-        {/* Registrar Evidencia */}
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => router.push('/(empleado)/evidencia')}
-          style={[styles.fabSecondary, { backgroundColor: themeColors.success }]}
-        >
-          <Ionicons name="camera" size={22} color="#ffffff" />
-        </TouchableOpacity>
-
         {/* Registrar Gasto */}
         <TouchableOpacity
           activeOpacity={0.8}
