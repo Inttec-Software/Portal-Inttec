@@ -103,10 +103,10 @@ export interface SubcategoriaItem {
 export const AuthService = {
   async login(email: string, password: string): Promise<Usuario> {
     const { data, error } = await supabase
-      .from('usuarios')
-      .select('id, nombre, email, rol, telefono, created_at')
-      .eq('email', email.trim().toLowerCase())
-      .eq('password', password)
+      .rpc('login_usuario', {
+        email_param: email.trim().toLowerCase(),
+        password_param: password,
+      })
       .maybeSingle();
 
     if (error) {

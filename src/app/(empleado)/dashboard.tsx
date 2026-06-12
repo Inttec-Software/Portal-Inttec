@@ -13,6 +13,7 @@ import {
   Image,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, AuthService, Usuario } from '@/services/supabase';
@@ -42,6 +43,61 @@ export default function EmpleadoDashboard() {
   // Feedback para Action Required
   const [repondFeedback, setRespondFeedback] = useState('');
   const [isSubmittingResponse, setIsSubmittingResponse] = useState(false);
+
+  // Modal de Perfil
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [profilePhone, setProfilePhone] = useState('');
+  const [profilePassword, setProfilePassword] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  const handleOpenProfile = () => {
+    if (user) {
+      setProfilePhone(user.telefono || '');
+      setProfilePassword('');
+      setProfileModalVisible(true);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!user) return;
+    setIsSavingProfile(true);
+
+    try {
+      const updates: any = {
+        telefono: profilePhone.trim(),
+      };
+
+      if (profilePassword.trim()) {
+        updates.password = profilePassword.trim();
+      }
+
+      const { data, error } = await supabase
+        .from('usuarios')
+        .update(updates)
+        .eq('id', user.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Actualizar el estado local y AsyncStorage
+      const updatedUser: Usuario = {
+        ...user,
+        telefono: updates.telefono,
+      };
+
+      setUser(updatedUser);
+      await AsyncStorage.setItem('logged_user', JSON.stringify(updatedUser));
+
+      Alert.alert('Éxito', 'Perfil actualizado correctamente.');
+      setProfileModalVisible(false);
+      setProfilePassword('');
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo actualizar el perfil.');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
 
   useEffect(() => {
     // Cargar usuario
@@ -233,6 +289,12 @@ export default function EmpleadoDashboard() {
             style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
           >
             <Ionicons name="briefcase-outline" size={20} color={themeColors.accent} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleOpenProfile}
+            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
+          >
+            <Ionicons name="person-circle-outline" size={20} color={themeColors.accent} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={handleLogout}
@@ -494,6 +556,82 @@ export default function EmpleadoDashboard() {
                 </View>
               </ScrollView>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de Mi Perfil */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={profileModalVisible}
+        onRequestClose={() => setProfileModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: themeColors.text }]}>Mi Perfil</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setProfileModalVisible(false);
+                  setProfilePassword('');
+                }}
+              >
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.modalScroll}>
+              <View style={styles.modalDetails}>
+                <CustomInput
+                  label="Nombre Completo"
+                  value={user?.nombre || ''}
+                  editable={false}
+                  style={{ opacity: 0.7 }}
+                />
+                
+                <CustomInput
+                  label="Correo Electrónico"
+                  value={user?.email || ''}
+                  editable={false}
+                  autoCapitalize="none"
+                  style={{ opacity: 0.7 }}
+                />
+
+                <CustomInput
+                  label="Rol"
+                  value={user?.rol || ''}
+                  editable={false}
+                  style={{ opacity: 0.7 }}
+                />
+
+                <CustomInput
+                  label="Teléfono"
+                  placeholder="Ej. 5512345678"
+                  value={profilePhone}
+                  onChangeText={setProfilePhone}
+                  keyboardType="phone-pad"
+                />
+
+                <CustomInput
+                  label="Nueva Contraseña (Opcional)"
+                  placeholder="Dejar en blanco para no cambiar"
+                  value={profilePassword}
+                  onChangeText={setProfilePassword}
+                  isPassword
+                  autoCapitalize="none"
+                />
+
+                <View style={{ marginTop: Spacing.two }}>
+                  <CustomButton
+                    title="Guardar Cambios"
+                    onPress={handleSaveProfile}
+                    loading={isSavingProfile}
+                    variant="primary"
+                  />
+                </View>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
