@@ -29,6 +29,14 @@ export default function AdminDashboard() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}: ${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
   const [adminUser, setAdminUser] = useState<Usuario | null>(null);
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [personal, setPersonal] = useState<Usuario[]>([]);
@@ -109,11 +117,11 @@ export default function AdminDashboard() {
       setAdminUser(updatedUser);
       await AsyncStorage.setItem('logged_user', JSON.stringify(updatedUser));
 
-      Alert.alert('Éxito', 'Perfil actualizado correctamente.');
+      showAlert('Éxito', 'Perfil actualizado correctamente.');
       setProfileModalVisible(false);
       setProfilePassword('');
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo actualizar el perfil.');
+      showAlert('Error', err.message || 'No se pudo actualizar el perfil.');
     } finally {
       setIsSavingProfile(false);
     }
@@ -237,7 +245,7 @@ export default function AdminDashboard() {
   // Registrar Nuevo Usuario
   const handleAddUser = async () => {
     if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword || !newUserRole) {
-      Alert.alert('Validación', 'Por favor completa los campos obligatorios (*).');
+      showAlert('Validación', 'Por favor completa los campos obligatorios (*).');
       return;
     }
 
@@ -255,7 +263,7 @@ export default function AdminDashboard() {
 
       if (error) throw error;
 
-      Alert.alert('Éxito', 'Personal registrado correctamente.');
+      showAlert('Éxito', 'Personal registrado correctamente.');
       setAddUserModalVisible(false);
       // Limpiar campos
       setNewUserName('');
@@ -265,7 +273,7 @@ export default function AdminDashboard() {
       setNewUserRole('EMPLEADO');
       await refreshData();
     } catch (err: any) {
-      Alert.alert('Error al registrar', err.message || 'No se pudo registrar el nuevo usuario.');
+      showAlert('Error al registrar', err.message || 'No se pudo registrar el nuevo usuario.');
     } finally {
       setIsAddingUser(false);
     }
@@ -285,7 +293,7 @@ export default function AdminDashboard() {
   // Actualizar Usuario en Supabase
   const handleUpdateUser = async () => {
     if (!editingUser || !editUserName.trim() || !editUserEmail.trim()) {
-      Alert.alert('Validación', 'Nombre y Correo son campos requeridos.');
+      showAlert('Validación', 'Nombre y Correo son campos requeridos.');
       return;
     }
 
@@ -310,12 +318,12 @@ export default function AdminDashboard() {
 
       if (error) throw error;
 
-      Alert.alert('Éxito', 'Información de personal actualizada correctamente.');
+      showAlert('Éxito', 'Información de personal actualizada correctamente.');
       setEditUserModalVisible(false);
       setEditingUser(null);
       await refreshData();
     } catch (err: any) {
-      Alert.alert('Error al actualizar', err.message || 'No se pudo guardar la información.');
+      showAlert('Error al actualizar', err.message || 'No se pudo guardar la información.');
     } finally {
       setIsUpdatingUser(false);
     }
@@ -326,11 +334,16 @@ export default function AdminDashboard() {
     const performDelete = async () => {
       try {
         const { error } = await supabase.from('usuarios').delete().eq('id', id);
-        if (error) throw error;
-        Alert.alert('Éxito', 'Personal eliminado.');
+        if (error) {
+          if (error.code === '23503') {
+            throw new Error('No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
+          }
+          throw error;
+        }
+        showAlert('Éxito', 'Personal eliminado.');
         await refreshData();
       } catch (err: any) {
-        Alert.alert('Error al eliminar', err.message || 'No se pudo eliminar el usuario.');
+        showAlert('Error al eliminar', err.message || 'No se pudo eliminar el usuario.');
       }
     };
 
