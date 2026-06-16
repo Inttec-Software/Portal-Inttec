@@ -4,10 +4,10 @@ import {
   Text,
   StyleSheet,
   ActivityIndicator,
-  useColorScheme,
   ViewStyle,
   TextStyle,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 
 interface CustomButtonProps {

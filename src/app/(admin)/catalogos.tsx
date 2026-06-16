@@ -7,10 +7,10 @@ import {
   Modal,
   TouchableOpacity,
   ActivityIndicator,
-  useColorScheme,
   Alert,
   ScrollView,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, CatalogoItem, SubcategoriaItem } from '@/services/supabase';
@@ -223,25 +223,40 @@ export default function CatalogosManager() {
       <View style={styles.selectorsContainer}>
         <TouchableOpacity
           onPress={() => setActiveCatalog('categorias')}
-          style={[styles.selectorBtn, activeCatalog === 'categorias' && styles.selectorActive]}
+          style={[
+            styles.selectorBtn,
+            activeCatalog === 'categorias'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+          ]}
         >
-          <Text style={[styles.selectorText, { color: activeCatalog === 'categorias' ? '#ffffff' : themeColors.text }]}>
+          <Text style={[styles.selectorText, { color: activeCatalog === 'categorias' ? '#ffffff' : themeColors.textSecondary }]}>
             Categorías
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setActiveCatalog('subcategorias')}
-          style={[styles.selectorBtn, activeCatalog === 'subcategorias' && styles.selectorActive]}
+          style={[
+            styles.selectorBtn,
+            activeCatalog === 'subcategorias'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+          ]}
         >
-          <Text style={[styles.selectorText, { color: activeCatalog === 'subcategorias' ? '#ffffff' : themeColors.text }]}>
+          <Text style={[styles.selectorText, { color: activeCatalog === 'subcategorias' ? '#ffffff' : themeColors.textSecondary }]}>
             Subcategorías
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setActiveCatalog('clientes')}
-          style={[styles.selectorBtn, activeCatalog === 'clientes' && styles.selectorActive]}
+          style={[
+            styles.selectorBtn,
+            activeCatalog === 'clientes'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+          ]}
         >
-          <Text style={[styles.selectorText, { color: activeCatalog === 'clientes' ? '#ffffff' : themeColors.text }]}>
+          <Text style={[styles.selectorText, { color: activeCatalog === 'clientes' ? '#ffffff' : themeColors.textSecondary }]}>
             Clientes
           </Text>
         </TouchableOpacity>

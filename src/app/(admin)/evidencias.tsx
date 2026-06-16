@@ -6,12 +6,12 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  useColorScheme,
   Alert,
   Modal,
   ScrollView,
   Image,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, Evidencia } from '@/services/supabase';
@@ -187,7 +187,7 @@ export default function AdminEvidenciasScreen() {
               },
             ]}
           >
-            <Text style={[styles.filterPillText, { color: selectedEmployeeId === null ? '#ffffff' : themeColors.text }]}>
+            <Text style={[styles.filterPillText, { color: selectedEmployeeId === null ? '#ffffff' : themeColors.textSecondary }]}>
               Todos
             </Text>
           </TouchableOpacity>
@@ -204,7 +204,7 @@ export default function AdminEvidenciasScreen() {
                 },
               ]}
             >
-              <Text style={[styles.filterPillText, { color: selectedEmployeeId === emp.id ? '#ffffff' : themeColors.text }]}>
+              <Text style={[styles.filterPillText, { color: selectedEmployeeId === emp.id ? '#ffffff' : themeColors.textSecondary }]}>
                 {emp.nombre.split(' ')[0]}
               </Text>
             </TouchableOpacity>

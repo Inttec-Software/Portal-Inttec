@@ -4,10 +4,10 @@ import {
   TextInput,
   Text,
   StyleSheet,
-  useColorScheme,
   TextInputProps,
   TouchableOpacity,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -32,6 +32,11 @@ export default function CustomInput({
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(!secureTextEntry);
 
+  const isMultiline = props.multiline;
+  const flattenedStyle = StyleSheet.flatten(style);
+  const containerHeight = flattenedStyle?.height ?? (isMultiline ? 'auto' : 50);
+  const inputStyle = isMultiline && flattenedStyle ? { ...flattenedStyle, height: undefined } : style;
+
   return (
     <View style={styles.container}>
       {!!label && <Text style={[styles.label, { color: themeColors.text }]}>{label}</Text>}
@@ -47,6 +52,9 @@ export default function CustomInput({
               ? themeColors.accent
               : themeColors.border,
             borderWidth: isFocused || error ? 1.5 : 1,
+            height: containerHeight,
+            alignItems: isMultiline ? 'flex-start' : 'center',
+            paddingVertical: isMultiline ? Spacing.two : 0,
           },
         ]}
       >
@@ -55,12 +63,17 @@ export default function CustomInput({
             name={iconName}
             size={20}
             color={error ? themeColors.danger : themeColors.textSecondary}
-            style={styles.icon}
+            style={[styles.icon, isMultiline && { marginTop: 2 }]}
           />
         )}
 
         <TextInput
-          style={[styles.input, { color: themeColors.text }, style]}
+          style={[
+            styles.input,
+            { color: themeColors.text },
+            isMultiline && { textAlignVertical: 'top', paddingTop: 0, paddingBottom: 0 },
+            inputStyle,
+          ]}
           placeholderTextColor={themeColors.textSecondary}
           secureTextEntry={isPassword ? !showPassword : secureTextEntry}
           onFocus={() => setIsFocused(true)}
@@ -99,10 +112,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.half,
   },
   inputContainer: {
-    height: 50,
     borderRadius: BorderRadius.medium,
     flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: Spacing.two,
   },
   icon: {

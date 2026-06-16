@@ -8,11 +8,11 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  useColorScheme,
   Alert,
   Image,
   Platform,
 } from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
@@ -509,17 +509,27 @@ export default function AdminDashboard() {
       <View style={styles.tabsContainer}>
         <TouchableOpacity
           onPress={() => setActiveTab('pendientes')}
-          style={[styles.tab, activeTab === 'pendientes' && styles.tabActive]}
+          style={[
+            styles.tab,
+            activeTab === 'pendientes'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+          ]}
         >
-          <Text style={[styles.tabText, { color: activeTab === 'pendientes' ? '#ffffff' : themeColors.text }]}>
+          <Text style={[styles.tabText, { color: activeTab === 'pendientes' ? '#ffffff' : themeColors.textSecondary }]}>
             Revisar ({pendingGastos.length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setActiveTab('historial')}
-          style={[styles.tab, activeTab === 'historial' && styles.tabActive]}
+          style={[
+            styles.tab,
+            activeTab === 'historial'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+          ]}
         >
-          <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#ffffff' : themeColors.text }]}>
+          <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#ffffff' : themeColors.textSecondary }]}>
             Historial ({historyGastos.length})
           </Text>
         </TouchableOpacity>
