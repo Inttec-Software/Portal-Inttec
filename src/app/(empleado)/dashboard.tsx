@@ -27,6 +27,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
+import MapView, { Marker } from 'react-native-maps';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -66,6 +67,7 @@ export default function EmpleadoDashboard() {
   const [isLoadingChecador, setIsLoadingChecador] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [currentAddress, setCurrentAddress] = useState<string>('Obteniendo dirección...');
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [checadorResultMsg, setChecadorResultMsg] = useState('');
   const [checadorResultType, setChecadorResultType] = useState<'entrada' | 'salida'>('entrada');
@@ -115,14 +117,59 @@ export default function EmpleadoDashboard() {
       return;
     }
 
-    // Obtener ubicación
+    // Obtener ubicación y geocodificación
     try {
+      setCurrentAddress('Obteniendo dirección...');
       const loc = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
-      setCurrentLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
-    } catch {
+      const lat = loc.coords.latitude;
+      const lng = loc.coords.longitude;
+      setCurrentLocation({ lat, lng });
+
+      try {
+        const reverse = await Location.reverseGeocodeAsync({
+          latitude: lat,
+          longitude: lng,
+        });
+
+        if (reverse && reverse.length > 0) {
+          const addr = reverse[0];
+          const street = addr.street || '';
+          const number = addr.streetNumber || '';
+          const district = addr.district || ''; // Colonia
+          const postalCode = addr.postalCode || ''; // CP
+          const city = addr.city || ''; // Ciudad
+          const region = addr.region || ''; // Estado
+
+          const parts = [];
+          if (street || number) {
+            parts.push(`${street} ${number}`.trim());
+          }
+          if (district) {
+            parts.push(district);
+          }
+          if (postalCode || city || region) {
+            let line = '';
+            if (postalCode) line += `${postalCode} `;
+            if (city) line += city;
+            if (region) line += (city ? ', ' : '') + region;
+            parts.push(line.trim());
+          }
+
+          const formatted = parts.join(', ');
+          setCurrentAddress(formatted || 'Dirección no identificada');
+        } else {
+          setCurrentAddress('Dirección no disponible');
+        }
+      } catch (geoErr) {
+        console.error('Error reverse geocoding:', geoErr);
+        setCurrentAddress(`Coordenadas: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+      }
+    } catch (err) {
+      console.error('Error al obtener ubicación:', err);
       setCurrentLocation(null);
+      setCurrentAddress('Ubicación no disponible');
     }
 
     // Iniciar reloj en tiempo real
@@ -157,12 +204,13 @@ export default function EmpleadoDashboard() {
 
       const lat = currentLocation?.lat || 0;
       const lng = currentLocation?.lng || 0;
+      const addressToSave = currentAddress || 'Ubicación registrada';
 
       if (tipoRegistro === 'entrada') {
-        await AsistenciaService.registrarEntrada(user.id, fotoUrl, lat, lng);
+        await AsistenciaService.registrarEntrada(user.id, fotoUrl, lat, lng, addressToSave);
         setChecadorResultMsg('Entrada registrada correctamente');
       } else {
-        await AsistenciaService.registrarSalida(registroHoy!.id, fotoUrl, lat, lng);
+        await AsistenciaService.registrarSalida(registroHoy!.id, fotoUrl, lat, lng, addressToSave);
         setChecadorResultMsg('Salida registrada correctamente');
       }
 
@@ -638,29 +686,6 @@ export default function EmpleadoDashboard() {
 
             {/* Bottom watermark info */}
             <View style={styles.watermarkBottom}>
-              <View style={styles.watermarkInfoCard}>
-                <View style={styles.watermarkRow}>
-                  <Ionicons name="person" size={14} color="#fff" />
-                  <Text style={styles.watermarkText}>{user?.nombre || 'Empleado'}</Text>
-                </View>
-                <View style={styles.watermarkRow}>
-                  <Ionicons name="time" size={14} color="#fff" />
-                  <Text style={styles.watermarkText}>{formatChecadorTime(currentDateTime)}</Text>
-                </View>
-                <View style={styles.watermarkRow}>
-                  <Ionicons name="calendar" size={14} color="#fff" />
-                  <Text style={styles.watermarkText}>{formatChecadorDate(currentDateTime)}</Text>
-                </View>
-                <View style={styles.watermarkRow}>
-                  <Ionicons name="location" size={14} color="#fff" />
-                  <Text style={styles.watermarkText}>
-                    {currentLocation
-                      ? `${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)}`
-                      : 'Obteniendo ubicación...'}
-                  </Text>
-                </View>
-              </View>
-
               {/* Botón de captura */}
               <TouchableOpacity
                 style={styles.captureBtn}
@@ -674,6 +699,69 @@ export default function EmpleadoDashboard() {
                   <View style={styles.captureBtnInner} />
                 )}
               </TouchableOpacity>
+
+              {/* Contenedor de la marca de agua estilo foto Timemark */}
+              <View style={styles.watermarkOverlayCard}>
+                {/* Lado Izquierdo: Hora, Fecha y Dirección */}
+                <View style={styles.watermarkLeftCol}>
+                  {/* Fila superior: Hora | Fecha */}
+                  <View style={styles.watermarkTimeDateRow}>
+                    <Text style={styles.watermarkTimeText}>
+                      {formatChecadorTime(currentDateTime).substring(0, 5)}
+                    </Text>
+                    <View style={styles.watermarkVerticalLine} />
+                    <View style={styles.watermarkDateCol}>
+                      <Text style={styles.watermarkDateText}>
+                        {currentDateTime.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </Text>
+                      <Text style={styles.watermarkDayText}>
+                        {currentDateTime.toLocaleDateString('es-MX', { weekday: 'long' }).toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Dirección */}
+                  <Text style={styles.watermarkAddressText} numberOfLines={3}>
+                    {currentAddress}
+                  </Text>
+                  {/* Nombre del Empleado */}
+                  <Text style={styles.watermarkEmployeeText}>
+                    👤 {user?.nombre || 'Empleado'}
+                  </Text>
+                </View>
+
+                {/* Lado Derecho: Mapa */}
+                {currentLocation && Platform.OS !== 'web' ? (
+                  <View style={styles.watermarkMapContainer}>
+                    <MapView
+                      style={styles.watermarkMapView}
+                      region={{
+                        latitude: currentLocation.lat,
+                        longitude: currentLocation.lng,
+                        latitudeDelta: 0.003,
+                        longitudeDelta: 0.003,
+                      }}
+                      liteMode={true}
+                      scrollEnabled={false}
+                      zoomEnabled={false}
+                      rotateEnabled={false}
+                      pitchEnabled={false}
+                    >
+                      <Marker
+                        coordinate={{
+                          latitude: currentLocation.lat,
+                          longitude: currentLocation.lng,
+                        }}
+                        pinColor="#007bff"
+                      />
+                    </MapView>
+                  </View>
+                ) : (
+                  <View style={styles.watermarkMapPlaceholder}>
+                    <Ionicons name="map" size={20} color="#888" />
+                    <Text style={{ fontSize: 7, color: '#888', marginTop: 2, fontWeight: '700' }}>Sin Mapa</Text>
+                  </View>
+                )}
+              </View>
             </View>
           </SafeAreaView>
         </View>
@@ -719,11 +807,11 @@ export default function EmpleadoDashboard() {
                   {formatChecadorTime(new Date())}
                 </Text>
               </View>
-              {currentLocation && (
-                <View style={styles.resultInfoRow}>
-                  <Ionicons name="location-outline" size={18} color={themeColors.textSecondary} />
-                  <Text style={[styles.resultInfoText, { color: themeColors.text }]}>
-                    {currentLocation.lat.toFixed(6)}, {currentLocation.lng.toFixed(6)}
+              {currentAddress && (
+                <View style={[styles.resultInfoRow, { paddingHorizontal: Spacing.three }]}>
+                  <Ionicons name="location-outline" size={18} color={themeColors.textSecondary} style={{ alignSelf: 'flex-start', marginTop: 2 }} />
+                  <Text style={[styles.resultInfoText, { color: themeColors.text, flex: 1, flexWrap: 'wrap' }]}>
+                    {currentAddress}
                   </Text>
                 </View>
               )}
@@ -1346,23 +1434,88 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.four,
     alignItems: 'center',
     gap: Spacing.three,
-  },
-  watermarkInfoCard: {
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: BorderRadius.medium,
-    padding: Spacing.two,
-    gap: 6,
     width: '100%',
   },
-  watermarkRow: {
+  watermarkOverlayCard: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: BorderRadius.medium,
+    padding: Spacing.three,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    width: '100%',
+    gap: Spacing.two,
+  },
+  watermarkLeftCol: {
+    flex: 1,
+    gap: 4,
+  },
+  watermarkTimeDateRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.one,
   },
-  watermarkText: {
+  watermarkTimeText: {
     color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 42,
+    fontWeight: '900',
+    letterSpacing: -1,
+  },
+  watermarkVerticalLine: {
+    width: 2.5,
+    height: 38,
+    backgroundColor: '#ffc107',
+    marginHorizontal: Spacing.two,
+  },
+  watermarkDateCol: {
+    justifyContent: 'center',
+  },
+  watermarkDateText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  watermarkDayText: {
+    color: '#ffc107',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  watermarkAddressText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  watermarkEmployeeText: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  watermarkMapContainer: {
+    width: 95,
+    height: 95,
+    borderRadius: BorderRadius.medium,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#fff',
+    backgroundColor: '#eee',
+  },
+  watermarkMapView: {
+    width: '100%',
+    height: '100%',
+  },
+  watermarkMapPlaceholder: {
+    width: 95,
+    height: 95,
+    borderRadius: BorderRadius.medium,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.5)',
   },
   captureBtn: {
     width: 80,

@@ -156,10 +156,12 @@ export interface Asistencia {
   foto_entrada_url?: string | null;
   latitud_entrada?: number | null;
   longitud_entrada?: number | null;
+  direccion_entrada?: string | null;
   hora_salida?: string | null;
   foto_salida_url?: string | null;
   latitud_salida?: number | null;
   longitud_salida?: number | null;
+  direccion_salida?: string | null;
   creado_en?: string;
 }
 
@@ -193,7 +195,8 @@ export const AsistenciaService = {
     empleadoId: string,
     fotoUrl: string,
     latitud: number,
-    longitud: number
+    longitud: number,
+    direccion: string
   ): Promise<Asistencia> {
     const ahora = new Date();
     const horaStr = ahora.toTimeString().split(' ')[0]; // HH:MM:SS
@@ -206,6 +209,7 @@ export const AsistenciaService = {
         foto_entrada_url: fotoUrl,
         latitud_entrada: latitud,
         longitud_entrada: longitud,
+        direccion_entrada: direccion,
       }])
       .select()
       .single();
@@ -221,7 +225,8 @@ export const AsistenciaService = {
     asistenciaId: string,
     fotoUrl: string,
     latitud: number,
-    longitud: number
+    longitud: number,
+    direccion: string
   ): Promise<Asistencia> {
     const ahora = new Date();
     const horaStr = ahora.toTimeString().split(' ')[0];
@@ -233,6 +238,7 @@ export const AsistenciaService = {
         foto_salida_url: fotoUrl,
         latitud_salida: latitud,
         longitud_salida: longitud,
+        direccion_salida: direccion,
       })
       .eq('id', asistenciaId)
       .select()

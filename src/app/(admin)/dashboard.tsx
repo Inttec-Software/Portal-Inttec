@@ -11,6 +11,7 @@ import {
   Alert,
   Image,
   Platform,
+  Linking,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -402,6 +403,17 @@ export default function AdminDashboard() {
       return d.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
     }
     return fecha;
+  };
+
+  const handleOpenMap = (lat: number, lng: number) => {
+    const url = Platform.select({
+      ios: `maps:0,0?q=${lat},${lng}`,
+      android: `geo:0,0?q=${lat},${lng}`,
+      default: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+    });
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'No se pudo abrir el mapa.');
+    });
   };
 
   // Exportar reportes
@@ -1322,10 +1334,25 @@ export default function AdminDashboard() {
                         <Text style={[styles.asistenciaHora, { color: themeColors.text }]}>
                           {item.hora_entrada?.substring(0, 5) || '--:--'}
                         </Text>
-                        {item.latitud_entrada != null && (
-                          <Text style={[styles.asistenciaCoords, { color: themeColors.textSecondary }]}>
-                            📍 {Number(item.latitud_entrada).toFixed(4)}, {Number(item.longitud_entrada).toFixed(4)}
-                          </Text>
+                        {item.direccion_entrada ? (
+                          <TouchableOpacity
+                            onPress={() => handleOpenMap(Number(item.latitud_entrada), Number(item.longitud_entrada))}
+                            activeOpacity={0.7}
+                            style={{ width: '100%' }}
+                          >
+                            <Text style={[styles.asistenciaAddress, { color: themeColors.textSecondary }]} numberOfLines={3}>
+                              🏠 {item.direccion_entrada}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : item.latitud_entrada != null && (
+                          <TouchableOpacity
+                            onPress={() => handleOpenMap(Number(item.latitud_entrada), Number(item.longitud_entrada))}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[styles.asistenciaCoords, { color: themeColors.textSecondary }]}>
+                              📍 {Number(item.latitud_entrada).toFixed(4)}, {Number(item.longitud_entrada).toFixed(4)}
+                            </Text>
+                          </TouchableOpacity>
                         )}
                       </View>
 
@@ -1356,10 +1383,25 @@ export default function AdminDashboard() {
                         <Text style={[styles.asistenciaHora, { color: item.hora_salida ? themeColors.text : themeColors.warning }]}>
                           {item.hora_salida?.substring(0, 5) || 'Pendiente'}
                         </Text>
-                        {item.latitud_salida != null && (
-                          <Text style={[styles.asistenciaCoords, { color: themeColors.textSecondary }]}>
-                            📍 {Number(item.latitud_salida).toFixed(4)}, {Number(item.longitud_salida).toFixed(4)}
-                          </Text>
+                        {item.direccion_salida ? (
+                          <TouchableOpacity
+                            onPress={() => handleOpenMap(Number(item.latitud_salida), Number(item.longitud_salida))}
+                            activeOpacity={0.7}
+                            style={{ width: '100%' }}
+                          >
+                            <Text style={[styles.asistenciaAddress, { color: themeColors.textSecondary }]} numberOfLines={3}>
+                              🏠 {item.direccion_salida}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : item.latitud_salida != null && (
+                          <TouchableOpacity
+                            onPress={() => handleOpenMap(Number(item.latitud_salida), Number(item.longitud_salida))}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[styles.asistenciaCoords, { color: themeColors.textSecondary }]}>
+                              📍 {Number(item.latitud_salida).toFixed(4)}, {Number(item.longitud_salida).toFixed(4)}
+                            </Text>
+                          </TouchableOpacity>
                         )}
                       </View>
                     </View>
@@ -1793,5 +1835,13 @@ const styles = StyleSheet.create({
   asistenciaCoords: {
     fontSize: 10,
     fontWeight: '500',
+  },
+  asistenciaAddress: {
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 2,
+    lineHeight: 13,
+    paddingHorizontal: 2,
   },
 });

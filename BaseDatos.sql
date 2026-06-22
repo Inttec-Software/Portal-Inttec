@@ -97,10 +97,12 @@ CREATE TABLE public.asistencias (
   foto_entrada_url text,
   latitud_entrada numeric,
   longitud_entrada numeric,
+  direccion_entrada text,
   hora_salida time with time zone,
   foto_salida_url text,
   latitud_salida numeric,
   longitud_salida numeric,
+  direccion_salida text,
   creado_en timestamp with time zone DEFAULT now(),
   CONSTRAINT asistencias_pkey PRIMARY KEY (id),
   CONSTRAINT asistencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
