@@ -742,7 +742,12 @@ export default function EmpleadoDashboard() {
                 {currentLocation ? (
                   <View style={styles.watermarkMapContainer}>
                     <Image
-                      source={{ uri: `https://staticmap.openstreetmap.de/staticmap.php?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${currentLocation.lat},${currentLocation.lng},red-pushpin` }}
+                      source={{
+                        uri: `https://staticmap.openstreetmap.de/staticmap.php?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${currentLocation.lat},${currentLocation.lng},red-pushpin`,
+                        headers: {
+                          'User-Agent': 'PortalInttec/1.0 (soporte@inttec.net)',
+                        },
+                      }}
                       style={styles.watermarkMapView}
                       resizeMode="cover"
                     />

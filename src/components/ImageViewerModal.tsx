@@ -148,7 +148,12 @@ export default function ImageViewerModal({
                 {/* Mapa Derecha */}
                 <View style={styles.watermarkMapContainer}>
                   <Image
-                    source={{ uri: getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng) }}
+                    source={{
+                      uri: getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng),
+                      headers: {
+                        'User-Agent': 'PortalInttec/1.0 (soporte@inttec.net)',
+                      },
+                    }}
                     style={styles.watermarkMap}
                     resizeMode="cover"
                   />
