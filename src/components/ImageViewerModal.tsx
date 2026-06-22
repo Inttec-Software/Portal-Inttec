@@ -33,7 +33,11 @@ interface ImageViewerModalProps {
 }
 
 const getStaticMapUrl = (lat: number, lng: number) => {
-  return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=16&size=200x200&maptype=mapnik&markers=${lat},${lng},red-pushpin`;
+  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=16&size=200x200&maptype=mapnik&markers=${lat},${lng},red-pushpin`;
+  }
+  return `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=16&size=200x200&markers=color:red%7C${lat},${lng}&key=${apiKey}`;
 };
 
 const formatFecha = (fechaStr: string) => {
@@ -52,6 +56,13 @@ export default function ImageViewerModal({
   asistenciaInfo,
 }: ImageViewerModalProps) {
   const viewRef = useRef<View>(null);
+  const [mapUrl, setMapUrl] = React.useState<string>('');
+
+  React.useEffect(() => {
+    if (asistenciaInfo) {
+      setMapUrl(getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng));
+    }
+  }, [asistenciaInfo]);
 
   if (!imageUrl) return null;
 
@@ -149,10 +160,15 @@ export default function ImageViewerModal({
                 <View style={styles.watermarkMapContainer}>
                   <Image
                     source={{
-                      uri: getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng),
+                      uri: mapUrl,
                       headers: {
                         'User-Agent': 'PortalInttec/1.0 (soporte@inttec.net)',
                       },
+                    }}
+                    onError={() => {
+                      if (asistenciaInfo) {
+                        setMapUrl(`https://staticmap.openstreetmap.de/staticmap.php?center=${asistenciaInfo.lat},${asistenciaInfo.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${asistenciaInfo.lat},${asistenciaInfo.lng},red-pushpin`);
+                      }
                     }}
                     style={styles.watermarkMap}
                     resizeMode="cover"

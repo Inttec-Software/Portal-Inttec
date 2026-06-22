@@ -67,6 +67,21 @@ export default function EmpleadoDashboard() {
   const [isLoadingChecador, setIsLoadingChecador] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [checadorMapUrl, setChecadorMapUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentLocation) {
+      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+      if (!apiKey) {
+        setChecadorMapUrl(`https://staticmap.openstreetmap.de/staticmap.php?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${currentLocation.lat},${currentLocation.lng},red-pushpin`);
+      } else {
+        setChecadorMapUrl(`https://maps.googleapis.com/maps/api/staticmap?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&markers=color:red%7C${currentLocation.lat},${currentLocation.lng}&key=${apiKey}`);
+      }
+    } else {
+      setChecadorMapUrl(null);
+    }
+  }, [currentLocation]);
+
   const [currentAddress, setCurrentAddress] = useState<string>('Obteniendo dirección...');
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [checadorResultMsg, setChecadorResultMsg] = useState('');
@@ -137,43 +152,60 @@ export default function EmpleadoDashboard() {
       setCurrentLocation({ lat, lng });
 
       try {
-        const reverse = await Location.reverseGeocodeAsync({
-          latitude: lat,
-          longitude: lng,
-        });
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+        if (!apiKey) {
+          throw new Error('Google Maps API key not found in environment');
+        }
+        const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`);
+        const data = await response.json();
 
-        if (reverse && reverse.length > 0) {
-          const addr = reverse[0];
-          const street = addr.street || '';
-          const number = addr.streetNumber || '';
-          const district = addr.district || ''; // Colonia
-          const postalCode = addr.postalCode || ''; // CP
-          const city = addr.city || ''; // Ciudad
-          const region = addr.region || ''; // Estado
-
-          const parts = [];
-          if (street || number) {
-            parts.push(`${street} ${number}`.trim());
-          }
-          if (district) {
-            parts.push(district);
-          }
-          if (postalCode || city || region) {
-            let line = '';
-            if (postalCode) line += `${postalCode} `;
-            if (city) line += city;
-            if (region) line += (city ? ', ' : '') + region;
-            parts.push(line.trim());
-          }
-
-          const formatted = parts.join(', ');
+        if (data.status === 'OK' && data.results && data.results.length > 0) {
+          const formatted = data.results[0].formatted_address;
           setCurrentAddress(formatted || 'Dirección no identificada');
         } else {
-          setCurrentAddress('Dirección no disponible');
+          throw new Error(data.error_message || `Google Geocoding API status: ${data.status}`);
         }
-      } catch (geoErr) {
-        console.error('Error reverse geocoding:', geoErr);
-        setCurrentAddress(`Coordenadas: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+      } catch (googleErr) {
+        console.warn('Google Geocoding failed, trying native fallback:', googleErr);
+        try {
+          const reverse = await Location.reverseGeocodeAsync({
+            latitude: lat,
+            longitude: lng,
+          });
+
+          if (reverse && reverse.length > 0) {
+            const addr = reverse[0];
+            const street = addr.street || '';
+            const number = addr.streetNumber || '';
+            const district = addr.district || ''; // Colonia
+            const postalCode = addr.postalCode || ''; // CP
+            const city = addr.city || ''; // Ciudad
+            const region = addr.region || ''; // Estado
+
+            const parts = [];
+            if (street || number) {
+              parts.push(`${street} ${number}`.trim());
+            }
+            if (district) {
+              parts.push(district);
+            }
+            if (postalCode || city || region) {
+              let line = '';
+              if (postalCode) line += `${postalCode} `;
+              if (city) line += city;
+              if (region) line += (city ? ', ' : '') + region;
+              parts.push(line.trim());
+            }
+
+            const formatted = parts.join(', ');
+            setCurrentAddress(formatted || 'Dirección no identificada');
+          } else {
+            setCurrentAddress('Dirección no disponible');
+          }
+        } catch (geoErr) {
+          console.error('Error reverse geocoding native fallback:', geoErr);
+          setCurrentAddress(`Coordenadas: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+        }
       }
     } catch (err) {
       console.error('Error al obtener ubicación:', err);
@@ -743,10 +775,12 @@ export default function EmpleadoDashboard() {
                   <View style={styles.watermarkMapContainer}>
                     <Image
                       source={{
-                        uri: `https://staticmap.openstreetmap.de/staticmap.php?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${currentLocation.lat},${currentLocation.lng},red-pushpin`,
-                        headers: {
-                          'User-Agent': 'PortalInttec/1.0 (soporte@inttec.net)',
-                        },
+                        uri: checadorMapUrl || '',
+                      }}
+                      onError={() => {
+                        if (currentLocation) {
+                          setChecadorMapUrl(`https://staticmap.openstreetmap.de/staticmap.php?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${currentLocation.lat},${currentLocation.lng},red-pushpin`);
+                        }
                       }}
                       style={styles.watermarkMapView}
                       resizeMode="cover"
