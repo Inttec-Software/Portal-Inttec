@@ -852,7 +852,9 @@ export default function EmpleadoDashboard() {
                         uri: checadorMapUrl,
                       }}
                       onError={() => {
-                        setChecadorMapUrl(`https://staticmap.openstreetmap.de/staticmap.php?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${currentLocation.lat},${currentLocation.lng},red-pushpin`);
+                        if (currentLocation && (!checadorMapUrl || !checadorMapUrl.includes('openstreetmap.de'))) {
+                          setChecadorMapUrl(`https://staticmap.openstreetmap.de/staticmap.php?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${currentLocation.lat},${currentLocation.lng},red-pushpin`);
+                        }
                       }}
                       style={styles.watermarkMapView}
                       resizeMode="cover"

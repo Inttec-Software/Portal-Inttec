@@ -303,12 +303,9 @@ export default function ImageViewerModal({
                     <Image
                       source={{
                         uri: mapUrl,
-                        headers: {
-                          'User-Agent': 'PortalInttec/1.0 (soporte@inttec.net)',
-                        },
                       }}
                       onError={() => {
-                        if (asistenciaInfo) {
+                        if (asistenciaInfo && !mapUrl.includes('openstreetmap.de')) {
                           setMapUrl(`https://staticmap.openstreetmap.de/staticmap.php?center=${asistenciaInfo.lat},${asistenciaInfo.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${asistenciaInfo.lat},${asistenciaInfo.lng},red-pushpin`);
                         }
                       }}
