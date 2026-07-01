@@ -1114,20 +1114,12 @@ export default function EmpleadoDashboard() {
                       </Text>
 
                       <View style={styles.responseForm}>
-                        <CustomInput
-                          label="Responder / Aclarar observación"
-                          placeholder="Escribe tu respuesta aquí..."
-                          value={repondFeedback}
-                          onChangeText={setRespondFeedback}
-                          multiline
-                          numberOfLines={3}
-                          style={{ height: 70 }}
-                        />
                         <CustomButton
-                          title="Reenviar Gasto"
-                          onPress={handleResubmitGasto}
-                          loading={isSubmittingResponse}
-                          disabled={!repondFeedback.trim()}
+                          title="Editar Gasto"
+                          onPress={() => {
+                            setModalVisible(false);
+                            router.push(`/(empleado)/editar-gasto?id=${selectedGasto.id}` as any);
+                          }}
                           variant="primary"
                         />
                       </View>
