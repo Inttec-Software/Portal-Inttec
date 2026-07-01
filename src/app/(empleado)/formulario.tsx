@@ -63,6 +63,9 @@ const ESTADOS_MEXICO = [
   'Zacatecas'
 ];
 
+
+const showAlert = (title: string, message: string) => { if (Platform.OS === 'web') { window.alert(title + '\n\n' + message); } else { showAlert(title, message); } };
+
 export default function GastoForm() {
   const router = useRouter();
   const scheme = useColorScheme();
@@ -235,7 +238,7 @@ export default function GastoForm() {
     if (Platform.OS === 'web') return true;
     const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
     if (cameraStatus.status !== 'granted') {
-      Alert.alert(
+      showAlert(
         'Permiso de cámara requerido',
         'Necesitamos permiso de la cámara para capturar la evidencia del ticket.'
       );
@@ -249,7 +252,7 @@ export default function GastoForm() {
     if (Platform.OS === 'web') return true;
     const libraryStatus = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (libraryStatus.status !== 'granted') {
-      Alert.alert(
+      showAlert(
         'Permiso de galería requerido',
         'Necesitamos permiso de la galería para seleccionar la imagen del ticket.'
       );
@@ -282,7 +285,7 @@ export default function GastoForm() {
         // En la web si falla launchCameraAsync (por ejemplo, sin webcam), redirigimos a la galería
         await handleSelectGallery();
       } else {
-        Alert.alert('Error', 'No se pudo abrir la cámara.');
+        showAlert('Error', 'No se pudo abrir la cámara.');
       }
     }
   };
@@ -307,7 +310,7 @@ export default function GastoForm() {
       }
     } catch (err) {
       console.error('Gallery select error:', err);
-      Alert.alert('Error', 'No se pudo abrir la galería.');
+      showAlert('Error', 'No se pudo abrir la galería.');
     }
   };
 
@@ -334,7 +337,7 @@ export default function GastoForm() {
       if (Platform.OS === 'web') {
         await handleSelectFacturaGallery();
       } else {
-        Alert.alert('Error', 'No se pudo abrir la cámara.');
+        showAlert('Error', 'No se pudo abrir la cámara.');
       }
     }
   };
@@ -358,7 +361,7 @@ export default function GastoForm() {
       }
     } catch (err) {
       console.error('Invoice gallery select error:', err);
-      Alert.alert('Error', 'No se pudo abrir la galería.');
+      showAlert('Error', 'No se pudo abrir la galería.');
     }
   };
 
@@ -474,14 +477,14 @@ export default function GastoForm() {
       }
 
       setScanSuccess(true);
-      Alert.alert(
+      showAlert(
         'Escaneo Completado',
         'La Inteligencia Artificial extrajo el monto, proveedor, fecha, método de pago, el Estado y sugirió una justificación.'
       );
       // Ir automáticamente al paso 2
       setCurrentStep(2);
     } catch (err: any) {
-      Alert.alert('Escáner IA', err.message || 'No se pudo procesar el ticket automáticamente.');
+      showAlert('Escáner IA', err.message || 'No se pudo procesar el ticket automáticamente.');
     } finally {
       setIsScanning(false);
     }
@@ -513,7 +516,7 @@ export default function GastoForm() {
       setClienteSearch('');
       setShowCliDropdown(false);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo agregar el cliente.');
+      showAlert('Error', err.message || 'No se pudo agregar el cliente.');
     }
   };
 
@@ -523,42 +526,42 @@ export default function GastoForm() {
     
     // Validar campos requeridos
     if (!monto || isNaN(Number(monto))) {
-      Alert.alert('Validación', 'Por favor ingresa un monto válido.');
+      showAlert('Validación', 'Por favor ingresa un monto válido.');
       setCurrentStep(2);
       return;
     }
 
     const fechaRegex = /^\d{2}\/\d{2}\/\d{4}$/;
     if (!fechaRegex.test(fechaComprobante)) {
-      Alert.alert('Validación', 'Por favor ingresa la fecha en formato DD/MM/AAAA (ej. 09/06/2026).');
+      showAlert('Validación', 'Por favor ingresa la fecha en formato DD/MM/AAAA (ej. 09/06/2026).');
       setCurrentStep(2);
       return;
     }
 
     if (!selectedCategoria) {
-      Alert.alert('Validación', 'Por favor selecciona una categoría.');
+      showAlert('Validación', 'Por favor selecciona una categoría.');
       return;
     }
 
     if (!justificacion.trim()) {
-      Alert.alert('Validación', 'Por favor escribe una justificación del gasto.');
+      showAlert('Validación', 'Por favor escribe una justificación del gasto.');
       return;
     }
 
     if (facturado === null) {
-      Alert.alert('Validación', 'Por favor especifica si el gasto está facturado.');
+      showAlert('Validación', 'Por favor especifica si el gasto está facturado.');
       setCurrentStep(2);
       return;
     }
 
     if (facturado && !facturaBase64) {
-      Alert.alert('Validación', 'Por favor sube la foto o el PDF de la factura.');
+      showAlert('Validación', 'Por favor sube la foto o el PDF de la factura.');
       setCurrentStep(2);
       return;
     }
 
     if (!facturado && !motivoSinFactura.trim()) {
-      Alert.alert('Validación', 'Por favor explica por qué no hay factura.');
+      showAlert('Validación', 'Por favor explica por qué no hay factura.');
       setCurrentStep(2);
       return;
     }
@@ -654,7 +657,7 @@ export default function GastoForm() {
         ]);
 
         if (dbError) throw dbError;
-        Alert.alert('Éxito', 'Gasto registrado correctamente en el servidor.');
+        showAlert('Éxito', 'Gasto registrado correctamente en el servidor.');
       } else {
         // Fuera de línea: Guardar localmente
         await SyncService.enqueueGasto({
@@ -663,7 +666,7 @@ export default function GastoForm() {
           base64Factura: facturado ? (facturaBase64 || undefined) : undefined,
           facturaExt: facturado ? (facturaExt || undefined) : undefined,
         });
-        Alert.alert(
+        showAlert(
           'Guardado sin conexión',
           'No tienes red. El gasto ha sido encolado en tu dispositivo y se sincronizará automáticamente al recuperar conexión.'
         );
@@ -671,7 +674,7 @@ export default function GastoForm() {
 
       router.replace('/(empleado)/dashboard');
     } catch (err: any) {
-      Alert.alert('Error al guardar', err.message || 'No se pudo guardar el gasto.');
+      showAlert('Error al guardar', err.message || 'No se pudo guardar el gasto.');
     } finally {
       setIsSubmitting(false);
     }
@@ -680,46 +683,46 @@ export default function GastoForm() {
   const nextStep = () => {
     if (currentStep === 1) {
       if (!imageUri) {
-        Alert.alert('Evidencia requerida', 'Por favor toma una fotografía o selecciona un ticket.');
+        showAlert('Evidencia requerida', 'Por favor toma una fotografía o selecciona un ticket.');
         return;
       }
       if (incluyePropina === null) {
-        Alert.alert('Validación', 'Por favor especifica si el ticket incluye propina.');
+        showAlert('Validación', 'Por favor especifica si el ticket incluye propina.');
         return;
       }
       if (incluyePropina === false && (!montoPropina || isNaN(Number(montoPropina)) || Number(montoPropina) < 0)) {
-        Alert.alert('Validación', 'Por favor ingresa un monto de propina válido.');
+        showAlert('Validación', 'Por favor ingresa un monto de propina válido.');
         return;
       }
     }
     if (currentStep === 2) {
       if (!monto || isNaN(Number(monto))) {
-        Alert.alert('Validación', 'Por favor ingresa un monto válido.');
+        showAlert('Validación', 'Por favor ingresa un monto válido.');
         return;
       }
       const fechaRegex = /^\d{2}\/\d{2}\/\d{4}$/;
       if (!fechaRegex.test(fechaComprobante)) {
-        Alert.alert('Validación', 'Por favor ingresa la fecha en formato DD/MM/AAAA (ej. 09/06/2026).');
+        showAlert('Validación', 'Por favor ingresa la fecha en formato DD/MM/AAAA (ej. 09/06/2026).');
         return;
       }
       if (!selectedEstado) {
-        Alert.alert('Validación', 'Por favor selecciona el Estado de la República.');
+        showAlert('Validación', 'Por favor selecciona el Estado de la República.');
         return;
       }
       if (metodoPago !== 'efectivo' && !tipoTarjeta) {
-        Alert.alert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE).');
+        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE).');
         return;
       }
       if (facturado === null) {
-        Alert.alert('Validación', 'Por favor especifica si el gasto está facturado.');
+        showAlert('Validación', 'Por favor especifica si el gasto está facturado.');
         return;
       }
       if (facturado && !facturaBase64) {
-        Alert.alert('Validación', 'Por favor sube la foto o el PDF de la factura.');
+        showAlert('Validación', 'Por favor sube la foto o el PDF de la factura.');
         return;
       }
       if (!facturado && !motivoSinFactura.trim()) {
-        Alert.alert('Validación', 'Por favor explica por qué no hay factura.');
+        showAlert('Validación', 'Por favor explica por qué no hay factura.');
         return;
       }
     }
