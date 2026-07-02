@@ -25,6 +25,8 @@ export interface OfflineGastoItem {
   base64Factura?: string | null;
   facturaExt?: string | null;
   motivo_sin_factura?: string | null;
+  tipo_servicio_proyecto?: string | null;
+  detalle_servicio_proyecto?: string | null;
   created_at: string;
 }
 
@@ -195,6 +197,8 @@ export const SyncService = {
               facturado: item.facturado || false,
               factura_url: publicInvoiceUrl || null,
               motivo_sin_factura: item.motivo_sin_factura || null,
+              tipo_servicio_proyecto: item.tipo_servicio_proyecto || null,
+              detalle_servicio_proyecto: item.detalle_servicio_proyecto || null,
               created_at: item.created_at,
             },
           ]);

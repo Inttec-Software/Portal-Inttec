@@ -1118,6 +1118,16 @@ export default function AdminDashboard() {
                     </Text>
                   </View>
 
+                  {(selectedGasto.tipo_servicio_proyecto || selectedGasto.detalle_servicio_proyecto) && (
+                    <View style={styles.detailItem}>
+                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Servicio / Proyecto</Text>
+                      <Text style={[styles.detailValue, { color: themeColors.text }]}>
+                        {selectedGasto.tipo_servicio_proyecto ? `Tipo: ${selectedGasto.tipo_servicio_proyecto}` : ''}
+                        {selectedGasto.detalle_servicio_proyecto ? `\nDetalle: ${selectedGasto.detalle_servicio_proyecto}` : ''}
+                      </Text>
+                    </View>
+                  )}
+
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Proveedor / Sucursal</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
@@ -1161,10 +1171,10 @@ export default function AdminDashboard() {
                           </View>
                         )}
                         <View style={styles.detailItem}>
-                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Pago / Justificación</Text>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Pago / Comentarios</Text>
                           <Text style={[styles.detailValue, { color: themeColors.text }]}>
                             Método: {selectedGasto.metodo_pago} {selectedGasto.tipo_tarjeta ? `(${selectedGasto.tipo_tarjeta})` : ''}
-                            {'\n'}Justificación: {parsed.justificacion || 'No especificada'}
+                            {'\n'}Comentarios: {parsed.justificacion || 'No especificados'}
                           </Text>
                         </View>
 
@@ -1260,7 +1270,7 @@ export default function AdminDashboard() {
                         <View style={styles.feedbackForm}>
                           <CustomInput
                             label="Duda / Comentario para el Empleado"
-                            placeholder="Escribe la justificación o información faltante requerida..."
+                            placeholder="Escribe la información faltante requerida..."
                             value={rejectionFeedback}
                             onChangeText={setRejectionFeedback}
                             multiline

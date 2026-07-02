@@ -73,6 +73,8 @@ export interface Gasto {
   facturado?: boolean | null;
   factura_url?: string | null;
   motivo_sin_factura?: string | null;
+  tipo_servicio_proyecto?: string | null;
+  detalle_servicio_proyecto?: string | null;
 }
 
 export interface Evidencia {

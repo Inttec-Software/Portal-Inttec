@@ -13,6 +13,7 @@ import {
   TextInput,
   useWindowDimensions,
   Pressable,
+  Keyboard,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -1358,6 +1359,7 @@ export default function InventarioDashboard() {
                 <TouchableOpacity
                   style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                   onPress={() => {
+                    Keyboard.dismiss();
                     setShowCliDropdown(!showCliDropdown);
                   }}
                 >
@@ -1368,7 +1370,7 @@ export default function InventarioDashboard() {
                 </TouchableOpacity>
 
                 {showCliDropdown && (
-                  <Pressable onPress={() => {}} style={{ width: '100%' }}>
+                  <View style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <CustomInput
                         placeholder="Buscar o agregar cliente..."
@@ -1377,35 +1379,41 @@ export default function InventarioDashboard() {
                         iconName="search-outline"
                         style={{ margin: Spacing.one, height: 40 }}
                       />
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                         {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
                           <TouchableOpacity
-                            style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15' }]}
+                            style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
                             onPress={() => handleAddNewCliente(clienteSearch)}
                           >
-                            <Text style={{ color: themeColors.accent, fontWeight: '600' }}>
-                              ➕ Agregar "{clienteSearch.trim()}"
+                            <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                            <Text style={{ color: themeColors.accent, fontWeight: '600', flex: 1 }}>
+                              Agregar "{clienteSearch.trim()}"
                             </Text>
                           </TouchableOpacity>
                         )}
                         {clientes
                           .filter(cli => cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
-                          .map((cli) => (
+                          .map((cli, index, array) => (
                             <TouchableOpacity
                               key={cli.id}
-                              style={styles.dropdownItem}
+                              style={[
+                                styles.dropdownItem,
+                                index === array.length - 1 && { borderBottomWidth: 0 },
+                                { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                              ]}
                               onPress={() => {
                                 setConsumoCliente(cli.nombre);
                                 setClienteSearch('');
                                 setShowCliDropdown(false);
                               }}
                             >
-                              <Text style={{ color: themeColors.text }}>{cli.nombre}</Text>
+                              <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
+                              <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
                             </TouchableOpacity>
                           ))}
                       </ScrollView>
                     </View>
-                  </Pressable>
+                  </View>
                 )}
               </View>
             </View>

@@ -384,7 +384,7 @@ export const ReportGenerator = {
 
     // Encabezados
     let csvContent = '\uFEFF'; // BOM para que Excel abra UTF-8 correctamente
-    csvContent += 'ID,Fecha,Empleado Nombre,Monto,Categoria,Subcategoria,Proveedor,Cliente,Sucursal,Metodo Pago,Tipo Tarjeta,Status,Alerta Politica\n';
+    csvContent += 'ID,Fecha,Empleado Nombre,Monto,Categoria,Subcategoria,Proveedor,Cliente,Servicio/Proyecto,Detalle,Sucursal,Metodo Pago,Tipo Tarjeta,Status,Alerta Politica\n';
 
     // Rellenar filas
     gastos.forEach((g) => {
@@ -406,6 +406,8 @@ export const ReportGenerator = {
         escape(g.subcategoria),
         escape(g.proveedor),
         escape(g.cliente),
+        escape(g.tipo_servicio_proyecto),
+        escape(g.detalle_servicio_proyecto),
         escape(g.sucursal),
         g.metodo_pago,
         escape(g.tipo_tarjeta),

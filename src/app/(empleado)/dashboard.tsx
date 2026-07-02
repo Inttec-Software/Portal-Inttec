@@ -513,7 +513,7 @@ export default function EmpleadoDashboard() {
       setRespondFeedback('');
       if (user) refreshData(user.id);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo reenviar la justificación');
+      Alert.alert('Error', err.message || 'No se pudo reenviar la respuesta');
     } finally {
       setIsSubmittingResponse(false);
     }
@@ -1045,7 +1045,7 @@ export default function EmpleadoDashboard() {
                           </View>
                         )}
                         <View style={styles.detailItem}>
-                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Justificación</Text>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Comentarios</Text>
                           <Text style={[styles.detailValue, { color: themeColors.text }]}>
                             {parsed.justificacion || 'No especificada'}
                           </Text>
@@ -1053,6 +1053,16 @@ export default function EmpleadoDashboard() {
                       </>
                     );
                   })()}
+
+                  {(selectedGasto.tipo_servicio_proyecto || selectedGasto.detalle_servicio_proyecto) && (
+                    <View style={styles.detailItem}>
+                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Servicio / Proyecto</Text>
+                      <Text style={[styles.detailValue, { color: themeColors.text }]}>
+                        {selectedGasto.tipo_servicio_proyecto ? `Tipo: ${selectedGasto.tipo_servicio_proyecto}` : ''}
+                        {selectedGasto.detalle_servicio_proyecto ? `\nDetalle: ${selectedGasto.detalle_servicio_proyecto}` : ''}
+                      </Text>
+                    </View>
+                  )}
 
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Sucursal / Cliente</Text>

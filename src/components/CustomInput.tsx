@@ -77,8 +77,14 @@ const CustomInput = React.forwardRef<TextInput, CustomInputProps>(({
           ]}
           placeholderTextColor={themeColors.textSecondary}
           secureTextEntry={isPassword ? !showPassword : secureTextEntry}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
+          onFocus={(e) => {
+            setIsFocused(true);
+            if (props.onFocus) props.onFocus(e);
+          }}
+          onBlur={(e) => {
+            setIsFocused(false);
+            if (props.onBlur) props.onBlur(e);
+          }}
           {...props}
         />
 

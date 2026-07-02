@@ -10,6 +10,7 @@ import {
   Alert,
   ScrollView,
   Pressable,
+  Keyboard,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -370,7 +371,10 @@ export default function CatalogosManager() {
                     <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Categoría Padre *</Text>
                     <TouchableOpacity
                       style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                      onPress={() => setShowParentCatDropdown(!showParentCatDropdown)}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowParentCatDropdown(!showParentCatDropdown);
+                      }}
                     >
                       <Text style={{ color: selectedParentCatId ? themeColors.text : themeColors.textSecondary }}>
                         {parentCatName || 'Selecciona categoría padre'}
@@ -378,24 +382,29 @@ export default function CatalogosManager() {
                       <Ionicons name={showParentCatDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                     </TouchableOpacity>
                     {showParentCatDropdown && (
-                      <Pressable onPress={() => {}} style={{ width: '100%' }}>
+                      <View style={{ width: '100%', zIndex: 1000 }}>
                         <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
-                            {categorias.map((cat) => (
+                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                            {categorias.map((cat, index, array) => (
                               <TouchableOpacity
                                 key={cat.id}
-                                style={styles.dropdownItem}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
                                 onPress={() => {
                                   setSelectedParentCatId(cat.id);
                                   setShowParentCatDropdown(false);
                                 }}
                               >
-                                <Text style={{ color: themeColors.text }}>{cat.nombre}</Text>
+                                <Ionicons name="folder-open-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cat.nombre}</Text>
                               </TouchableOpacity>
                             ))}
                           </ScrollView>
                         </View>
-                      </Pressable>
+                      </View>
                     )}
                   </View>
                 )}
@@ -463,7 +472,10 @@ export default function CatalogosManager() {
                     <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Categoría Padre *</Text>
                     <TouchableOpacity
                       style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                      onPress={() => setShowEditParentCatDropdown(!showEditParentCatDropdown)}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowEditParentCatDropdown(!showEditParentCatDropdown);
+                      }}
                     >
                       <Text style={{ color: editParentCatId ? themeColors.text : themeColors.textSecondary }}>
                         {editParentCatName || 'Selecciona categoría padre'}
@@ -471,24 +483,29 @@ export default function CatalogosManager() {
                       <Ionicons name={showEditParentCatDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                     </TouchableOpacity>
                     {showEditParentCatDropdown && (
-                      <Pressable onPress={() => {}} style={{ width: '100%' }}>
+                      <View style={{ width: '100%', zIndex: 1000 }}>
                         <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
-                            {categorias.map((cat) => (
+                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                            {categorias.map((cat, index, array) => (
                               <TouchableOpacity
                                 key={cat.id}
-                                style={styles.dropdownItem}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
                                 onPress={() => {
                                   setEditParentCatId(cat.id);
                                   setShowEditParentCatDropdown(false);
                                 }}
                               >
-                                <Text style={{ color: themeColors.text }}>{cat.nombre}</Text>
+                                <Ionicons name="folder-open-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cat.nombre}</Text>
                               </TouchableOpacity>
                             ))}
                           </ScrollView>
                         </View>
-                      </Pressable>
+                      </View>
                     )}
                   </View>
                 )}

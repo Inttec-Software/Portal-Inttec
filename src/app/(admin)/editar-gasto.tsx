@@ -19,7 +19,9 @@ import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, Gasto } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
-import { GeminiService } from '@/services/gemini';
+import { GeminiService, analyzeImageGastos } from '@/services/gemini';
+import * as FileSystem from 'expo-file-system';
+import { getComentariosPlaceholder } from '@/utils/helpers';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -112,6 +114,8 @@ export default function EditarGastoForm() {
   };
 
   const [fechaComprobante, setFechaComprobante] = useState(getTodayFriendly());
+  const [tipoServicioProyecto, setTipoServicioProyecto] = useState<'Servicio' | 'Proyecto' | null>(null);
+  const [detalleServicioProyecto, setDetalleServicioProyecto] = useState('');
   const [sucursal, setSucursal] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
   const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | null>(null);
@@ -260,6 +264,8 @@ export default function EditarGastoForm() {
             }
 
             setProveedor(data.proveedor || '');
+            setTipoServicioProyecto(data.tipo_servicio_proyecto as any || null);
+            setDetalleServicioProyecto(data.detalle_servicio_proyecto || '');
             setSucursal(data.sucursal || '');
             setSelectedEstado(data.estado || '');
             setMetodoPago(data.metodo_pago as any || 'efectivo');
@@ -599,6 +605,16 @@ export default function EditarGastoForm() {
       return;
     }
 
+    if (!tipoServicioProyecto) {
+      showAlert('Validación', 'Por favor selecciona si es Servicio o Proyecto.');
+      return;
+    }
+
+    if (!detalleServicioProyecto.trim()) {
+      showAlert('Validación', 'Por favor ingresa el detalle del Servicio o Proyecto.');
+      return;
+    }
+
     if (!justificacion.trim()) {
       showAlert('Validación', 'Por favor escribe una justificación del gasto.');
       return;
@@ -659,6 +675,8 @@ export default function EditarGastoForm() {
       estado: selectedEstado || null,
       facturado: facturado,
       motivo_sin_factura: facturado ? null : motivoSinFactura.trim(),
+      tipo_servicio_proyecto: tipoServicioProyecto,
+      detalle_servicio_proyecto: detalleServicioProyecto.trim(),
     };
 
     setIsSubmitting(true);
@@ -1085,6 +1103,48 @@ export default function EditarGastoForm() {
                 value={proveedor}
                 onChangeText={setProveedor}
                 iconName="business-outline"
+              />
+              {/* Selector de Servicio/Proyecto */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <Text style={{ color: themeColors.text, marginBottom: Spacing.half, fontWeight: '500', fontSize: 14, paddingLeft: Spacing.half }}>Servicio o Proyecto *</Text>
+                <View style={{ flexDirection: 'row', gap: Spacing.one }}>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      padding: Spacing.one,
+                      borderRadius: BorderRadius.medium,
+                      borderWidth: 1,
+                      borderColor: tipoServicioProyecto === 'Servicio' ? themeColors.primary : themeColors.border,
+                      backgroundColor: tipoServicioProyecto === 'Servicio' ? themeColors.primary + '20' : themeColors.backgroundElement,
+                      alignItems: 'center'
+                    }}
+                    onPress={() => setTipoServicioProyecto('Servicio')}
+                  >
+                    <Text style={{ color: tipoServicioProyecto === 'Servicio' ? themeColors.primary : themeColors.textSecondary, fontWeight: '600' }}>Servicio</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      padding: Spacing.one,
+                      borderRadius: BorderRadius.medium,
+                      borderWidth: 1,
+                      borderColor: tipoServicioProyecto === 'Proyecto' ? themeColors.primary : themeColors.border,
+                      backgroundColor: tipoServicioProyecto === 'Proyecto' ? themeColors.primary + '20' : themeColors.backgroundElement,
+                      alignItems: 'center'
+                    }}
+                    onPress={() => setTipoServicioProyecto('Proyecto')}
+                  >
+                    <Text style={{ color: tipoServicioProyecto === 'Proyecto' ? themeColors.primary : themeColors.textSecondary, fontWeight: '600' }}>Proyecto</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <CustomInput
+                label="Detalle de Servicio o Proyecto *"
+                placeholder="Escribe el nombre o texto libre..."
+                value={detalleServicioProyecto}
+                onChangeText={setDetalleServicioProyecto}
+                iconName="briefcase-outline"
               />
 
               <CustomInput
@@ -1539,8 +1599,8 @@ export default function EditarGastoForm() {
               </View>
 
               <CustomInput
-                label="Justificación del Gasto *"
-                placeholder="Escribe el propósito de este gasto..."
+                label="Comentarios *"
+                placeholder={getComentariosPlaceholder(selectedCategoria, selectedSubcategoria)}
                 value={justificacion}
                 onChangeText={setJustificacion}
                 multiline
