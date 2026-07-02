@@ -645,8 +645,6 @@ export default function EditarGastoForm() {
     }
     
     const gastoPayload = {
-      empleado_id: currentUser.id,
-      empleado_nombre: currentUser.nombre,
       monto: totalGasto,
       categoria: selectedCategoria,
       subcategoria: selectedSubcategoria || null,
