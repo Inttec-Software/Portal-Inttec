@@ -38,8 +38,8 @@ for (let i = 0; i < chars.length; i++) {
 }
 
 export function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  // 1. Limpiar cualquier cabecera de Data URL
-  let cleanBase64 = base64.replace(/^data:image\/[a-z]+;base64,/, '');
+  // 1. Limpiar cualquier cabecera de Data URL (imágenes, PDFs, etc.)
+  let cleanBase64 = base64.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '');
 
   // 2. Limpiar espacios en blanco, saltos de línea o caracteres no válidos de base64
   cleanBase64 = cleanBase64.replace(/[^A-Za-z0-9+/=]/g, '');

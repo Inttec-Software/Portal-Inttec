@@ -607,7 +607,7 @@ export default function InventarioDashboard() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*'],
-        copyToCacheDirectory: true,
+        copyToCacheDirectory: false, // Obtener URI content:// original para resolver permisos correctos
       });
 
       if (result.canceled || !result.assets?.[0]) return;
@@ -616,7 +616,7 @@ export default function InventarioDashboard() {
       const uri = fileAsset.uri;
       const mimeType = fileAsset.mimeType || '';
 
-      const isPdf = mimeType.includes('pdf') || uri.endsWith('.pdf');
+      const isPdf = mimeType.includes('pdf') || uri.endsWith('.pdf') || fileAsset.name?.endsWith('.pdf');
       const isImage = mimeType.startsWith('image/') || uri.endsWith('.jpg') || uri.endsWith('.jpeg') || uri.endsWith('.png') || uri.endsWith('.webp');
 
       if (!isPdf && !isImage) {
@@ -624,7 +624,7 @@ export default function InventarioDashboard() {
         return;
       }
 
-      const resolvedMime = mimeType || (uri.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+      const resolvedMime = mimeType || (uri.endsWith('.pdf') || fileAsset.name?.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
 
       setIsAnalyzing(true);
 
@@ -644,11 +644,28 @@ export default function InventarioDashboard() {
           reader.readAsDataURL(blob);
         });
       } else {
-        const FileSystem = require('expo-file-system');
-        base64Data = await FileSystem.readAsStringAsync(uri, {
+        const FileSystem = require('expo-file-system/legacy');
+        
+        // Copiar archivo temporal a la sandbox para evitar restricciones de lectura nativas en Android
+        const tempFileName = `temp_inv_${Date.now()}_${fileAsset.name || 'factura.pdf'}`;
+        const targetUri = `${FileSystem.cacheDirectory}${tempFileName}`;
+        
+        await FileSystem.copyAsync({
+          from: uri,
+          to: targetUri,
+        });
+
+        base64Data = await FileSystem.readAsStringAsync(targetUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
         base64Data = base64Data.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, ''); // Safety cleanup
+
+        // Limpiar el archivo temporal
+        try {
+          await FileSystem.deleteAsync(targetUri, { idempotent: true });
+        } catch (cleanErr) {
+          console.log('Error cleaning inventory temp file:', cleanErr);
+        }
       }
 
       // 2. Compilar catálogo maestro JSON

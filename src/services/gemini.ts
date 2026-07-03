@@ -337,5 +337,186 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
       console.error('Error in extractInvoiceProducts:', err);
       throw new Error(err.message || 'Error al procesar la factura con Inteligencia Artificial.');
     }
+  },
+
+  async analyzeInvoiceSales(
+    base64File: string,
+    mimeType: string
+  ): Promise<GeminiSalesResult> {
+    if (!GEMINI_API_KEY) {
+      throw new Error('Gemini API Key is missing. Check your environment variables.');
+    }
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+    const prompt = `Rol: Eres un asistente experto en contabilidad y extracción de datos de facturas de compra.
+
+Tarea: Analiza el documento adjunto (imagen o PDF). Este es una FACTURA DE COMPRA a un proveedor. Los precios que aparecen en el documento son nuestros COSTOS de adquisición.
+
+Instrucciones:
+- Los precios del documento son COSTOS (costo_unitario_proveedor).
+- El campo precio_unitario_venta debe ser 0 (el administrador lo ingresará manualmente después).
+- Extrae cada producto/servicio con su descripción, cantidad, unidad de medida y costo unitario.
+
+Reglas de extracción:
+- Extrae la fecha en formato YYYY-MM-DD
+- Extrae el nombre del proveedor o emisor (quien nos vendió el producto)
+- Extrae el número de factura, folio, o referencia de orden
+- Identifica el tipo de producto/proyecto: "Venta", "Servicio", "Paneles", "Instalación", "Mantenimiento" u otro según el contenido
+- Si aparece el nombre del cliente final (a quién se le revenderá), extráelo; si no, usa null
+- Extrae cada partida/producto con: descripción exacta, cantidad, unidad de medida, y precio (como costo_unitario_proveedor)
+
+Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, sin texto adicional:
+{
+  "informacion_general": {
+    "fecha": "YYYY-MM-DD o null",
+    "cliente": "Nombre del Cliente final o null",
+    "factura_o_referencia": "Número de factura o ID de orden o null",
+    "tipo_de_proyecto": "Venta / Servicio / Paneles / otro",
+    "proveedor": "Nombre del proveedor que nos vendió o null"
+  },
+  "partidas_o_productos": [
+    {
+      "descripcion": "Nombre o descripción del producto/servicio",
+      "cantidad": 1,
+      "unidad": "PZA",
+      "precio_unitario_venta": 0.00,
+      "costo_unitario_proveedor": 0.00,
+      "precio_total_venta": 0.00,
+      "costo_total_proveedor": 0.00
+    }
+  ],
+  "totales_calculados": {
+    "precio_total_facturado": 0.00,
+    "costo_total": 0.00,
+    "utilidad_bruta": 0.00,
+    "margen_porcentual": 0.00
+  }
+}`;
+
+    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '');
+
+    const requestBody = {
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: cleanBase64,
+              },
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+      },
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Gemini API Error (${response.status}): ${errorText}`);
+      }
+
+      const resData = await response.json();
+      const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!textResult) {
+        throw new Error('No se pudo extraer el contenido de la factura de venta.');
+      }
+
+      let cleanJsonStr = textResult.trim();
+      const markdownMatch = cleanJsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (markdownMatch) {
+        cleanJsonStr = markdownMatch[1].trim();
+      }
+
+      const parsed: GeminiSalesResult = JSON.parse(cleanJsonStr);
+
+      // Re-calcular totales en código para evitar errores matemáticos de la IA
+      let precioTotalFacturado = 0;
+      let costoTotal = 0;
+
+      const partidasCorregidas = (parsed.partidas_o_productos || []).map(p => {
+        const cant = Number(p.cantidad) || 0;
+        const precioUV = Number(p.precio_unitario_venta) || 0;
+        const costoUP = Number(p.costo_unitario_proveedor) || 0;
+        const precioTV = Math.round(cant * precioUV * 100) / 100;
+        const costoTP = Math.round(cant * costoUP * 100) / 100;
+
+        precioTotalFacturado += precioTV;
+        costoTotal += costoTP;
+
+        return {
+          ...p,
+          cantidad: cant,
+          precio_unitario_venta: precioUV,
+          costo_unitario_proveedor: costoUP,
+          precio_total_venta: precioTV,
+          costo_total_proveedor: costoTP,
+        };
+      });
+
+      const utilidadBruta = Math.round((precioTotalFacturado - costoTotal) * 100) / 100;
+      const margen = precioTotalFacturado > 0
+        ? Math.round((utilidadBruta / precioTotalFacturado) * 10000) / 10000
+        : 0;
+
+      return {
+        informacion_general: {
+          fecha: parsed.informacion_general?.fecha ?? null,
+          cliente: parsed.informacion_general?.cliente ?? null,
+          factura_o_referencia: parsed.informacion_general?.factura_o_referencia ?? null,
+          tipo_de_proyecto: parsed.informacion_general?.tipo_de_proyecto ?? null,
+          proveedor: parsed.informacion_general?.proveedor ?? null,
+        },
+        partidas_o_productos: partidasCorregidas,
+        totales_calculados: {
+          precio_total_facturado: precioTotalFacturado,
+          costo_total: costoTotal,
+          utilidad_bruta: utilidadBruta,
+          margen_porcentual: margen,
+        },
+      };
+    } catch (err: any) {
+      console.error('Error in analyzeInvoiceSales:', err);
+      throw new Error(err.message || 'Error al procesar la factura de venta con Inteligencia Artificial.');
+    }
   }
 };
+
+export interface GeminiSalesResult {
+  informacion_general: {
+    fecha: string | null;
+    cliente: string | null;
+    factura_o_referencia: string | null;
+    tipo_de_proyecto: string | null;
+    proveedor: string | null;
+  };
+  partidas_o_productos: Array<{
+    descripcion: string;
+    cantidad: number;
+    unidad: string;
+    precio_unitario_venta: number;
+    costo_unitario_proveedor: number;
+    precio_total_venta: number;
+    costo_total_proveedor: number;
+  }>;
+  totales_calculados: {
+    precio_total_facturado: number;
+    costo_total: number;
+    utilidad_bruta: number;
+    margen_porcentual: number;
+  };
+}

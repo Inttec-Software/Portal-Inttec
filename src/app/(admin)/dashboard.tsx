@@ -105,6 +105,7 @@ export default function AdminDashboard() {
   const [isFetchingAsistencias, setIsFetchingAsistencias] = useState(false);
   const [isFetchingInventario, setIsFetchingInventario] = useState(false);
   const [isFetchingConsumos, setIsFetchingConsumos] = useState(false);
+  const [isFetchingVentas, setIsFetchingVentas] = useState(false);
 
   const handleOpenProfile = () => {
     if (adminUser) {
@@ -559,6 +560,38 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleExportVentasPDF = async () => {
+    setIsFetchingVentas(true);
+    try {
+      const { data, error } = await supabase
+        .from('ventas')
+        .select('*')
+        .order('fecha', { ascending: false });
+      if (error) throw error;
+      await ReportGenerator.exportVentasToPDF(data || [], 'Reporte de Control de Ventas');
+    } catch (err: any) {
+      showAlert('Error PDF Ventas', err.message || 'No se pudo generar el reporte de ventas.');
+    } finally {
+      setIsFetchingVentas(false);
+    }
+  };
+
+  const handleExportVentasCSV = async () => {
+    setIsFetchingVentas(true);
+    try {
+      const { data, error } = await supabase
+        .from('ventas')
+        .select('*')
+        .order('fecha', { ascending: false });
+      if (error) throw error;
+      await ReportGenerator.exportVentasToCSV(data || [], 'reporte_ventas_general.csv');
+    } catch (err: any) {
+      showAlert('Error CSV Ventas', err.message || 'No se pudo generar el reporte de ventas.');
+    } finally {
+      setIsFetchingVentas(false);
+    }
+  };
+
   // Filtrados por pestañas
   const pendingGastos = gastos.filter((g) => g.status === 'PENDING');
   const historyGastos = gastos.filter((g) => g.status === 'APPROVED' || g.status === 'REJECTED' || g.status === 'ACTION_REQUIRED');
@@ -798,6 +831,7 @@ export default function AdminDashboard() {
             Catálogos
           </Text>
         </TouchableOpacity>
+
       </View>
 
       {/* Tabs Simplificadas a 2 */}
@@ -1048,6 +1082,23 @@ export default function AdminDashboard() {
                 <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
                   <CustomButton title="PDF" onPress={handleExportConsumosPDF} style={{ flex: 1, height: 36 }} loading={isFetchingConsumos} />
                   <CustomButton title="Excel (CSV)" onPress={handleExportConsumosCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingConsumos} />
+                </View>
+              </View>
+
+              {/* Tarjeta 5: Reporte de Ventas */}
+              <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one, marginTop: Spacing.two }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+                  <Ionicons name="bar-chart-outline" size={28} color={themeColors.success} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Ventas</Text>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                      Resumen financiero de facturación, costos, utilidades y márgenes.
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
+                  <CustomButton title="PDF" onPress={handleExportVentasPDF} style={{ flex: 1, height: 36 }} loading={isFetchingVentas} />
+                  <CustomButton title="Excel (CSV)" onPress={handleExportVentasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingVentas} />
                 </View>
               </View>
             </ScrollView>
@@ -1811,6 +1862,14 @@ export default function AdminDashboard() {
           setSelectedAsistenciaInfo(null);
         }}
       />
+      {/* Floating Action Button for Ventas */}
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => router.push('/(admin)/ventas' as any)}
+        style={[styles.fab, { backgroundColor: themeColors.success, bottom: Spacing.four }]}
+      >
+        <Ionicons name="receipt" size={24} color="#ffffff" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }

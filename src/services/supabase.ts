@@ -324,3 +324,32 @@ export const AsistenciaService = {
     }
   },
 };
+
+export interface Venta {
+  id: string;
+  registrado_por: string;
+  fecha: string;
+  cliente: string;
+  factura_referencia?: string | null;
+  tipo_proyecto?: string | null;
+  proveedor?: string | null;
+  precio_total_facturado: number;
+  costo_total: number;
+  utilidad_bruta: number;
+  margen_porcentual: number;
+  factura_url?: string | null;
+  notas?: string | null;
+  created_at?: string;
+}
+
+export interface VentaPartida {
+  id: string;
+  venta_id: string;
+  descripcion: string;
+  cantidad: number;
+  unidad: string;
+  precio_unitario_venta: number;
+  costo_unitario_proveedor: number;
+  precio_total_venta: number;
+  costo_total_proveedor: number;
+}

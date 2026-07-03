@@ -1453,4 +1453,334 @@ export const ReportGenerator = {
       throw new Error(error.message || 'Error al generar reporte CSV.');
     }
   },
+
+  /**
+   * Genera un reporte PDF de las ventas registradas y lo comparte
+   */
+  async exportVentasToPDF(
+    ventas: any[],
+    title: string = 'Reporte de Ventas INTTEC'
+  ): Promise<void> {
+    if (ventas.length === 0) {
+      throw new Error('No hay registros de ventas para exportar.');
+    }
+
+    const totalFacturado = ventas.reduce((sum, v) => sum + Number(v.precio_total_facturado || 0), 0);
+    const totalCosto = ventas.reduce((sum, v) => sum + Number(v.costo_total || 0), 0);
+    const totalUtilidad = totalFacturado - totalCosto;
+    const margenConsolidado = totalFacturado > 0 ? (totalUtilidad / totalFacturado) * 100 : 0;
+
+    let tableRows = '';
+    ventas.forEach((v) => {
+      const fecha = v.fecha || '';
+      const facturadoFormatted = new Intl.NumberFormat('es-MX', {
+        style: 'currency',
+        currency: 'MXN',
+      }).format(Number(v.precio_total_facturado || 0));
+
+      const costoFormatted = new Intl.NumberFormat('es-MX', {
+        style: 'currency',
+        currency: 'MXN',
+      }).format(Number(v.costo_total || 0));
+
+      const utilidadFormatted = new Intl.NumberFormat('es-MX', {
+        style: 'currency',
+        currency: 'MXN',
+      }).format(Number(v.utilidad_bruta || 0));
+
+      const margenPercent = ((v.margen_porcentual || 0) * 100).toFixed(1) + '%';
+      const isProfit = Number(v.utilidad_bruta || 0) >= 0;
+
+      tableRows += `
+        <tr>
+          <td>${fecha}</td>
+          <td>
+            <div style="font-weight: bold;">${v.cliente || 'N/A'}</div>
+            ${v.factura_referencia ? `<span style="font-size: 9px; color: #777;">Ref: ${v.factura_referencia}</span>` : ''}
+          </td>
+          <td>${v.tipo_proyecto || 'N/A'}</td>
+          <td>${v.proveedor || 'N/A'}</td>
+          <td style="text-align: right; color: #0d1b2a; font-weight: bold;">${facturadoFormatted}</td>
+          <td style="text-align: right; color: #f44336;">${costoFormatted}</td>
+          <td style="text-align: right; color: ${isProfit ? '#4CAF50' : '#F44336'}; font-weight: bold;">${utilidadFormatted}</td>
+          <td style="text-align: right; color: ${isProfit ? '#4CAF50' : '#F44336'}; font-weight: bold;">${margenPercent}</td>
+        </tr>
+      `;
+    });
+
+    const formatCurr = (val: number) =>
+      new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val);
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${title}</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 24px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @media print {
+            body {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            @page {
+              size: letter;
+              margin: 15mm;
+            }
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 24px;
+            font-weight: bold;
+            margin: 0;
+          }
+          .subtitle {
+            color: #777;
+            font-size: 12px;
+            margin-top: 5px;
+          }
+          .summary-grid {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 25px;
+            gap: 15px;
+          }
+          .summary-card {
+            flex: 1;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+          }
+          .summary-card .value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #0d1b2a;
+            margin-top: 5px;
+          }
+          .summary-card .label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #888;
+            letter-spacing: 0.5px;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 11px;
+          }
+          th {
+            background-color: #0d1b2a;
+            color: white;
+            text-align: left;
+            padding: 10px 8px;
+            font-weight: 600;
+          }
+          td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #e9ecef;
+          }
+          tr:nth-child(even) {
+            background-color: #fcfcfd;
+          }
+          .footer {
+            margin-top: 40px;
+            text-align: center;
+            font-size: 10px;
+            color: #aaa;
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+          }
+        </style>
+      </head>
+      <body>
+        <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #0d1b2a; padding-bottom: 15px; margin-bottom: 20px; border: none;">
+          <tr>
+            <td style="vertical-align: middle; border: none; padding: 0;">
+              <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
+              <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
+            </td>
+            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
+              <img src="data:image/png;base64,${LOGO_BASE64}" style="width: 60px; height: 60px; object-fit: contain;" />
+            </td>
+          </tr>
+        </table>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div class="label">Total Facturado</div>
+            <div class="value" style="color: #0d1b2a;">${formatCurr(totalFacturado)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Costo Proveedores</div>
+            <div class="value" style="color: #f44336;">${formatCurr(totalCosto)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Utilidad Consolidada</div>
+            <div class="value" style="color: ${totalUtilidad >= 0 ? '#4CAF50' : '#f44336'};">${formatCurr(totalUtilidad)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Margen Consolidado</div>
+            <div class="value" style="color: ${totalUtilidad >= 0 ? '#4CAF50' : '#f44336'};">${margenConsolidado.toFixed(1)}%</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 12%">Fecha</th>
+              <th style="width: 25%">Cliente / Ref</th>
+              <th style="width: 13%">Tipo</th>
+              <th style="width: 15%">Proveedor</th>
+              <th style="width: 13%; text-align: right;">Venta</th>
+              <th style="width: 10%; text-align: right;">Costo</th>
+              <th style="width: 12%; text-align: right;">Utilidad</th>
+              <th style="width: 10%; text-align: right;">Margen</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Documento Confidencial - Control de Ventas e Ingresos INTTEC - Sistema Automatizado
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      if (Platform.OS === 'web') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+
+          setTimeout(() => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+            }, 1000);
+          }, 500);
+        }
+        return;
+      }
+
+      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      const pdfFileName = `reporte_ventas_${Date.now()}.pdf`;
+      const safeUri = `${cacheDirectory}${pdfFileName}`;
+      
+      await writeAsStringAsync(safeUri, base64 || '', {
+        encoding: EncodingType.Base64,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(safeUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Exportar Reporte Ventas PDF',
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    } catch (error: any) {
+      console.error('Error generating sales PDF:', error);
+      throw new Error(error.message || 'Error al generar el reporte de ventas.');
+    }
+  },
+
+  /**
+   * Genera un archivo CSV de ventas y lo comparte
+   */
+  async exportVentasToCSV(
+    ventas: any[],
+    fileName: string = 'reporte_ventas.csv'
+  ): Promise<void> {
+    if (ventas.length === 0) {
+      throw new Error('No hay registros de ventas para exportar.');
+    }
+
+    let csvContent = '\uFEFF'; // BOM
+    csvContent += 'ID Venta,Fecha,Cliente,Referencia/Factura,Tipo Proyecto,Proveedor,Total Facturado (Venta),Total Costo (Proveedor),Utilidad Bruta,Margen %\n';
+
+    ventas.forEach((v) => {
+      const fecha = v.fecha || '';
+      const escape = (text?: string | null) => {
+        if (!text) return '';
+        const cleaned = text.replace(/"/g, '""');
+        return `"${cleaned}"`;
+      };
+
+      const margenPercent = ((v.margen_porcentual || 0) * 100).toFixed(2);
+
+      const row = [
+        v.id,
+        fecha,
+        escape(v.cliente),
+        escape(v.factura_referencia),
+        escape(v.tipo_proyecto),
+        escape(v.proveedor),
+        Number(v.precio_total_facturado || 0).toFixed(2),
+        Number(v.costo_total || 0).toFixed(2),
+        Number(v.utilidad_bruta || 0).toFixed(2),
+        margenPercent + '%',
+      ].join(',');
+
+      csvContent += row + '\n';
+    });
+
+    try {
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', fileName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      const fileUri = `${cacheDirectory}${fileName}`;
+      await writeAsStringAsync(fileUri, csvContent, {
+        encoding: EncodingType.UTF8,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Exportar Reporte Ventas CSV',
+          UTI: 'public.comma-separated-values-text',
+        });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    } catch (error: any) {
+      console.error('Error generating sales CSV:', error);
+      throw new Error(error.message || 'Error al generar reporte CSV de ventas.');
+    }
+  },
 };
