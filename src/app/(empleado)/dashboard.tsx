@@ -423,8 +423,18 @@ export default function EmpleadoDashboard() {
     return () => unsubscribe();
   }, []);
 
-  const refreshData = async (userId: string) => {
-    setIsLoading(true);
+  useEffect(() => {
+    if (!user) return;
+
+    const interval = setInterval(() => {
+      refreshData(user.id, true);
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [user]);
+
+  const refreshData = async (userId: string, silent = false) => {
+    if (!silent) setIsLoading(true);
     try {
       // 1. Obtener de Supabase
       const { data, error } = await supabase
@@ -442,7 +452,7 @@ export default function EmpleadoDashboard() {
     } catch (err: any) {
       console.error('Error al cargar datos:', err);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 

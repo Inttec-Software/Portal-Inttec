@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService } from '@/services/supabase';
+import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, Venta } from '@/services/supabase';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
@@ -26,6 +26,17 @@ import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+
+interface PartidaEditable {
+  id: string;
+  descripcion: string;
+  cantidad: string;
+  unidad: string;
+  precio_unitario_venta: string;
+  costo_unitario_proveedor: string;
+}
+
+const TIPOS_PROYECTO = ['Venta', 'Servicio', 'Paneles', 'Instalación', 'Mantenimiento', 'Otro'];
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -107,6 +118,69 @@ export default function AdminDashboard() {
   const [isFetchingConsumos, setIsFetchingConsumos] = useState(false);
   const [isFetchingVentas, setIsFetchingVentas] = useState(false);
 
+  // === Vinculación con Ventas al Aprobar ===
+  const [isLinkSaleModalVisible, setIsLinkSaleModalVisible] = useState(false);
+  const [salesForLinking, setSalesForLinking] = useState<Venta[]>([]);
+  const [isLoadingSalesForLinking, setIsLoadingSalesForLinking] = useState(false);
+  const [linkSaleSearch, setLinkSaleSearch] = useState('');
+
+  // === Formulario de Nueva Venta Rápida ===
+  const [isQuickSaleFormVisible, setIsQuickSaleFormVisible] = useState(false);
+  const [quickSaleFecha, setQuickSaleFecha] = useState('');
+  const [quickSaleCliente, setQuickSaleCliente] = useState('');
+  const [quickSaleFactura, setQuickSaleFactura] = useState('');
+  const [quickSaleTipoProyecto, setQuickSaleTipoProyecto] = useState('');
+  const [quickSaleProveedor, setQuickSaleProveedor] = useState('');
+  const [quickSaleNotas, setQuickSaleNotas] = useState('');
+  const [quickSalePartidas, setQuickSalePartidas] = useState<PartidaEditable[]>([]);
+  const [showQuickSaleTipoDropdown, setShowQuickSaleTipoDropdown] = useState(false);
+  const [showQuickSaleCliDropdown, setShowQuickSaleCliDropdown] = useState(false);
+  const [quickSaleCliSearch, setQuickSaleCliSearch] = useState('');
+  const [isSavingQuickSale, setIsSavingQuickSale] = useState(false);
+  const [clientesCatalog, setClientesCatalog] = useState<any[]>([]);
+
+  const quickSaleTotals = useMemo(() => {
+    let precioTotal = 0;
+    let costoTotal = 0;
+
+    quickSalePartidas.forEach(p => {
+      const cant = Number(p.cantidad) || 0;
+      const precioUV = Number(p.precio_unitario_venta) || 0;
+      const costoUP = Number(p.costo_unitario_proveedor) || 0;
+      precioTotal += Math.round(cant * precioUV * 100) / 100;
+      costoTotal += Math.round(cant * costoUP * 100) / 100;
+    });
+
+    const utilidad = Math.round((precioTotal - costoTotal) * 100) / 100;
+    const margen = precioTotal > 0
+      ? Math.round((utilidad / precioTotal) * 10000) / 10000
+      : 0;
+
+    return {
+      precioTotal,
+      costoTotal,
+      utilidad,
+      margen,
+    };
+  }, [quickSalePartidas]);
+
+  const filteredSalesForLinking = useMemo(() => {
+    if (!linkSaleSearch.trim()) return salesForLinking;
+    const query = linkSaleSearch.toLowerCase();
+    return salesForLinking.filter(
+      (s) =>
+        s.cliente.toLowerCase().includes(query) ||
+        (s.factura_referencia && s.factura_referencia.toLowerCase().includes(query)) ||
+        (s.tipo_proyecto && s.tipo_proyecto.toLowerCase().includes(query))
+    );
+  }, [salesForLinking, linkSaleSearch]);
+
+  const filteredClientsForQuickSale = useMemo(() => {
+    if (!quickSaleCliSearch.trim()) return clientesCatalog;
+    const q = quickSaleCliSearch.toLowerCase();
+    return clientesCatalog.filter(c => c.nombre && c.nombre.toLowerCase().includes(q));
+  }, [clientesCatalog, quickSaleCliSearch]);
+
   const handleOpenProfile = () => {
     if (adminUser) {
       setProfilePhone(adminUser.telefono || '');
@@ -168,10 +242,16 @@ export default function AdminDashboard() {
     };
 
     checkAdmin();
+
+    const interval = setInterval(() => {
+      refreshData(true);
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
-  const refreshData = async () => {
-    setIsLoading(true);
+  const refreshData = async (silent = false) => {
+    if (!silent) setIsLoading(true);
     try {
       // 1. Obtener TODOS los gastos
       const { data: gastosData, error: gastosErr } = await supabase
@@ -192,9 +272,11 @@ export default function AdminDashboard() {
       setPersonal(usersData || []);
     } catch (err: any) {
       console.error('Error loading admin data:', err);
-      Alert.alert('Error', err.message || 'No se pudieron recuperar los datos.');
+      if (!silent) {
+        Alert.alert('Error', err.message || 'No se pudieron recuperar los datos.');
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
@@ -278,6 +360,202 @@ export default function AdminDashboard() {
       showAlert('Error', err.message || 'No se pudo procesar la acción de revisión.');
     } finally {
       setIsProcessingAction(false);
+    }
+  };
+
+  const loadSalesForLinking = async () => {
+    setIsLoadingSalesForLinking(true);
+    try {
+      const { data, error } = await supabase
+        .from('ventas')
+        .select('*')
+        .order('fecha', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      setSalesForLinking(data || []);
+
+      // Cargar catálogo de clientes
+      const { data: cliData } = await supabase
+        .from('clientes')
+        .select('*')
+        .order('nombre');
+      setClientesCatalog(cliData || []);
+    } catch (err) {
+      console.error('Error loading sales for linking:', err);
+    } finally {
+      setIsLoadingSalesForLinking(false);
+    }
+  };
+
+  const handleApproveClick = () => {
+    if (!selectedGasto) return;
+    setLinkSaleSearch('');
+    setIsQuickSaleFormVisible(false);
+    setIsLinkSaleModalVisible(true);
+    loadSalesForLinking();
+  };
+
+  const executeApproveGasto = async (ventaId: string | null) => {
+    if (!selectedGasto || !adminUser) return;
+
+    setIsProcessingAction(true);
+    try {
+      const updatePayload: Partial<Gasto> = {
+        status: 'APPROVED',
+        approved_at: new Date().toISOString(),
+        venta_id: ventaId,
+      };
+
+      const { error } = await supabase
+        .from('gastos')
+        .update(updatePayload)
+        .eq('id', selectedGasto.id);
+
+      if (error) throw error;
+
+      // Generar registro de auditoría
+      await supabase.from('audit_logs').insert([
+        {
+          action: 'APPROVE',
+          actor_id: adminUser.id,
+          target_id: selectedGasto.id,
+          details: `Gasto por ${selectedGasto.monto} aprobado por Admin.${ventaId ? ` Vinculado a venta ID: ${ventaId}.` : ''}`,
+        },
+      ]);
+
+      showAlert('Éxito', `El gasto ha sido marcado como Aprobado.${ventaId ? ' Vinculado a la venta seleccionada.' : ''}`);
+      setReviewModalVisible(false);
+      setSelectedGasto(null);
+      setRejectionFeedback('');
+      setShowFeedbackInput(false);
+      await refreshData();
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo aprobar el gasto.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const handleOpenQuickSaleForm = () => {
+    if (!selectedGasto) return;
+
+    setQuickSaleFecha(selectedGasto.fecha_comprobante || selectedGasto.created_at?.split('T')[0] || new Date().toISOString().split('T')[0]);
+    setQuickSaleCliente(selectedGasto.cliente || '');
+    setQuickSaleFactura(selectedGasto.facturado ? 'Factura' : '');
+    setQuickSaleTipoProyecto(selectedGasto.tipo_servicio_proyecto || 'Otro');
+    setQuickSaleProveedor(selectedGasto.proveedor || '');
+    setQuickSaleNotas(`Vinculado automáticamente al aprobar gasto de justificación: ${selectedGasto.justificacion || 'Sin justificación'}`);
+
+    // No pre-cargar partidas, dejarlas en blanco
+    setQuickSalePartidas([]);
+
+    setIsQuickSaleFormVisible(true);
+  };
+
+  const addQuickSalePartida = () => {
+    setQuickSalePartidas(prev => [
+      ...prev,
+      {
+        id: `manual_${Date.now()}`,
+        descripcion: '',
+        cantidad: '1',
+        unidad: 'PZA',
+        precio_unitario_venta: '0',
+        costo_unitario_proveedor: '0',
+      }
+    ]);
+  };
+
+  const removeQuickSalePartida = (id: string) => {
+    setQuickSalePartidas(prev => prev.filter(p => p.id !== id));
+  };
+
+  const updateQuickSalePartida = (id: string, field: keyof PartidaEditable, value: string) => {
+    setQuickSalePartidas(prev =>
+      prev.map(p => (p.id === id ? { ...p, [field]: value } : p))
+    );
+  };
+
+  const handleSaveQuickSale = async () => {
+    if (!adminUser || !selectedGasto) return;
+
+    if (!quickSaleFecha.trim()) {
+      showAlert('Validación', 'Por favor ingresa la fecha.');
+      return;
+    }
+    if (!quickSaleCliente.trim()) {
+      showAlert('Validación', 'Por favor ingresa el nombre del cliente.');
+      return;
+    }
+    if (quickSalePartidas.length === 0) {
+      showAlert('Validación', 'Agrega al menos una partida.');
+      return;
+    }
+
+    const hasEmptyDescriptions = quickSalePartidas.some(p => !p.descripcion.trim());
+    if (hasEmptyDescriptions) {
+      showAlert('Validación', 'Todas las partidas deben tener una descripción.');
+      return;
+    }
+
+    setIsSavingQuickSale(true);
+    try {
+      // 1. Insertar venta principal
+      const ventaPayload = {
+        registrado_por: adminUser.id,
+        fecha: quickSaleFecha.trim(),
+        cliente: quickSaleCliente.trim(),
+        factura_referencia: quickSaleFactura.trim() || null,
+        tipo_proyecto: quickSaleTipoProyecto || null,
+        proveedor: quickSaleProveedor.trim() || null,
+        precio_total_facturado: quickSaleTotals.precioTotal,
+        costo_total: quickSaleTotals.costoTotal,
+        utilidad_bruta: quickSaleTotals.utilidad,
+        margen_porcentual: quickSaleTotals.margen,
+        factura_url: selectedGasto.factura_url || null, // reusar factura del gasto
+        notas: quickSaleNotas.trim() || null,
+      };
+
+      const { data: ventaData, error: ventaError } = await supabase
+        .from('ventas')
+        .insert([ventaPayload])
+        .select()
+        .single();
+
+      if (ventaError) throw ventaError;
+
+      // 2. Insertar partidas
+      const partidasPayload = quickSalePartidas.map(p => {
+        const cant = Number(p.cantidad) || 0;
+        const precioUV = Number(p.precio_unitario_venta) || 0;
+        const costoUP = Number(p.costo_unitario_proveedor) || 0;
+
+        return {
+          venta_id: ventaData.id,
+          descripcion: p.descripcion.trim(),
+          cantidad: cant,
+          unidad: p.unidad || 'PZA',
+          precio_unitario_venta: precioUV,
+          costo_unitario_proveedor: costoUP,
+          precio_total_venta: Math.round(cant * precioUV * 100) / 100,
+          costo_total_proveedor: Math.round(cant * costoUP * 100) / 100,
+        };
+      });
+
+      const { error: partidasError } = await supabase
+        .from('ventas_partidas')
+        .insert(partidasPayload);
+
+      if (partidasError) throw partidasError;
+
+      // 3. Aprobar y vincular gasto
+      setIsQuickSaleFormVisible(false);
+      setIsLinkSaleModalVisible(false);
+      await executeApproveGasto(ventaData.id);
+    } catch (err: any) {
+      showAlert('Error al guardar venta rápida', err.message || 'No se pudo crear la venta.');
+    } finally {
+      setIsSavingQuickSale(false);
     }
   };
 
@@ -932,6 +1210,8 @@ export default function AdminDashboard() {
         </View>
       )}
 
+
+
       {/* MODAL 1 EXTRA: PERSONAL MANAGER */}
       <Modal
         animationType="slide"
@@ -1286,7 +1566,7 @@ export default function AdminDashboard() {
                           <View style={styles.rowActions}>
                             <CustomButton
                               title="Aprobar"
-                              onPress={() => handleUpdateStatus('APPROVED')}
+                              onPress={handleApproveClick}
                               variant="success"
                               style={{ flex: 1 }}
                               loading={isProcessingAction}
@@ -1393,6 +1673,374 @@ export default function AdminDashboard() {
                   )}
                 </View>
               </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de Vinculación a Ventas al Aprobar */}
+      <Modal
+        visible={isLinkSaleModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsLinkSaleModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '80%', paddingBottom: Spacing.four }]}>
+            {/* Header del Modal */}
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border, borderBottomWidth: 1, paddingBottom: Spacing.two }]}>
+               <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}>
+                 {isQuickSaleFormVisible && (
+                   <TouchableOpacity onPress={() => setIsQuickSaleFormVisible(false)} style={{ marginRight: 4 }}>
+                     <Ionicons name="arrow-back" size={24} color={themeColors.text} />
+                   </TouchableOpacity>
+                 )}
+                 <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                   {isQuickSaleFormVisible ? 'Crear Venta Rápida' : '¿Vincular Gasto a Venta?'}
+                 </Text>
+               </View>
+               <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+                 {!isQuickSaleFormVisible && (
+                   <TouchableOpacity onPress={handleOpenQuickSaleForm} style={{ padding: 4 }}>
+                     <Ionicons name="add-circle" size={28} color={themeColors.success} />
+                   </TouchableOpacity>
+                 )}
+                 <TouchableOpacity onPress={() => setIsLinkSaleModalVisible(false)} style={{ padding: 4 }}>
+                   <Ionicons name="close" size={24} color={themeColors.text} />
+                 </TouchableOpacity>
+               </View>
+            </View>
+
+            {!isQuickSaleFormVisible ? (
+              <>
+                {/* Buscador de Ventas */}
+                <View style={{ paddingTop: Spacing.two, marginBottom: Spacing.two }}>
+                  <CustomInput
+                    placeholder="Buscar por cliente, factura o tipo..."
+                    value={linkSaleSearch}
+                    onChangeText={setLinkSaleSearch}
+                    iconName="search-outline"
+                  />
+                </View>
+
+                {/* Lista de Ventas */}
+                <View style={{ flex: 1, marginBottom: Spacing.two }}>
+                  {isLoadingSalesForLinking ? (
+                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                      <ActivityIndicator size="large" color={themeColors.accent} />
+                      <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando ventas...</Text>
+                    </View>
+                  ) : filteredSalesForLinking.length === 0 ? (
+                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: Spacing.one }}>
+                      <Ionicons name="alert-circle-outline" size={40} color={themeColors.textSecondary} />
+                      <Text style={{ color: themeColors.textSecondary, textAlign: 'center', fontSize: 13 }}>
+                        No se encontraron ventas para asociar.
+                      </Text>
+                    </View>
+                  ) : (
+                    <FlatList
+                      data={filteredSalesForLinking}
+                      keyExtractor={(item) => item.id}
+                      showsVerticalScrollIndicator={false}
+                      contentContainerStyle={{ gap: Spacing.two }}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setIsLinkSaleModalVisible(false);
+                            executeApproveGasto(item.id);
+                          }}
+                          style={[
+                            styles.linkSaleItem,
+                            {
+                              backgroundColor: themeColors.backgroundElement,
+                              borderColor: themeColors.border,
+                            },
+                          ]}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 14 }}>
+                              {item.cliente}
+                            </Text>
+                            <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                              {item.fecha} {item.tipo_proyecto ? `| ${item.tipo_proyecto}` : ''}
+                            </Text>
+                            {item.factura_referencia ? (
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 1 }}>
+                                Factura: {item.factura_referencia}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <Text style={{ color: themeColors.accent, fontWeight: '800', fontSize: 14, alignSelf: 'center' }}>
+                            {formatCurrency(item.precio_total_facturado)}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    />
+                  )}
+                </View>
+
+                {/* Footer con opciones */}
+                <View style={{ gap: Spacing.two, paddingTop: Spacing.two, borderTopWidth: 1, borderTopColor: themeColors.border }}>
+                  <CustomButton
+                    title="Aprobar sin vincular"
+                    onPress={() => {
+                      setIsLinkSaleModalVisible(false);
+                      executeApproveGasto(null);
+                    }}
+                    variant="primary"
+                    style={{ width: '100%' }}
+                  />
+                  <CustomButton
+                    title="Cancelar"
+                    onPress={() => setIsLinkSaleModalVisible(false)}
+                    variant="secondary"
+                    style={{ width: '100%' }}
+                  />
+                </View>
+              </>
+            ) : (
+              // Formulario de Venta Rápida
+              <View style={{ flex: 1 }}>
+                <ScrollView contentContainerStyle={{ paddingBottom: Spacing.four }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                  {/* Fecha */}
+                  <CustomInput
+                    label="Fecha (AAAA-MM-DD) *"
+                    placeholder="2026-07-06"
+                    value={quickSaleFecha}
+                    onChangeText={setQuickSaleFecha}
+                    iconName="calendar-outline"
+                  />
+
+                  {/* Input Cliente con Autocompletado */}
+                  <View style={{ zIndex: 10, position: 'relative', marginBottom: Spacing.two }}>
+                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>Cliente *</Text>
+                    <CustomInput
+                      placeholder="Nombre del cliente..."
+                      value={quickSaleCliente}
+                      onChangeText={(val) => {
+                        setQuickSaleCliente(val);
+                        setQuickSaleCliSearch(val);
+                        setShowQuickSaleCliDropdown(true);
+                      }}
+                      onFocus={() => setShowQuickSaleCliDropdown(true)}
+                    />
+                    {showQuickSaleCliDropdown && filteredClientsForQuickSale.length > 0 && (
+                      <View style={[styles.quickDropdown, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                        <ScrollView style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
+                          {filteredClientsForQuickSale.map((c) => (
+                            <TouchableOpacity
+                              key={c.id}
+                              onPress={() => {
+                                setQuickSaleCliente(c.nombre);
+                                setShowQuickSaleCliDropdown(false);
+                              }}
+                              style={[styles.quickDropdownItem, { borderBottomColor: themeColors.border }]}
+                            >
+                              <Text style={{ color: themeColors.text }}>{c.nombre}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Factura Referencia */}
+                  <CustomInput
+                    label="Factura / Referencia (Opcional)"
+                    placeholder="F-12345"
+                    value={quickSaleFactura}
+                    onChangeText={setQuickSaleFactura}
+                    iconName="document-text-outline"
+                  />
+
+                  {/* Tipo de Proyecto Selector */}
+                  <View style={{ zIndex: 9, position: 'relative' }}>
+                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>Tipo de Proyecto</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowQuickSaleTipoDropdown(!showQuickSaleTipoDropdown)}
+                      style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                    >
+                      <Text style={{ color: quickSaleTipoProyecto ? themeColors.text : themeColors.textSecondary }}>
+                        {quickSaleTipoProyecto || 'Selecciona un tipo...'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={18} color={themeColors.textSecondary} />
+                    </TouchableOpacity>
+                    {showQuickSaleTipoDropdown && (
+                      <View style={[styles.quickDropdown, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                        {TIPOS_PROYECTO.map((tipo) => (
+                          <TouchableOpacity
+                            key={tipo}
+                            onPress={() => {
+                              setQuickSaleTipoProyecto(tipo);
+                              setShowQuickSaleTipoDropdown(false);
+                            }}
+                            style={[styles.quickDropdownItem, { borderBottomColor: themeColors.border }]}
+                          >
+                            <Text style={{ color: themeColors.text }}>{tipo}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Proveedor */}
+                  <CustomInput
+                    label="Proveedor (Opcional)"
+                    placeholder="Nombre del proveedor..."
+                    value={quickSaleProveedor}
+                    onChangeText={setQuickSaleProveedor}
+                    iconName="business-outline"
+                    style={{ marginTop: Spacing.two }}
+                  />
+
+                  {/* Notas */}
+                  <CustomInput
+                    label="Notas / Observaciones"
+                    placeholder="Detalles de la venta..."
+                    value={quickSaleNotas}
+                    onChangeText={setQuickSaleNotas}
+                    multiline
+                    numberOfLines={2}
+                    iconName="create-outline"
+                  />
+
+                  {/* Partidas de Venta */}
+                  <View style={{ marginTop: Spacing.three }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.one }}>
+                      <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 16 }}>Partidas desglosadas</Text>
+                      <TouchableOpacity onPress={addQuickSalePartida} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Ionicons name="add-circle-outline" size={18} color={themeColors.accent} />
+                        <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>Agregar Partida</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {quickSalePartidas.map((partida, index) => (
+                      <View
+                        key={partida.id}
+                        style={[
+                          styles.partidaCard,
+                          {
+                            backgroundColor: themeColors.backgroundElement + '50',
+                            borderColor: themeColors.border,
+                            padding: Spacing.two,
+                            borderRadius: BorderRadius.medium,
+                            borderWidth: 1,
+                            marginBottom: Spacing.two,
+                          },
+                        ]}
+                      >
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.one }}>
+                          <Text style={{ color: themeColors.textSecondary, fontWeight: '600', fontSize: 12 }}>Partida #{index + 1}</Text>
+                          {quickSalePartidas.length > 1 && (
+                            <TouchableOpacity onPress={() => removeQuickSalePartida(partida.id)}>
+                              <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+
+                        <CustomInput
+                          placeholder="Descripción del producto o servicio..."
+                          value={partida.descripcion}
+                          onChangeText={(val) => updateQuickSalePartida(partida.id, 'descripcion', val)}
+                        />
+
+                        <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.one }}>
+                          <View style={{ flex: 1 }}>
+                            <CustomInput
+                              label="Cant."
+                              placeholder="1"
+                              keyboardType="numeric"
+                              value={partida.cantidad}
+                              onChangeText={(val) => updateQuickSalePartida(partida.id, 'cantidad', val)}
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <CustomInput
+                              label="Unidad"
+                              placeholder="PZA"
+                              value={partida.unidad}
+                              onChangeText={(val) => updateQuickSalePartida(partida.id, 'unidad', val)}
+                            />
+                          </View>
+                          <View style={{ flex: 1.5 }}>
+                            <CustomInput
+                              label="Costo Prov ($)"
+                              placeholder="0.00"
+                              keyboardType="numeric"
+                              value={partida.costo_unitario_proveedor}
+                              onChangeText={(val) => updateQuickSalePartida(partida.id, 'costo_unitario_proveedor', val)}
+                            />
+                          </View>
+                          <View style={{ flex: 1.5 }}>
+                            <CustomInput
+                              label="Precio Venta ($)"
+                              placeholder="0.00"
+                              keyboardType="numeric"
+                              value={partida.precio_unitario_venta}
+                              onChangeText={(val) => updateQuickSalePartida(partida.id, 'precio_unitario_venta', val)}
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+
+                  {/* Resumen Financiero Rápido */}
+                  <View
+                    style={[
+                      styles.financialSummary,
+                      {
+                        backgroundColor: themeColors.backgroundSelected,
+                        borderRadius: BorderRadius.medium,
+                        padding: Spacing.two,
+                        marginTop: Spacing.two,
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 14, marginBottom: Spacing.one }}>
+                      Resumen Financiero de la Venta
+                    </Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>Costo Proveedor Total:</Text>
+                      <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 13 }}>{formatCurrency(quickSaleTotals.costoTotal)}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>Precio de Venta Total:</Text>
+                      <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>{formatCurrency(quickSaleTotals.precioTotal)}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>Utilidad Bruta:</Text>
+                      <Text style={{ color: quickSaleTotals.utilidad >= 0 ? themeColors.success : themeColors.danger, fontWeight: '700', fontSize: 13 }}>
+                        {formatCurrency(quickSaleTotals.utilidad)}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>Margen de Utilidad:</Text>
+                      <Text style={{ color: quickSaleTotals.utilidad >= 0 ? themeColors.success : themeColors.danger, fontWeight: '700', fontSize: 13 }}>
+                        {Math.round(quickSaleTotals.margen * 10000) / 100}%
+                      </Text>
+                    </View>
+                  </View>
+                </ScrollView>
+
+                {/* Footer de Venta Rápida */}
+                <View style={{ gap: Spacing.one, paddingTop: Spacing.two, borderTopWidth: 1, borderTopColor: themeColors.border }}>
+                  <CustomButton
+                    title="Crear y Vincular Venta"
+                    onPress={handleSaveQuickSale}
+                    variant="success"
+                    loading={isSavingQuickSale}
+                    style={{ width: '100%' }}
+                  />
+                  <CustomButton
+                    title="Volver al buscador"
+                    onPress={() => setIsQuickSaleFormVisible(false)}
+                    variant="secondary"
+                    style={{ width: '100%' }}
+                    disabled={isSavingQuickSale}
+                  />
+                </View>
+              </View>
             )}
           </View>
         </View>
@@ -2283,5 +2931,46 @@ const styles = StyleSheet.create({
     marginTop: 2,
     lineHeight: 13,
     paddingHorizontal: 2,
+  },
+  linkSaleItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: Spacing.two,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+  },
+  quickDropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 999,
+  },
+  quickDropdownItem: {
+    padding: Spacing.two,
+    borderBottomWidth: 1,
+  },
+  dropdownTrigger: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    height: 48,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.two,
+    marginBottom: Spacing.two,
+  },
+  partidaCard: {
+    marginBottom: Spacing.two,
+  },
+  financialSummary: {
+    marginTop: Spacing.two,
   },
 });

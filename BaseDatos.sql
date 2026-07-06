@@ -34,8 +34,10 @@ CREATE TABLE public.gastos (
   facturado boolean DEFAULT false,
   factura_url text,
   motivo_sin_factura text,
+  venta_id uuid,
   CONSTRAINT gastos_pkey PRIMARY KEY (id),
-  CONSTRAINT gastos_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
+  CONSTRAINT gastos_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id),
+  CONSTRAINT gastos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id) ON DELETE SET NULL
 );
 CREATE TABLE public.audit_logs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

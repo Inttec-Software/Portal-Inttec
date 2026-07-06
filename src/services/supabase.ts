@@ -75,6 +75,7 @@ export interface Gasto {
   motivo_sin_factura?: string | null;
   tipo_servicio_proyecto?: string | null;
   detalle_servicio_proyecto?: string | null;
+  venta_id?: string | null;
 }
 
 export interface Evidencia {
