@@ -26,6 +26,9 @@ import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import { base64ToArrayBuffer } from '@/services/sync';
 
 interface PartidaEditable {
   id: string;
@@ -71,6 +74,16 @@ export default function AdminDashboard() {
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
+  const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
+  const [localMotivo, setLocalMotivo] = useState('');
+
+  useEffect(() => {
+    if (selectedGasto) {
+      setLocalMotivo(selectedGasto.motivo_sin_factura || '');
+    } else {
+      setLocalMotivo('');
+    }
+  }, [selectedGasto?.id]);
 
   // Registro y Edición de Usuario (Personal)
   const [addUserModalVisible, setAddUserModalVisible] = useState(false);
@@ -441,6 +454,275 @@ export default function AdminDashboard() {
       showAlert('Error', err.message || 'No se pudo aprobar el gasto.');
     } finally {
       setIsProcessingAction(false);
+    }
+  };
+
+  const uploadInvoiceToSupabase = async (uri: string, base64Data: string, ext: string) => {
+    if (!selectedGasto || !adminUser) return;
+    setIsUploadingInvoice(true);
+    try {
+      const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
+      const fileName = `admin_uploads/factura_${selectedGasto.id}_${Date.now()}.${ext}`;
+      const arrayBuffer = base64ToArrayBuffer(base64Data);
+
+      const { error: uploadError } = await supabase.storage
+        .from('tickets')
+        .upload(fileName, arrayBuffer, { contentType, upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+      const publicInvoiceUrl = urlData.publicUrl;
+
+      // Actualizar en base de datos
+      const { error: dbError } = await supabase
+        .from('gastos')
+        .update({
+          facturado: true,
+          factura_url: publicInvoiceUrl,
+          motivo_sin_factura: null
+        })
+        .eq('id', selectedGasto.id);
+
+      if (dbError) throw dbError;
+
+      // Actualizar estado local
+      const updatedGasto = {
+        ...selectedGasto,
+        facturado: true,
+        factura_url: publicInvoiceUrl,
+        motivo_sin_factura: null
+      };
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
+
+      showAlert('Éxito', 'Factura cargada y registrada correctamente.');
+    } catch (err: any) {
+      console.error('Error al subir factura:', err);
+      showAlert('Error', err.message || 'No se pudo subir la factura.');
+    } finally {
+      setIsUploadingInvoice(false);
+    }
+  };
+
+  const handleCaptureAdminInvoice = async () => {
+    if (Platform.OS !== 'web') {
+      const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
+      if (cameraStatus.status !== 'granted') {
+        showAlert('Permiso', 'Se requiere permiso de cámara.');
+        return;
+      }
+    }
+
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: Platform.OS !== 'web',
+        quality: 0.7,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        let b64 = result.assets[0].base64;
+        if (!b64) {
+          const response = await fetch(result.assets[0].uri);
+          const blob = await response.blob();
+          b64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              resolve((reader.result as string).split(',')[1]);
+            };
+            reader.readAsDataURL(blob);
+          });
+        }
+        await uploadInvoiceToSupabase(result.assets[0].uri, b64, 'jpg');
+      }
+    } catch (err) {
+      console.error('Camera invoice capture error:', err);
+      if (Platform.OS === 'web') {
+        await handleSelectAdminInvoiceGallery();
+      } else {
+        showAlert('Error', 'No se pudo abrir la cámara.');
+      }
+    }
+  };
+
+  const handleSelectAdminInvoiceGallery = async () => {
+    const libraryStatus = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (libraryStatus.status !== 'granted') {
+      showAlert('Permiso', 'Se requiere permiso de galería.');
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.7,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets?.[0] && result.assets[0].base64) {
+        await uploadInvoiceToSupabase(result.assets[0].uri, result.assets[0].base64, 'jpg');
+      }
+    } catch (err) {
+      console.error('Gallery invoice select error:', err);
+      showAlert('Error', 'No se pudo abrir la galería.');
+    }
+  };
+
+  const handleSelectAdminInvoiceDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: false,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        const uri = asset.uri;
+        const mimeType = asset.mimeType || '';
+
+        const isPdf = mimeType.includes('pdf') || uri.endsWith('.pdf') || asset.name?.endsWith('.pdf');
+        const isImage = mimeType.startsWith('image/') || uri.endsWith('.jpg') || uri.endsWith('.jpeg') || uri.endsWith('.png');
+
+        if (!isPdf && !isImage) {
+          showAlert('Validación', 'Selecciona únicamente archivos PDF o imágenes (JPG, PNG).');
+          return;
+        }
+
+        const ext = isPdf ? 'pdf' : 'jpg';
+
+        if (Platform.OS !== 'web') {
+          const FileSys = require('expo-file-system');
+          const tempFileName = `temp_${Date.now()}_${asset.name || 'factura.pdf'}`;
+          const targetUri = `${FileSys.cacheDirectory}${tempFileName}`;
+
+          await FileSys.copyAsync({
+            from: uri,
+            to: targetUri,
+          });
+
+          const b64 = await FileSys.readAsStringAsync(targetUri, {
+            encoding: FileSys.EncodingType.Base64,
+          });
+
+          await uploadInvoiceToSupabase(targetUri, b64, ext);
+        } else {
+          const response = await fetch(uri);
+          const blob = await response.blob();
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            const base64data = (reader.result as string).split(',')[1];
+            await uploadInvoiceToSupabase(uri, base64data, ext);
+          };
+          reader.readAsDataURL(blob);
+        }
+      }
+    } catch (err) {
+      console.error('Document invoice select error:', err);
+      showAlert('Error', 'No se pudo seleccionar el archivo.');
+    }
+  };
+
+  const handleDeleteAdminInvoice = async () => {
+    if (!selectedGasto) return;
+
+    if (Platform.OS === 'web') {
+      if (!window.confirm('¿Estás seguro de eliminar el archivo de factura?')) return;
+    } else {
+      const confirmed = await new Promise((resolve) => {
+        Alert.alert(
+          'Eliminar Factura',
+          '¿Estás seguro de que deseas eliminar la factura adjunta?',
+          [
+            { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
+            { text: 'Eliminar', onPress: () => resolve(true), style: 'destructive' },
+          ]
+        );
+      });
+      if (!confirmed) return;
+    }
+
+    setIsUploadingInvoice(true);
+    try {
+      const { error: dbError } = await supabase
+        .from('gastos')
+        .update({
+          factura_url: null
+        })
+        .eq('id', selectedGasto.id);
+
+      if (dbError) throw dbError;
+
+      const updatedGasto = {
+        ...selectedGasto,
+        factura_url: null
+      };
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
+
+      showAlert('Éxito', 'Se ha eliminado la factura del gasto.');
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo eliminar la factura.');
+    } finally {
+      setIsUploadingInvoice(false);
+    }
+  };
+
+  const handleToggleAdminFacturado = async (val: boolean) => {
+    if (!selectedGasto) return;
+    try {
+      const updateObj: Partial<Gasto> = {
+        facturado: val,
+        motivo_sin_factura: val ? null : selectedGasto.motivo_sin_factura
+      };
+      if (!val) {
+        updateObj.factura_url = null;
+      }
+
+      if (val) {
+        setLocalMotivo('');
+      }
+
+      const { error: dbError } = await supabase
+        .from('gastos')
+        .update(updateObj)
+        .eq('id', selectedGasto.id);
+
+      if (dbError) throw dbError;
+
+      const updatedGasto = {
+        ...selectedGasto,
+        ...updateObj
+      };
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo cambiar el estado de facturación.');
+    }
+  };
+
+  const handleUpdateAdminMotivoSinFactura = async (motivo: string) => {
+    if (!selectedGasto) return;
+    try {
+      const { error: dbError } = await supabase
+        .from('gastos')
+        .update({
+          motivo_sin_factura: motivo.trim() || null
+        })
+        .eq('id', selectedGasto.id);
+
+      if (dbError) throw dbError;
+
+      const updatedGasto = {
+        ...selectedGasto,
+        motivo_sin_factura: motivo.trim() || null
+      };
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo actualizar el motivo.');
     }
   };
 
@@ -1517,41 +1799,131 @@ export default function AdminDashboard() {
                           </Text>
                         </View>
 
-                        <View style={styles.detailItem}>
-                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Facturación</Text>
-                          <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                            {selectedGasto.facturado ? 'Sí, Facturado' : 'No Facturado'}
-                          </Text>
-                        </View>
+                        <View style={[styles.detailItem, { marginTop: Spacing.one, borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: Spacing.two }]}>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary, fontWeight: '700', marginBottom: Spacing.one }]}>GESTIÓN DE FACTURACIÓN (ADMIN)</Text>
+                          
+                          {/* Selector de Sí / No */}
+                          <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.two }}>
+                            <TouchableOpacity
+                              onPress={() => handleToggleAdminFacturado(true)}
+                              style={{
+                                flex: 1,
+                                height: 36,
+                                borderRadius: BorderRadius.small,
+                                borderWidth: 1,
+                                borderColor: selectedGasto.facturado ? 'transparent' : themeColors.border,
+                                backgroundColor: selectedGasto.facturado ? themeColors.accent : themeColors.backgroundElement,
+                                justifyContent: 'center',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <Text style={{ color: selectedGasto.facturado ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 13 }}>Sí, Facturado</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => handleToggleAdminFacturado(false)}
+                              style={{
+                                flex: 1,
+                                height: 36,
+                                borderRadius: BorderRadius.small,
+                                borderWidth: 1,
+                                borderColor: !selectedGasto.facturado ? 'transparent' : themeColors.border,
+                                backgroundColor: !selectedGasto.facturado ? themeColors.accent : themeColors.backgroundElement,
+                                justifyContent: 'center',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <Text style={{ color: !selectedGasto.facturado ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 13 }}>No Facturado</Text>
+                            </TouchableOpacity>
+                          </View>
 
-                        {selectedGasto.facturado ? (
-                          <View style={styles.detailItem}>
-                            <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Archivo de Factura</Text>
-                            {selectedGasto.factura_url ? (
-                              <TouchableOpacity
-                                style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15' }]}
-                                onPress={() => {
-                                  setActivePreviewUrl(selectedGasto.factura_url!);
-                                  setViewerVisible(true);
-                                }}
-                              >
-                                <Ionicons name="image" size={18} color={themeColors.accent} />
-                                <Text style={[styles.invoiceLinkText, { color: themeColors.accent }]}>
-                                  Ver Factura
-                                </Text>
-                              </TouchableOpacity>
-                            ) : (
-                              <Text style={[styles.detailValue, { color: themeColors.textSecondary }]}>Sin archivo adjunto</Text>
-                            )}
-                          </View>
-                        ) : (
-                          <View style={styles.detailItem}>
-                            <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Motivo de No Factura</Text>
-                            <Text style={[styles.detailValue, { color: themeColors.text, fontStyle: 'italic' }]}>
-                              {selectedGasto.motivo_sin_factura || 'No especificado'}
-                            </Text>
-                          </View>
-                        )}
+                          {/* Secciones según el toggle */}
+                          {selectedGasto.facturado ? (
+                            <View style={{ gap: Spacing.one }}>
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 2 }}>Archivo de Factura:</Text>
+                              {selectedGasto.factura_url ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+                                  <TouchableOpacity
+                                    style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15', flex: 1, height: 40, justifyContent: 'center', borderRadius: BorderRadius.small }]}
+                                    onPress={() => {
+                                      setActivePreviewUrl(selectedGasto.factura_url!);
+                                      setViewerVisible(true);
+                                    }}
+                                  >
+                                    <Ionicons name="image-outline" size={18} color={themeColors.accent} />
+                                    <Text style={[styles.invoiceLinkText, { color: themeColors.accent }]}>
+                                      Ver Factura Adjunta
+                                    </Text>
+                                  </TouchableOpacity>
+                                  
+                                  <TouchableOpacity
+                                    style={{
+                                      backgroundColor: themeColors.danger + '15',
+                                      padding: Spacing.one,
+                                      borderRadius: BorderRadius.small,
+                                      borderWidth: 1,
+                                      borderColor: themeColors.danger + '40',
+                                      height: 40,
+                                      justifyContent: 'center',
+                                      alignItems: 'center',
+                                      aspectRatio: 1
+                                    }}
+                                    onPress={handleDeleteAdminInvoice}
+                                    disabled={isUploadingInvoice}
+                                  >
+                                    <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                                  </TouchableOpacity>
+                                </View>
+                              ) : (
+                                <View style={{ gap: Spacing.one }}>
+                                  <Text style={{ color: themeColors.danger, fontSize: 12, fontStyle: 'italic', marginBottom: 4 }}>⚠️ Falta factura correspondiente</Text>
+                                  {isUploadingInvoice ? (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one, padding: Spacing.one }}>
+                                      <ActivityIndicator size="small" color={themeColors.accent} />
+                                      <Text style={{ color: themeColors.text, fontSize: 12 }}>Subiendo archivo a Supabase...</Text>
+                                    </View>
+                                  ) : (
+                                    <View style={{ flexDirection: 'row', gap: Spacing.one }}>
+                                      <TouchableOpacity
+                                        onPress={handleCaptureAdminInvoice}
+                                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 38, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }}
+                                      >
+                                        <Ionicons name="camera-sharp" size={16} color={themeColors.text} />
+                                        <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600' }}>Cámara</Text>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        onPress={handleSelectAdminInvoiceGallery}
+                                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 38, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }}
+                                      >
+                                        <Ionicons name="images-sharp" size={16} color={themeColors.text} />
+                                        <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600' }}>Galería</Text>
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        onPress={handleSelectAdminInvoiceDocument}
+                                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 38, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }}
+                                      >
+                                        <Ionicons name="document-text-sharp" size={16} color={themeColors.text} />
+                                        <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600' }}>PDF</Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  )}
+                                </View>
+                              )}
+                            </View>
+                          ) : (
+                            <View style={{ gap: Spacing.one }}>
+                              <CustomInput
+                                label="Motivo de falta de factura:"
+                                placeholder="Escribe el motivo (ej. Proveedor informal)..."
+                                value={localMotivo}
+                                onChangeText={setLocalMotivo}
+                                onBlur={() => handleUpdateAdminMotivoSinFactura(localMotivo)}
+                                onEndEditing={() => handleUpdateAdminMotivoSinFactura(localMotivo)}
+                                style={{ height: 40 }}
+                                iconName="warning-outline"
+                              />
+                            </View>
+                          )}
+                        </View>
                       </>
                     );
                   })()}

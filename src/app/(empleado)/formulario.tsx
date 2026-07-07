@@ -579,18 +579,6 @@ export default function GastoForm() {
       return;
     }
 
-    if (facturado && !facturaBase64) {
-      showAlert('Validación', 'Por favor sube la foto o el PDF de la factura.');
-      setCurrentStep(2);
-      return;
-    }
-
-    if (!facturado && !motivoSinFactura.trim()) {
-      showAlert('Validación', 'Por favor explica por qué no hay factura.');
-      setCurrentStep(2);
-      return;
-    }
-
     const totalGasto = Number(monto) + (incluyePropina === false ? Number(montoPropina || 0) : 0);
 
     if (isSplit) {
@@ -651,8 +639,7 @@ export default function GastoForm() {
       tipo_tarjeta: tipoTarjeta,
       ubicacion_registro: 'Móvil',
       estado: selectedEstado || null,
-      facturado: facturado,
-      motivo_sin_factura: facturado ? null : motivoSinFactura.trim(),
+      motivo_sin_factura: facturado ? null : (motivoSinFactura.trim() || null),
       tipo_servicio_proyecto: tipoServicioProyecto,
       detalle_servicio_proyecto: detalleServicioProyecto.trim(),
     };
@@ -745,8 +732,6 @@ export default function GastoForm() {
               cliente: s.clienteId || null,
               justificacion: `[Gasto dividido del ticket total de $${totalGasto}] - División ${i + 1}/${splits.length}\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
-              base64Factura: facturado ? (facturaBase64 || undefined) : undefined,
-              facturaExt: facturado ? (facturaExt || undefined) : undefined,
             });
           }
           const sum = splits.reduce((acc, curr) => acc + Number(curr.monto), 0);
@@ -758,16 +743,12 @@ export default function GastoForm() {
               cliente: selectedCliente || null,
               justificacion: `[Gasto principal / Restante del ticket total de $${totalGasto}]\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
-              base64Factura: facturado ? (facturaBase64 || undefined) : undefined,
-              facturaExt: facturado ? (facturaExt || undefined) : undefined,
             });
           }
         } else {
           await SyncService.enqueueGasto({
             ...gastoPayload,
             base64Foto: imageBase64 || undefined,
-            base64Factura: facturado ? (facturaBase64 || undefined) : undefined,
-            facturaExt: facturado ? (facturaExt || undefined) : undefined,
           });
         }
         showAlert(
@@ -819,14 +800,6 @@ export default function GastoForm() {
       }
       if (facturado === null) {
         showAlert('Validación', 'Por favor especifica si el gasto está facturado.');
-        return;
-      }
-      if (facturado && !facturaBase64) {
-        showAlert('Validación', 'Por favor sube la foto o el PDF de la factura.');
-        return;
-      }
-      if (!facturado && !motivoSinFactura.trim()) {
-        showAlert('Validación', 'Por favor explica por qué no hay factura.');
         return;
       }
     }
@@ -1445,71 +1418,7 @@ export default function GastoForm() {
                 </View>
               </View>
 
-              {/* Campos condicionales de facturación */}
-              {facturado === true && (
-                <View style={[styles.selectorGroup, { paddingLeft: Spacing.two, borderLeftWidth: 2, borderLeftColor: themeColors.accent }]}>
-                  <Text style={[styles.selectorLabel, { color: themeColors.text }]}>Adjuntar Factura *</Text>
-                  
-                  {facturaUri ? (
-                    <View style={[styles.invoicePreviewCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <TouchableOpacity
-                        activeOpacity={0.9}
-                        onPress={() => {
-                          setActivePreviewUrl(facturaUri);
-                          setViewerVisible(true);
-                        }}
-                        style={{ width: 80, height: 80, borderRadius: BorderRadius.small, overflow: 'hidden' }}
-                      >
-                        <Image source={{ uri: facturaUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.removeInvoiceBtn, { backgroundColor: themeColors.danger }]}
-                        onPress={() => {
-                          setFacturaUri(null);
-                          setFacturaBase64(null);
-                          setFacturaExt(null);
-                        }}
-                      >
-                        <Ionicons name="trash-outline" size={18} color="#ffffff" />
-                        <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '700' }}>Eliminar</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={styles.actionGrid}>
-                      <TouchableOpacity
-                        onPress={handleCaptureFactura}
-                        style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                      >
-                        <Ionicons name="camera-sharp" size={20} color={themeColors.accent} />
-                        <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 13 }]}>Cámara</Text>
-                      </TouchableOpacity>
 
-                      <TouchableOpacity
-                        onPress={handleSelectFacturaGallery}
-                        style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                      >
-                        <Ionicons name="images-sharp" size={20} color={themeColors.accent} />
-                        <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 13 }]}>Galería</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              )}
-
-              {facturado === false && (
-                <View style={[styles.selectorGroup, { paddingLeft: Spacing.two, borderLeftWidth: 2, borderLeftColor: themeColors.accent }]}>
-                  <CustomInput
-                    label="Explicación de falta de factura *"
-                    placeholder="Explica por qué no hay factura para este gasto..."
-                    value={motivoSinFactura}
-                    onChangeText={setMotivoSinFactura}
-                    multiline
-                    numberOfLines={3}
-                    style={{ height: 70 }}
-                    iconName="warning-outline"
-                  />
-                </View>
-              )}
 
               <View style={styles.footerNav}>
                 <CustomButton title="Atrás" onPress={prevStep} variant="secondary" style={styles.navBtn} />
@@ -1662,7 +1571,7 @@ export default function GastoForm() {
                     <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                   </TouchableOpacity>
                   {showCliDropdown && (
-                    <View style={{ width: '100%', zIndex: 1000 }}>
+                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                         <CustomInput
                           placeholder="Buscar cliente..."
@@ -1673,7 +1582,7 @@ export default function GastoForm() {
                         />
                         <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                           {clientes
-                            .filter(cli => cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                            .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
                             .map((cli, index, array) => (
                               <TouchableOpacity
                                 key={cli.id}
@@ -1694,7 +1603,7 @@ export default function GastoForm() {
                             ))}
                         </ScrollView>
                       </View>
-                    </View>
+                    </Pressable>
                   )}
                 </View>
               ) : (
@@ -1801,37 +1710,39 @@ export default function GastoForm() {
                   <Ionicons name={showNewSplitCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showNewSplitCliDropdown && (
-                  <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, width: '100%', zIndex: 100 }]}>
-                    <CustomInput
-                      placeholder="Buscar cliente..."
-                      value={clienteSearch}
-                      onChangeText={setClienteSearch}
-                      iconName="search-outline"
-                      style={{ margin: Spacing.one, height: 40 }}
-                    />
-                    <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                      {clientes
-                        .filter(cli => cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
-                        .map((cli, index, array) => (
-                          <TouchableOpacity
-                            key={cli.id}
-                            style={[
-                              styles.dropdownItem,
-                              index === array.length - 1 && { borderBottomWidth: 0 },
-                              { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                            ]}
-                            onPress={() => {
-                              setNewSplitClienteId(cli.nombre);
-                              setClienteSearch('');
-                              setShowNewSplitCliDropdown(false);
-                            }}
-                          >
-                            <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
-                            <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
-                          </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                  </View>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 100 }}>
+                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <CustomInput
+                        placeholder="Buscar cliente..."
+                        value={clienteSearch}
+                        onChangeText={setClienteSearch}
+                        iconName="search-outline"
+                        style={{ margin: Spacing.one, height: 40 }}
+                      />
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        {clientes
+                          .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                          .map((cli, index, array) => (
+                            <TouchableOpacity
+                              key={cli.id}
+                              style={[
+                                styles.dropdownItem,
+                                index === array.length - 1 && { borderBottomWidth: 0 },
+                                { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                              ]}
+                              onPress={() => {
+                                setNewSplitClienteId(cli.nombre);
+                                setClienteSearch('');
+                                setShowNewSplitCliDropdown(false);
+                              }}
+                            >
+                              <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
+                              <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
+                            </TouchableOpacity>
+                          ))}
+                      </ScrollView>
+                    </View>
+                  </Pressable>
                 )}
               </View>
 

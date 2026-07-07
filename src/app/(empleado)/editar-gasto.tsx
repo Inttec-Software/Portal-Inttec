@@ -624,18 +624,6 @@ export default function EditarGastoForm() {
       return;
     }
 
-    if (facturado && !facturaBase64 && !facturaUri) {
-      showAlert('Validación', 'Por favor sube la foto o el PDF de la factura.');
-      setCurrentStep(2);
-      return;
-    }
-
-    if (!facturado && !motivoSinFactura.trim()) {
-      showAlert('Validación', 'Por favor explica por qué no hay factura.');
-      setCurrentStep(2);
-      return;
-    }
-
     setIsSubmitting(false);
     
     const dbFecha = formatFriendlyToDb(fechaComprobante);
@@ -674,7 +662,7 @@ export default function EditarGastoForm() {
       ubicacion_registro: 'Móvil',
       estado: selectedEstado || null,
       facturado: facturado,
-      motivo_sin_factura: facturado ? null : motivoSinFactura.trim(),
+      motivo_sin_factura: facturado ? null : (motivoSinFactura.trim() || null),
       tipo_servicio_proyecto: tipoServicioProyecto,
       detalle_servicio_proyecto: detalleServicioProyecto.trim(),
     };
@@ -706,23 +694,7 @@ export default function EditarGastoForm() {
         publicUrl = urlData.publicUrl;
       }
 
-      // Subir factura si se seleccionó una
-      let publicInvoiceUrl = facturaUri;
-      if (facturado && facturaBase64) {
-        const ext = facturaExt || 'jpg';
-        const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-        const fileName = `${currentUser.id}/factura_${Date.now()}.${ext}`;
-        const arrayBuffer = base64ToArrayBuffer(facturaBase64);
 
-        const { error: uploadError } = await supabase.storage
-          .from('tickets')
-          .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
-
-        if (uploadError) throw uploadError;
-
-        const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-        publicInvoiceUrl = urlData.publicUrl;
-      }
 
       const updateData: any = {
         ...gastoPayload,
@@ -734,9 +706,7 @@ export default function EditarGastoForm() {
         updateData.foto_url = publicUrl;
       }
       
-      if (facturaBase64) {
-        updateData.factura_url = publicInvoiceUrl;
-      }
+
 
       // Obtener el venta_id actual antes de actualizar para saber si estaba vinculado
       const { data: oldGasto } = await supabase
@@ -802,14 +772,6 @@ export default function EditarGastoForm() {
       }
       if (facturado === null) {
         showAlert('Validación', 'Por favor especifica si el gasto está facturado.');
-        return;
-      }
-      if (facturado && !facturaBase64 && !facturaUri) {
-        showAlert('Validación', 'Por favor sube la foto o el PDF de la factura.');
-        return;
-      }
-      if (!facturado && !motivoSinFactura.trim()) {
-        showAlert('Validación', 'Por favor explica por qué no hay factura.');
         return;
       }
     }
@@ -1374,71 +1336,7 @@ export default function EditarGastoForm() {
                 </View>
               </View>
 
-              {/* Campos condicionales de facturación */}
-              {facturado === true && (
-                <View style={[styles.selectorGroup, { paddingLeft: Spacing.two, borderLeftWidth: 2, borderLeftColor: themeColors.accent }]}>
-                  <Text style={[styles.selectorLabel, { color: themeColors.text }]}>Adjuntar Factura *</Text>
-                  
-                  {facturaUri ? (
-                    <View style={[styles.invoicePreviewCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <TouchableOpacity
-                        activeOpacity={0.9}
-                        onPress={() => {
-                          setActivePreviewUrl(facturaUri);
-                          setViewerVisible(true);
-                        }}
-                        style={{ width: 80, height: 80, borderRadius: BorderRadius.small, overflow: 'hidden' }}
-                      >
-                        <Image source={{ uri: facturaUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.removeInvoiceBtn, { backgroundColor: themeColors.danger }]}
-                        onPress={() => {
-                          setFacturaUri(null);
-                          setFacturaBase64(null);
-                          setFacturaExt(null);
-                        }}
-                      >
-                        <Ionicons name="trash-outline" size={18} color="#ffffff" />
-                        <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '700' }}>Eliminar</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={styles.actionGrid}>
-                      <TouchableOpacity
-                        onPress={handleCaptureFactura}
-                        style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                      >
-                        <Ionicons name="camera-sharp" size={20} color={themeColors.accent} />
-                        <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 13 }]}>Cámara</Text>
-                      </TouchableOpacity>
 
-                      <TouchableOpacity
-                        onPress={handleSelectFacturaGallery}
-                        style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                      >
-                        <Ionicons name="images-sharp" size={20} color={themeColors.accent} />
-                        <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 13 }]}>Galería</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              )}
-
-              {facturado === false && (
-                <View style={[styles.selectorGroup, { paddingLeft: Spacing.two, borderLeftWidth: 2, borderLeftColor: themeColors.accent }]}>
-                  <CustomInput
-                    label="Explicación de falta de factura *"
-                    placeholder="Explica por qué no hay factura para este gasto..."
-                    value={motivoSinFactura}
-                    onChangeText={setMotivoSinFactura}
-                    multiline
-                    numberOfLines={3}
-                    style={{ height: 70 }}
-                    iconName="warning-outline"
-                  />
-                </View>
-              )}
 
               <View style={styles.footerNav}>
                 <CustomButton title="Atrás" onPress={prevStep} variant="secondary" style={styles.navBtn} />
@@ -1571,7 +1469,7 @@ export default function EditarGastoForm() {
                   <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showCliDropdown && (
-                  <Pressable onPress={() => {}} style={{ width: '100%' }}>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%' }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <CustomInput
                         placeholder="Buscar o agregar cliente..."
@@ -1581,7 +1479,7 @@ export default function EditarGastoForm() {
                         style={{ margin: Spacing.one, height: 40 }}
                       />
                       <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
-                        {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
+                        {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
                           <TouchableOpacity
                             style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15' }]}
                             onPress={() => handleAddNewCliente(clienteSearch)}
@@ -1592,7 +1490,7 @@ export default function EditarGastoForm() {
                           </TouchableOpacity>
                         )}
                         {clientes
-                          .filter(cli => cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                          .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
                           .map((cli) => (
                             <TouchableOpacity
                               key={cli.id}
