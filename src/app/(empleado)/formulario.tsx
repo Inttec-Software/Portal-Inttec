@@ -1111,7 +1111,9 @@ export default function GastoForm() {
                 </>
               )}
 
-
+              <View style={[styles.footerNav, { marginTop: Spacing.three }]}>
+                <CustomButton title="Siguiente" onPress={nextStep} style={{ width: '100%' }} />
+              </View>
             </View>
           )}
 

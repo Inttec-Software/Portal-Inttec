@@ -41,7 +41,7 @@ interface PartidaEditable {
   costo_unitario_proveedor: string;
 }
 
-const TIPOS_PROYECTO = ['Venta', 'Servicio', 'Paneles', 'Instalación', 'Mantenimiento', 'Otro'];
+const TIPOS_PROYECTO = ['Venta', 'Servicio', 'Proyecto'];
 
 const showAlert = (title: string, message: string) => {
   if (Platform.OS === 'web') {
@@ -945,10 +945,10 @@ export default function VentasScreen() {
       </View>
 
       <CustomInput
-        label="Factura / Referencia"
+        label="PO / Referencia"
         value={facturaReferencia}
         onChangeText={setFacturaReferencia}
-        placeholder="No. de factura o referencia"
+        placeholder="No. de PO o referencia"
       />
 
       {/* Tipo de Proyecto */}
@@ -1119,7 +1119,7 @@ export default function VentasScreen() {
           </View>
           {facturaReferencia ? (
             <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>Factura:</Text>
+              <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>PO:</Text>
               <Text style={[styles.summaryValue, { color: themeColors.text }]}>{facturaReferencia}</Text>
             </View>
           ) : null}
@@ -1279,7 +1279,7 @@ export default function VentasScreen() {
                 </View>
                 {item.factura_referencia ? (
                   <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 4 }}>
-                    Factura: {item.factura_referencia}
+                    PO: {item.factura_referencia}
                   </Text>
                 ) : null}
                 {item.tipo_proyecto ? (
@@ -1459,7 +1459,7 @@ export default function VentasScreen() {
                   
                   {selectedVenta.factura_referencia ? (
                     <View style={styles.modalRow}>
-                      <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>Factura/Ref:</Text>
+                      <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>PO/Ref:</Text>
                       <Text style={[styles.modalValue, { color: themeColors.text }]}>{selectedVenta.factura_referencia}</Text>
                     </View>
                   ) : null}

@@ -96,6 +96,9 @@ export const GeminiService = {
       if (markdownMatch) {
         cleanJsonStr = markdownMatch[1].trim();
       }
+      
+      // Sanitizar JSON: eliminar comas sueltas antes de un cierre de objeto o arreglo
+      cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
 
       const parsed: GeminiOcrResult = JSON.parse(cleanJsonStr);
 
@@ -340,6 +343,9 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
       if (markdownMatch) {
         cleanJsonStr = markdownMatch[1].trim();
       }
+      
+      // Sanitizar JSON: eliminar comas sueltas antes de un cierre de objeto o arreglo
+      cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
 
       return JSON.parse(cleanJsonStr);
     } catch (err: any) {
@@ -450,6 +456,9 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
       if (markdownMatch) {
         cleanJsonStr = markdownMatch[1].trim();
       }
+      
+      // Sanitizar JSON: eliminar comas sueltas antes de un cierre de objeto o arreglo
+      cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
 
       const parsed: GeminiSalesResult = JSON.parse(cleanJsonStr);
 
