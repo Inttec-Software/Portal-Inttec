@@ -12,6 +12,7 @@ import {
   Image,
   Platform,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -1097,9 +1098,16 @@ export default function EmpleadoDashboard() {
                         <TouchableOpacity
                           style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15' }]}
                           onPress={() => {
-                            const imgUrl = selectedGasto.factura_url || `data:image/jpeg;base64,${(selectedGasto as any).base64Factura}`;
-                            setActivePreviewUrl(imgUrl);
-                            setViewerVisible(true);
+                            const url = selectedGasto.factura_url;
+                            if (url && url.toLowerCase().includes('.pdf')) {
+                              Linking.openURL(url).catch(() => {
+                                Alert.alert('Error', 'No se pudo abrir el archivo PDF.');
+                              });
+                            } else {
+                              const imgUrl = url || `data:image/jpeg;base64,${(selectedGasto as any).base64Factura}`;
+                              setActivePreviewUrl(imgUrl);
+                              setViewerVisible(true);
+                            }
                           }}
                         >
                           <Ionicons name="image" size={18} color={themeColors.accent} />

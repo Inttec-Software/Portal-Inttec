@@ -1845,8 +1845,15 @@ export default function AdminDashboard() {
                                   <TouchableOpacity
                                     style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15', flex: 1, height: 40, justifyContent: 'center', borderRadius: BorderRadius.small }]}
                                     onPress={() => {
-                                      setActivePreviewUrl(selectedGasto.factura_url!);
-                                      setViewerVisible(true);
+                                      const url = selectedGasto.factura_url!;
+                                      if (url.toLowerCase().includes('.pdf')) {
+                                        Linking.openURL(url).catch(() => {
+                                          Alert.alert('Error', 'No se pudo abrir el archivo PDF.');
+                                        });
+                                      } else {
+                                        setActivePreviewUrl(url);
+                                        setViewerVisible(true);
+                                      }
                                     }}
                                   >
                                     <Ionicons name="image-outline" size={18} color={themeColors.accent} />
