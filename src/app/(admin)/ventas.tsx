@@ -29,6 +29,7 @@ import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 // Tipo local para las partidas editables en la UI
 interface PartidaEditable {
@@ -73,6 +74,8 @@ export default function VentasScreen() {
 
   // === Paso 2: Datos Generales + Partidas ===
   const [fecha, setFecha] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [dateValue, setDateValue] = useState(new Date());
   const [cliente, setCliente] = useState('');
   const [facturaReferencia, setFacturaReferencia] = useState('');
   const [tipoProyecto, setTipoProyecto] = useState('');
@@ -231,6 +234,14 @@ export default function VentasScreen() {
     }));
 
     setFecha(selectedVenta.fecha);
+    // Sync dateValue so the calendar picker shows the correct date
+    if (selectedVenta.fecha) {
+      const parts = selectedVenta.fecha.split('-');
+      if (parts.length === 3) {
+        const parsed = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        if (!isNaN(parsed.getTime())) setDateValue(parsed);
+      }
+    }
     setCliente(selectedVenta.cliente);
     setFacturaReferencia(selectedVenta.factura_referencia || '');
     setTipoProyecto(selectedVenta.tipo_proyecto || '');
@@ -808,12 +819,67 @@ export default function VentasScreen() {
       {/* Datos Generales */}
       <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Información General</Text>
 
-      <CustomInput
-        label="Fecha (YYYY-MM-DD)"
-        value={fecha}
-        onChangeText={setFecha}
-        placeholder="2026-07-03"
-      />
+      {Platform.OS === 'web' ? (
+        <CustomInput
+          label="Fecha de la Venta (DD/MM/AAAA)"
+          value={fecha}
+          onChangeText={setFecha}
+          placeholder="DD/MM/AAAA"
+          iconName="calendar-outline"
+        />
+      ) : (
+        <>
+          <TouchableOpacity onPress={() => setShowDatePicker(true)} activeOpacity={0.7}>
+            <View pointerEvents="none">
+              <CustomInput
+                label="Fecha de la Venta *"
+                placeholder="Selecciona la fecha"
+                value={fecha}
+                editable={false}
+                iconName="calendar-outline"
+              />
+            </View>
+          </TouchableOpacity>
+
+          {showDatePicker && (
+            <View style={{
+              backgroundColor: themeColors.backgroundElement,
+              borderRadius: BorderRadius.medium,
+              padding: Spacing.two,
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              marginTop: -Spacing.two,
+              marginBottom: Spacing.two,
+            }}>
+              <DateTimePicker
+                value={dateValue}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event: any, selectedDate?: Date) => {
+                  if (Platform.OS === 'android') {
+                    setShowDatePicker(false);
+                  }
+                  if (selectedDate) {
+                    setDateValue(selectedDate);
+                    const dd = String(selectedDate.getDate()).padStart(2, '0');
+                    const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                    const yyyy = selectedDate.getFullYear();
+                    setFecha(`${yyyy}-${mm}-${dd}`);
+                  }
+                }}
+                maximumDate={new Date()}
+              />
+              {Platform.OS === 'ios' && (
+                <CustomButton
+                  title="Confirmar Fecha"
+                  onPress={() => setShowDatePicker(false)}
+                  style={{ marginTop: Spacing.one }}
+                />
+              )}
+            </View>
+          )}
+        </>
+      )}
 
       {/* Selector de Cliente Desplegable */}
       <View style={[styles.customDropdownContainer, { zIndex: 100 }]}>
