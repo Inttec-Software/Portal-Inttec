@@ -14,6 +14,7 @@ export interface OfflineGastoItem {
   metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito';
   justificacion?: string | null;
   base64Foto?: string | null; // Foto en base64 para guardado offline
+  fotoExt?: string | null;
   fecha_comprobante?: string | null;
   proveedor?: string | null;
   cliente?: string | null;
@@ -135,13 +136,15 @@ export const SyncService = {
 
           // 1. Subir foto a Supabase Storage si existe
           if (item.base64Foto) {
-            const fileName = `${item.empleado_id}/${Date.now()}.jpg`;
+            const ext = item.fotoExt || 'jpg';
+            const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
+            const fileName = `${item.empleado_id}/${Date.now()}.${ext}`;
             const arrayBuffer = base64ToArrayBuffer(item.base64Foto);
 
             const { data: uploadData, error: uploadError } = await supabase.storage
               .from('tickets')
               .upload(fileName, arrayBuffer, {
-                contentType: 'image/jpeg',
+                contentType: contentType,
                 upsert: true,
               });
 

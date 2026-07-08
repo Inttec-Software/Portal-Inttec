@@ -387,8 +387,9 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
     "fecha": "YYYY-MM-DD o null",
     "cliente": "Nombre del Cliente final o null",
     "factura_o_referencia": "Número de factura o ID de orden o null",
-    "tipo_de_proyecto": "Venta / Servicio / Paneles / otro",
-    "proveedor": "Nombre del proveedor que nos vendió o null"
+    "tipo_de_proyecto": "Venta / Servicio / Proyecto / otro",
+    "proveedor": "Nombre del proveedor que nos vendió o null",
+    "descripcion": "Una descripción corta o concepto general de la factura o proyecto"
   },
   "partidas_o_productos": [
     {
@@ -498,6 +499,7 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
           factura_o_referencia: parsed.informacion_general?.factura_o_referencia ?? null,
           tipo_de_proyecto: parsed.informacion_general?.tipo_de_proyecto ?? null,
           proveedor: parsed.informacion_general?.proveedor ?? null,
+          descripcion: parsed.informacion_general?.descripcion ?? null,
         },
         partidas_o_productos: partidasCorregidas,
         totales_calculados: {
@@ -521,6 +523,7 @@ export interface GeminiSalesResult {
     factura_o_referencia: string | null;
     tipo_de_proyecto: string | null;
     proveedor: string | null;
+    descripcion: string | null;
   };
   partidas_o_productos: Array<{
     descripcion: string;

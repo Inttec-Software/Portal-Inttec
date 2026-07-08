@@ -4,39 +4,14 @@ import { Slot, useRouter } from 'expo-router';
 import { AuthService } from '@/services/supabase';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAuth } from '@/context/AuthContext';
 
 export default function AdminLayout() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  const { isLoading, user } = useAuth();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
-  useEffect(() => {
-    let active = true;
-
-    const checkAuth = async () => {
-      try {
-        const user = await AuthService.getCurrentUser();
-        if (!active) return;
-        if (!user || user.rol !== 'ADMIN') {
-          router.replace('/');
-        } else {
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error('Error checking admin auth:', err);
-        if (active) router.replace('/');
-      }
-    };
-
-    checkAuth();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (loading) {
+  if (isLoading || !user || user.rol !== 'ADMIN') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors.background }}>
         <ActivityIndicator size="large" color={themeColors.accent} />

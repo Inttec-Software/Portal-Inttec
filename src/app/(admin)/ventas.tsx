@@ -82,6 +82,8 @@ export default function VentasScreen() {
   const [proveedor, setProveedor] = useState('');
   const [showTipoDropdown, setShowTipoDropdown] = useState(false);
   const [notas, setNotas] = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [agregarIva, setAgregarIva] = useState(false);
   const [partidas, setPartidas] = useState<PartidaEditable[]>([]);
 
   // === Historial ===
@@ -244,6 +246,8 @@ export default function VentasScreen() {
     }
     setCliente(selectedVenta.cliente);
     setFacturaReferencia(selectedVenta.factura_referencia || '');
+    setDescripcion(selectedVenta.descripcion || '');
+    setAgregarIva(selectedVenta.agregar_iva || false);
     setTipoProyecto(selectedVenta.tipo_proyecto || '');
     setProveedor(selectedVenta.proveedor || '');
     setNotas(selectedVenta.notas || '');
@@ -304,6 +308,10 @@ export default function VentasScreen() {
       costoTotal += Math.round(cant * costoUP * 100) / 100;
     });
 
+    if (agregarIva) {
+      precioTotal = Math.round(precioTotal * 1.16 * 100) / 100;
+    }
+
     // Sumar el costo de los gastos vinculados si existen
     const costoGastos = selectedVentaGastos.reduce((sum, g) => sum + (Number(g.monto) || 0), 0);
     const costoTotalConGastos = costoTotal + costoGastos;
@@ -319,7 +327,7 @@ export default function VentasScreen() {
       utilidad,
       margen,
     };
-  }, [partidas, selectedVentaGastos]);
+  }, [partidas, selectedVentaGastos, agregarIva]);
 
   // === Permisos ===
   const requestCameraPermission = async (): Promise<boolean> => {
@@ -475,6 +483,7 @@ export default function VentasScreen() {
       if (result.informacion_general.fecha) setFecha(result.informacion_general.fecha);
       if (result.informacion_general.cliente) setCliente(result.informacion_general.cliente);
       if (result.informacion_general.factura_o_referencia) setFacturaReferencia(result.informacion_general.factura_o_referencia);
+      if (result.informacion_general.descripcion) setDescripcion(result.informacion_general.descripcion);
       if (result.informacion_general.tipo_de_proyecto) setTipoProyecto(result.informacion_general.tipo_de_proyecto);
       // No auto-poblamos la sucursal con el proveedor de la factura de compra ya que son conceptos distintos
       // if (result.informacion_general.proveedor) setProveedor(result.informacion_general.proveedor);
@@ -590,6 +599,8 @@ export default function VentasScreen() {
         margen_porcentual: calculatedTotals.margen,
         factura_url: facturaPublicUrl,
         notas: notas.trim() || null,
+        descripcion: descripcion.trim() || null,
+        agregar_iva: agregarIva,
       };
 
       let activeVentaId = '';
@@ -675,6 +686,8 @@ export default function VentasScreen() {
     setFecha('');
     setCliente('');
     setFacturaReferencia('');
+    setDescripcion('');
+    setAgregarIva(false);
     setTipoProyecto('');
     setProveedor('');
     setNotas('');
@@ -951,6 +964,41 @@ export default function VentasScreen() {
         placeholder="No. de PO o referencia"
       />
 
+      <CustomInput
+        label="Descripción General"
+        value={descripcion}
+        onChangeText={setDescripcion}
+        placeholder="Concepto principal de la venta"
+      />
+
+      <View style={{ marginBottom: Spacing.two }}>
+        <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>¿Agregar IVA? (Sumar 16%)</Text>
+        <View style={{ flexDirection: 'row', gap: Spacing.one }}>
+          <TouchableOpacity
+            style={[
+              { flex: 1, padding: Spacing.one, borderRadius: BorderRadius.medium, borderWidth: 1, alignItems: 'center' },
+              agregarIva 
+                ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+                : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }
+            ]}
+            onPress={() => setAgregarIva(true)}
+          >
+            <Text style={{ color: agregarIva ? '#ffffff' : themeColors.textSecondary, fontWeight: '600' }}>Sí</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              { flex: 1, padding: Spacing.one, borderRadius: BorderRadius.medium, borderWidth: 1, alignItems: 'center' },
+              !agregarIva 
+                ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+                : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }
+            ]}
+            onPress={() => setAgregarIva(false)}
+          >
+            <Text style={{ color: !agregarIva ? '#ffffff' : themeColors.textSecondary, fontWeight: '600' }}>No</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Tipo de Proyecto */}
       <View>
         <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Tipo de Proyecto</Text>
@@ -1123,6 +1171,12 @@ export default function VentasScreen() {
               <Text style={[styles.summaryValue, { color: themeColors.text }]}>{facturaReferencia}</Text>
             </View>
           ) : null}
+          {descripcion ? (
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>Descripción:</Text>
+              <Text style={[styles.summaryValue, { color: themeColors.text }]}>{descripcion}</Text>
+            </View>
+          ) : null}
           {tipoProyecto ? (
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>Tipo:</Text>
@@ -1280,6 +1334,11 @@ export default function VentasScreen() {
                 {item.factura_referencia ? (
                   <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 4 }}>
                     PO: {item.factura_referencia}
+                  </Text>
+                ) : null}
+                {item.descripcion ? (
+                  <Text style={{ color: themeColors.text, fontSize: 13, marginBottom: 4, fontWeight: '500' }}>
+                    {item.descripcion}
                   </Text>
                 ) : null}
                 {item.tipo_proyecto ? (
@@ -1461,6 +1520,12 @@ export default function VentasScreen() {
                     <View style={styles.modalRow}>
                       <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>PO/Ref:</Text>
                       <Text style={[styles.modalValue, { color: themeColors.text }]}>{selectedVenta.factura_referencia}</Text>
+                    </View>
+                  ) : null}
+                  {selectedVenta.descripcion ? (
+                    <View style={styles.modalRow}>
+                      <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>Descripción:</Text>
+                      <Text style={[styles.modalValue, { color: themeColors.text }]}>{selectedVenta.descripcion}</Text>
                     </View>
                   ) : null}
 

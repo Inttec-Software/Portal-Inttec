@@ -23,12 +23,13 @@ import { SyncService, OfflineGastoItem } from '@/services/sync';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import MapView, { Marker } from 'react-native-maps';
+import { useAuth } from '@/context/AuthContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -36,6 +37,7 @@ export default function EmpleadoDashboard() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { setUser: setAuthUser } = useAuth();
 
   const [user, setUser] = useState<Usuario | null>(null);
   const [gastos, setGastos] = useState<Gasto[]>([]);
@@ -478,7 +480,7 @@ export default function EmpleadoDashboard() {
   const handleLogout = async () => {
     const performLogout = async () => {
       await AuthService.logout();
-      router.replace('/');
+      setAuthUser(null);
     };
 
     if (Platform.OS === 'web') {

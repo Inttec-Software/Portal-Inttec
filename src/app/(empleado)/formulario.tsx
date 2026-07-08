@@ -18,6 +18,8 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem } from '@/services/supabase';
@@ -86,6 +88,7 @@ export default function GastoForm() {
   // Paso 1: Evidencia
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageExt, setImageExt] = useState<string>('jpg');
   const [isScanning, setIsScanning] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
@@ -114,7 +117,7 @@ export default function GastoForm() {
   };
 
   const [fechaComprobante, setFechaComprobante] = useState(getTodayFriendly());
-  const [tipoServicioProyecto, setTipoServicioProyecto] = useState<'Servicio' | 'Proyecto' | 'Venta' | null>(null);
+  const [tipoServicioProyecto, setTipoServicioProyecto] = useState<'Servicio' | 'Proyecto' | 'Venta' | 'Operativo' | null>(null);
   const [detalleServicioProyecto, setDetalleServicioProyecto] = useState('');
   const [sucursal, setSucursal] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
@@ -319,12 +322,40 @@ export default function GastoForm() {
       if (!result.canceled && result.assets?.[0]) {
         setImageUri(result.assets[0].uri);
         setImageBase64(result.assets[0].base64 || null);
+        setImageExt('jpg');
         setScanSuccess(false);
         setAlertaPolitica(null);
       }
     } catch (err) {
       console.error('Gallery select error:', err);
       showAlert('Error', 'No se pudo abrir la galería.');
+    }
+  };
+
+  const handleSelectDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        setImageUri(file.uri);
+        const ext = file.name ? file.name.split('.').pop()?.toLowerCase() || 'jpg' : 'jpg';
+        setImageExt(ext === 'pdf' ? 'pdf' : 'jpg');
+        
+        const base64Str = await FileSystem.readAsStringAsync(file.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        setImageBase64(base64Str);
+        
+        setScanSuccess(false);
+        setAlertaPolitica(null);
+      }
+    } catch (err) {
+      console.error('Document select error:', err);
+      showAlert('Error', 'No se pudo seleccionar el archivo.');
     }
   };
 
@@ -385,7 +416,7 @@ export default function GastoForm() {
     if (!imageBase64) return;
     setIsScanning(true);
     try {
-      const result = await GeminiService.scanTicket(imageBase64, 1 + selectedEmpleados.length);
+      const result = await GeminiService.scanTicket(imageBase64, 1 + selectedEmpleados.length, imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg');
       
       if (result.monto) setMonto(result.monto.toString());
       if (result.proveedor) setProveedor(result.proveedor);
@@ -558,12 +589,12 @@ export default function GastoForm() {
     }
 
     if (!tipoServicioProyecto) {
-      showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto o Venta.');
+      showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto, Venta u Operativo.');
       return;
     }
 
     if (!detalleServicioProyecto.trim()) {
-      showAlert('Validación', 'Por favor ingresa el detalle del Servicio, Proyecto o Venta.');
+      showAlert('Validación', 'Por favor ingresa el detalle del Servicio, Proyecto, Venta u Operativo.');
       return;
     }
 
@@ -650,14 +681,15 @@ export default function GastoForm() {
       
       if (netState.isConnected) {
         // En línea: Subir foto y guardar en Supabase
-        let publicUrl = '';
+        let publicUrl = imageUri;
         if (imageBase64) {
-          const fileName = `${currentUser.id}/${Date.now()}.jpg`;
+          const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
+          const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
           const arrayBuffer = base64ToArrayBuffer(imageBase64);
 
           const { error: uploadError } = await supabase.storage
             .from('tickets')
-            .upload(fileName, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
+            .upload(fileName, arrayBuffer, { contentType, upsert: true });
 
           if (uploadError) throw uploadError;
 
@@ -731,6 +763,7 @@ export default function GastoForm() {
               cliente: s.clienteId || null,
               justificacion: `[Gasto dividido del ticket total de $${totalGasto}] - División ${i + 1}/${splits.length}\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
+              fotoExt: imageExt,
             });
           }
           const sum = splits.reduce((acc, curr) => acc + Number(curr.monto), 0);
@@ -742,12 +775,14 @@ export default function GastoForm() {
               cliente: selectedCliente || null,
               justificacion: `[Gasto principal / Restante del ticket total de $${totalGasto}]\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
+              fotoExt: imageExt,
             });
           }
         } else {
           await SyncService.enqueueGasto({
             ...gastoPayload,
             base64Foto: imageBase64 || undefined,
+            fotoExt: imageExt,
           });
         }
         showAlert(
@@ -854,15 +889,23 @@ export default function GastoForm() {
               <View style={[styles.imageCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                 {imageUri ? (
                   <View style={styles.previewContainer}>
-                    <TouchableOpacity
-                      activeOpacity={0.9}
+                    <TouchableOpacity 
                       onPress={() => {
-                        setActivePreviewUrl(imageUri);
-                        setViewerVisible(true);
+                        if (imageExt !== 'pdf') {
+                          setActivePreviewUrl(imageUri);
+                          setViewerVisible(true);
+                        }
                       }}
-                      style={{ flex: 1 }}
+                      activeOpacity={imageExt === 'pdf' ? 1 : 0.7}
                     >
-                      <Image source={{ uri: imageUri }} style={styles.previewImage} resizeMode="contain" />
+                      {imageExt === 'pdf' ? (
+                        <View style={[styles.previewImage, { justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors.backgroundElement }]}>
+                          <Ionicons name="document-text" size={64} color={themeColors.danger} />
+                          <Text style={{ color: themeColors.text, marginTop: Spacing.one, fontWeight: '500' }}>Documento PDF</Text>
+                        </View>
+                      ) : (
+                        <Image source={{ uri: imageUri }} style={styles.previewImage} resizeMode="contain" />
+                      )}
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.removeImageBtn}
@@ -889,21 +932,29 @@ export default function GastoForm() {
               </View>
 
               <View style={styles.actionGrid}>
-                <TouchableOpacity
-                  onPress={handleCapturePhoto}
-                  style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                >
-                  <Ionicons name="camera-sharp" size={24} color={themeColors.accent} />
-                  <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Cámara</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={handleSelectGallery}
-                  style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                >
-                  <Ionicons name="images-sharp" size={24} color={themeColors.accent} />
-                  <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Galería</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: Spacing.one }}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { flex: 1, backgroundColor: themeColors.primary, borderColor: themeColors.primary }]}
+                    onPress={handleCapturePhoto}
+                  >
+                    <Ionicons name="camera-outline" size={24} color="#ffffff" />
+                    <Text style={{ color: '#ffffff', marginTop: 4, fontWeight: '600' }}>Cámara</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { flex: 1, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                    onPress={handleSelectGallery}
+                  >
+                    <Ionicons name="image-outline" size={24} color={themeColors.text} />
+                    <Text style={{ color: themeColors.text, marginTop: 4, fontWeight: '500' }}>Galería</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { flex: 1, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                    onPress={handleSelectDocument}
+                  >
+                    <Ionicons name="document-attach-outline" size={24} color={themeColors.text} />
+                    <Text style={{ color: themeColors.text, marginTop: 4, fontWeight: '500' }}>Archivo</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Pregunta si es Comida */}
@@ -1209,7 +1260,7 @@ export default function GastoForm() {
                 onChangeText={setProveedor}
                 iconName="business-outline"
               />
-              {/* Selector de Tipo: Servicio / Proyecto / Venta */}
+              {/* Selector de Tipo: Servicio / Proyecto / Venta / Operativo */}
               <View style={{ marginBottom: Spacing.two }}>
                 <Text style={{ color: themeColors.text, marginBottom: Spacing.half, fontWeight: '500', fontSize: 14, paddingLeft: Spacing.half }}>Tipo de Gasto *</Text>
                 <View style={{ flexDirection: 'row', gap: Spacing.one }}>
@@ -1254,6 +1305,20 @@ export default function GastoForm() {
                     onPress={() => setTipoServicioProyecto('Venta')}
                   >
                     <Text style={{ color: tipoServicioProyecto === 'Venta' ? themeColors.primary : themeColors.textSecondary, fontWeight: '600', fontSize: 13 }}>Venta</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      padding: Spacing.one,
+                      borderRadius: BorderRadius.medium,
+                      borderWidth: 1,
+                      borderColor: tipoServicioProyecto === 'Operativo' ? themeColors.primary : themeColors.border,
+                      backgroundColor: tipoServicioProyecto === 'Operativo' ? themeColors.primary + '20' : themeColors.backgroundElement,
+                      alignItems: 'center'
+                    }}
+                    onPress={() => setTipoServicioProyecto('Operativo')}
+                  >
+                    <Text style={{ color: tipoServicioProyecto === 'Operativo' ? themeColors.primary : themeColors.textSecondary, fontWeight: '600', fontSize: 13 }}>Operativo</Text>
                   </TouchableOpacity>
                 </View>
               </View>

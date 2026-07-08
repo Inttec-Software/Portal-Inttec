@@ -16,13 +16,14 @@ import { AuthService } from '@/services/supabase';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@/context/AuthContext';
 
 export default function LoginScreen() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
-  const [isLoading, setIsLoading] = useState(true);
+  const { isLoading, setUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,27 +34,7 @@ export default function LoginScreen() {
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
-  useEffect(() => {
-    // Verificar sesión previa automática
-    const checkSession = async () => {
-      try {
-        const user = await AuthService.getCurrentUser();
-        if (user) {
-          if (user.rol === 'ADMIN') {
-            router.replace('/(admin)/dashboard');
-          } else {
-            router.replace('/(empleado)/dashboard');
-          }
-        }
-      } catch (err) {
-        console.error('Session check failed:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkSession();
-  }, []);
+  // AuthContext maneja el checkSession automáticamente
 
   const handleLogin = async () => {
     // Reset errores
@@ -81,11 +62,8 @@ export default function LoginScreen() {
     setIsSubmitting(true);
     try {
       const user = await AuthService.login(email, password);
-      if (user.rol === 'ADMIN') {
-        router.replace('/(admin)/dashboard');
-      } else {
-        router.replace('/(empleado)/dashboard');
-      }
+      setUser(user);
+      // El useEffect de AuthContext se encargará de hacer el router.replace() al instante
     } catch (err: any) {
       setErrorMsg(err.message || 'Error al iniciar sesión');
     } finally {

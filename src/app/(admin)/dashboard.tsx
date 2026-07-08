@@ -23,8 +23,9 @@ import { ReportGenerator } from '@/utils/reportGenerator';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '@/context/AuthContext';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -47,6 +48,7 @@ export default function AdminDashboard() {
   const isMobile = windowWidth < 600;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { setUser } = useAuth();
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -300,7 +302,7 @@ export default function AdminDashboard() {
   const handleLogout = async () => {
     const performLogout = async () => {
       await AuthService.logout();
-      router.replace('/');
+      setUser(null);
     };
 
     if (Platform.OS === 'web') {

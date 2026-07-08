@@ -340,6 +340,8 @@ export interface Venta {
   margen_porcentual: number;
   factura_url?: string | null;
   notas?: string | null;
+  descripcion?: string | null;
+  agregar_iva?: boolean;
   created_at?: string;
 }
 
