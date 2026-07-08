@@ -1109,24 +1109,13 @@ export default function VentasScreen() {
 
             <View style={styles.partidaRow}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.partidaFieldLabel, { color: themeColors.danger }]}>📦 Costo Compra (IA)</Text>
-                <TextInput
-                  style={[styles.partidaInputSmall, { color: themeColors.text, borderColor: themeColors.danger + '50', backgroundColor: themeColors.background }]}
-                  value={partida.costo_unitario_proveedor}
-                  onChangeText={val => updatePartida(partida.id, 'costo_unitario_proveedor', val)}
-                  keyboardType="numeric"
-                  placeholder="0.00"
-                  placeholderTextColor={themeColors.textSecondary}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.partidaFieldLabel, { color: themeColors.success }]}>💰 Precio Venta (tú)</Text>
+                <Text style={[styles.partidaFieldLabel, { color: themeColors.success }]}>💰 Precio Venta</Text>
                 <TextInput
                   style={[styles.partidaInputSmall, { color: themeColors.text, borderColor: themeColors.success + '50', backgroundColor: themeColors.background }]}
                   value={partida.precio_unitario_venta}
                   onChangeText={val => updatePartida(partida.id, 'precio_unitario_venta', val)}
                   keyboardType="numeric"
-                  placeholder="Ingresa precio"
+                  placeholder="0.00"
                   placeholderTextColor={themeColors.textSecondary}
                 />
               </View>
@@ -1136,9 +1125,6 @@ export default function VentasScreen() {
             <View style={[styles.partidaSubtotal, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
               <Text style={[styles.partidaSubtotalText, { color: themeColors.textSecondary }]}>
                 Subtotal Venta: {formatCurrency((Number(partida.cantidad) || 0) * (Number(partida.precio_unitario_venta) || 0))}
-              </Text>
-              <Text style={[styles.partidaSubtotalText, { color: themeColors.textSecondary }]}>
-                Subtotal Costo: {formatCurrency((Number(partida.cantidad) || 0) * (Number(partida.costo_unitario_proveedor) || 0))}
               </Text>
             </View>
           </View>
@@ -1564,13 +1550,6 @@ export default function VentasScreen() {
                     </View>
 
                     {/* Costo de Partidas / Productos */}
-                    <View style={styles.modalRow}>
-                      <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>Costo de Adquisición (Productos):</Text>
-                      <Text style={[styles.modalValue, { color: themeColors.text, fontSize: 13, fontWeight: '500' }]}>
-                        {formatCurrency(selectedVentaPartidas.reduce((sum, p) => sum + (p.cantidad * p.costo_unitario_proveedor), 0))}
-                      </Text>
-                    </View>
-
                     {/* Costo de Gastos vinculados */}
                     {selectedVentaGastos.length > 0 && (
                       <View style={styles.modalRow}>
@@ -1635,7 +1614,7 @@ export default function VentasScreen() {
 
                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
                               <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                                Costo U: {formatCurrency(partida.costo_unitario_proveedor)} | Venta U: {formatCurrency(partida.precio_unitario_venta)}
+                                Venta U: {formatCurrency(partida.precio_unitario_venta)}
                               </Text>
                             </View>
 

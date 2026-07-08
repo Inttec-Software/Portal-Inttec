@@ -97,10 +97,23 @@ export const GeminiService = {
         cleanJsonStr = markdownMatch[1].trim();
       }
       
+      // Extraer estrictamente el objeto JSON para evitar basura (ej: notas extras de la IA)
+      const firstBrace = cleanJsonStr.indexOf('{');
+      const lastBrace = cleanJsonStr.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
+        cleanJsonStr = cleanJsonStr.substring(firstBrace, lastBrace + 1);
+      }
+      
       // Sanitizar JSON: eliminar comas sueltas antes de un cierre de objeto o arreglo
       cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
 
-      const parsed: GeminiOcrResult = JSON.parse(cleanJsonStr);
+      let parsed: GeminiOcrResult;
+      try {
+        parsed = JSON.parse(cleanJsonStr);
+      } catch (e: any) {
+        console.error('Failed to parse Gemini output:', cleanJsonStr);
+        throw new Error('Error al interpretar el JSON generado por Gemini: ' + e.message);
+      }
 
       return {
         monto: parsed.monto ?? null,
@@ -366,12 +379,12 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
 
     const prompt = `Rol: Eres un asistente experto en contabilidad y extracción de datos de facturas de compra.
 
-Tarea: Analiza el documento adjunto (imagen o PDF). Este es una FACTURA DE COMPRA a un proveedor. Los precios que aparecen en el documento son nuestros COSTOS de adquisición.
+Tarea: Analiza el documento adjunto (imagen o PDF). Este es una ORDEN DE COMPRA (PO) o pedido de un cliente. Los precios que aparecen en el documento representan el monto que el cliente nos va a pagar, es decir, el PRECIO DE VENTA.
 
 Instrucciones:
-- Los precios del documento son COSTOS (costo_unitario_proveedor).
-- El campo precio_unitario_venta debe ser 0 (el administrador lo ingresará manualmente después).
-- Extrae cada producto/servicio con su descripción, cantidad, unidad de medida y costo unitario.
+- Los precios del documento son nuestros ingresos por VENTA (precio_unitario_venta).
+- El campo costo_unitario_proveedor debe ser siempre 0.
+- Extrae cada producto/servicio con su descripción, cantidad, unidad de medida y precio de venta.
 
 Reglas de extracción:
 - Extrae la fecha en formato YYYY-MM-DD
@@ -379,7 +392,7 @@ Reglas de extracción:
 - Extrae el número de factura, folio, o referencia de orden
 - Identifica el tipo de producto/proyecto: "Venta", "Servicio", "Paneles", "Instalación", "Mantenimiento" u otro según el contenido
 - Si aparece el nombre del cliente final (a quién se le revenderá), extráelo; si no, usa null
-- Extrae cada partida/producto con: descripción exacta, cantidad, unidad de medida, y precio (como costo_unitario_proveedor)
+- Extrae cada partida/producto con: descripción exacta, cantidad, unidad de medida, y precio (como precio_unitario_venta, dejando costo_unitario_proveedor en 0)
 
 Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, sin texto adicional:
 {
@@ -458,10 +471,22 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
         cleanJsonStr = markdownMatch[1].trim();
       }
       
+      const firstBrace = cleanJsonStr.indexOf('{');
+      const lastBrace = cleanJsonStr.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
+        cleanJsonStr = cleanJsonStr.substring(firstBrace, lastBrace + 1);
+      }
+      
       // Sanitizar JSON: eliminar comas sueltas antes de un cierre de objeto o arreglo
       cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
 
-      const parsed: GeminiSalesResult = JSON.parse(cleanJsonStr);
+      let parsed: GeminiSalesResult;
+      try {
+        parsed = JSON.parse(cleanJsonStr);
+      } catch (e: any) {
+        console.error('Failed to parse Gemini output:', cleanJsonStr);
+        throw new Error('Error al interpretar el JSON generado por Gemini: ' + e.message);
+      }
 
       // Re-calcular totales en código para evitar errores matemáticos de la IA
       let precioTotalFacturado = 0;

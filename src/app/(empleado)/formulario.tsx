@@ -345,9 +345,24 @@ export default function GastoForm() {
         const ext = file.name ? file.name.split('.').pop()?.toLowerCase() || 'jpg' : 'jpg';
         setImageExt(ext === 'pdf' ? 'pdf' : 'jpg');
         
-        const base64Str = await FileSystem.readAsStringAsync(file.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        let base64Str = '';
+        if (Platform.OS === 'web') {
+           const res = await fetch(file.uri);
+           const blob = await res.blob();
+           base64Str = await new Promise<string>((resolve, reject) => {
+             const reader = new FileReader();
+             reader.onloadend = () => {
+               const b64 = reader.result as string;
+               resolve(b64.split(',')[1]);
+             };
+             reader.onerror = reject;
+             reader.readAsDataURL(blob);
+           });
+        } else {
+           base64Str = await FileSystem.readAsStringAsync(file.uri, {
+             encoding: FileSystem.EncodingType.Base64,
+           });
+        }
         setImageBase64(base64Str);
         
         setScanSuccess(false);
@@ -931,30 +946,30 @@ export default function GastoForm() {
                 )}
               </View>
 
-              <View style={styles.actionGrid}>
+              <View style={{ flexDirection: 'column', gap: Spacing.one, marginTop: Spacing.two }}>
                 <View style={{ flexDirection: 'row', gap: Spacing.one }}>
                   <TouchableOpacity
-                    style={[styles.actionBtn, { flex: 1, backgroundColor: themeColors.primary, borderColor: themeColors.primary }]}
+                    style={[{ flex: 1, backgroundColor: themeColors.primary, borderRadius: 16, height: 90, justifyContent: 'center', alignItems: 'center', shadowColor: themeColors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 }]}
                     onPress={handleCapturePhoto}
                   >
-                    <Ionicons name="camera-outline" size={24} color="#ffffff" />
-                    <Text style={{ color: '#ffffff', marginTop: 4, fontWeight: '600' }}>Cámara</Text>
+                    <Ionicons name="camera" size={32} color="#ffffff" />
+                    <Text style={{ color: '#ffffff', marginTop: 8, fontWeight: '700', fontSize: 14 }}>Cámara</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.actionBtn, { flex: 1, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                    style={[{ flex: 1, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, borderWidth: 1, borderRadius: 16, height: 90, justifyContent: 'center', alignItems: 'center' }]}
                     onPress={handleSelectGallery}
                   >
-                    <Ionicons name="image-outline" size={24} color={themeColors.text} />
-                    <Text style={{ color: themeColors.text, marginTop: 4, fontWeight: '500' }}>Galería</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.actionBtn, { flex: 1, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                    onPress={handleSelectDocument}
-                  >
-                    <Ionicons name="document-attach-outline" size={24} color={themeColors.text} />
-                    <Text style={{ color: themeColors.text, marginTop: 4, fontWeight: '500' }}>Archivo</Text>
+                    <Ionicons name="images" size={32} color={themeColors.text} />
+                    <Text style={{ color: themeColors.text, marginTop: 8, fontWeight: '700', fontSize: 14 }}>Galería</Text>
                   </TouchableOpacity>
                 </View>
+                <TouchableOpacity
+                  style={[{ width: '100%', backgroundColor: themeColors.backgroundElement, borderColor: themeColors.primary, borderWidth: 1.5, borderStyle: 'dashed', borderRadius: 16, height: 70, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 12 }]}
+                  onPress={handleSelectDocument}
+                >
+                  <Ionicons name="document-text" size={28} color={themeColors.primary} />
+                  <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 15 }}>Subir Documento (PDF o Imagen)</Text>
+                </TouchableOpacity>
               </View>
 
               {/* Pregunta si es Comida */}
