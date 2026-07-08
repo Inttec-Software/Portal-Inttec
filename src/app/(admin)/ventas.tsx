@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, createElement } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
   Modal,
   Pressable,
+  Keyboard,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -832,67 +833,110 @@ export default function VentasScreen() {
       {/* Datos Generales */}
       <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Información General</Text>
 
-      {Platform.OS === 'web' ? (
-        <CustomInput
-          label="Fecha de la Venta (DD/MM/AAAA)"
-          value={fecha}
-          onChangeText={setFecha}
-          placeholder="DD/MM/AAAA"
-          iconName="calendar-outline"
-        />
-      ) : (
-        <>
-          <TouchableOpacity onPress={() => setShowDatePicker(true)} activeOpacity={0.7}>
-            <View pointerEvents="none">
-              <CustomInput
-                label="Fecha de la Venta *"
-                placeholder="Selecciona la fecha"
-                value={fecha}
-                editable={false}
-                iconName="calendar-outline"
-              />
-            </View>
-          </TouchableOpacity>
-
-          {showDatePicker && (
+      <>
+        {Platform.OS === 'web' ? (
+          <View style={{ marginBottom: Spacing.two }}>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: themeColors.text, marginBottom: Spacing.one }}>Fecha de la Venta *</Text>
             <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
               backgroundColor: themeColors.backgroundElement,
-              borderRadius: BorderRadius.medium,
-              padding: Spacing.two,
-              borderWidth: 1,
               borderColor: themeColors.border,
-              marginTop: -Spacing.two,
-              marginBottom: Spacing.two,
+              borderWidth: 1,
+              borderRadius: BorderRadius.medium,
+              height: 50,
+              paddingHorizontal: Spacing.three,
             }}>
-              <DateTimePicker
-                value={dateValue}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event: any, selectedDate?: Date) => {
-                  if (Platform.OS === 'android') {
-                    setShowDatePicker(false);
-                  }
-                  if (selectedDate) {
-                    setDateValue(selectedDate);
-                    const dd = String(selectedDate.getDate()).padStart(2, '0');
-                    const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
-                    const yyyy = selectedDate.getFullYear();
-                    setFecha(`${yyyy}-${mm}-${dd}`);
-                  }
-                }}
-                maximumDate={new Date()}
-              />
-              {Platform.OS === 'ios' && (
-                <CustomButton
-                  title="Confirmar Fecha"
-                  onPress={() => setShowDatePicker(false)}
-                  style={{ marginTop: Spacing.one }}
-                />
-              )}
+              <Ionicons name="calendar-outline" size={20} color={themeColors.textSecondary} style={{ marginRight: Spacing.two }} />
+              
+              {Platform.OS === 'web' && createElement('style', null, `
+                .custom-web-date::-webkit-calendar-picker-indicator {
+                  background: transparent;
+                  bottom: 0;
+                  color: transparent;
+                  cursor: pointer;
+                  height: auto;
+                  left: 0;
+                  position: absolute;
+                  right: 0;
+                  top: 0;
+                  width: auto;
+                }
+              `)}
+
+              {createElement('input', {
+                type: 'date',
+                className: 'custom-web-date',
+                value: fecha,
+                onChange: (e: any) => setFecha(e.target.value),
+                style: {
+                  flex: 1,
+                  backgroundColor: 'transparent',
+                  color: themeColors.text,
+                  fontSize: '15px',
+                  border: 'none',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  position: 'relative'
+                }
+              })}
             </View>
-          )}
-        </>
-      )}
+          </View>
+        ) : (
+          <>
+            <TouchableOpacity onPress={() => setShowDatePicker(true)} activeOpacity={0.7}>
+              <View pointerEvents="none">
+                <CustomInput
+                  label="Fecha de la Venta *"
+                  placeholder="Selecciona la fecha"
+                  value={fecha}
+                  editable={false}
+                  iconName="calendar-outline"
+                />
+              </View>
+            </TouchableOpacity>
+
+            {showDatePicker && (
+              <View style={{
+                backgroundColor: themeColors.backgroundElement,
+                borderRadius: BorderRadius.medium,
+                padding: Spacing.two,
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                marginTop: -Spacing.two,
+                marginBottom: Spacing.two,
+              }}>
+                <DateTimePicker
+                  value={dateValue}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(event: any, selectedDate?: Date) => {
+                    if (Platform.OS === 'android') {
+                      setShowDatePicker(false);
+                    }
+                    if (selectedDate) {
+                      setDateValue(selectedDate);
+                      const dd = String(selectedDate.getDate()).padStart(2, '0');
+                      const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                      const yyyy = selectedDate.getFullYear();
+                      setFecha(`${yyyy}-${mm}-${dd}`);
+                    }
+                  }}
+                  maximumDate={new Date()}
+                />
+                {Platform.OS === 'ios' && (
+                  <CustomButton
+                    title="Confirmar Fecha"
+                    onPress={() => setShowDatePicker(false)}
+                    style={{ marginTop: Spacing.one }}
+                  />
+                )}
+              </View>
+            )}
+          </>
+        )}
+      </>
 
       {/* Selector de Cliente Desplegable */}
       <View style={[styles.customDropdownContainer, { zIndex: 100 }]}>

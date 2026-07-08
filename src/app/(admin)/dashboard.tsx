@@ -1410,6 +1410,36 @@ export default function AdminDashboard() {
           </Text>
         </TouchableOpacity>
 
+        <TouchableOpacity
+          onPress={() => router.push('/(admin)/nueva-cotizacion')}
+          style={[
+            styles.quickActionBtn,
+            {
+              backgroundColor: themeColors.backgroundElement,
+              borderColor: themeColors.border,
+              paddingHorizontal: isMobile ? 4 : Spacing.one,
+            }
+          ]}
+        >
+          <View style={[styles.quickActionIconBg, { backgroundColor: '#714B67' + '15' }]}>
+            <Ionicons name="document-text" size={18} color="#714B67" />
+          </View>
+          <Text
+            style={[
+              styles.quickActionLabel,
+              {
+                color: themeColors.text,
+                fontSize: isMobile ? 10 : 11,
+              }
+            ]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+          >
+            Cotizaciones
+          </Text>
+        </TouchableOpacity>
+
       </View>
 
       {/* Tabs Simplificadas a 2 */}

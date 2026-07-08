@@ -61,6 +61,10 @@ CREATE TABLE public.usuarios (
 CREATE TABLE public.clientes (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   nombre text NOT NULL UNIQUE,
+  rfc text,
+  correo_electronico text,
+  direccion text,
+  codigo_postal text,
   CONSTRAINT clientes_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.categorias (
@@ -110,3 +114,19 @@ CREATE TABLE public.asistencias (
   CONSTRAINT asistencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
 );
 CREATE INDEX idx_asistencias_empleado_fecha ON public.asistencias(empleado_id, fecha);
+CREATE TABLE public.cotizaciones (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  folio text NOT NULL UNIQUE,
+  cliente_nombre text,
+  vendedor text,
+  moneda text,
+  fecha_creacion text,
+  subtotal numeric,
+  iva numeric,
+  total numeric,
+  lineas jsonb,
+  terminos_condiciones text,
+  estado text DEFAULT 'Borrador',
+  creado_en timestamp with time zone DEFAULT now(),
+  CONSTRAINT cotizaciones_pkey PRIMARY KEY (id)
+);

@@ -1,9 +1,10 @@
 import { cacheDirectory, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import { Gasto, Asistencia, Usuario } from '../services/supabase';
 import { LOGO_BASE64 } from './logoBase64';
+import { Cotizacion } from '@/types/ventas';
 
 export interface ReportProducto {
   id: string;
@@ -1784,3 +1785,215 @@ export const ReportGenerator = {
     }
   },
 };
+
+export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion) {
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        @media print {
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+        }
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; margin: 30px; margin-bottom: 120px; font-size: 11px; position: relative; min-height: 95vh; }
+        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        .logo { max-width: 300px; height: auto; }
+        .company-details { font-size: 11px; text-align: right; line-height: 1.4; color: #333; }
+        
+        .title-area { text-align: right; margin-bottom: 30px; }
+        .title-text { font-size: 26px; font-weight: bold; color: #9b2c2c; letter-spacing: 1px; display: block; }
+        .folio-text { font-size: 20px; color: #666; display: block; margin-top: 4px; }
+        
+        .info-grid { width: 100%; margin-bottom: 20px; border-collapse: collapse; }
+        .info-grid td { vertical-align: top; }
+        .info-header { font-size: 10px; font-weight: bold; color: #9b2c2c; text-transform: uppercase; margin-bottom: 5px; }
+        
+        .info-table { border-collapse: collapse; width: 100%; border-top: 2px solid #9b2c2c; }
+        .info-table td { padding: 4px 0; font-size: 10px; }
+        
+        .info-commercial { border-collapse: collapse; width: 100%; border-top: 2px solid #9b2c2c; }
+        .info-commercial td { padding: 4px 6px; font-size: 10px; border-left: 1px solid #333; }
+        .info-commercial td:first-child { border-left: none; width: 35%; color: #555; }
+        .info-commercial td:last-child { text-align: right; }
+
+        .data-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #333; }
+        .data-table th { background-color: #9b2c2c; color: white; padding: 6px 8px; text-align: center; font-size: 10px; font-weight: normal; border-left: 1px solid white; text-transform: uppercase; }
+        .data-table th:first-child { border-left: none; text-align: left; }
+        .data-table td { border-left: 1px solid #333; border-bottom: 1px solid #333; padding: 8px; vertical-align: top; font-size: 10px; line-height: 1.4; }
+        .data-table td:first-child { border-left: none; }
+        
+        .totals-area { width: 100%; border-collapse: collapse; }
+        .totals-area td { vertical-align: top; }
+        
+        .totals-table { width: 100%; border-collapse: collapse; border-top: 2px solid #9b2c2c; }
+        .totals-table td { padding: 4px 8px; font-size: 10px; border-bottom: 1px solid #ddd; }
+        .totals-table td:last-child { text-align: right; }
+        .totals-table tr:last-child td { border-bottom: none; background-color: #f2f2f2; font-size: 14px; font-weight: bold; padding: 8px; }
+        
+        .footer-bank { position: absolute; bottom: 0; left: 0; width: 100%; border-top: 1px solid #000; padding-top: 8px; font-size: 10px; color: #333; line-height: 1.4; display: table; }
+      </style>
+    </head>
+    <body>
+      <!-- HEADER -->
+      <table class="header-table">
+        <tr>
+          <td style="width: 60%;">
+            <img class="logo" src="${LOGO_BASE64}" alt="Logo INTTEC">
+          </td>
+          <td class="company-details">
+            <div style="margin-bottom: 3px;">INTTEC</div>
+            <div style="margin-bottom: 3px;">Ozorno 811</div>
+            <div style="margin-bottom: 3px;">31107 Chihuahua, CHH</div>
+            <div>México</div>
+          </td>
+        </tr>
+      </table>
+
+      <!-- TITLE -->
+      <div class="title-area">
+        <span class="title-text">COTIZACIÓN</span>
+        <span class="folio-text">${cotizacion.numeroCotizacion}</span>
+      </div>
+
+      <!-- INFO GRID -->
+      <table class="info-grid">
+        <tr>
+          <td style="width: 55%; padding-right: 20px;">
+            <div class="info-header">DATOS DEL CLIENTE</div>
+            <table class="info-table">
+              <tr>
+                <td>
+                  <strong>${cotizacion.clienteNombre || 'Nombre del Cliente'}</strong><br>
+                  <strong>RFC:</strong> ${cotizacion.clienteRFC || ''}<br>
+                  <strong>Correo:</strong> ${cotizacion.clienteCorreo || ''}<br>
+                  <strong>Dirección:</strong> ${cotizacion.direccionFactura || ''}<br>
+                  <strong>CP:</strong> ${cotizacion.clienteCP || ''}
+                </td>
+              </tr>
+            </table>
+          </td>
+          <td style="width: 45%;">
+            <div class="info-header">DETALLES COMERCIALES</div>
+            <table class="info-commercial">
+              <tr>
+                <td>Fecha:</td>
+                <td>${cotizacion.fechaCreacion}</td>
+              </tr>
+              <tr>
+                <td style="border-top: 1px solid #ddd;">Vendedor:</td>
+                <td style="border-top: 1px solid #ddd;">${cotizacion.vendedor || 'Rafael Fernandez'}</td>
+              </tr>
+              <tr>
+                <td style="border-top: 1px solid #ddd;">Moneda:</td>
+                <td style="border-top: 1px solid #ddd;">${cotizacion.moneda || 'MXN'}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <!-- DATA TABLE -->
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width: 45%;">DESCRIPCIÓN</th>
+            <th style="text-align: center; width: 12%;">ENTREGA</th>
+            <th style="text-align: center; width: 8%;">CANT</th>
+            <th style="text-align: center; width: 12%;">PRECIO UNIT</th>
+            <th style="text-align: center; width: 8%;">IVA</th>
+            <th style="text-align: center; width: 15%;">IMPORTE</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cotizacion.lineas.map(linea => `
+            <tr>
+              <td>
+                <strong style="display:block; margin-bottom:4px;">${linea.productoNombre || ''}</strong>
+                <span style="color:#555;">${linea.productoDescripcion ? linea.productoDescripcion.replace(/\n/g, '<br>') : ''}</span>
+              </td>
+              <td style="text-align: center;">${linea.tiempoEntrega || ''}</td>
+              <td style="text-align: center;">${linea.cantidad.toFixed(1)}</td>
+              <td style="text-align: right;">$ ${linea.precioUnitario.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+              <td style="text-align: center;">${linea.impuestoPorcentaje}%</td>
+              <td style="text-align: right;">$ ${linea.importe.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <!-- TOTALS AREA -->
+      <table class="totals-area">
+        <tr>
+          <td style="width: 60%; padding-right: 20px;">
+            <div class="info-header">INFORMACION ADICIONAL</div>
+            <table class="info-table">
+              <tr>
+                <td style="color: #444;">
+                  Términos y condiciones: <a href="${cotizacion.terminosCondiciones}" style="color: blue; text-decoration: none;">${cotizacion.terminosCondiciones}</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+          <td style="width: 40%;">
+            <table class="totals-table">
+              <tr>
+                <td>Subtotal</td>
+                <td>$ ${cotizacion.subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+              </tr>
+              <tr>
+                <td>IVA 16%</td>
+                <td>$ ${cotizacion.iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+              </tr>
+              <tr>
+                <td>TOTAL</td>
+                <td>$ ${cotizacion.total.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <!-- FOOTER FIXED -->
+      <div class="footer-bank">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="width: 40%; vertical-align: top;">
+              <strong>RAFAEL ALONSO FERNANDEZ TINAJERO</strong><br>
+              RFC: FETR83041461A<br>
+              TEL: 6142477119<br>
+              MAIL: rfernandez@inttec.net
+            </td>
+            <td style="width: 45%; vertical-align: top;">
+              <strong>CUENTA BANCARIA BBVA</strong><br>
+              NO. CUENTA: 0193092593<br>
+              CLABE: 012150001930925930<br>
+              CUENTAHABIENTE: Rafael Alonso Fernandez Tinajero
+            </td>
+            <td style="width: 15%; vertical-align: bottom; text-align: right; color: #666;">
+              Página 1 / 1
+            </td>
+          </tr>
+        </table>
+      </div>
+    </body>
+    </html>
+  `;
+
+  try {
+    if (Platform.OS === 'web') {
+      await Print.printAsync({ html: htmlContent });
+    } else {
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Compartir Cotización' });
+    }
+  } catch (error: any) {
+    console.error('Error generando PDF:', error);
+    if (Platform.OS === 'web') {
+      window.alert('Error: No se pudo generar el documento PDF corporativo. ' + (error.message || ''));
+    } else {
+      Alert.alert('Error', 'No se pudo generar el documento PDF corporativo. ' + (error.message || ''));
+    }
+  }
+}
+
