@@ -1411,7 +1411,7 @@ export default function AdminDashboard() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          onPress={() => router.push('/(admin)/nueva-cotizacion')}
+          onPress={() => router.push('/(admin)/cotizaciones')}
           style={[
             styles.quickActionBtn,
             {

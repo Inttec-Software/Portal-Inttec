@@ -335,7 +335,7 @@ export default function GastoForm() {
   const handleSelectDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'image/*'],
+        type: ['image/*'],
         copyToCacheDirectory: true,
       });
 
@@ -963,13 +963,7 @@ export default function GastoForm() {
                     <Text style={{ color: themeColors.text, marginTop: 8, fontWeight: '700', fontSize: 14 }}>Galería</Text>
                   </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  style={[{ width: '100%', backgroundColor: themeColors.backgroundElement, borderColor: themeColors.primary, borderWidth: 1.5, borderStyle: 'dashed', borderRadius: 16, height: 70, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 12 }]}
-                  onPress={handleSelectDocument}
-                >
-                  <Ionicons name="document-text" size={28} color={themeColors.primary} />
-                  <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 15 }}>Subir Documento (PDF o Imagen)</Text>
-                </TouchableOpacity>
+
               </View>
 
               {/* Pregunta si es Comida */}

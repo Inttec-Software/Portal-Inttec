@@ -9,8 +9,10 @@ import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { ThemedText } from '@/components/themed-text';
 import { supabase } from '@/services/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useRouter } from 'expo-router';
 
 export default function NuevaCotizacionScreen() {
+  const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
@@ -93,6 +95,25 @@ export default function NuevaCotizacionScreen() {
   };
 
   // Calculate totals whenever lines change
+  useEffect(() => {
+    const fetchLastFolio = async () => {
+      const { data, error } = await supabase
+        .from('cotizaciones')
+        .select('folio')
+        .order('folio', { ascending: false })
+        .limit(1);
+      
+      if (!error && data && data.length > 0) {
+        const lastFolio = parseInt(data[0].folio, 10);
+        if (!isNaN(lastFolio)) {
+          setCotizacion(prev => ({ ...prev, numeroCotizacion: (lastFolio + 1).toString() }));
+        }
+      }
+    };
+    
+    fetchLastFolio();
+  }, []);
+
   useEffect(() => {
     const subtotal = cotizacion.lineas.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0);
     const iva = cotizacion.lineas.reduce((acc, item) => acc + ((item.cantidad * item.precioUnitario) * (item.impuestoPorcentaje / 100)), 0);
@@ -196,10 +217,16 @@ export default function NuevaCotizacionScreen() {
       }
       
       showAlert('Éxito', 'Cotización guardada y cliente registrado.');
+      setTimeout(() => {
+        router.push('/(admin)/cotizaciones');
+      }, 1500);
     } catch (error: any) {
       console.error('Error al guardar:', error);
       if (error.message?.includes('duplicate key value')) {
         showAlert('Éxito', 'Cotización actualizada y guardada.');
+        setTimeout(() => {
+          router.push('/(admin)/cotizaciones');
+        }, 1500);
       } else {
         showAlert('Error', error.message || 'Hubo un error guardando la cotización.');
       }
@@ -213,6 +240,14 @@ export default function NuevaCotizacionScreen() {
     >
       <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
         
+        {/* Cabecera con Botón de Regreso */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.three, paddingTop: Spacing.three, paddingBottom: Spacing.two }}>
+          <TouchableOpacity onPress={() => router.push('/(admin)/cotizaciones')} style={{ marginRight: Spacing.two, padding: 8 }}>
+            <Ionicons name="arrow-back" size={24} color={themeColors.text} />
+          </TouchableOpacity>
+          <ThemedText style={{ fontSize: 20, fontWeight: 'bold', color: themeColors.text }}>Nueva Cotización</ThemedText>
+        </View>
+
         {/* Barra de Estado (Tracker) */}
         <View style={[styles.statusBar, { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border }]}>
           <ThemedText style={[styles.statusTitle, { color: themeColors.text }]}>

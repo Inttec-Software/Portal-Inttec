@@ -1787,194 +1787,265 @@ export const ReportGenerator = {
 };
 
 export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion) {
+  const title = `Cotizacion - ${cotizacion.numeroCotizacion}`;
+  
+  const renderDescription = (name: string, description: string) => {
+    const fullText = (name || '') + (description ? '\n' + description : '');
+    const parts = fullText.split('\n');
+    return parts.map((part, part_index) => {
+      const clean_part = part.trim();
+      if (clean_part === '') return '<br/>';
+      
+      if (part_index === 0) {
+        const innerHtml = `<strong style="color: #111; font-size: 12.5px;">${clean_part.replace(/\*/g, '')}</strong>`;
+        return `<div style="display: block; margin-bottom: 4px;">${innerHtml}</div>`;
+      } else {
+        const chunks = clean_part.split('*');
+        const innerHtml = chunks.map((chunk, chunk_index) => {
+          if (chunk_index % 2 === 0) {
+            return `<span style="font-size: 10.5px; color: #555;">${chunk}</span>`;
+          } else {
+            return `<strong style="color: #333; font-size: 10.5px;">${chunk}</strong>`;
+          }
+        }).join('');
+        return `<div style="display: block; margin-bottom: 2px; padding-left: 10px; text-indent: -10px;">
+                  <span style="font-size: 12px; color: #555; margin-right: 3px;">&bull;</span>${innerHtml}
+                </div>`;
+      }
+    }).join('');
+  };
+
   const htmlContent = `
     <!DOCTYPE html>
     <html>
     <head>
-      <meta charset="utf-8">
+      <meta charset="utf-8" />
+      <title>${title}</title>
       <style>
-        @media print {
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+        @page {
+          size: letter;
+          margin: 0;
         }
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; margin: 30px; margin-bottom: 120px; font-size: 11px; position: relative; min-height: 95vh; }
-        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        .logo { max-width: 300px; height: auto; }
-        .company-details { font-size: 11px; text-align: right; line-height: 1.4; color: #333; }
+        body {
+          font-family: 'Helvetica', Arial, sans-serif;
+          color: #333;
+          margin: 0;
+          padding: 0;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .page-container {
+          width: 100%;
+          min-height: 100vh;
+          box-sizing: border-box;
+          position: relative;
+        }
+        /* Header and Layout */
+        .header-content {
+          padding: 15px 40px 0 40px;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          height: 174px;
+          position: relative;
+          z-index: 10;
+        }
+        .company-details { text-align: right; font-size: 11px; line-height: 1.4; color: #333; margin-top: 5px; }
         
-        .title-area { text-align: right; margin-bottom: 30px; }
-        .title-text { font-size: 26px; font-weight: bold; color: #9b2c2c; letter-spacing: 1px; display: block; }
-        .folio-text { font-size: 20px; color: #666; display: block; margin-top: 4px; }
-        
-        .info-grid { width: 100%; margin-bottom: 20px; border-collapse: collapse; }
-        .info-grid td { vertical-align: top; }
-        .info-header { font-size: 10px; font-weight: bold; color: #9b2c2c; text-transform: uppercase; margin-bottom: 5px; }
-        
-        .info-table { border-collapse: collapse; width: 100%; border-top: 2px solid #9b2c2c; }
-        .info-table td { padding: 4px 0; font-size: 10px; }
-        
-        .info-commercial { border-collapse: collapse; width: 100%; border-top: 2px solid #9b2c2c; }
-        .info-commercial td { padding: 4px 6px; font-size: 10px; border-left: 1px solid #333; }
-        .info-commercial td:first-child { border-left: none; width: 35%; color: #555; }
-        .info-commercial td:last-child { text-align: right; }
+        .page-body {
+          padding: 0px 40px 100px 40px;
+          position: relative;
+          z-index: 10;
+          margin-top: -50px;
+        }
 
-        .data-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #333; }
-        .data-table th { background-color: #9b2c2c; color: white; padding: 6px 8px; text-align: center; font-size: 10px; font-weight: normal; border-left: 1px solid white; text-transform: uppercase; }
-        .data-table th:first-child { border-left: none; text-align: left; }
-        .data-table td { border-left: 1px solid #333; border-bottom: 1px solid #333; padding: 8px; vertical-align: top; font-size: 10px; line-height: 1.4; }
-        .data-table td:first-child { border-left: none; }
+        /* Odoo specific classes */
+        .row { display: flex; flex-wrap: wrap; margin-bottom: 20px; }
+        .col-6 { width: 50%; box-sizing: border-box; }
+        .col-7 { width: 58.333333%; box-sizing: border-box; padding-right: 20px; }
+        .col-5 { width: 41.666667%; box-sizing: border-box; }
         
-        .totals-area { width: 100%; border-collapse: collapse; }
-        .totals-area td { vertical-align: top; }
+        .text-end { text-align: right; }
+        .text-center { text-align: center; }
+        .fw-bold { font-weight: bold; }
+        .mb-0 { margin-bottom: 0; }
+        .mb-2 { margin-bottom: 8px; }
+        .mb-4 { margin-bottom: 24px; }
+        .mt-4 { margin-top: 24px; }
+        .mt-2 { margin-top: 8px; }
+        .ps-1 { padding-left: 2px; }
+        .py-3 { padding-top: 8px; padding-bottom: 8px; }
+        .px-2 { padding-left: 8px; padding-right: 8px; }
+        .text-muted { color: #6c757d; }
         
-        .totals-table { width: 100%; border-collapse: collapse; border-top: 2px solid #9b2c2c; }
-        .totals-table td { padding: 4px 8px; font-size: 10px; border-bottom: 1px solid #ddd; }
-        .totals-table td:last-child { text-align: right; }
-        .totals-table tr:last-child td { border-bottom: none; background-color: #f2f2f2; font-size: 14px; font-weight: bold; padding: 8px; }
+        .inttec-red { color: #8B1D22; }
+        .section-header { border-bottom: 2px solid #8B1D22; font-weight: bold; margin-bottom: 8px; color: #8B1D22; text-transform: uppercase; padding-bottom: 3px; font-size: 10px; }
         
-        .footer-bank { position: absolute; bottom: 0; left: 0; width: 100%; border-top: 1px solid #000; padding-top: 8px; font-size: 10px; color: #333; line-height: 1.4; display: table; }
+        .table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+        
+        .table-red { border: 1px solid #dee2e6; border-top: none; }
+        .table-red thead th { background-color: #8B1D22; color: #FFFFFF !important; padding: 8px 8px; font-size: 10px; border-right: 1px solid #fff; }
+        .table-red thead th:last-child { border-right: none; }
+        .table-red tbody td { border: 1px solid #dee2e6; padding: 8px; font-size: 10px; }
+        
+        .info-text { font-size: 10.5px; line-height: 1.4; color: #333; }
+        
+        .table-details { width: 100%; border-collapse: collapse; border: 1px solid #dee2e6; }
+        .table-details td { padding: 4px 8px; border: 1px solid #dee2e6; font-size: 10px; }
+        .label-col { width: 35%; background-color: #f4f5f6; font-weight: normal; color: #111; }
+        .value-col { width: 65%; text-align: right; }
+        
+        .table-totals { width: 100%; border-collapse: collapse; }
+        .table-totals td { padding: 6px 0; border-bottom: 1px solid #dee2e6; font-size: 11px; }
+        .table-totals tr:last-child td { border-bottom: none; border-top: 2px solid #333; font-size: 16px; font-weight: bold; padding-top: 10px; color: #111;}
+        
+        /* FOOTER */
+        .footer-bank { position: absolute; bottom: 40px; left: 40px; right: 40px; border-top: 1px solid #000; padding-top: 10px; font-size: 9px; color: #333; line-height: 1.4; display: flex; justify-content: space-between; }
+        .footer-bank strong { color: #111; font-weight: bold; }
       </style>
     </head>
     <body>
-      <!-- HEADER -->
-      <table class="header-table">
-        <tr>
-          <td style="width: 60%;">
-            <img class="logo" src="${LOGO_BASE64}" alt="Logo INTTEC">
-          </td>
-          <td class="company-details">
-            <div style="margin-bottom: 3px;">INTTEC</div>
-            <div style="margin-bottom: 3px;">Ozorno 811</div>
-            <div style="margin-bottom: 3px;">31107 Chihuahua, CHH</div>
+      <div class="page-container">
+        <!-- HEADER BG ODOO Exact Shape (Pure HTML/CSS BORDERS ONLY - FAILPROOF) -->
+        <div style="position: absolute; top: -90px; left: 0; width: 100%; height: 174px; z-index: 1;">
+            <!-- Top Rectangle -->
+            <div style="position: absolute; top: 87px; left: 0; 
+            width: 100%; height: 0; border-top: 87px solid #EAE6E2;"></div>
+            <!-- Left Rectangle -->
+            <div style="position: absolute; top: 174px; left: 0;
+             width: 60%; height: 0; border-top: 87px solid #EAE6E2;"></div>
+            <!-- Triangle -->
+            <div style="position: absolute; top: 174px; left: 60%; 
+            width: 0; height: 0; border-top: 87px solid #EAE6E2; 
+            border-right: 80px solid transparent;"></div>
+        </div>
+        
+        <div class="header-content">
+          <div style="width: 50%;">
+            <img src="${LOGO_BASE64}" alt="Logo" style="max-height: 150px; 
+            height: 170px; width: 450px; margin-top: 
+            -10px; z-index: 10; position: relative;">
+          </div>
+          <div class="company-details" style="width: 50%;">
+            <div>INTTEC</div>
+            <div>Ozorno 811</div>
+            <div>31107 Chihuahua, CHH</div>
             <div>México</div>
-          </td>
-        </tr>
-      </table>
+          </div>
+        </div>
 
-      <!-- TITLE -->
-      <div class="title-area">
-        <span class="title-text">COTIZACIÓN</span>
-        <span class="folio-text">${cotizacion.numeroCotizacion}</span>
-      </div>
+        <div class="page-body">
+          <div class="row mb-4" style="margin-top: -15px;">
+              <div class="col-6">
+              </div>
+              <div class="col-6 text-end">
+                  <h1 class="inttec-red fw-bold" style="font-size: 26px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">COTIZACIÓN</h1>
+                  <h2 class="text-muted" style="font-size: 20px; font-weight: normal; margin-top: 0;">${cotizacion.numeroCotizacion}</h2>
+              </div>
+          </div>
 
-      <!-- INFO GRID -->
-      <table class="info-grid">
-        <tr>
-          <td style="width: 55%; padding-right: 20px;">
-            <div class="info-header">DATOS DEL CLIENTE</div>
-            <table class="info-table">
-              <tr>
-                <td>
-                  <strong>${cotizacion.clienteNombre || 'Nombre del Cliente'}</strong><br>
-                  <strong>RFC:</strong> ${cotizacion.clienteRFC || ''}<br>
-                  <strong>Correo:</strong> ${cotizacion.clienteCorreo || ''}<br>
-                  <strong>Dirección:</strong> ${cotizacion.direccionFactura || ''}<br>
-                  <strong>CP:</strong> ${cotizacion.clienteCP || ''}
-                </td>
-              </tr>
-            </table>
-          </td>
-          <td style="width: 45%;">
-            <div class="info-header">DETALLES COMERCIALES</div>
-            <table class="info-commercial">
-              <tr>
-                <td>Fecha:</td>
-                <td>${cotizacion.fechaCreacion}</td>
-              </tr>
-              <tr>
-                <td style="border-top: 1px solid #ddd;">Vendedor:</td>
-                <td style="border-top: 1px solid #ddd;">${cotizacion.vendedor || 'Rafael Fernandez'}</td>
-              </tr>
-              <tr>
-                <td style="border-top: 1px solid #ddd;">Moneda:</td>
-                <td style="border-top: 1px solid #ddd;">${cotizacion.moneda || 'MXN'}</td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
+          <div class="row mb-4">
+              <div class="col-7">
+                  <div class="section-header">Datos del Cliente</div>
+                  <div class="info-text ps-1">
+                      <strong style="font-size: 11px;">${cotizacion.clienteNombre || 'Nombre del Cliente'}</strong><br/>
+                      <strong>RFC:</strong> ${cotizacion.clienteRFC || 'XAXX010101000'}<br/>
+                      <strong>CP:</strong> ${cotizacion.clienteCP || ''}<br/>
+                      ${cotizacion.direccionFactura || ''}
+                  </div>
+              </div>
+              <div class="col-5">
+                  <div class="section-header">Detalles Comerciales</div>
+                  <table class="table-details">
+                      <tr>
+                          <td class="label-col">Fecha:</td>
+                          <td class="value-col">${cotizacion.fechaCreacion}</td>
+                      </tr>
+                      <tr>
+                          <td class="label-col">Vendedor:</td>
+                          <td class="value-col">${cotizacion.vendedor || 'Rafael Fernandez'}</td>
+                      </tr>
+                      <tr>
+                          <td class="label-col">Moneda:</td>
+                          <td class="value-col">${cotizacion.moneda || 'MXN'}</td>
+                      </tr>
+                  </table>
+              </div>
+          </div>
 
-      <!-- DATA TABLE -->
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th style="width: 45%;">DESCRIPCIÓN</th>
-            <th style="text-align: center; width: 12%;">ENTREGA</th>
-            <th style="text-align: center; width: 8%;">CANT</th>
-            <th style="text-align: center; width: 12%;">PRECIO UNIT</th>
-            <th style="text-align: center; width: 8%;">IVA</th>
-            <th style="text-align: center; width: 15%;">IMPORTE</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${cotizacion.lineas.map(linea => `
-            <tr>
-              <td>
-                <strong style="display:block; margin-bottom:4px;">${linea.productoNombre || ''}</strong>
-                <span style="color:#555;">${linea.productoDescripcion ? linea.productoDescripcion.replace(/\n/g, '<br>') : ''}</span>
-              </td>
-              <td style="text-align: center;">${linea.tiempoEntrega || ''}</td>
-              <td style="text-align: center;">${linea.cantidad.toFixed(1)}</td>
-              <td style="text-align: right;">$ ${linea.precioUnitario.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-              <td style="text-align: center;">${linea.impuestoPorcentaje}%</td>
-              <td style="text-align: right;">$ ${linea.importe.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+          <table class="table table-red mt-4">
+              <thead>
+                  <tr>
+                      <th width="40%" style="text-align: left;">DESCRIPCIÓN</th>
+                      <th width="15%" class="text-center">ENTREGA</th>
+                      <th class="text-center">CANT</th>
+                      <th class="text-end">PRECIO UNIT</th>
+                      <th class="text-center">IVA</th>
+                      <th class="text-end">IMPORTE</th>
+                  </tr>
+              </thead>
+              <tbody>
+                  ${cotizacion.lineas.map(linea => `
+                      <tr>
+                          <td>
+                              ${renderDescription(linea.productoNombre, linea.productoDescripcion)}
+                          </td>
+                          <td class="text-center">
+                              ${linea.tiempoEntrega || ''}
+                          </td>
+                          <td class="text-center">${linea.cantidad.toFixed(1)}</td>
+                          <td class="text-end">$ ${linea.precioUnitario.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          
+                          <td class="text-center">
+                              ${linea.impuestoPorcentaje}%
+                          </td>
 
-      <!-- TOTALS AREA -->
-      <table class="totals-area">
-        <tr>
-          <td style="width: 60%; padding-right: 20px;">
-            <div class="info-header">INFORMACION ADICIONAL</div>
-            <table class="info-table">
-              <tr>
-                <td style="color: #444;">
-                  Términos y condiciones: <a href="${cotizacion.terminosCondiciones}" style="color: blue; text-decoration: none;">${cotizacion.terminosCondiciones}</a>
-                </td>
-              </tr>
-            </table>
-          </td>
-          <td style="width: 40%;">
-            <table class="totals-table">
-              <tr>
-                <td>Subtotal</td>
-                <td>$ ${cotizacion.subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-              </tr>
-              <tr>
-                <td>IVA 16%</td>
-                <td>$ ${cotizacion.iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-              </tr>
-              <tr>
-                <td>TOTAL</td>
-                <td>$ ${cotizacion.total.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
+                          <td class="text-end">$ ${linea.importe.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                      </tr>
+                  `).join('')}
+              </tbody>
+          </table>
 
-      <!-- FOOTER FIXED -->
-      <div class="footer-bank">
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <td style="width: 40%; vertical-align: top;">
-              <strong>RAFAEL ALONSO FERNANDEZ TINAJERO</strong><br>
-              RFC: FETR83041461A<br>
-              TEL: 6142477119<br>
-              MAIL: rfernandez@inttec.net
-            </td>
-            <td style="width: 45%; vertical-align: top;">
-              <strong>CUENTA BANCARIA BBVA</strong><br>
-              NO. CUENTA: 0193092593<br>
-              CLABE: 012150001930925930<br>
-              CUENTAHABIENTE: Rafael Alonso Fernandez Tinajero
-            </td>
-            <td style="width: 15%; vertical-align: bottom; text-align: right; color: #666;">
-              Página 1 / 1
-            </td>
-          </tr>
-        </table>
+          <div class="row mt-4">
+              <div class="col-7">
+                  <div class="info-text mt-2">
+                      <div class="section-header">Informacion Adicional</div>
+                      <div style="padding-top: 4px;">
+                        Términos y condiciones: <a href="${cotizacion.terminosCondiciones}" style="color: #0000ee; text-decoration: none;">${cotizacion.terminosCondiciones}</a>
+                      </div>
+                  </div>
+              </div>
+              <div class="col-5">
+                  <table class="table-totals">
+                      <tr><td>Subtotal</td><td class="text-end">$ ${cotizacion.subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
+                      <tr><td>IVA 16%</td><td class="text-end">$ ${cotizacion.iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
+                      <tr>
+                          <td>TOTAL</td>
+                          <td class="text-end">$ ${cotizacion.total.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                      </tr>
+                  </table>
+              </div>
+          </div>
+        </div>
+        
+        <!-- FOOTER FIXED -->
+        <div class="footer-bank">
+          <div style="width: 40%;">
+            <strong>RAFAEL ALONSO FERNANDEZ TINAJERO</strong><br>
+            RFC: FETR83041461A<br>
+            TEL: 6142477119<br>
+            MAIL: rfernandez@inttec.net
+          </div>
+          <div style="width: 45%;">
+            <strong>CUENTA BANCARIA BBVA</strong><br>
+            NO. CUENTA: 0193092593<br>
+            CLABE: 012150001930925930<br>
+            CUENTAHABIENTE: Rafael Alonso Fernandez Tinajero
+          </div>
+          <div style="width: 15%; text-align: right; color: #666; display: flex; align-items: flex-end; justify-content: flex-end;">
+            Página 1 / 1
+          </div>
+        </div>
       </div>
     </body>
     </html>
@@ -1982,10 +2053,38 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion) {
 
   try {
     if (Platform.OS === 'web') {
-      await Print.printAsync({ html: htmlContent });
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (iframeDoc) {
+        iframeDoc.open();
+        iframeDoc.write(htmlContent);
+        iframeDoc.close();
+
+        iframe.onload = () => {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 1000);
+        };
+      }
     } else {
-      const { uri } = await Print.printToFileAsync({ html: htmlContent });
-      await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Compartir Cotización' });
+      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      
+      const customNameUri = `${cacheDirectory}Cotizacion - ${cotizacion.numeroCotizacion}.pdf`;
+      await writeAsStringAsync(customNameUri, base64 || '', {
+        encoding: EncodingType.Base64,
+      });
+
+      await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: 'Compartir Cotización' });
     }
   } catch (error: any) {
     console.error('Error generando PDF:', error);
@@ -1996,4 +2095,3 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion) {
     }
   }
 }
-
