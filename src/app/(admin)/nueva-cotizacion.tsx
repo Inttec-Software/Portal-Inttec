@@ -9,10 +9,12 @@ import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { ThemedText } from '@/components/themed-text';
 import { supabase } from '@/services/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
 export default function NuevaCotizacionScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const editId = params.id as string | undefined;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
@@ -30,6 +32,7 @@ export default function NuevaCotizacionScreen() {
     moneda: 'MXN',
     lineas: [],
     terminosCondiciones: 'https://inttec.odoo.com/terms',
+    estado: 'Borrador',
     subtotal: 0,
     iva: 0,
     total: 0,
@@ -42,6 +45,9 @@ export default function NuevaCotizacionScreen() {
 
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
+
+  const [productSearchResults, setProductSearchResults] = useState<any[]>([]);
+  const [activeProductLineId, setActiveProductLineId] = useState<string | null>(null);
 
   const onDateChange = (event: any, selectedDate?: Date) => {
     setShowDatePicker(Platform.OS === 'ios');
@@ -94,25 +100,103 @@ export default function NuevaCotizacionScreen() {
     setShowClientResults(false);
   };
 
+  const searchProducts = async (lineId: string, text: string) => {
+    handleUpdateLine(lineId, 'productoNombre', text);
+    // Remove productoId if they edit the text manually so it gets saved as new
+    setCotizacion(prev => {
+      const newLineas = prev.lineas.map(l => l.id === lineId ? { ...l, productoId: undefined } : l);
+      return { ...prev, lineas: newLineas };
+    });
+
+    if (text.length < 2) {
+      setProductSearchResults([]);
+      setActiveProductLineId(null);
+      return;
+    }
+    setActiveProductLineId(lineId);
+    const { data } = await supabase
+      .from('productos')
+      .select('*')
+      .ilike('nombre_oficial', `%${text}%`)
+      .limit(5);
+    
+    if (data && data.length > 0) {
+      setProductSearchResults(data);
+    } else {
+      setProductSearchResults([]);
+    }
+  };
+
+  const handleSelectProduct = (lineId: string, product: any) => {
+    setCotizacion(prev => {
+      const newLineas = prev.lineas.map(linea => {
+        if (linea.id === lineId) {
+          return {
+            ...linea,
+            productoNombre: product.nombre_oficial,
+            productoId: product.id,
+            claveFacturacion: product.clave_facturacion || '',
+            precioUnitario: product.precio_unitario || 0,
+            impuestoPorcentaje: product.impuesto_porcentaje !== null ? product.impuesto_porcentaje : 16
+          };
+        }
+        return linea;
+      });
+      return { ...prev, lineas: newLineas };
+    });
+    setProductSearchResults([]);
+    setActiveProductLineId(null);
+  };
+
   // Calculate totals whenever lines change
   useEffect(() => {
-    const fetchLastFolio = async () => {
-      const { data, error } = await supabase
-        .from('cotizaciones')
-        .select('folio')
-        .order('folio', { ascending: false })
-        .limit(1);
-      
-      if (!error && data && data.length > 0) {
-        const lastFolio = parseInt(data[0].folio, 10);
-        if (!isNaN(lastFolio)) {
-          setCotizacion(prev => ({ ...prev, numeroCotizacion: (lastFolio + 1).toString() }));
+    const fetchCotizacion = async () => {
+      if (editId) {
+        const { data, error } = await supabase.from('cotizaciones').select('*').eq('id', editId).single();
+        if (data && !error) {
+          const { data: clientData } = await supabase.from('clientes').select('*').eq('nombre', data.cliente_nombre).single();
+          setCotizacion({
+            id: data.id,
+            numeroCotizacion: data.folio,
+            clienteNombre: data.cliente_nombre,
+            clienteRFC: clientData?.rfc || '',
+            clienteCorreo: clientData?.correo_electronico || '',
+            clienteCP: clientData?.codigo_postal || '',
+            direccionFactura: clientData?.direccion || '',
+            fechaCreacion: data.fecha_creacion,
+            vendedor: data.vendedor || 'Rafael Fernandez',
+            moneda: data.moneda || 'MXN',
+            lineas: data.lineas || [],
+            terminosCondiciones: data.terminos_condiciones || 'https://inttec.odoo.com/terms',
+            estado: data.estado || 'Borrador',
+            subtotal: data.subtotal || 0,
+            iva: data.iva || 0,
+            total: data.total || 0,
+          });
+          return;
         }
       }
+
+      const fetchLastFolio = async () => {
+        const { data, error } = await supabase
+          .from('cotizaciones')
+          .select('folio')
+          .order('folio', { ascending: false })
+          .limit(1);
+        
+        if (!error && data && data.length > 0) {
+          const lastFolio = parseInt(data[0].folio, 10);
+          if (!isNaN(lastFolio)) {
+            setCotizacion(prev => ({ ...prev, numeroCotizacion: (lastFolio + 1).toString() }));
+          }
+        }
+      };
+      
+      fetchLastFolio();
     };
-    
-    fetchLastFolio();
-  }, []);
+
+    fetchCotizacion();
+  }, [editId]);
 
   useEffect(() => {
     const subtotal = cotizacion.lineas.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0);
@@ -130,6 +214,7 @@ export default function NuevaCotizacionScreen() {
       id: Math.random().toString(),
       productoNombre: '',
       productoDescripcion: '',
+      claveFacturacion: '',
       tiempoEntrega: '',
       cantidad: 1,
       unidad: 'Unidad',
@@ -196,9 +281,50 @@ export default function NuevaCotizacionScreen() {
       );
       if (errorCliente) throw errorCliente;
       
+      console.log('Guardando/Actualizando productos...');
+      for (let linea of cotizacion.lineas) {
+        if (!linea.productoNombre.trim()) continue;
+        
+        try {
+          if (linea.productoId) {
+            // Actualizar precio, iva y clave del producto existente
+            await supabase.from('productos').update({
+              precio_unitario: linea.precioUnitario,
+              impuesto_porcentaje: linea.impuestoPorcentaje,
+              clave_facturacion: linea.claveFacturacion || null
+            }).eq('id', linea.productoId);
+          } else {
+            // Producto nuevo: crear con categoria generica y SKU temporal
+            const { data: catData } = await supabase.from('categorias_productos').select('id').limit(1);
+            let categoriaId = catData && catData.length > 0 ? catData[0].id : null;
+            
+            const tempSku = `TEMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            
+            if (categoriaId) {
+              const { data: newProd, error: prodErr } = await supabase.from('productos').insert({
+                nombre_oficial: linea.productoNombre.trim(),
+                sku_interno: tempSku,
+                categoria_id: categoriaId,
+                precio_unitario: linea.precioUnitario,
+                impuesto_porcentaje: linea.impuestoPorcentaje,
+                clave_facturacion: linea.claveFacturacion || null,
+                activo: true
+              }).select('id').single();
+              
+              if (newProd && !prodErr) {
+                linea.productoId = newProd.id;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('No se pudo guardar/actualizar el producto', e);
+        }
+      }
+
       console.log('Guardando cotizacion...');
-      // Save the cotizacion to database
-      const { error: errorCotizacion } = await supabase.from('cotizaciones').insert({
+      let errorCotizacion;
+      
+      const payload = {
         folio: cotizacion.numeroCotizacion,
         cliente_nombre: cotizacion.clienteNombre.trim(),
         vendedor: cotizacion.vendedor,
@@ -209,14 +335,22 @@ export default function NuevaCotizacionScreen() {
         total: cotizacion.total,
         lineas: cotizacion.lineas,
         terminos_condiciones: cotizacion.terminosCondiciones,
-        estado: 'Borrador'
-      });
+        estado: cotizacion.estado || 'Borrador'
+      };
+
+      if (editId) {
+        const { error } = await supabase.from('cotizaciones').update(payload).eq('id', editId);
+        errorCotizacion = error;
+      } else {
+        const { error } = await supabase.from('cotizaciones').insert(payload);
+        errorCotizacion = error;
+      }
 
       if (errorCotizacion) {
         throw errorCotizacion;
       }
       
-      showAlert('Éxito', 'Cotización guardada y cliente registrado.');
+      showAlert('Éxito', editId ? 'Cotización actualizada exitosamente.' : 'Cotización guardada y cliente registrado.');
       setTimeout(() => {
         router.push('/(admin)/cotizaciones');
       }, 1500);
@@ -240,30 +374,56 @@ export default function NuevaCotizacionScreen() {
     >
       <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
         
-        {/* Cabecera con Botón de Regreso */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.three, paddingTop: Spacing.three, paddingBottom: Spacing.two }}>
-          <TouchableOpacity onPress={() => router.push('/(admin)/cotizaciones')} style={{ marginRight: Spacing.two, padding: 8 }}>
-            <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-          </TouchableOpacity>
-          <ThemedText style={{ fontSize: 20, fontWeight: 'bold', color: themeColors.text }}>Nueva Cotización</ThemedText>
-        </View>
-
-        {/* Barra de Estado (Tracker) */}
-        <View style={[styles.statusBar, { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border }]}>
-          <ThemedText style={[styles.statusTitle, { color: themeColors.text }]}>
-            Estado de Cotización
-          </ThemedText>
-          <View style={[styles.tracker, { backgroundColor: themeColors.background }]}>
-            <View style={[styles.trackerActive, { backgroundColor: '#E8F0FE' }]}>
-              <ThemedText style={[styles.trackerActiveText, { color: '#1967D2' }]}>Borrador</ThemedText>
-            </View>
-            <View style={styles.trackerInactive}>
-              <ThemedText style={[styles.trackerInactiveText, { color: themeColors.textSecondary }]}>Enviado</ThemedText>
-            </View>
-            <View style={styles.trackerInactive}>
-              <ThemedText style={[styles.trackerInactiveText, { color: themeColors.textSecondary }]}>Orden</ThemedText>
-            </View>
+        {/* Cabecera con Botón de Regreso y Selector de Estado */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.three, paddingTop: Spacing.three, paddingBottom: Spacing.two, flexWrap: 'wrap', gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity onPress={() => router.push('/(admin)/cotizaciones')} style={{ marginRight: Spacing.two, padding: 8 }}>
+              <Ionicons name="arrow-back" size={24} color={themeColors.text} />
+            </TouchableOpacity>
+            <ThemedText style={{ fontSize: 20, fontWeight: 'bold', color: themeColors.text }}>
+              {editId ? 'Editar Cotización' : 'Nueva Cotización'}
+            </ThemedText>
           </View>
+
+          {/* Status Picker (Upper Right) */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            {['Borrador', 'Enviado', 'Aprobada', 'Orden de Compra'].map(status => {
+              const getStatusColor = () => {
+                switch(status) {
+                  case 'Borrador': return '#757575';
+                  case 'Enviado': return '#FF9800';
+                  case 'Aprobada': return '#4CAF50';
+                  case 'Orden de Compra': return '#2196F3';
+                  default: return themeColors.primary;
+                }
+              };
+              const activeColor = getStatusColor();
+              const isActive = cotizacion.estado === status;
+
+              return (
+                <TouchableOpacity
+                  key={status}
+                  onPress={() => setCotizacion({...cotizacion, estado: status})}
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 12,
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: isActive ? activeColor : themeColors.border,
+                    backgroundColor: isActive ? activeColor + '20' : 'transparent',
+                  }}
+                >
+                  <ThemedText style={{ 
+                    fontSize: 12, 
+                    fontWeight: isActive ? 'bold' : 'normal',
+                    color: isActive ? activeColor : themeColors.textSecondary 
+                  }}>
+                    {status}
+                  </ThemedText>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
 
         {/* Banner de Mensajes (Errores/Exito) */}
@@ -443,16 +603,34 @@ export default function NuevaCotizacionScreen() {
                 </View>
 
                 {/* Inputs Producto (Nombre y Descripcion) */}
-                <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Nombre del producto</ThemedText>
-                  <TextInput
-                    style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                    placeholder="Ej. Cilindro Hidraulico 10T..."
-                    placeholderTextColor={themeColors.textSecondary}
-                    value={linea.productoNombre}
-                    onChangeText={(t) => handleUpdateLine(linea.id, 'productoNombre', t)}
-                  />
-                </View>
+                  <View style={{ position: 'relative', zIndex: activeProductLineId === linea.id ? 2 : 1 }}>
+                    <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Nombre del producto</ThemedText>
+                    <TextInput
+                      style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
+                      placeholder="Ej. Cilindro Hidraulico 10T..."
+                      placeholderTextColor={themeColors.textSecondary}
+                      value={linea.productoNombre}
+                      onChangeText={(t) => searchProducts(linea.id, t)}
+                    />
+                    {activeProductLineId === linea.id && productSearchResults.length > 0 && (
+                      <View style={[styles.autocompleteContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, top: 75, zIndex: 10 }]}>
+                        <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 150 }}>
+                          {productSearchResults.map((prod) => (
+                            <TouchableOpacity 
+                              key={prod.id} 
+                              style={[styles.autocompleteItem, { borderBottomColor: themeColors.border }]}
+                              onPress={() => handleSelectProduct(linea.id, prod)}
+                            >
+                              <ThemedText style={{ color: themeColors.text, fontWeight: 'bold' }}>{prod.nombre_oficial}</ThemedText>
+                              <ThemedText style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+                                SKU: {prod.sku_interno}
+                              </ThemedText>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    )}
+                  </View>
                 <View style={styles.inputGroup}>
                   <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Detalles o descripción (Qué incluye)</ThemedText>
                   <TextInput
@@ -463,6 +641,17 @@ export default function NuevaCotizacionScreen() {
                     placeholderTextColor={themeColors.textSecondary}
                     value={linea.productoDescripcion}
                     onChangeText={(t) => handleUpdateLine(linea.id, 'productoDescripcion', t)}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Clave de Facturación / SAT (Uso Interno)</ThemedText>
+                  <TextInput
+                    style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
+                    placeholder="Ej. 43211500"
+                    placeholderTextColor={themeColors.textSecondary}
+                    value={linea.claveFacturacion || ''}
+                    onChangeText={(t) => handleUpdateLine(linea.id, 'claveFacturacion', t)}
                   />
                 </View>
 
@@ -548,7 +737,7 @@ export default function NuevaCotizacionScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity 
-              style={[styles.bottomBtnPrimary, { backgroundColor: '#714B67' }]}
+              style={[styles.bottomBtnPrimary, { backgroundColor: '#2196F3' }]}
               onPress={handleEnviar}
             >
               <Ionicons name="send" size={18} color="#ffffff" />
@@ -772,5 +961,23 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.medium,
     flex: 1,
     maxWidth: 200,
-  }
+  },
+  autocompleteContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  autocompleteItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+  },
 });

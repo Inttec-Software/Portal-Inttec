@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Platform, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Platform, TextInput, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
@@ -61,7 +61,7 @@ export default function CotizacionesListScreen() {
     }).format(cantidad || 0);
   };
 
-  const handleDownloadPDF = async (cot: any) => {
+  const handleDownloadPDF = async (cot: any, action: 'view' | 'download' = 'view') => {
     try {
       // Intentar obtener los datos completos del cliente de la base de datos
       const { data: clientData } = await supabase
@@ -89,10 +89,42 @@ export default function CotizacionesListScreen() {
         terminosCondiciones: cot.terminos_condiciones || 'https://inttec.odoo.com/terms',
       };
       
-      await exportarCotizacionOdooPDF(cotData);
+      await exportarCotizacionOdooPDF(cotData, action);
     } catch (error: any) {
       if (Platform.OS === 'web') {
         window.alert('Error al generar PDF: ' + error.message);
+      }
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Estás seguro de que deseas eliminar esta cotización?')) {
+        ejecutarEliminacion(id);
+      }
+    } else {
+      Alert.alert(
+        'Eliminar Cotización',
+        '¿Estás seguro de que deseas eliminar esta cotización?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Eliminar', style: 'destructive', onPress: () => ejecutarEliminacion(id) }
+        ]
+      );
+    }
+  };
+
+  const ejecutarEliminacion = async (id: string) => {
+    try {
+      const { error } = await supabase.from('cotizaciones').delete().eq('id', id);
+      if (error) throw error;
+      fetchCotizaciones();
+    } catch (err) {
+      console.error('Error al eliminar:', err);
+      if (Platform.OS === 'web') {
+        window.alert('Error al eliminar la cotización.');
+      } else {
+        Alert.alert('Error', 'No se pudo eliminar la cotización.');
       }
     }
   };
@@ -157,33 +189,64 @@ export default function CotizacionesListScreen() {
               <View key={cot.id} style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                   <Text style={[styles.folio, { color: themeColors.primary }]}>Folio: {cot.folio}</Text>
-                  <View style={[styles.badge, { backgroundColor: cot.estado === 'Aprobada' ? '#4caf50' : '#e0e0e0' }]}>
-                    <Text style={{ fontSize: 10, fontWeight: 'bold', color: cot.estado === 'Aprobada' ? '#fff' : '#424242' }}>
-                      {cot.estado || 'Borrador'}
-                    </Text>
-                  </View>
+                  {(() => {
+                    const estado = cot.estado || 'Borrador';
+                    let activeColor: string = themeColors.primary;
+                    switch(estado) {
+                      case 'Borrador': activeColor = '#757575'; break;
+                      case 'Enviado': activeColor = '#FF9800'; break;
+                      case 'Aprobada': activeColor = '#4CAF50'; break;
+                      case 'Orden de Compra': activeColor = '#2196F3'; break;
+                    }
+                    return (
+                      <View style={[styles.badge, { backgroundColor: activeColor + '20', borderWidth: 1, borderColor: activeColor }]}>
+                        <Text style={{ fontSize: 10, fontWeight: 'bold', color: activeColor }}>
+                          {estado}
+                        </Text>
+                      </View>
+                    );
+                  })()}
                 </View>
                 <Text style={{ fontSize: 15, color: themeColors.text, fontWeight: '600', marginBottom: 4 }}>
                   {cot.cliente_nombre || 'Cliente sin nombre'}
                 </Text>
                 
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: Spacing.two }}>
-                  <View>
-                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginBottom: 4 }}>
-                      Fecha: {cot.fecha_creacion}
-                    </Text>
-                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.accent }}>
-                      {formatearMoneda(cot.total)}
-                    </Text>
+                <View style={{ marginTop: Spacing.two }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: Spacing.two }}>
+                    <View>
+                      <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginBottom: 4 }}>
+                        Fecha: {cot.fecha_creacion}
+                      </Text>
+                      <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.accent }}>
+                        {formatearMoneda(cot.total)}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+                      <TouchableOpacity onPress={() => handleDelete(cot.id)} style={{ padding: 8 }}>
+                        <Ionicons name="trash-outline" size={20} color="#e53935" />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} style={{ padding: 8 }}>
+                        <Ionicons name="pencil-outline" size={20} color={themeColors.primary} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   
-                  <TouchableOpacity 
-                    onPress={() => handleDownloadPDF(cot)}
-                    style={{ backgroundColor: themeColors.primary + '15', padding: 8, borderRadius: 8, flexDirection: 'row', alignItems: 'center' }}
-                  >
-                    <Ionicons name="document-text-outline" size={16} color={themeColors.primary} style={{ marginRight: 4 }} />
-                    <Text style={{ color: themeColors.primary, fontSize: 12, fontWeight: 'bold' }}>Ver PDF</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity 
+                      onPress={() => handleDownloadPDF(cot, 'view')}
+                      style={{ flex: 1, backgroundColor: themeColors.primary + '15', padding: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <Ionicons name="eye-outline" size={16} color={themeColors.primary} style={{ marginRight: 6 }} />
+                      <Text style={{ color: themeColors.primary, fontSize: 13, fontWeight: 'bold' }}>Ver PDF</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      onPress={() => handleDownloadPDF(cot, 'download')}
+                      style={{ flex: 1, backgroundColor: themeColors.primary, padding: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <Ionicons name="download-outline" size={16} color="#ffffff" style={{ marginRight: 6 }} />
+                      <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: 'bold' }}>Descargar</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             ))

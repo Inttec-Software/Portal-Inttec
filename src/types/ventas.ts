@@ -1,7 +1,9 @@
 export interface CotizacionLinea {
   id: string;
+  productoId?: string;
   productoNombre: string; // Nombre principal
   productoDescripcion: string; // Detalles o lo que incluye
+  claveFacturacion?: string; // Clave especial para facturas (ej. Clave SAT)
   tiempoEntrega: string;
   cantidad: number;
   unidad: string;
@@ -23,6 +25,7 @@ export interface Cotizacion {
   moneda: string; // Ej: 'MXN'
   lineas: CotizacionLinea[];
   terminosCondiciones?: string;
+  estado?: string;
   subtotal: number;
   iva: number;
   total: number;

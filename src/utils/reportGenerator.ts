@@ -1786,7 +1786,7 @@ export const ReportGenerator = {
   },
 };
 
-export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion) {
+export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 'view' | 'download' = 'view') {
   const title = `Cotizacion - ${cotizacion.numeroCotizacion}`;
   
   const renderDescription = (name: string, description: string) => {
@@ -2053,38 +2053,54 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion) {
 
   try {
     if (Platform.OS === 'web') {
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
-      document.body.appendChild(iframe);
+      if (action === 'download') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
 
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (iframeDoc) {
-        iframeDoc.open();
-        iframeDoc.write(htmlContent);
-        iframeDoc.close();
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
 
-        iframe.onload = () => {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-          setTimeout(() => {
-            document.body.removeChild(iframe);
-          }, 1000);
-        };
+          iframe.onload = () => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+            }, 1000);
+          };
+        }
+      } else {
+        const newWindow = window.open('', '_blank');
+        if (newWindow) {
+          newWindow.document.write(htmlContent);
+          newWindow.document.close();
+        } else {
+          window.alert('Por favor, permite las ventanas emergentes (pop-ups) en tu navegador para ver el documento.');
+        }
       }
     } else {
-      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
-      
-      const customNameUri = `${cacheDirectory}Cotizacion - ${cotizacion.numeroCotizacion}.pdf`;
-      await writeAsStringAsync(customNameUri, base64 || '', {
-        encoding: EncodingType.Base64,
-      });
+      if (action === 'view') {
+        // En móviles, para "solo ver", usamos printAsync que abre el visor de impresión nativo (muy bueno para visualizar)
+        await Print.printAsync({ html: htmlContent });
+      } else {
+        // Para "descargar", generamos el archivo físico y abrimos el menú de compartir/guardar
+        const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+        
+        const customNameUri = `${cacheDirectory}Cotizacion - ${cotizacion.numeroCotizacion}.pdf`;
+        await writeAsStringAsync(customNameUri, base64 || '', {
+          encoding: EncodingType.Base64,
+        });
 
-      await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: 'Compartir Cotización' });
+        await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: 'Compartir Cotización' });
+      }
     }
   } catch (error: any) {
     console.error('Error generando PDF:', error);
