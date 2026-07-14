@@ -13,6 +13,56 @@ export interface GeminiOcrResult {
   estado: string | null;
 }
 
+
+/**
+ * Limpia y parsea de forma robusta la respuesta JSON de Gemini, eliminando markdown,
+ * comentarios de una línea o multilínea, y comas finales adicionales (trailing commas).
+ */
+function cleanAndParseJson<T>(rawText: string): T {
+  let cleanJsonStr = rawText.trim();
+  
+  // 1. Quitar bloques de código markdown si los hay
+  const markdownMatch = cleanJsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (markdownMatch) {
+    cleanJsonStr = markdownMatch[1].trim();
+  }
+  
+  // 2. Extraer el primer objeto o arreglo JSON para evitar texto basura antes o después
+  const firstBrace = cleanJsonStr.indexOf('{');
+  const lastBrace = cleanJsonStr.lastIndexOf('}');
+  const firstBracket = cleanJsonStr.indexOf('[');
+  const lastBracket = cleanJsonStr.lastIndexOf(']');
+  
+  let startIdx = -1;
+  let endIdx = -1;
+  
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    startIdx = firstBrace;
+    endIdx = lastBrace;
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+    endIdx = lastBracket;
+  }
+  
+  if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+    cleanJsonStr = cleanJsonStr.substring(startIdx, endIdx + 1);
+  }
+  
+  // 3. Eliminar comentarios de una línea (//...) y comentarios multilínea (/*...*/)
+  cleanJsonStr = cleanJsonStr.replace(/\/\/.*$/gm, '');
+  cleanJsonStr = cleanJsonStr.replace(/\/\*[\s\S]*?\*\//g, '');
+  
+  // 4. Eliminar comas sueltas antes de un cierre de objeto o arreglo (trailing commas)
+  cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
+  
+  try {
+    return JSON.parse(cleanJsonStr) as T;
+  } catch (e: any) {
+    console.error('Failed to parse Gemini output:', cleanJsonStr);
+    throw new Error('Error al interpretar el JSON generado por Gemini: ' + e.message);
+  }
+}
+
 export const GeminiService = {
   async scanTicket(base64Image: string, cantidadPersonas: number = 1, mimeType: string = 'image/jpeg'): Promise<GeminiOcrResult> {
     if (!GEMINI_API_KEY) {
@@ -23,7 +73,7 @@ export const GeminiService = {
 
     const prompt = `Analiza la imagen de este ticket de compra de gastos. Extrae y devuelve un objeto JSON puro (sin formato markdown ni bloques de código, solo el texto del JSON) con las siguientes propiedades:
 {
-  "monto": number (monto total del ticket, si no es legible o no hay, usa null),
+  "monto": number (monto total del ticket incluyendo centavos/decimales de forma exacta, no redondees el valor, si no es legible o no hay, usa null),
   "proveedor": string (nombre del establecimiento o proveedor, si no hay usa null),
   "sucursal": string (nombre de la sucursal o filial si aparece en el ticket, si no usa null),
   "fecha": string (la fecha de compra o emisión del ticket en formato DD/MM/AAAA, si no es legible o no hay, usa null),
@@ -90,30 +140,7 @@ export const GeminiService = {
         throw new Error('No se pudo extraer texto del ticket.');
       }
 
-      // Intentar parsear la respuesta JSON del modelo de forma robusta
-      let cleanJsonStr = textResult.trim();
-      const markdownMatch = cleanJsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (markdownMatch) {
-        cleanJsonStr = markdownMatch[1].trim();
-      }
-      
-      // Extraer estrictamente el objeto JSON para evitar basura (ej: notas extras de la IA)
-      const firstBrace = cleanJsonStr.indexOf('{');
-      const lastBrace = cleanJsonStr.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
-        cleanJsonStr = cleanJsonStr.substring(firstBrace, lastBrace + 1);
-      }
-      
-      // Sanitizar JSON: eliminar comas sueltas antes de un cierre de objeto o arreglo
-      cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
-
-      let parsed: GeminiOcrResult;
-      try {
-        parsed = JSON.parse(cleanJsonStr);
-      } catch (e: any) {
-        console.error('Failed to parse Gemini output:', cleanJsonStr);
-        throw new Error('Error al interpretar el JSON generado por Gemini: ' + e.message);
-      }
+      const parsed = cleanAndParseJson<GeminiOcrResult>(textResult);
 
       return {
         monto: parsed.monto ?? null,
@@ -351,16 +378,7 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
         throw new Error('No se pudo extraer el contenido de la factura.');
       }
 
-      let cleanJsonStr = textResult.trim();
-      const markdownMatch = cleanJsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (markdownMatch) {
-        cleanJsonStr = markdownMatch[1].trim();
-      }
-      
-      // Sanitizar JSON: eliminar comas sueltas antes de un cierre de objeto o arreglo
-      cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
-
-      return JSON.parse(cleanJsonStr);
+      return cleanAndParseJson<any>(textResult);
     } catch (err: any) {
       console.error('Error in extractInvoiceProducts:', err);
       throw new Error(err.message || 'Error al procesar la factura con Inteligencia Artificial.');
@@ -465,28 +483,7 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
         throw new Error('No se pudo extraer el contenido de la factura de venta.');
       }
 
-      let cleanJsonStr = textResult.trim();
-      const markdownMatch = cleanJsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (markdownMatch) {
-        cleanJsonStr = markdownMatch[1].trim();
-      }
-      
-      const firstBrace = cleanJsonStr.indexOf('{');
-      const lastBrace = cleanJsonStr.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
-        cleanJsonStr = cleanJsonStr.substring(firstBrace, lastBrace + 1);
-      }
-      
-      // Sanitizar JSON: eliminar comas sueltas antes de un cierre de objeto o arreglo
-      cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
-
-      let parsed: GeminiSalesResult;
-      try {
-        parsed = JSON.parse(cleanJsonStr);
-      } catch (e: any) {
-        console.error('Failed to parse Gemini output:', cleanJsonStr);
-        throw new Error('Error al interpretar el JSON generado por Gemini: ' + e.message);
-      }
+      const parsed = cleanAndParseJson<GeminiSalesResult>(textResult);
 
       // Re-calcular totales en código para evitar errores matemáticos de la IA
       let precioTotalFacturado = 0;

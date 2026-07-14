@@ -625,6 +625,12 @@ export default function GastoForm() {
       return;
     }
 
+    if (facturado === false && !motivoSinFactura.trim()) {
+      showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
+      setCurrentStep(2);
+      return;
+    }
+
     const totalGasto = Number(monto) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
 
     if (isSplit) {
@@ -849,6 +855,10 @@ export default function GastoForm() {
       }
       if (facturado === null) {
         showAlert('Validación', 'Por favor especifica si el gasto está facturado.');
+        return;
+      }
+      if (facturado === false && !motivoSinFactura.trim()) {
+        showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
         return;
       }
     }
@@ -1561,7 +1571,64 @@ export default function GastoForm() {
                 </View>
               </View>
 
+              {facturado === true && (
+                <View style={{ marginBottom: Spacing.two }}>
+                  <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13 }]}>Adjuntar Factura</Text>
+                  {facturaUri ? (
+                    <View style={[styles.invoicePreviewCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <View style={styles.pdfPreviewContainer}>
+                        <Ionicons name="document-text" size={24} color={themeColors.danger} />
+                        <Text style={[styles.pdfFileName, { color: themeColors.text }]} numberOfLines={1}>
+                          {facturaUri.split('/').pop()}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.removeInvoiceBtn, { backgroundColor: themeColors.danger + '15' }]}
+                        onPress={() => {
+                          setFacturaUri(null);
+                          setFacturaBase64(null);
+                          setFacturaExt(null);
+                        }}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
+                        <Text style={{ color: themeColors.danger, fontSize: 12, fontWeight: '700' }}>Quitar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={{ flexDirection: 'row', gap: Spacing.one, marginTop: Spacing.one }}>
+                      <TouchableOpacity
+                        style={[styles.actionBtn, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
+                        onPress={handleCaptureFactura}
+                      >
+                        <Ionicons name="camera" size={20} color={themeColors.text} />
+                        <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Cámara</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.actionBtn, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
+                        onPress={handleSelectFacturaGallery}
+                      >
+                        <Ionicons name="images" size={20} color={themeColors.text} />
+                        <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Galería</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              )}
 
+              {facturado === false && (
+                <View style={{ marginBottom: Spacing.two }}>
+                  <CustomInput
+                    label="Motivo por el cual no se cuenta con factura *"
+                    placeholder="Ej. El establecimiento no emite facturas, régimen simplificado, etc."
+                    value={motivoSinFactura}
+                    onChangeText={setMotivoSinFactura}
+                    iconName="alert-circle-outline"
+                    multiline
+                    numberOfLines={2}
+                    style={{ height: 60 }}
+                  />
+                </View>
+              )}
 
               <View style={styles.footerNav}>
                 <CustomButton title="Atrás" onPress={prevStep} variant="secondary" style={styles.navBtn} />
