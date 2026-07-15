@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -29,7 +29,6 @@ export default function MiTrabajoScreen() {
 
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
-  const [filteredEvidencias, setFilteredEvidencias] = useState<Evidencia[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -51,6 +50,31 @@ export default function MiTrabajoScreen() {
     }
   };
 
+  const loadEvidencias = async (userId: string, isRefresh = false) => {
+    if (isRefresh) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('evidencias')
+        .select('*')
+        .eq('empleado_id', userId)
+        .order('fecha_trabajo', { ascending: false });
+
+      if (error) throw error;
+      setEvidencias(data || []);
+    } catch (error: any) {
+      console.error('Error al cargar evidencias:', error.message);
+      Alert.alert('Error', 'No se pudieron cargar las evidencias de trabajo.');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
       const user = await AuthService.getCurrentUser();
@@ -64,46 +88,18 @@ export default function MiTrabajoScreen() {
     init();
   }, [router]);
 
-  useEffect(() => {
+  const filteredEvidencias = useMemo(() => {
     if (!searchQuery.trim()) {
-      setFilteredEvidencias(evidencias);
-    } else {
-      const q = searchQuery.toLowerCase();
-      const filtered = evidencias.filter(
-        (e) =>
-          e.cliente.toLowerCase().includes(q) ||
-          e.descripcion_trabajo.toLowerCase().includes(q) ||
-          (e.materiales_usados && e.materiales_usados.toLowerCase().includes(q))
-      );
-      setFilteredEvidencias(filtered);
+      return evidencias;
     }
+    const q = searchQuery.toLowerCase();
+    return evidencias.filter(
+      (e) =>
+        e.cliente.toLowerCase().includes(q) ||
+        e.descripcion_trabajo.toLowerCase().includes(q) ||
+        (e.materiales_usados && e.materiales_usados.toLowerCase().includes(q))
+    );
   }, [searchQuery, evidencias]);
-
-  const loadEvidencias = async (userId: string, isRefresh = false) => {
-    if (isRefresh) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('evidencias')
-        .select('*')
-        .eq('empleado_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setEvidencias(data || []);
-      setFilteredEvidencias(data || []);
-    } catch (err: any) {
-      console.error('Error fetching evidencias:', err);
-      Alert.alert('Error', 'No se pudieron recuperar los reportes de trabajo.');
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  };
 
   const handleRefresh = () => {
     if (currentUser) {

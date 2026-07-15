@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -29,7 +29,6 @@ export default function AdminEvidenciasScreen() {
 
   const [adminUser, setAdminUser] = useState<Usuario | null>(null);
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
-  const [filteredEvidencias, setFilteredEvidencias] = useState<Evidencia[]>([]);
   const [employees, setEmployees] = useState<Usuario[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,20 +51,7 @@ export default function AdminEvidenciasScreen() {
     }
   };
 
-  useEffect(() => {
-    const init = async () => {
-      const user = await AuthService.getCurrentUser();
-      if (!user || user.rol !== 'ADMIN') {
-        router.replace('/');
-        return;
-      }
-      setAdminUser(user);
-      await refreshData();
-    };
-    init();
-  }, [router]);
-
-  const refreshData = async (isRefresh = false) => {
+  async function refreshData(isRefresh = false) {
     if (isRefresh) {
       setIsRefreshing(true);
     } else {
@@ -81,28 +67,39 @@ export default function AdminEvidenciasScreen() {
 
       if (evidencesErr) throw evidencesErr;
       setEvidencias(evidencesData || []);
-      setFilteredEvidencias(evidencesData || []);
 
-      // 2. Obtener la lista de empleados para el filtro
-      const { data: usersData, error: usersErr } = await supabase
+      // 2. Obtener lista de personal (usuarios de tipo EMPLEADO)
+      const { data: employeesData, error: employeesErr } = await supabase
         .from('usuarios')
-        .select('id, nombre, email, rol')
+        .select('*')
         .eq('rol', 'EMPLEADO')
         .order('nombre');
 
-      if (usersErr) throw usersErr;
-      setEmployees(usersData || []);
+      if (employeesErr) throw employeesErr;
+      setEmployees(employeesData || []);
     } catch (err: any) {
-      console.error('Error fetching admin evidences data:', err);
+      console.error('Error al actualizar evidencias:', err.message);
       Alert.alert('Error', 'No se pudieron recuperar los reportes de trabajo.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  };
+  }
 
-  // Filtrado combinado: Empleado + Buscador
   useEffect(() => {
+    const init = async () => {
+      const user = await AuthService.getCurrentUser();
+      if (!user || user.rol !== 'ADMIN') {
+        router.replace('/');
+        return;
+      }
+      setAdminUser(user);
+      await refreshData();
+    };
+    init();
+  }, [router]);
+
+  const filteredEvidencias = useMemo(() => {
     let result = evidencias;
 
     // Filtro por Empleado
@@ -122,7 +119,7 @@ export default function AdminEvidenciasScreen() {
       );
     }
 
-    setFilteredEvidencias(result);
+    return result;
   }, [searchQuery, selectedEmployeeId, evidencias]);
 
   const handleExportPDF = async (ev: Evidencia) => {

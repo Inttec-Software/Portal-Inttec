@@ -108,6 +108,8 @@ const CustomInput = React.forwardRef<TextInput, CustomInputProps>(({
   );
 });
 
+CustomInput.displayName = 'CustomInput';
+
 export default CustomInput;
 
 const styles = StyleSheet.create({

@@ -38,7 +38,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    refreshSession();
+    let active = true;
+    const initSession = async () => {
+      try {
+        const currentUser = await AuthService.getCurrentUser();
+        if (active) setUser(currentUser);
+      } catch (error) {
+        console.error('Error fetching user context:', error);
+        if (active) setUser(null);
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    };
+    initSession();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {

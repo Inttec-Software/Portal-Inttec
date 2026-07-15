@@ -70,16 +70,22 @@ export default function EmpleadoDashboard() {
   const [isLoadingChecador, setIsLoadingChecador] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [checadorMapUrl, setChecadorMapUrl] = useState<string | null>(null);
+  const [prevCurrentLocation, setPrevCurrentLocation] = useState(currentLocation);
+  const [checadorMapUrl, setChecadorMapUrl] = useState<string | null>(() => {
+    if (!currentLocation) return null;
+    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyDgvQcdXQYx8uSGNJJ4wENAGkIVbDIaUXc";
+    return `https://maps.googleapis.com/maps/api/staticmap?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&markers=color:red%7C${currentLocation.lat},${currentLocation.lng}&key=${apiKey}`;
+  });
 
-  useEffect(() => {
+  if (currentLocation !== prevCurrentLocation) {
+    setPrevCurrentLocation(currentLocation);
     if (currentLocation) {
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyDgvQcdXQYx8uSGNJJ4wENAGkIVbDIaUXc";
       setChecadorMapUrl(`https://maps.googleapis.com/maps/api/staticmap?center=${currentLocation.lat},${currentLocation.lng}&zoom=16&size=200x200&markers=color:red%7C${currentLocation.lat},${currentLocation.lng}&key=${apiKey}`);
     } else {
       setChecadorMapUrl(null);
     }
-  }, [currentLocation]);
+  }
 
   const [currentAddress, setCurrentAddress] = useState<string>('Obteniendo dirección...');
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
@@ -436,7 +442,7 @@ export default function EmpleadoDashboard() {
     return () => clearInterval(interval);
   }, [user]);
 
-  const refreshData = async (userId: string, silent = false) => {
+  async function refreshData(userId: string, silent = false) {
     if (!silent) setIsLoading(true);
     try {
       // 1. Obtener de Supabase
@@ -457,7 +463,7 @@ export default function EmpleadoDashboard() {
     } finally {
       if (!silent) setIsLoading(false);
     }
-  };
+  }
 
   const handleSyncManual = async () => {
     if (!user) return;
@@ -1140,7 +1146,7 @@ export default function EmpleadoDashboard() {
                         </Text>
                       </View>
                       <Text style={[styles.observationText, { color: themeColors.text }]}>
-                        "{selectedGasto.rejection_feedback}"
+                        {`"${selectedGasto.rejection_feedback}"`}
                       </Text>
 
                       <View style={styles.responseForm}>

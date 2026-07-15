@@ -55,6 +55,10 @@ const showAlert = (title: string, message: string) => {
 const formatCurrency = (val: number) =>
   '$' + val.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const getTimestampFileName = (userId: string, ext: string) => {
+  return `ventas/${userId}/${Date.now()}_factura.${ext}`;
+};
+
 export default function VentasScreen() {
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
@@ -290,11 +294,7 @@ export default function VentasScreen() {
     }
   };
 
-  useEffect(() => {
-    if (activeTab === 'historial') {
-      loadHistorial();
-    }
-  }, [activeTab]);
+
 
   // === Calcular totales de las partidas ===
   const calculatedTotals = useMemo(() => {
@@ -570,7 +570,7 @@ export default function VentasScreen() {
       if (fileBase64) {
         const ext = fileMimeType.includes('pdf') ? 'pdf' : 'jpg';
         const contentType = fileMimeType.includes('pdf') ? 'application/pdf' : 'image/jpeg';
-        const fileName = `ventas/${currentUser.id}/${Date.now()}_factura.${ext}`;
+        const fileName = getTimestampFileName(currentUser.id, ext);
         const arrayBuffer = base64ToArrayBuffer(fileBase64);
 
         const { error: uploadError } = await supabase.storage
@@ -971,7 +971,7 @@ export default function VentasScreen() {
                   >
                     <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
                     <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 14 }}>
-                      Agregar "{clienteSearch.trim()}"
+                      {`Agregar "${clienteSearch.trim()}"`}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -1451,7 +1451,10 @@ export default function VentasScreen() {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => setActiveTab('historial')}
+            onPress={() => {
+              setActiveTab('historial');
+              loadHistorial();
+            }}
             style={[
               styles.tab,
               activeTab === 'historial'

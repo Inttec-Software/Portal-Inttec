@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -129,8 +129,7 @@ export default function EditarGastoForm() {
   const [selectedEstado, setSelectedEstado] = useState<string>('');
   const [showEstDropdown, setShowEstDropdown] = useState(false);
 
-  // Alerta local por límites de alimentos según el Estado
-  const [alertaLocal, setAlertaLocal] = useState<string | null>(null);
+
 
   const [incluyePropina, setIncluyePropina] = useState<boolean | null>(null);
   const [montoPropina, setMontoPropina] = useState<string>('');
@@ -173,7 +172,7 @@ export default function EditarGastoForm() {
   const [showSubDropdown, setShowSubDropdown] = useState(false);
   const [showCliDropdown, setShowCliDropdown] = useState(false);
 
-  useEffect(() => {
+  const alertaLocal = useMemo(() => {
     const alerts: string[] = [];
 
     // 1. Validar límite de alimentos general de $280 MXN por persona (comida + propina)
@@ -201,12 +200,8 @@ export default function EditarGastoForm() {
       alerts.push(`Artículos no permitidos detectados (${infraccionesDetectadas.join(', ')})`);
     }
 
-    if (alerts.length > 0) {
-      setAlertaLocal(alerts.join(' | '));
-    } else {
-      setAlertaLocal(null);
-    }
-  }, [monto, selectedCategoria, justificacion, proveedor, selectedEmpleados]);
+    return alerts.length > 0 ? alerts.join(' | ') : null;
+  }, [monto, selectedCategoria, justificacion, proveedor, selectedEmpleados, esComida, incluyePropina, montoPropina]);
 
   const loadCatalogos = async () => {
     try {
@@ -1733,7 +1728,7 @@ export default function EditarGastoForm() {
                             onPress={() => handleAddNewCliente(clienteSearch)}
                           >
                             <Text style={{ color: themeColors.accent, fontWeight: '600' }}>
-                              ➕ Agregar "{clienteSearch.trim()}"
+                              {`➕ Agregar "${clienteSearch.trim()}"`}
                             </Text>
                           </TouchableOpacity>
                         )}

@@ -51,7 +51,7 @@ export default function CatalogosManager() {
     loadData();
   }, []);
 
-  const loadData = async () => {
+  async function loadData() {
     setIsLoading(true);
     try {
       const [catRes, subRes, cliRes] = await Promise.all([
@@ -73,7 +73,7 @@ export default function CatalogosManager() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }
 
   const handleAddItem = async () => {
     if (!newItemName.trim()) {

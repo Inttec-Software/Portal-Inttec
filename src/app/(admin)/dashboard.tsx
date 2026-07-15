@@ -77,15 +77,13 @@ export default function AdminDashboard() {
   const [viewerVisible, setViewerVisible] = useState(false);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
+  const [prevSelectedGastoId, setPrevSelectedGastoId] = useState<string | undefined>(undefined);
   const [localMotivo, setLocalMotivo] = useState('');
 
-  useEffect(() => {
-    if (selectedGasto) {
-      setLocalMotivo(selectedGasto.motivo_sin_factura || '');
-    } else {
-      setLocalMotivo('');
-    }
-  }, [selectedGasto?.id]);
+  if (selectedGasto?.id !== prevSelectedGastoId) {
+    setPrevSelectedGastoId(selectedGasto?.id);
+    setLocalMotivo(selectedGasto?.motivo_sin_factura || '');
+  }
 
   // Registro y Edición de Usuario (Personal)
   const [addUserModalVisible, setAddUserModalVisible] = useState(false);
@@ -269,7 +267,7 @@ export default function AdminDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const refreshData = async (silent = false) => {
+  async function refreshData(silent = false) {
     if (!silent) setIsLoading(true);
     try {
       // 1. Obtener TODOS los gastos
@@ -281,10 +279,10 @@ export default function AdminDashboard() {
       if (gastosErr) throw gastosErr;
       setGastos(gastosData || []);
 
-      // 2. Obtener lista de personal (usuarios)
+      // 2. Obtener usuarios (personal)
       const { data: usersData, error: usersErr } = await supabase
         .from('usuarios')
-        .select('id, nombre, email, rol, telefono, created_at')
+        .select('*')
         .order('nombre');
 
       if (usersErr) throw usersErr;
@@ -297,7 +295,7 @@ export default function AdminDashboard() {
     } finally {
       if (!silent) setIsLoading(false);
     }
-  };
+  }
 
   const handleLogout = async () => {
     const performLogout = async () => {
@@ -1243,12 +1241,26 @@ export default function AdminDashboard() {
       {/* Resumen Cards */}
       <View style={styles.summaryContainer}>
         <View style={[styles.summaryCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>TOTAL PENDIENTES</Text>
-          <Text style={[styles.summaryValue, { color: themeColors.warning }]}>{formatCurrency(totalPendientes)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: themeColors.warning + '15', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="time" size={20} color={themeColors.warning} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>PENDIENTES</Text>
+              <Text style={[styles.summaryValue, { color: themeColors.warning }]} numberOfLines={1}>{formatCurrency(totalPendientes)}</Text>
+            </View>
+          </View>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>TOTAL APROBADO</Text>
-          <Text style={[styles.summaryValue, { color: themeColors.success }]}>{formatCurrency(totalAprobados)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: themeColors.success + '15', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="checkmark-circle" size={20} color={themeColors.success} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>APROBADO</Text>
+              <Text style={[styles.summaryValue, { color: themeColors.success }]} numberOfLines={1}>{formatCurrency(totalAprobados)}</Text>
+            </View>
+          </View>
         </View>
       </View>
 
@@ -1421,8 +1433,8 @@ export default function AdminDashboard() {
             }
           ]}
         >
-          <View style={[styles.quickActionIconBg, { backgroundColor: '#714B67' + '15' }]}>
-            <Ionicons name="document-text" size={18} color="#714B67" />
+          <View style={[styles.quickActionIconBg, { backgroundColor: themeColors.accent + '15' }]}>
+            <Ionicons name="document-text" size={18} color={themeColors.accent} />
           </View>
           <Text
             style={[
@@ -1442,31 +1454,27 @@ export default function AdminDashboard() {
 
       </View>
 
-      {/* Tabs Simplificadas a 2 */}
-      <View style={styles.tabsContainer}>
+      {/* Segmented Control Tabs */}
+      <View style={[styles.tabsSegmentedContainer, { backgroundColor: themeColors.border }]}>
         <TouchableOpacity
           onPress={() => setActiveTab('pendientes')}
           style={[
-            styles.tab,
-            activeTab === 'pendientes'
-              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
-              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+            styles.tabSegment,
+            activeTab === 'pendientes' && { backgroundColor: themeColors.backgroundElement }
           ]}
         >
-          <Text style={[styles.tabText, { color: activeTab === 'pendientes' ? '#ffffff' : themeColors.textSecondary }]}>
+          <Text style={[styles.tabSegmentText, { color: activeTab === 'pendientes' ? themeColors.text : themeColors.textSecondary, fontWeight: activeTab === 'pendientes' ? 'bold' : '600' }]}>
             Revisar ({pendingGastos.length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setActiveTab('historial')}
           style={[
-            styles.tab,
-            activeTab === 'historial'
-              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
-              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+            styles.tabSegment,
+            activeTab === 'historial' && { backgroundColor: themeColors.backgroundElement }
           ]}
         >
-          <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#ffffff' : themeColors.textSecondary }]}>
+          <Text style={[styles.tabSegmentText, { color: activeTab === 'historial' ? themeColors.text : themeColors.textSecondary, fontWeight: activeTab === 'historial' ? 'bold' : '600' }]}>
             Historial ({historyGastos.length})
           </Text>
         </TouchableOpacity>
@@ -2064,7 +2072,7 @@ export default function AdminDashboard() {
                         </Text>
                         {selectedGasto.rejection_feedback && (
                           <Text style={{ color: themeColors.textSecondary, fontSize: 13, marginTop: 4 }}>
-                            Feedback enviado: "{selectedGasto.rejection_feedback}"
+                            {`Feedback enviado: "${selectedGasto.rejection_feedback}"`}
                           </Text>
                         )}
                       </View>
@@ -3000,42 +3008,40 @@ const styles = StyleSheet.create({
   summaryCard: {
     flex: 1,
     padding: Spacing.three,
-    borderRadius: BorderRadius.medium,
+    borderRadius: BorderRadius.large,
     borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
   summaryLabel: {
     fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
   summaryValue: {
-    fontSize: 15,
-    fontWeight: '800',
-    marginTop: 4,
+    fontSize: 16,
+    fontWeight: '900',
+    marginTop: 2,
   },
-  tabsContainer: {
+  tabsSegmentedContainer: {
     flexDirection: 'row',
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.two,
-    marginBottom: Spacing.two,
+    padding: 3,
+    borderRadius: BorderRadius.large,
+    marginHorizontal: Spacing.four,
+    marginBottom: Spacing.three,
   },
-  tab: {
+  tabSegment: {
     flex: 1,
-    height: 40,
-    borderRadius: BorderRadius.small,
-    borderWidth: 1,
-    borderColor: '#eee',
-    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: BorderRadius.medium,
     alignItems: 'center',
-    backgroundColor: 'transparent',
+    justifyContent: 'center',
   },
-  tabActive: {
-    backgroundColor: '#0d1b2a',
-    borderColor: '#0d1b2a',
-  },
-  tabText: {
+  tabSegmentText: {
     fontSize: 13,
-    fontWeight: '700',
   },
   listContent: {
     paddingHorizontal: Spacing.four,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,16 +10,15 @@ import {
   useColorScheme,
   Image,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { AuthService } from '@/services/supabase';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/context/AuthContext';
+import { LinearGradient } from 'expo-linear-gradient';
 
 export default function LoginScreen() {
-  const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
@@ -34,10 +33,7 @@ export default function LoginScreen() {
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
-  // AuthContext maneja el checkSession automáticamente
-
   const handleLogin = async () => {
-    // Reset errores
     setEmailError('');
     setPasswordError('');
     setErrorMsg('');
@@ -63,7 +59,6 @@ export default function LoginScreen() {
     try {
       const user = await AuthService.login(email, password);
       setUser(user);
-      // El useEffect de AuthContext se encargará de hacer el router.replace() al instante
     } catch (err: any) {
       setErrorMsg(err.message || 'Error al iniciar sesión');
     } finally {
@@ -80,82 +75,96 @@ export default function LoginScreen() {
     );
   }
 
+  const gradientColors = scheme === 'dark'
+    ? [themeColors.background, '#13283c'] as const
+    : ['#f4f6f9', '#dce3ec'] as const;
+
+  const cardBackground = scheme === 'dark'
+    ? 'rgba(27, 73, 101, 0.45)'
+    : 'rgba(255, 255, 255, 0.75)';
+
+  const cardBorderColor = scheme === 'dark'
+    ? 'rgba(255, 255, 255, 0.12)'
+    : 'rgba(13, 27, 42, 0.08)';
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ flex: 1 }}
-    >
-      <ScrollView
-        contentContainerStyle={[styles.scrollContainer, { backgroundColor: themeColors.background }]}
-        keyboardShouldPersistTaps="handled"
+    <LinearGradient colors={gradientColors} style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
       >
-        <View style={styles.header}>
-          <View style={[styles.logoContainer, { backgroundColor: '#ffffff' }]}>
-            <Image
-              source={require('@/assets/images/logo.jpeg')}
-              style={styles.logoImage}
-              resizeMode="contain"
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.header}>
+            <View style={styles.logoContainer}>
+              <Image
+                source={require('@/assets/images/logo.jpeg')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
+            </View>
+            <Text style={[styles.title, { color: themeColors.text }]}>INTTEC</Text>
+            <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
+              Control de Gastos
+            </Text>
+          </View>
+
+          <View style={[styles.card, { backgroundColor: cardBackground, borderColor: cardBorderColor }]}>
+            <Text style={[styles.cardTitle, { color: themeColors.text }]}>Iniciar Sesión</Text>
+            
+            {errorMsg ? (
+              <View style={[styles.errorAlert, { backgroundColor: themeColors.danger + '15' }]}>
+                <Ionicons name="alert-circle" size={20} color={themeColors.danger} />
+                <Text style={[styles.errorAlertText, { color: themeColors.danger }]}>{errorMsg}</Text>
+              </View>
+            ) : null}
+
+            <CustomInput
+              label="Correo Electrónico"
+              placeholder="ejemplo@inttec.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              iconName="mail-outline"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                if (emailError) setEmailError('');
+              }}
+              error={emailError}
+              returnKeyType="next"
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
+              blurOnSubmit={false}
+            />
+
+            <CustomInput
+              ref={passwordInputRef}
+              label="Contraseña"
+              placeholder="••••••••"
+              secureTextEntry
+              isPassword
+              iconName="lock-closed-outline"
+              value={password}
+              onChangeText={(text) => {
+                setPassword(text);
+                if (passwordError) setPasswordError('');
+              }}
+              error={passwordError}
+              returnKeyType="go"
+              onSubmitEditing={handleLogin}
+            />
+
+            <CustomButton
+              title="Ingresar"
+              onPress={handleLogin}
+              loading={isSubmitting}
+              style={styles.submitBtn}
             />
           </View>
-          <Text style={[styles.title, { color: themeColors.text }]}>INTTEC</Text>
-          <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
-            Control de Gastos
-          </Text>
-        </View>
-
-        <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.cardTitle, { color: themeColors.text }]}>Iniciar Sesión</Text>
-          
-          {errorMsg ? (
-            <View style={[styles.errorAlert, { backgroundColor: themeColors.danger + '15' }]}>
-              <Ionicons name="alert-circle" size={20} color={themeColors.danger} />
-              <Text style={[styles.errorAlertText, { color: themeColors.danger }]}>{errorMsg}</Text>
-            </View>
-          ) : null}
-
-          <CustomInput
-            label="Correo Electrónico"
-            placeholder="ejemplo@inttec.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            iconName="mail-outline"
-            value={email}
-            onChangeText={(text) => {
-              setEmail(text);
-              if (emailError) setEmailError('');
-            }}
-            error={emailError}
-            returnKeyType="next"
-            onSubmitEditing={() => passwordInputRef.current?.focus()}
-            blurOnSubmit={false}
-          />
-
-          <CustomInput
-            ref={passwordInputRef}
-            label="Contraseña"
-            placeholder="••••••••"
-            secureTextEntry
-            isPassword
-            iconName="lock-closed-outline"
-            value={password}
-            onChangeText={(text) => {
-              setPassword(text);
-              if (passwordError) setPasswordError('');
-            }}
-            error={passwordError}
-            returnKeyType="go"
-            onSubmitEditing={handleLogin}
-          />
-
-          <CustomButton
-            title="Ingresar"
-            onPress={handleLogin}
-            loading={isSubmitting}
-            style={styles.submitBtn}
-          />
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </LinearGradient>
   );
 }
 
@@ -180,31 +189,35 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.five,
   },
   logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: BorderRadius.large,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: Spacing.two,
+    backgroundColor: '#ffffff',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 4,
     overflow: 'hidden',
   },
   logoImage: {
-    width: '100%',
-    height: '100%',
+    width: '90%',
+    height: '90%',
   },
   title: {
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: 1,
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
   },
   subtitle: {
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
     marginTop: Spacing.half,
   },
   card: {
@@ -212,10 +225,17 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
     borderWidth: 1,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 6,
+    // Efecto de desenfoque traslúcido para web
+    ...Platform.select({
+      web: {
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+      } as any
+    })
   },
   cardTitle: {
     fontSize: 22,

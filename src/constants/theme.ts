@@ -18,7 +18,7 @@ export const Colors = {
   },
   dark: {
     text: '#ffffff',
-    textSecondary: '#a0aab2',
+    textSecondary: '#cbd5e1',
     background: '#0d1b2a', // Azul Oscuro Profundo
     backgroundElement: '#1b4965', // Fondo de cartas/elementos
     backgroundSelected: '#2c5e7a',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, ScrollView, TouchableOpacity, Alert, StyleSheet, useWindowDimensions, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
@@ -198,16 +198,9 @@ export default function NuevaCotizacionScreen() {
     fetchCotizacion();
   }, [editId]);
 
-  useEffect(() => {
-    const subtotal = cotizacion.lineas.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0);
-    const iva = cotizacion.lineas.reduce((acc, item) => acc + ((item.cantidad * item.precioUnitario) * (item.impuestoPorcentaje / 100)), 0);
-    setCotizacion(prev => ({
-      ...prev,
-      subtotal,
-      iva,
-      total: subtotal + iva
-    }));
-  }, [cotizacion.lineas]);
+  const subtotal = useMemo(() => cotizacion.lineas.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0), [cotizacion.lineas]);
+  const iva = useMemo(() => cotizacion.lineas.reduce((acc, item) => acc + ((item.cantidad * item.precioUnitario) * (item.impuestoPorcentaje / 100)), 0), [cotizacion.lineas]);
+  const total = subtotal + iva;
 
   const handleAddLine = () => {
     const nuevaLinea: CotizacionLinea = {
@@ -252,7 +245,7 @@ export default function NuevaCotizacionScreen() {
   const handlePrintPDF = async () => {
     try {
       console.log('Generando PDF...');
-      await exportarCotizacionOdooPDF(cotizacion);
+      await exportarCotizacionOdooPDF({ ...cotizacion, subtotal, iva, total });
       console.log('PDF Generado correctamente.');
     } catch (error: any) {
       console.error('Error en handlePrintPDF:', error);
@@ -282,7 +275,8 @@ export default function NuevaCotizacionScreen() {
       if (errorCliente) throw errorCliente;
       
       console.log('Guardando/Actualizando productos...');
-      for (let linea of cotizacion.lineas) {
+      const lineasClonadas = cotizacion.lineas.map(linea => ({ ...linea }));
+      for (let linea of lineasClonadas) {
         if (!linea.productoNombre.trim()) continue;
         
         try {
@@ -330,10 +324,10 @@ export default function NuevaCotizacionScreen() {
         vendedor: cotizacion.vendedor,
         moneda: cotizacion.moneda,
         fecha_creacion: cotizacion.fechaCreacion,
-        subtotal: cotizacion.subtotal,
-        iva: cotizacion.iva,
-        total: cotizacion.total,
-        lineas: cotizacion.lineas,
+        subtotal,
+        iva,
+        total,
+        lineas: lineasClonadas,
         terminos_condiciones: cotizacion.terminosCondiciones,
         estado: cotizacion.estado || 'Borrador'
       };
@@ -715,15 +709,15 @@ export default function NuevaCotizacionScreen() {
           <View style={[styles.totalsCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
             <View style={styles.totalsRow}>
               <ThemedText style={[styles.totalLabel, { color: themeColors.textSecondary }]}>Subtotal:</ThemedText>
-              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${cotizacion.subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
+              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
             </View>
             <View style={styles.totalsRow}>
               <ThemedText style={[styles.totalLabel, { color: themeColors.textSecondary }]}>IVA (Calculado):</ThemedText>
-              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${cotizacion.iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
+              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
             </View>
             <View style={[styles.totalsRow, styles.totalFinalRow, { borderTopColor: themeColors.border }]}>
               <ThemedText style={[styles.totalFinalLabel, { color: themeColors.text }]}>Total a Cobrar:</ThemedText>
-              <ThemedText style={[styles.totalFinalValue, { color: themeColors.primary }]}>${cotizacion.total.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
+              <ThemedText style={[styles.totalFinalValue, { color: themeColors.primary }]}>${total.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
             </View>
           </View>
           

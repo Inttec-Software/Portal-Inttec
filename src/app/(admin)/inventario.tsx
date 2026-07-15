@@ -140,7 +140,7 @@ export default function InventarioDashboard() {
     loadAllData();
   }, []);
 
-  const loadAllData = async () => {
+  async function loadAllData() {
     setIsLoading(true);
     try {
       // Cargar categorías, proveedores, productos, historial de consumo y clientes
@@ -173,7 +173,7 @@ export default function InventarioDashboard() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }
 
   // --- Centralized Selectors ---
   const openCategoryFilter = () => {
@@ -1404,7 +1404,7 @@ export default function InventarioDashboard() {
                           >
                             <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
                             <Text style={{ color: themeColors.accent, fontWeight: '600', flex: 1 }}>
-                              Agregar "{clienteSearch.trim()}"
+                              {`Agregar "${clienteSearch.trim()}"`}
                             </Text>
                           </TouchableOpacity>
                         )}

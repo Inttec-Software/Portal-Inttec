@@ -54,13 +54,15 @@ export default function ImageViewerModal({
   asistenciaInfo,
 }: ImageViewerModalProps) {
   const viewRef = useRef<View>(null);
-  const [mapUrl, setMapUrl] = React.useState<string>('');
+  const [prevAsistenciaInfo, setPrevAsistenciaInfo] = React.useState(asistenciaInfo);
+  const [mapUrl, setMapUrl] = React.useState<string>(() =>
+    asistenciaInfo ? getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng) : ''
+  );
 
-  React.useEffect(() => {
-    if (asistenciaInfo) {
-      setMapUrl(getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng));
-    }
-  }, [asistenciaInfo]);
+  if (asistenciaInfo !== prevAsistenciaInfo) {
+    setPrevAsistenciaInfo(asistenciaInfo);
+    setMapUrl(asistenciaInfo ? getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng) : '');
+  }
 
   if (!imageUrl) return null;
 

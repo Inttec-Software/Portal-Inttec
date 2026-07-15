@@ -71,7 +71,7 @@ export default function ExpenseCard({
     >
       <View style={styles.header}>
         <View style={styles.categoryContainer}>
-          <View style={[styles.iconContainer, { backgroundColor: themeColors.background }]}>
+          <View style={[styles.iconContainer, { backgroundColor: themeColors.accent + '15' }]}>
             <Ionicons
               name={
                 gasto.categoria?.toLowerCase().includes('transporte')
@@ -148,7 +148,7 @@ export default function ExpenseCard({
             Nota de revisión:
           </Text>
           <Text style={[styles.feedbackText, { color: themeColors.text }]} numberOfLines={2}>
-            "{gasto.rejection_feedback}"
+            {`"${gasto.rejection_feedback}"`}
           </Text>
         </View>
       )}
@@ -158,14 +158,14 @@ export default function ExpenseCard({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: BorderRadius.medium,
+    borderRadius: BorderRadius.large,
     padding: Spacing.three,
     marginBottom: Spacing.two,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
   },
   header: {
     flexDirection: 'row',
@@ -180,9 +180,9 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   iconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: BorderRadius.small,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
