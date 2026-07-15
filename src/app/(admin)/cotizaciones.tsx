@@ -384,10 +384,7 @@ export default function CotizacionesListScreen() {
         <Text style={[styles.tableHeaderCell, { width: '10%', fontWeight: 'bold' }]}>Fecha de Emisión</Text>
         <Text style={[styles.tableHeaderCell, { width: '8%', fontWeight: 'bold' }]}>Usuario</Text>
         <Text style={[styles.tableHeaderCell, { width: '18%', fontWeight: 'bold' }]}>Empresa</Text>
-        <View style={[styles.tableHeaderCell, { width: '13%', flexDirection: 'row', alignItems: 'center' }]}>
-          <Text style={{ fontWeight: 'bold', marginRight: 4, color: themeColors.text, fontSize: 12 }}>Referencia</Text>
-          <Ionicons name="pencil-sharp" size={12} color={themeColors.accent} />
-        </View>
+        <Text style={[styles.tableHeaderCell, { width: '13%', fontWeight: 'bold' }]}>Referencia</Text>
         <Text style={[styles.tableHeaderCell, { width: '10%', fontWeight: 'bold' }]}>Estado</Text>
         <Text style={[styles.tableHeaderCell, { width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>Total</Text>
         
@@ -418,6 +415,7 @@ export default function CotizacionesListScreen() {
           return (
             <View key={cot.id}>
               <Pressable 
+                onPress={() => toggleRowExpansion(cot.id)}
                 onHoverIn={() => setHoveredRowId(cot.id)}
                 onHoverOut={() => setHoveredRowId(null)}
                 style={[

@@ -535,8 +535,123 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
       console.error('Error in analyzeInvoiceSales:', err);
       throw new Error(err.message || 'Error al procesar la factura de venta con Inteligencia Artificial.');
     }
+  },
+
+  async analyzeCardStatement(
+    base64File: string,
+    mimeType: string
+  ): Promise<CardStatementResult> {
+    if (!GEMINI_API_KEY) {
+      throw new Error('Gemini API Key is missing. Check your environment variables.');
+    }
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+    const prompt = `Eres un experto en análisis de estados de cuenta bancarios y tarjetas corporativas. Analiza el documento adjunto (PDF o imagen de un estado de cuenta de tarjeta de crédito o débito) y extrae TODAS las transacciones que aparezcan.
+
+INSTRUCCIONES:
+1. Extrae TODAS las filas de movimientos/transacciones visibles, sin omitir ninguna.
+2. Para cada transacción identifica: fecha, monto, descripción del comercio/concepto, y si es cargo (-) o abono (+).
+3. Normaliza las fechas al formato YYYY-MM-DD. Si el año no aparece, infiere el año más probable según el período del estado.
+4. Los montos deben ser siempre positivos en el campo "monto"; usa el campo "tipo" para indicar si es cargo o abono.
+5. Si no puedes determinar si es cargo o abono, usa "desconocido".
+6. Intenta identificar el período de corte, el nombre del titular y los últimos 4 dígitos de la tarjeta.
+
+Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin markdown, sin texto adicional):
+{
+  "periodo_inicio": "YYYY-MM-DD o null",
+  "periodo_fin": "YYYY-MM-DD o null",
+  "titular": "Nombre del titular o null",
+  "numero_tarjeta_parcial": "Últimos 4 dígitos o null",
+  "transacciones": [
+    {
+      "fecha": "YYYY-MM-DD o null",
+      "monto": 123.45,
+      "descripcion": "Nombre del comercio o concepto",
+      "tipo": "cargo"
+    }
+  ]
+}`;
+
+    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '');
+
+    const requestBody = {
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: cleanBase64,
+              },
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+      },
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Gemini API Error (${response.status}): ${errorText}`);
+      }
+
+      const resData = await response.json();
+      const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!textResult) {
+        throw new Error('No se pudo extraer el contenido del estado de cuenta.');
+      }
+
+      const parsed = cleanAndParseJson<CardStatementResult>(textResult);
+
+      return {
+        periodo_inicio: parsed.periodo_inicio ?? null,
+        periodo_fin: parsed.periodo_fin ?? null,
+        titular: parsed.titular ?? null,
+        numero_tarjeta_parcial: parsed.numero_tarjeta_parcial ?? null,
+        transacciones: (parsed.transacciones || []).map(t => ({
+          fecha: t.fecha ?? null,
+          monto: Number(t.monto) || 0,
+          descripcion: t.descripcion ?? null,
+          tipo: (['cargo', 'abono', 'desconocido'].includes(t.tipo) ? t.tipo : 'desconocido') as CardTransaction['tipo'],
+        })),
+      };
+    } catch (err: any) {
+      console.error('Error in analyzeCardStatement:', err);
+      throw new Error(err.message || 'Error al procesar el estado de cuenta con Inteligencia Artificial.');
+    }
   }
 };
+
+// ============================================================
+// Card Statement Analysis
+// ============================================================
+
+export interface CardTransaction {
+  fecha: string | null;        // YYYY-MM-DD
+  monto: number | null;
+  descripcion: string | null;  // comercio / concepto
+  tipo: 'cargo' | 'abono' | 'desconocido';
+}
+
+export interface CardStatementResult {
+  periodo_inicio: string | null;  // YYYY-MM-DD
+  periodo_fin: string | null;     // YYYY-MM-DD
+  titular: string | null;
+  numero_tarjeta_parcial: string | null; // últimos 4 dígitos
+  transacciones: CardTransaction[];
+}
 
 export interface GeminiSalesResult {
   informacion_general: {

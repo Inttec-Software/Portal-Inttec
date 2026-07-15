@@ -2965,6 +2965,14 @@ export default function AdminDashboard() {
       >
         <Ionicons name="receipt" size={24} color="#ffffff" />
       </TouchableOpacity>
+      {/* Floating Action Button for Auditoría de Tarjeta */}
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => router.push('/(admin)/auditoria-tarjeta' as any)}
+        style={[styles.fab, { backgroundColor: '#7b1fa2', bottom: Spacing.four + 72 }]}
+      >
+        <Ionicons name="card" size={24} color="#ffffff" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }

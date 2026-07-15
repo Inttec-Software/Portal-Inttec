@@ -95,6 +95,7 @@ export default function VentasScreen() {
   const [activeTab, setActiveTab] = useState<'registrar' | 'historial'>('registrar');
   const [ventasHistorial, setVentasHistorial] = useState<Venta[]>([]);
   const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
+  const [historialSearch, setHistorialSearch] = useState('');
 
   // === Edición y Detalle de Ventas ===
   const [selectedVenta, setSelectedVenta] = useState<Venta | null>(null);
@@ -295,6 +296,20 @@ export default function VentasScreen() {
   };
 
 
+
+  // === Filtrar Historial ===
+  const ventasFiltradas = useMemo(() => {
+    const q = historialSearch.trim().toLowerCase();
+    if (!q) return ventasHistorial;
+    return ventasHistorial.filter(v =>
+      v.cliente?.toLowerCase().includes(q) ||
+      v.factura_referencia?.toLowerCase().includes(q) ||
+      v.descripcion?.toLowerCase().includes(q) ||
+      v.fecha?.toLowerCase().includes(q) ||
+      v.tipo_proyecto?.toLowerCase().includes(q) ||
+      v.proveedor?.toLowerCase().includes(q)
+    );
+  }, [ventasHistorial, historialSearch]);
 
   // === Calcular totales de las partidas ===
   const calculatedTotals = useMemo(() => {
@@ -1332,6 +1347,30 @@ export default function VentasScreen() {
 
   const renderHistorial = () => (
     <View style={{ flex: 1 }}>
+      {/* Buscador */}
+      <View
+        style={[
+          styles.searchContainer,
+          { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+        ]}
+      >
+        <Ionicons name="search" size={18} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
+        <TextInput
+          style={[styles.searchInput, { color: themeColors.text }]}
+          placeholder="Buscar por cliente, PO, descripción, fecha..."
+          placeholderTextColor={themeColors.textSecondary}
+          value={historialSearch}
+          onChangeText={setHistorialSearch}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+        />
+        {historialSearch.length > 0 && (
+          <TouchableOpacity onPress={() => setHistorialSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+          </TouchableOpacity>
+        )}
+      </View>
+
       {isLoadingHistorial ? (
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color={themeColors.accent} />
@@ -1344,9 +1383,16 @@ export default function VentasScreen() {
             No hay ventas registradas aún.
           </Text>
         </View>
+      ) : ventasFiltradas.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="search-outline" size={48} color={themeColors.textSecondary} />
+          <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
+            Sin resultados para "{historialSearch}"
+          </Text>
+        </View>
       ) : (
         <FlatList
-          data={ventasHistorial}
+          data={ventasFiltradas}
           keyExtractor={item => item.id}
           contentContainerStyle={{ padding: Spacing.three, gap: Spacing.two }}
           renderItem={({ item }) => {
@@ -2102,6 +2148,26 @@ const styles = StyleSheet.create({
   footerBtnText: {
     fontSize: 14,
     fontWeight: '700',
+  },
+
+  // Search bar
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: Spacing.three,
+    marginTop: Spacing.three,
+    marginBottom: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    minHeight: 44,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    paddingVertical: 4,
   },
 
   // Historial
