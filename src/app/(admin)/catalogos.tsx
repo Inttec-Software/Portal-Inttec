@@ -11,6 +11,7 @@ import {
   ScrollView,
   Pressable,
   Keyboard,
+  Platform,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -117,31 +118,40 @@ export default function CatalogosManager() {
     }
   };
 
+  const ejecutarEliminacionItem = async (id: string, table: 'categorias' | 'subcategorias' | 'clientes') => {
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.from(table).delete().eq('id', id);
+      if (error) throw error;
+      Alert.alert('Éxito', 'Elemento eliminado.');
+      await loadData();
+    } catch (err: any) {
+      Alert.alert('Error al eliminar', err.message || 'No se pudo realizar la operación.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleDeleteItem = async (id: string, table: 'categorias' | 'subcategorias' | 'clientes') => {
-    Alert.alert(
-      'Confirmar Eliminación',
-      '¿Estás seguro de que deseas eliminar este elemento? Esto podría afectar a los gastos ya registrados.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            setIsLoading(true);
-            try {
-              const { error } = await supabase.from(table).delete().eq('id', id);
-              if (error) throw error;
-              Alert.alert('Éxito', 'Elemento eliminado.');
-              await loadData();
-            } catch (err: any) {
-              Alert.alert('Error al eliminar', err.message || 'No se pudo realizar la operación.');
-            } finally {
-              setIsLoading(false);
-            }
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('¿Estás seguro de que deseas eliminar este elemento? Esto podría afectar a los gastos ya registrados.');
+      if (confirmed) {
+        ejecutarEliminacionItem(id, table);
+      }
+    } else {
+      Alert.alert(
+        'Confirmar Eliminación',
+        '¿Estás seguro de que deseas eliminar este elemento? Esto podría afectar a los gastos ya registrados.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Eliminar',
+            style: 'destructive',
+            onPress: () => ejecutarEliminacionItem(id, table),
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const handleOpenEditItem = (item: any) => {

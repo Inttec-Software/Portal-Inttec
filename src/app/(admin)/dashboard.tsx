@@ -13,6 +13,7 @@ import {
   Platform,
   Linking,
   useWindowDimensions,
+  Pressable,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -46,6 +47,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
   const isMobile = windowWidth < 600;
+  const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { setUser } = useAuth();
@@ -63,6 +65,7 @@ export default function AdminDashboard() {
   const [personal, setPersonal] = useState<Usuario[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
+  const [facturaFilter, setFacturaFilter] = useState<'TODOS' | 'FACTURADOS' | 'PENDIENTES'>('TODOS');
 
   // Modales de Acceso Rápido (Botones Extra)
   const [personalModalVisible, setPersonalModalVisible] = useState(false);
@@ -999,6 +1002,35 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDeleteGasto = async (id: string) => {
+    Alert.alert(
+      'Eliminar Gasto Permanente',
+      '¿Estás seguro de que deseas eliminar este gasto de la base de datos? Esta acción es irreversible.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            setIsProcessingAction(true);
+            try {
+              const { error } = await supabase.from('gastos').delete().eq('id', id);
+              if (error) throw error;
+              setGastos(prev => prev.filter(g => g.id !== id));
+              setReviewModalVisible(false);
+              setSelectedGasto(null);
+              Alert.alert('Éxito', 'Gasto eliminado correctamente de la base de datos.');
+            } catch (err: any) {
+              Alert.alert('Error al eliminar', err.message || 'No se pudo eliminar el gasto.');
+            } finally {
+              setIsProcessingAction(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const formatAsistenciaFecha = (fecha: string) => {
     const parts = fecha.split('-');
     if (parts.length === 3) {
@@ -1170,7 +1202,14 @@ export default function AdminDashboard() {
 
   // Filtrados por pestañas
   const pendingGastos = gastos.filter((g) => g.status === 'PENDING');
-  const historyGastos = gastos.filter((g) => g.status === 'APPROVED' || g.status === 'REJECTED' || g.status === 'ACTION_REQUIRED');
+  const historyGastos = gastos.filter((g) => {
+    const isHistoryStatus = g.status === 'APPROVED' || g.status === 'REJECTED' || g.status === 'ACTION_REQUIRED';
+    if (!isHistoryStatus) return false;
+    
+    if (facturaFilter === 'FACTURADOS') return g.facturado === true;
+    if (facturaFilter === 'PENDIENTES') return !g.facturado;
+    return true; // TODOS
+  });
 
   // Totales
   const totalPendientes = pendingGastos.reduce((sum, g) => sum + Number(g.monto), 0);
@@ -1519,31 +1558,124 @@ export default function AdminDashboard() {
 
           {/* HISTORIAL */}
           {activeTab === 'historial' && (
-            <FlatList
-              data={historyGastos}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
-              renderItem={({ item }) => (
-                <ExpenseCard
-                  gasto={item}
-                  showEmployeeName
-                  onPress={() => {
-                    setSelectedGasto(item);
-                    setReviewModalVisible(true);
-                  }}
+            <>
+              <View style={{ flexDirection: 'row', marginHorizontal: Spacing.three, marginBottom: Spacing.two, marginTop: Spacing.one, backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, overflow: 'hidden', borderWidth: 1, borderColor: themeColors.border }}>
+                <TouchableOpacity
+                  onPress={() => setFacturaFilter('TODOS')}
+                  style={{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: facturaFilter === 'TODOS' ? themeColors.accent + '20' : 'transparent' }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: facturaFilter === 'TODOS' ? 'bold' : 'normal', color: facturaFilter === 'TODOS' ? themeColors.accent : themeColors.textSecondary }}>TODOS</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setFacturaFilter('FACTURADOS')}
+                  style={{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: facturaFilter === 'FACTURADOS' ? themeColors.accent + '20' : 'transparent', borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: facturaFilter === 'FACTURADOS' ? 'bold' : 'normal', color: facturaFilter === 'FACTURADOS' ? themeColors.accent : themeColors.textSecondary }}>FACTURADOS</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setFacturaFilter('PENDIENTES')}
+                  style={{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: facturaFilter === 'PENDIENTES' ? themeColors.accent + '20' : 'transparent' }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: facturaFilter === 'PENDIENTES' ? 'bold' : 'normal', color: facturaFilter === 'PENDIENTES' ? themeColors.accent : themeColors.textSecondary }}>PENDIENTES</Text>
+                </TouchableOpacity>
+              </View>
+              {isDesktop ? (
+                <ScrollView style={{ flex: 1 }}>
+                  <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
+                    <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Categoría</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Empleado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '20%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Fecha</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Estado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
+                      <View style={{ width: '10%', alignItems: 'center' }}>
+                        <Ionicons name="settings-outline" size={14} color={themeColors.text} />
+                      </View>
+                    </View>
+                    <View style={{ backgroundColor: themeColors.backgroundElement, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderTopWidth: 0 }}>
+                    {historyGastos.length === 0 ? (
+                      <View style={styles.emptyContainer}>
+                        <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>No hay registros históricos.</Text>
+                      </View>
+                    ) : (
+                      historyGastos.map((item) => {
+                        const rawFecha = item.fecha_comprobante || item.created_at?.split('T')[0] || '';
+                        let fecha = rawFecha;
+                        if (rawFecha) {
+                          const parts = rawFecha.split('-');
+                          if (parts.length === 3) fecha = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                        }
+                        
+                        let statusText = 'PENDIENTE';
+                        let statusColor: string = themeColors.warning;
+                        if (item.status === 'APPROVED') { statusText = 'APROBADO'; statusColor = themeColors.success; }
+                        else if (item.status === 'REJECTED') { statusText = 'RECHAZADO'; statusColor = themeColors.danger; }
+                        else if (item.status === 'ACTION_REQUIRED') { statusText = 'ACCIÓN REQ.'; statusColor = themeColors.actionRequired; }
+                        
+                        return (
+                          <Pressable
+                            key={item.id}
+                            onPress={() => {
+                              setSelectedGasto(item);
+                              setReviewModalVisible(true);
+                            }}
+                            style={({ hovered }: any) => [
+                              styles.tableRow,
+                              { borderBottomColor: themeColors.border },
+                              hovered && { backgroundColor: themeColors.backgroundSelected }
+                            ] as any}
+                          >
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%', fontWeight: '600' }]} numberOfLines={1}>{item.categoria}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
+                            <Text style={[styles.tableCell, { width: '20%', color: themeColors.textSecondary }]} numberOfLines={1}>
+                              {item.proveedor} {item.proveedor && item.cliente ? ' | ' : ''} {item.cliente}
+                            </Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]}>{fecha}</Text>
+                            <View style={{ width: '10%' }}>
+                               <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
+                                 <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColor }}>{statusText}</Text>
+                               </View>
+                            </View>
+                            <Text style={[styles.tableCell, { width: '15%', fontWeight: '700', color: themeColors.text, textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
+                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', gap: 12 }}>
+                              <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                            </View>
+                          </Pressable>
+                        );
+                      })
+                    )}
+                    </View>
+                  </View>
+                </ScrollView>
+              ) : (
+                <FlatList
+                  data={historyGastos}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={styles.listContent}
+                  renderItem={({ item }) => (
+                    <ExpenseCard
+                      gasto={item}
+                      showEmployeeName
+                      onPress={() => {
+                        setSelectedGasto(item);
+                        setReviewModalVisible(true);
+                      }}
+                    />
+                  )}
+                  ListEmptyComponent={
+                    <View style={styles.emptyContainer}>
+                      <Ionicons name="folder-open-outline" size={48} color={themeColors.textSecondary} />
+                      <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
+                        No hay registros históricos.
+                      </Text>
+                    </View>
+                  }
+                  refreshing={isLoading}
+                  onRefresh={refreshData}
                 />
               )}
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="folder-open-outline" size={48} color={themeColors.textSecondary} />
-                  <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-                    No hay registros históricos.
-                  </Text>
-                </View>
-              }
-              refreshing={isLoading}
-              onRefresh={refreshData}
-            />
+            </>
           )}
         </View>
       )}
@@ -2116,6 +2248,14 @@ export default function AdminDashboard() {
                           loading={isProcessingAction}
                         />
                       )}
+                      <CustomButton
+                        title="Eliminar Gasto Permanente"
+                        onPress={() => handleDeleteGasto(selectedGasto.id)}
+                        variant="danger"
+                        style={{ width: '100%', marginTop: Spacing.one }}
+                        loading={isProcessingAction}
+                        icon={<Ionicons name="trash-outline" size={20} color="#fff" style={{ marginRight: 8 }} />}
+                      />
                     </View>
                   )}
                 </View>
@@ -2978,6 +3118,31 @@ export default function AdminDashboard() {
 }
 
 const styles = StyleSheet.create({
+  scanFeedbackSuccess: {
+    color: '#059669',
+  },
+  // Table Styles (Desktop)
+  tableHeaderRow: {
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    borderBottomWidth: 1,
+  },
+  tableHeaderCell: {
+    fontSize: 13,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+  },
+  tableCell: {
+    fontSize: 13,
+  },
   container: {
     flex: 1,
   },

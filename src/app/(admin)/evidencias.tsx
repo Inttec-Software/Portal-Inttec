@@ -10,6 +10,9 @@ import {
   Modal,
   ScrollView,
   Image,
+  Platform,
+  useWindowDimensions,
+  Pressable,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -24,6 +27,8 @@ import ImageViewerModal from '@/components/ImageViewerModal';
 
 export default function AdminEvidenciasScreen() {
   const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
@@ -229,6 +234,57 @@ export default function AdminEvidenciasScreen() {
             Cargando evidencias...
           </Text>
         </View>
+      ) : isDesktop ? (
+        <ScrollView style={{ flex: 1 }}>
+          <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
+            <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Fecha de Reg.</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '20%', fontWeight: 'bold' }]}>Empleado</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '25%', fontWeight: 'bold' }]}>Cliente</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Fotos</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Material</Text>
+              <View style={{ width: '10%', alignItems: 'center' }}>
+                <Ionicons name="settings-outline" size={14} color={themeColors.text} />
+              </View>
+            </View>
+            <View style={{ backgroundColor: themeColors.backgroundElement, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderTopWidth: 0 }}>
+            {filteredEvidencias.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="document-text-outline" size={48} color={themeColors.textSecondary} />
+                <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>No hay evidencias registradas.</Text>
+              </View>
+            ) : (
+              filteredEvidencias.map((item) => (
+                <Pressable
+                  key={item.id}
+                  onPress={() => {
+                    setSelectedEvidencia(item);
+                    setModalVisible(true);
+                  }}
+                  style={({ hovered }: any) => [
+                    styles.tableRow,
+                    { borderBottomColor: themeColors.border },
+                    hovered && { backgroundColor: themeColors.backgroundSelected }
+                  ] as any}
+                >
+                  <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]}>{formatFriendlyDate(item.created_at)}</Text>
+                  <Text style={[styles.tableCell, { color: themeColors.text, width: '20%', fontWeight: '600' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
+                  <Text style={[styles.tableCell, { color: themeColors.text, width: '25%' }]} numberOfLines={1}>{item.cliente || 'Sin cliente'}</Text>
+                  <Text style={[styles.tableCell, { width: '15%', color: themeColors.textSecondary }]}>
+                    {(item.fotos_adicionales_urls?.length || 0) + (item.foto_antes_url ? 1 : 0) + (item.foto_despues_url ? 1 : 0)} fotos
+                  </Text>
+                  <Text style={[styles.tableCell, { width: '15%', color: themeColors.textSecondary }]} numberOfLines={1}>
+                    {item.materiales_usados ? 'Sí' : 'No'}
+                  </Text>
+                  <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', gap: 12 }}>
+                    <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                  </View>
+                </Pressable>
+              ))
+            )}
+            </View>
+          </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={filteredEvidencias}
@@ -590,10 +646,10 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.five,
   },
   card: {
-    borderRadius: BorderRadius.medium,
+    borderRadius: BorderRadius.large,
     borderWidth: 1,
-    padding: Spacing.three,
-    marginBottom: Spacing.two,
+    padding: Spacing.two,
+    marginBottom: Spacing.one,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -653,8 +709,30 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
+    marginTop: Spacing.two,
+    fontWeight: '500',
+  },
+  // Table Styles (Desktop)
+  tableHeaderRow: {
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    borderBottomWidth: 1,
+  },
+  tableHeaderCell: {
+    fontSize: 13,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+  },
+  tableCell: {
+    fontSize: 13,
   },
   modalOverlay: {
     flex: 1,

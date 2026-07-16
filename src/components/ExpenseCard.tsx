@@ -69,77 +69,58 @@ export default function ExpenseCard({
         },
       ]}
     >
-      <View style={styles.header}>
-        <View style={styles.categoryContainer}>
-          <View style={[styles.iconContainer, { backgroundColor: themeColors.accent + '15' }]}>
-            <Ionicons
-              name={
-                gasto.categoria?.toLowerCase().includes('transporte')
-                  ? 'car-outline'
-                  : gasto.categoria?.toLowerCase().includes('aliment')
-                  ? 'restaurant-outline'
-                  : gasto.categoria?.toLowerCase().includes('hosped')
-                  ? 'bed-outline'
-                  : 'receipt-outline'
-              }
-              size={18}
-              color={themeColors.accent}
-            />
-          </View>
-          <View>
-            <Text style={[styles.category, { color: themeColors.text }]} numberOfLines={1}>
-              {gasto.categoria || 'Sin Categoría'}
-            </Text>
-            {gasto.subcategoria && (
-              <Text style={[styles.subcat, { color: themeColors.textSecondary }]} numberOfLines={1}>
-                {gasto.subcategoria}
-              </Text>
-            )}
-          </View>
-        </View>
-        <Text style={[styles.monto, { color: themeColors.text }]}>{montoFormatted}</Text>
-      </View>
-
-      {showEmployeeName && gasto.empleado_nombre && (
-        <View style={[styles.detailRow, { marginBottom: Spacing.one }]}>
-          <Ionicons name="person-outline" size={14} color={themeColors.textSecondary} />
-          <Text style={[styles.detailText, { color: themeColors.textSecondary, maxWidth: '90%' }]}>
-            {gasto.empleado_nombre}
+      {/* Header: Categoria & Status Badge */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Ionicons
+            name={
+              gasto.categoria?.toLowerCase().includes('transporte')
+                ? 'car-outline'
+                : gasto.categoria?.toLowerCase().includes('aliment')
+                ? 'restaurant-outline'
+                : gasto.categoria?.toLowerCase().includes('hosped')
+                ? 'bed-outline'
+                : 'receipt-outline'
+            }
+            size={16}
+            color={themeColors.accent}
+          />
+          <Text style={[styles.category, { color: themeColors.text }]} numberOfLines={1}>
+            {gasto.categoria || 'Sin Categoría'}
+            {gasto.subcategoria ? ` - ${gasto.subcategoria}` : ''}
           </Text>
         </View>
-      )}
-
-      {(gasto.proveedor || gasto.cliente) && (
-        <View style={[styles.metadataRow, { marginBottom: Spacing.one }]}>
-          {gasto.proveedor && (
-            <View style={styles.detailRow}>
-              <Ionicons name="business-outline" size={14} color={themeColors.textSecondary} />
-              <Text style={[styles.detailText, { color: themeColors.textSecondary, maxWidth: 120 }]} numberOfLines={1}>
-                {gasto.proveedor}
-              </Text>
-            </View>
-          )}
-          {gasto.cliente && (
-            <View style={[styles.detailRow, { marginLeft: gasto.proveedor ? Spacing.three : 0 }]}>
-              <Ionicons name="people-outline" size={14} color={themeColors.textSecondary} />
-              <Text style={[styles.detailText, { color: themeColors.textSecondary, maxWidth: 120 }]} numberOfLines={1}>
-                {gasto.cliente}
-              </Text>
-            </View>
-          )}
-        </View>
-      )}
-
-      <View style={styles.footer}>
-        <View style={styles.detailRow}>
-          <Ionicons name="calendar-outline" size={14} color={themeColors.textSecondary} />
-          <Text style={[styles.detailText, { color: themeColors.textSecondary }]}>{fecha}</Text>
-        </View>
-
         <View style={[styles.statusBadge, { backgroundColor: statusColor + '18' }]}>
-          <Ionicons name={statusIcon} size={12} color={statusColor} />
+          <Ionicons name={statusIcon} size={11} color={statusColor} />
           <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>
         </View>
+      </View>
+      
+      {/* Detalle */}
+      <View style={{ gap: 4, marginBottom: 8 }}>
+        {showEmployeeName && gasto.empleado_nombre && (
+          <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
+            <Text style={{fontWeight: '600', color: themeColors.text}}>Empleado: </Text>
+            {gasto.empleado_nombre}
+          </Text>
+        )}
+        {(gasto.proveedor || gasto.cliente) && (
+          <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
+            <Text style={{fontWeight: '600', color: themeColors.text}}>Detalle: </Text>
+            {gasto.proveedor}
+            {gasto.proveedor && gasto.cliente ? ' | ' : ''}
+            {gasto.cliente}
+          </Text>
+        )}
+      </View>
+
+      {/* Footer: Fecha & Monto */}
+      <View style={styles.footer}>
+        <View style={styles.detailRow}>
+          <Ionicons name="calendar-outline" size={12} color={themeColors.textSecondary} />
+          <Text style={[styles.detailText, { color: themeColors.textSecondary }]}>{fecha}</Text>
+        </View>
+        <Text style={[styles.monto, { color: themeColors.text }]}>{montoFormatted}</Text>
       </View>
 
       {gasto.status === 'ACTION_REQUIRED' && gasto.rejection_feedback && (
@@ -159,8 +140,8 @@ export default function ExpenseCard({
 const styles = StyleSheet.create({
   card: {
     borderRadius: BorderRadius.large,
-    padding: Spacing.three,
-    marginBottom: Spacing.two,
+    padding: Spacing.two,
+    marginBottom: Spacing.one,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
@@ -187,17 +168,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   category: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
-  subcat: {
-    fontSize: 12,
-    marginTop: 1,
-  },
   monto: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
-    marginLeft: Spacing.one,
   },
   footer: {
     flexDirection: 'row',

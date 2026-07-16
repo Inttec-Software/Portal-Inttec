@@ -63,6 +63,7 @@ export default function VentasScreen() {
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
   const isMobile = windowWidth < 600;
+  const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
@@ -1383,13 +1384,58 @@ export default function VentasScreen() {
             No hay ventas registradas aún.
           </Text>
         </View>
-      ) : ventasFiltradas.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="search-outline" size={48} color={themeColors.textSecondary} />
-          <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-            Sin resultados para "{historialSearch}"
-          </Text>
-        </View>
+      ) : isDesktop ? (
+                <ScrollView style={{ flex: 1 }}>
+                  <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
+                    <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '20%', fontWeight: 'bold' }]}>Cliente</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Fecha</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Referencia</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Proyecto</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold', textAlign: 'right' }]}>Facturado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold', textAlign: 'right' }]}>Margen</Text>
+                      <View style={{ width: '10%', alignItems: 'center' }}>
+                        <Ionicons name="settings-outline" size={14} color={themeColors.text} />
+                      </View>
+                    </View>
+                    <View style={{ backgroundColor: themeColors.backgroundElement, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderTopWidth: 0 }}>
+                      {ventasFiltradas.map((item) => {
+                        const isProfit = item.utilidad_bruta >= 0;
+                        const margenPct = (item.margen_porcentual * 100).toFixed(1);
+                        return (
+                          <Pressable
+                            key={item.id}
+                            onPress={() => handleSelectVenta(item)}
+                            style={({ hovered }: any) => [
+                              styles.tableRow,
+                              { borderBottomColor: themeColors.border },
+                              hovered && { backgroundColor: themeColors.backgroundSelected }
+                            ] as any}
+                          >
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '20%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '10%' }]}>{item.fecha}</Text>
+                            <Text style={[styles.tableCell, { width: '12%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
+                            <View style={{ width: '15%' }}>
+                              {item.tipo_proyecto ? (
+                                <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }]}>
+                                  <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
+                                </View>
+                              ) : <Text style={{ color: themeColors.textSecondary }}>--</Text>}
+                            </View>
+                            <Text style={[styles.tableCell, { width: '13%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]}>{formatCurrency(item.precio_total_facturado)}</Text>
+                            <Text style={[styles.tableCell, { width: '12%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{formatCurrency(item.utilidad_bruta)}</Text>
+                            <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{margenPct}%</Text>
+                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', gap: 12 }}>
+                              <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                              <Ionicons name="pencil-outline" size={16} color={themeColors.accent} />
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </ScrollView>
       ) : (
         <FlatList
           data={ventasFiltradas}
@@ -1403,42 +1449,51 @@ export default function VentasScreen() {
                 onPress={() => handleSelectVenta(item)}
                 style={[styles.historialCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
               >
-                <View style={styles.historialHeader}>
-                  <Text style={[styles.historialCliente, { color: themeColors.text }]}>{item.cliente}</Text>
-                  <Text style={[styles.historialFecha, { color: themeColors.textSecondary }]}>{item.fecha}</Text>
-                </View>
-                {item.factura_referencia ? (
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 4 }}>
-                    PO: {item.factura_referencia}
-                  </Text>
-                ) : null}
-                {item.descripcion ? (
-                  <Text style={{ color: themeColors.text, fontSize: 13, marginBottom: 4, fontWeight: '500' }}>
-                    {item.descripcion}
-                  </Text>
-                ) : null}
-                {item.tipo_proyecto ? (
-                  <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15' }]}>
-                    <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="bar-chart-sharp" size={16} color={themeColors.primary} />
+                    <Text style={[styles.historialCliente, { color: themeColors.text }]} numberOfLines={1}>
+                      {item.cliente}
+                    </Text>
                   </View>
-                ) : null}
+                  <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }]}>
+                    <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto || 'Venta'}</Text>
+                  </View>
+                </View>
+                
+                <View style={{ gap: 2, marginBottom: 8 }}>
+                  {item.factura_referencia ? (
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+                      <Text style={{ fontWeight: '600', color: themeColors.text }}>Factura/PO: </Text>
+                      {item.factura_referencia}
+                    </Text>
+                  ) : null}
+                  {item.descripcion ? (
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 12 }} numberOfLines={1}>
+                      <Text style={{ fontWeight: '600', color: themeColors.text }}>Detalle: </Text>
+                      {item.descripcion}
+                    </Text>
+                  ) : null}
+
+                </View>
+
                 <View style={styles.historialTotals}>
-                  <View style={{ alignItems: 'center' }}>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>FACTURADO</Text>
-                    <Text style={{ color: themeColors.accent, fontSize: 14, fontWeight: '800' }}>
+                  <View style={{ alignItems: 'flex-start', flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                      <Ionicons name="calendar-outline" size={12} color={themeColors.textSecondary} />
+                      <Text style={[styles.historialFecha, { color: themeColors.textSecondary, fontSize: 11 }]}>{item.fecha}</Text>
+                    </View>
+                  </View>
+                  <View style={{ alignItems: 'center', flex: 1 }}>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FACTURADO</Text>
+                    <Text style={{ color: themeColors.accent, fontSize: 13, fontWeight: '800' }}>
                       {formatCurrency(item.precio_total_facturado)}
                     </Text>
                   </View>
-                  <View style={{ alignItems: 'center' }}>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>UTILIDAD</Text>
-                    <Text style={{ color: isProfit ? themeColors.success : themeColors.danger, fontSize: 14, fontWeight: '800' }}>
+                  <View style={{ alignItems: 'flex-end', flex: 1 }}>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>UTILIDAD ({margenPct}%)</Text>
+                    <Text style={{ color: isProfit ? themeColors.success : themeColors.danger, fontSize: 13, fontWeight: '800' }}>
                       {formatCurrency(item.utilidad_bruta)}
-                    </Text>
-                  </View>
-                  <View style={{ alignItems: 'center' }}>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>MARGEN</Text>
-                    <Text style={{ color: isProfit ? themeColors.success : themeColors.danger, fontSize: 14, fontWeight: '800' }}>
-                      {margenPct}%
                     </Text>
                   </View>
                 </View>
@@ -2032,6 +2087,15 @@ const styles = StyleSheet.create({
     paddingVertical: Platform.OS === 'ios' ? 10 : 8,
     fontSize: 14,
   },
+  historialTotals: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: BorderRadius.small,
+  },
   partidaSubtotal: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2173,9 +2237,9 @@ const styles = StyleSheet.create({
   // Historial
   historialCard: {
     borderWidth: 1,
-    borderRadius: BorderRadius.medium,
-    padding: Spacing.three,
-    gap: Spacing.one,
+    borderRadius: BorderRadius.large,
+    padding: Spacing.two,
+    marginBottom: Spacing.one,
   },
   historialHeader: {
     flexDirection: 'row',
@@ -2190,14 +2254,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  historialTotals: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: Spacing.two,
-    paddingTop: Spacing.two,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(128,128,128,0.15)',
-  },
+
   tipoBadge: {
     alignSelf: 'flex-start',
     paddingHorizontal: 8,
@@ -2356,5 +2413,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: BorderRadius.pill,
     borderWidth: 1,
+  },
+  // Table Styles (Desktop)
+  tableHeaderRow: {
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    borderBottomWidth: 1,
+  },
+  tableHeaderCell: {
+    fontSize: 13,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+  },
+  tableCell: {
+    fontSize: 13,
   },
 });
