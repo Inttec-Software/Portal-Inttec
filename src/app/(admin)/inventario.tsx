@@ -307,34 +307,51 @@ export default function InventarioDashboard() {
   };
 
   const handleSoftDeleteProduct = (p: Producto) => {
-    Alert.alert(
-      'Confirmar Desactivación',
-      `¿Estás seguro de que deseas desactivar el producto "${p.nombre_oficial}" del catálogo activo?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Desactivar',
-          style: 'destructive',
-          onPress: async () => {
-            setIsLoading(true);
-            try {
-              const { error } = await supabase
-                .from('productos')
-                .update({ activo: false })
-                .eq('id', p.id);
+    const performDelete = async () => {
+      setIsLoading(true);
+      try {
+        const { error } = await supabase
+          .from('productos')
+          .update({ activo: false })
+          .eq('id', p.id);
 
-              if (error) throw error;
-              Alert.alert('Éxito', 'Producto desactivado.');
-              await loadAllData();
-            } catch (err: any) {
-              Alert.alert('Error', err.message || 'No se pudo desactivar el producto.');
-            } finally {
-              setIsLoading(false);
-            }
+        if (error) throw error;
+        if (Platform.OS === 'web') {
+          window.alert('Producto desactivado.');
+        } else {
+          Alert.alert('Éxito', 'Producto desactivado.');
+        }
+        await loadAllData();
+      } catch (err: any) {
+        if (Platform.OS === 'web') {
+          window.alert(err.message || 'No se pudo desactivar el producto.');
+        } else {
+          Alert.alert('Error', err.message || 'No se pudo desactivar el producto.');
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const confirm = window.confirm(`¿Estás seguro de que deseas desactivar el producto "${p.nombre_oficial}" del catálogo activo?`);
+      if (confirm) {
+        performDelete();
+      }
+    } else {
+      Alert.alert(
+        'Confirmar Desactivación',
+        `¿Estás seguro de que deseas desactivar el producto "${p.nombre_oficial}" del catálogo activo?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Desactivar',
+            style: 'destructive',
+            onPress: performDelete,
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const handleQuickAddStock = async (product: Producto) => {

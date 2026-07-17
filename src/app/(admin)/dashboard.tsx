@@ -1003,6 +1003,30 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteGasto = async (id: string) => {
+    const performDelete = async () => {
+      setIsProcessingAction(true);
+      try {
+        const { error } = await supabase.from('gastos').delete().eq('id', id);
+        if (error) throw error;
+        setGastos(prev => prev.filter(g => g.id !== id));
+        setReviewModalVisible(false);
+        setSelectedGasto(null);
+        showAlert('Éxito', 'Gasto eliminado correctamente de la base de datos.');
+      } catch (err: any) {
+        showAlert('Error al eliminar', err.message || 'No se pudo eliminar el gasto.');
+      } finally {
+        setIsProcessingAction(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const confirm = window.confirm('¿Estás seguro de que deseas eliminar este gasto de la base de datos? Esta acción es irreversible.');
+      if (confirm) {
+        await performDelete();
+      }
+      return;
+    }
+
     Alert.alert(
       'Eliminar Gasto Permanente',
       '¿Estás seguro de que deseas eliminar este gasto de la base de datos? Esta acción es irreversible.',
@@ -1011,21 +1035,7 @@ export default function AdminDashboard() {
         {
           text: 'Eliminar',
           style: 'destructive',
-          onPress: async () => {
-            setIsProcessingAction(true);
-            try {
-              const { error } = await supabase.from('gastos').delete().eq('id', id);
-              if (error) throw error;
-              setGastos(prev => prev.filter(g => g.id !== id));
-              setReviewModalVisible(false);
-              setSelectedGasto(null);
-              Alert.alert('Éxito', 'Gasto eliminado correctamente de la base de datos.');
-            } catch (err: any) {
-              Alert.alert('Error al eliminar', err.message || 'No se pudo eliminar el gasto.');
-            } finally {
-              setIsProcessingAction(false);
-            }
-          },
+          onPress: performDelete,
         },
       ]
     );
@@ -1529,31 +1539,105 @@ export default function AdminDashboard() {
         <View style={{ flex: 1 }}>
           {/* REVISAR PENDIENTES */}
           {activeTab === 'pendientes' && (
-            <FlatList
-              data={pendingGastos}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
-              renderItem={({ item }) => (
-                <ExpenseCard
-                  gasto={item}
-                  showEmployeeName
-                  onPress={() => {
-                    setSelectedGasto(item);
-                    setReviewModalVisible(true);
-                  }}
-                />
-              )}
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="shield-checkmark-outline" size={48} color={themeColors.success} />
-                  <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-                    ¡Al corriente! No hay gastos pendientes de revisión.
-                  </Text>
+            isDesktop ? (
+              <ScrollView style={{ flex: 1 }}>
+                <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
+                  <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Categoría</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Empleado</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '20%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Fecha</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Estado</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
+                    <View style={{ width: '10%', alignItems: 'center' }}>
+                      <Ionicons name="settings-outline" size={14} color={themeColors.text} />
+                    </View>
+                  </View>
+                  <View style={{ backgroundColor: themeColors.backgroundElement, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderTopWidth: 0 }}>
+                    {pendingGastos.length === 0 ? (
+                      <View style={styles.emptyContainer}>
+                        <Ionicons name="shield-checkmark-outline" size={48} color={themeColors.success} />
+                        <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
+                          ¡Al corriente! No hay gastos pendientes de revisión.
+                        </Text>
+                      </View>
+                    ) : (
+                      pendingGastos.map((item) => {
+                        const rawFecha = item.fecha_comprobante || item.created_at?.split('T')[0] || '';
+                        let fecha = rawFecha;
+                        if (rawFecha) {
+                          const parts = rawFecha.split('-');
+                          if (parts.length === 3) fecha = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                        }
+                        
+                        let statusText = 'PENDIENTE';
+                        let statusColor: string = themeColors.warning;
+                        if (item.status === 'APPROVED') { statusText = 'APROBADO'; statusColor = themeColors.success; }
+                        else if (item.status === 'REJECTED') { statusText = 'RECHAZADO'; statusColor = themeColors.danger; }
+                        else if (item.status === 'ACTION_REQUIRED') { statusText = 'ACCIÓN REQ.'; statusColor = themeColors.actionRequired; }
+                        
+                        return (
+                          <Pressable
+                            key={item.id}
+                            onPress={() => {
+                              setSelectedGasto(item);
+                              setReviewModalVisible(true);
+                            }}
+                            style={({ hovered }: any) => [
+                              styles.tableRow,
+                              { borderBottomColor: themeColors.border },
+                              hovered && { backgroundColor: themeColors.backgroundSelected }
+                            ] as any}
+                          >
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%', fontWeight: '600' }]} numberOfLines={1}>{item.categoria}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
+                            <Text style={[styles.tableCell, { width: '20%', color: themeColors.textSecondary }]} numberOfLines={1}>
+                              {item.proveedor} {item.proveedor && item.cliente ? ' | ' : ''} {item.cliente}
+                            </Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]}>{fecha}</Text>
+                            <View style={{ width: '10%' }}>
+                               <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
+                                 <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColor }}>{statusText}</Text>
+                               </View>
+                            </View>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%', fontWeight: '700', textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
+                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', gap: 12 }}>
+                              <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                            </View>
+                          </Pressable>
+                        );
+                      })
+                    )}
+                  </View>
                 </View>
-              }
-              refreshing={isLoading}
-              onRefresh={refreshData}
-            />
+              </ScrollView>
+            ) : (
+              <FlatList
+                data={pendingGastos}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.listContent}
+                renderItem={({ item }) => (
+                  <ExpenseCard
+                    gasto={item}
+                    showEmployeeName
+                    onPress={() => {
+                      setSelectedGasto(item);
+                      setReviewModalVisible(true);
+                    }}
+                  />
+                )}
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="shield-checkmark-outline" size={48} color={themeColors.success} />
+                    <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
+                      ¡Al corriente! No hay gastos pendientes de revisión.
+                    </Text>
+                  </View>
+                }
+                refreshing={isLoading}
+                onRefresh={refreshData}
+              />
+            )
           )}
 
           {/* HISTORIAL */}

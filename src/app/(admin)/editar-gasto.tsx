@@ -69,6 +69,20 @@ const ESTADOS_MEXICO = [
 
 const showAlert = (title: string, message: string) => { if (Platform.OS === 'web') { window.alert(title + '\n\n' + message); } else { Alert.alert(title, message); } };
 
+const cleanJustificacion = (text: string | null | undefined): string => {
+  if (!text) return '';
+  let cleaned = text;
+  // Strip ALERTA IA prefix
+  cleaned = cleaned.replace(/^\[ALERTA IA:[^\]]*\]\n\n/, '');
+  // Strip Consumo compartido
+  cleaned = cleaned.replace(/\n\n\[Consumo compartido con:[^\]]*\]/g, '');
+  // Strip Propina incluida
+  cleaned = cleaned.replace(/\n\n\[Propina incluida en ticket:[^\]]*\]/g, '');
+  // Strip Monto de propina dejado aparte
+  cleaned = cleaned.replace(/\n\n\[Monto de propina dejado aparte:[^\]]*\]/g, '');
+  return cleaned.trim();
+};
+
 export default function EditarGastoForm() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -266,7 +280,7 @@ export default function EditarGastoForm() {
             setSelectedEstado(data.estado || '');
             setMetodoPago(data.metodo_pago as any || 'efectivo');
             setTipoTarjeta(data.tipo_tarjeta as any || null);
-            setJustificacion(data.justificacion || '');
+            setJustificacion(cleanJustificacion(data.justificacion));
             setSelectedCategoria(data.categoria || '');
             setSelectedSubcategoria(data.subcategoria || '');
             setSelectedCliente(data.cliente || '');

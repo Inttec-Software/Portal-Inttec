@@ -18,6 +18,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
@@ -70,7 +72,7 @@ type MetodoPagoKey = 'tarjeta_credito' | 'tarjeta_debito' | 'tarjeta';
 
 interface MatchedTransaction {
   transaction: CardTransaction;
-  matchedGasto: Gasto | null;
+  matchedGastos: Gasto[];
 }
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
@@ -93,13 +95,16 @@ export default function AuditoriaTarjetaScreen() {
 
   // Analysis
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [statementResult, setStatementResult] = useState<CardStatementResult | null>(null);
   const [matchedList, setMatchedList] = useState<MatchedTransaction[]>([]);
+  const [appGastos, setAppGastos] = useState<Gasto[]>([]);
 
   // UI
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'todos' | 'reportados' | 'no_reportados'>('todos');
   const [selectedMatch, setSelectedMatch] = useState<MatchedTransaction | null>(null);
+  const [selectedGastosToLink, setSelectedGastosToLink] = useState<Set<string>>(new Set());
   const [photoViewerUrl, setPhotoViewerUrl] = useState<string | null>(null);
 
   const selectedTarjetaInfo = TARJETAS.find(t => t.key === selectedTarjeta);
@@ -243,9 +248,10 @@ export default function AuditoriaTarjetaScreen() {
         });
 
         if (candidate) usedGastoIds.add(candidate.id);
-        return { transaction: cargo, matchedGasto: candidate ?? null };
+        return { transaction: cargo, matchedGastos: candidate ? [candidate] : [] };
       });
 
+      setAppGastos(gastos);
       setMatchedList(matched);
     } catch (err: any) {
       console.error('Analysis error:', err);
@@ -260,8 +266,8 @@ export default function AuditoriaTarjetaScreen() {
   // ─────────────────────────────────────────────────────────────────────────────
 
   const stats = useMemo(() => {
-    const reportados = matchedList.filter(m => m.matchedGasto !== null);
-    const noReportados = matchedList.filter(m => m.matchedGasto === null);
+    const reportados = matchedList.filter(m => m.matchedGastos.length > 0);
+    const noReportados = matchedList.filter(m => m.matchedGastos.length === 0);
     const totalCargos = matchedList.reduce((s, m) => s + (m.transaction.monto ?? 0), 0);
     const totalNoReportado = noReportados.reduce((s, m) => s + (m.transaction.monto ?? 0), 0);
     return { reportados, noReportados, totalCargos, totalNoReportado };
@@ -269,34 +275,270 @@ export default function AuditoriaTarjetaScreen() {
 
   const filteredList = useMemo(() => {
     let list = matchedList;
-    if (filterTab === 'reportados') list = list.filter(m => m.matchedGasto !== null);
-    if (filterTab === 'no_reportados') list = list.filter(m => m.matchedGasto === null);
+    if (filterTab === 'reportados') list = list.filter(m => m.matchedGastos.length > 0);
+    if (filterTab === 'no_reportados') list = list.filter(m => m.matchedGastos.length === 0);
     const q = searchQuery.trim().toLowerCase();
     if (q) {
       list = list.filter(m =>
         m.transaction.descripcion?.toLowerCase().includes(q) ||
         m.transaction.fecha?.includes(q) ||
         String(m.transaction.monto).includes(q) ||
-        m.matchedGasto?.justificacion?.toLowerCase().includes(q) ||
-        m.matchedGasto?.proveedor?.toLowerCase().includes(q) ||
-        m.matchedGasto?.empleado_nombre?.toLowerCase().includes(q)
+        m.matchedGastos.some(g =>
+          g.justificacion?.toLowerCase().includes(q) ||
+          g.proveedor?.toLowerCase().includes(q) ||
+          g.empleado_nombre?.toLowerCase().includes(q)
+        )
       );
     }
     return list;
   }, [matchedList, filterTab, searchQuery]);
+
+  const availableGastos = useMemo(() => {
+    const usedIds = new Set<string>();
+    matchedList.forEach(m => {
+      if (m !== selectedMatch) {
+        m.matchedGastos.forEach(g => usedIds.add(g.id));
+      }
+    });
+    return appGastos.filter(g => !usedIds.has(g.id));
+  }, [appGastos, matchedList, selectedMatch]);
+
+  const handleLinkSelectedGastos = () => {
+    if (!selectedMatch || selectedGastosToLink.size === 0) return;
+    const gastosToLink = availableGastos.filter(g => selectedGastosToLink.has(g.id));
+    
+    // Update matchedList in memory
+    setMatchedList(prev => prev.map(m => {
+      if (m === selectedMatch) {
+        return { ...m, matchedGastos: gastosToLink };
+      }
+      return m;
+    }));
+    
+    // Reset and close
+    setSelectedMatch(null);
+    setSelectedGastosToLink(new Set());
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Report Generation (PDF)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const generatePDFReport = async () => {
+    setIsGeneratingPDF(true);
+    try {
+      const now = new Date();
+      const dateString = now.toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      
+      const tableStyle = `
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+        th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+        th { background-color: #f8fafc; color: #475569; font-weight: bold; text-transform: uppercase; font-size: 11px; }
+        .monto { text-align: right; font-weight: bold; }
+        .danger { color: #dc2626; }
+        .success { color: #059669; }
+        .sub-row td { background-color: #f0fdf4; border-top: none; color: #334155; padding-left: 24px; font-size: 11px; }
+      `;
+
+      let reportadosHtml = '';
+      if (stats.reportados.length > 0) {
+        reportadosHtml = `
+          <h3>✅ Cargos Conciliados (${stats.reportados.length})</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Concepto Banco</th>
+                <th class="monto">Monto Banco</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${stats.reportados.map(m => `
+                <tr>
+                  <td>${m.transaction.fecha || '-'}</td>
+                  <td><strong>${m.transaction.descripcion || '-'}</strong></td>
+                  <td class="monto success">${formatCurrency(m.transaction.monto || 0)}</td>
+                </tr>
+                ${m.matchedGastos.map(g => `
+                  <tr class="sub-row">
+                    <td colspan="2">↳ <em>Gasto App:</em> ${g.empleado_nombre || 'Empleado'} - ${g.justificacion || g.proveedor || 'Sin detalles'}</td>
+                    <td class="monto" style="color: #64748b; font-weight: normal;">${formatCurrency(Number(g.monto) || 0)}</td>
+                  </tr>
+                `).join('')}
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+
+      let noReportadosHtml = '';
+      if (stats.noReportados.length > 0) {
+        noReportadosHtml = `
+          <h3 style="margin-top: 30px; color: #dc2626;">⚠ Cargos Sin Reportar (${stats.noReportados.length})</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Concepto Banco</th>
+                <th class="monto">Monto Banco</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${stats.noReportados.map(m => `
+                <tr>
+                  <td>${m.transaction.fecha || '-'}</td>
+                  <td>${m.transaction.descripcion || '-'}</td>
+                  <td class="monto danger">${formatCurrency(m.transaction.monto || 0)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; line-height: 1.5; padding: 40px; }
+            h1 { color: #0f172a; margin-bottom: 5px; font-size: 24px; }
+            h2 { color: #334155; font-size: 16px; margin-top: 0; font-weight: normal; margin-bottom: 30px; }
+            .header-info { display: flex; justify-content: space-between; margin-bottom: 30px; background-color: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; }
+            .header-info div { flex: 1; }
+            .header-info strong { display: block; font-size: 11px; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
+            .header-info span { font-size: 14px; font-weight: 600; }
+            
+            .stats-grid { display: flex; gap: 15px; margin-bottom: 40px; }
+            .stat-box { flex: 1; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center; }
+            .stat-box.primary { background-color: #f0f9ff; border-color: #bae6fd; }
+            .stat-box.success { background-color: #f0fdf4; border-color: #bbf7d0; }
+            .stat-box.danger { background-color: #fef2f2; border-color: #fecaca; }
+            .stat-label { font-size: 11px; font-weight: bold; color: #64748b; margin-bottom: 5px; display: block; }
+            .stat-value { font-size: 20px; font-weight: 800; }
+            .stat-box.primary .stat-value { color: #0284c7; }
+            .stat-box.success .stat-value { color: #16a34a; }
+            .stat-box.danger .stat-value { color: #dc2626; }
+            ${tableStyle}
+            .footer { margin-top: 50px; text-align: center; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <h1>Reporte de Auditoría de Tarjeta</h1>
+          <h2>Generado el ${dateString}</h2>
+
+          <div class="header-info">
+            <div>
+              <strong>Tarjeta Auditada</strong>
+              <span>${selectedTarjetaInfo?.label || 'Desconocida'} (${selectedMetodoPagoInfo?.label || 'Cualquiera'})</span>
+            </div>
+            <div>
+              <strong>Titular de Cuenta</strong>
+              <span>${statementResult?.titular || 'No especificado'}</span>
+            </div>
+            <div>
+              <strong>Período</strong>
+              <span>${statementResult?.periodo_inicio || '-'} al ${statementResult?.periodo_fin || '-'}</span>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-box primary">
+              <span class="stat-label">TOTAL CARGOS (${matchedList.length})</span>
+              <span class="stat-value">${formatCurrency(stats.totalCargos)}</span>
+            </div>
+            <div class="stat-box success">
+              <span class="stat-label">CONCILIADO (${stats.reportados.length})</span>
+              <span class="stat-value">${formatCurrency(stats.reportados.reduce((s, m) => s + (m.transaction.monto || 0), 0))}</span>
+            </div>
+            <div class="stat-box danger">
+              <span class="stat-label">FALTANTE (${stats.noReportados.length})</span>
+              <span class="stat-value">${formatCurrency(stats.totalNoReportado)}</span>
+            </div>
+          </div>
+
+          ${reportadosHtml}
+          ${noReportadosHtml}
+
+          <div class="footer">
+            Reporte generado automáticamente por el Portal Administrativo Inttec.<br>
+            Archivo fuente procesado: ${fileName || 'Desconocido'}
+          </div>
+        </body>
+        </html>
+      `;
+
+      const reportTitle = `Auditoria de tarjeta ${selectedTarjetaInfo?.label || 'banco'}`;
+
+      if (Platform.OS === 'web') {
+        // Custom robust iframe printing for Web to avoid expo-print iframe issues
+        // and force the browser to use our custom title as the PDF filename.
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'absolute';
+        iframe.style.width = '0px';
+        iframe.style.height = '0px';
+        iframe.style.border = 'none';
+        document.body.appendChild(iframe);
+        
+        const doc = iframe.contentWindow?.document || iframe.contentDocument;
+        if (doc) {
+          const htmlWithTitle = html.replace('<head>', `<head><title>${reportTitle}</title>`);
+          doc.open();
+          doc.write(htmlWithTitle);
+          doc.close();
+          
+          setTimeout(() => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            document.body.removeChild(iframe);
+          }, 500);
+        }
+      } else {
+        const { uri } = await Print.printToFileAsync({ html });
+        let shareUri = uri;
+        
+        try {
+          // Rename the temp file so the shared PDF has the correct name
+          const FileSys = require('expo-file-system');
+          const cleanTitle = reportTitle.replace(/[^a-zA-Z0-9_]/g, '_');
+          const newUri = `${FileSys.cacheDirectory}${cleanTitle}.pdf`;
+          await FileSys.copyAsync({ from: uri, to: newUri });
+          shareUri = newUri;
+        } catch (copyErr) {
+          console.warn('Could not rename PDF file:', copyErr);
+        }
+
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(shareUri, {
+            mimeType: 'application/pdf',
+            dialogTitle: reportTitle,
+            UTI: 'com.adobe.pdf'
+          });
+        } else {
+          showAlert('Listo', 'PDF Generado en: ' + shareUri);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error generando PDF:', err);
+      showAlert('Error', 'No se pudo generar el documento PDF.');
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Render helpers
   // ─────────────────────────────────────────────────────────────────────────────
 
   const renderTransactionCard = useCallback(({ item }: { item: MatchedTransaction }) => {
-    const { transaction, matchedGasto } = item;
-    const isMatched = matchedGasto !== null;
+    const { transaction, matchedGastos } = item;
+    const isMatched = matchedGastos.length > 0;
 
     return (
       <TouchableOpacity
-        activeOpacity={isMatched ? 0.75 : 1}
-        onPress={() => { if (isMatched) setSelectedMatch(item); }}
+        activeOpacity={0.75}
+        onPress={() => setSelectedMatch(item)}
         style={[
           styles.txCard,
           {
@@ -338,20 +580,24 @@ export default function AuditoriaTarjetaScreen() {
           </View>
         </View>
 
-        {isMatched && matchedGasto && (
+        {isMatched && (
           <View
             style={[
               styles.matchedDetail,
-              { backgroundColor: themeColors.success + '10', borderColor: themeColors.success + '30' },
+              { backgroundColor: themeColors.success + '10', borderColor: themeColors.success + '30', flexDirection: 'column', alignItems: 'flex-start' },
             ]}
           >
-            <Ionicons name="receipt-outline" size={13} color={themeColors.success} />
-            <Text style={[styles.matchedText, { color: themeColors.textSecondary }]} numberOfLines={2}>
-              {matchedGasto.justificacion || matchedGasto.proveedor || 'Gasto registrado'}
-              {' — '}
-              {matchedGasto.empleado_nombre || 'Empleado'}
-            </Text>
-            <Ionicons name="chevron-forward" size={14} color={themeColors.success} style={{ marginLeft: 'auto' }} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+              <Ionicons name="receipt-outline" size={13} color={themeColors.success} />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.success, marginLeft: 4 }}>
+                {matchedGastos.length} {matchedGastos.length === 1 ? 'gasto vinculado' : 'gastos vinculados'}
+              </Text>
+            </View>
+            {matchedGastos.map(g => (
+              <Text key={g.id} style={[styles.matchedText, { color: themeColors.textSecondary }]} numberOfLines={1}>
+                • {formatCurrency(g.monto)} — {g.justificacion || g.proveedor || 'Gasto'} ({g.empleado_nombre})
+              </Text>
+            ))}
           </View>
         )}
       </TouchableOpacity>
@@ -622,27 +868,53 @@ export default function AuditoriaTarjetaScreen() {
 
         {/* Stats */}
         {hasResults && (
-          <View style={styles.statsGrid}>
-            <View style={[styles.statCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-              <Ionicons name="wallet" size={22} color={themeColors.accent} />
-              <Text style={[styles.statLabel, { color: themeColors.textSecondary }]}>TOTAL CARGOS</Text>
-              <Text style={[styles.statValue, { color: themeColors.accent }]}>{formatCurrency(stats.totalCargos)}</Text>
-              <Text style={[styles.statCount, { color: themeColors.textSecondary }]}>{matchedList.length} mov.</Text>
+          <View style={{ marginBottom: Spacing.four }}>
+            <View style={[styles.statsGrid, { marginBottom: Spacing.three }]}>
+              <View style={[styles.statCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                <Ionicons name="wallet" size={22} color={themeColors.accent} />
+                <Text style={[styles.statLabel, { color: themeColors.textSecondary }]}>TOTAL CARGOS</Text>
+                <Text style={[styles.statValue, { color: themeColors.accent }]}>{formatCurrency(stats.totalCargos)}</Text>
+                <Text style={[styles.statCount, { color: themeColors.textSecondary }]}>{matchedList.length} mov.</Text>
+              </View>
+              <View style={[styles.statCard, { backgroundColor: themeColors.success + '12', borderColor: themeColors.success + '40' }]}>
+                <Ionicons name="checkmark-circle" size={22} color={themeColors.success} />
+                <Text style={[styles.statLabel, { color: themeColors.success }]}>REPORTADOS</Text>
+                <Text style={[styles.statValue, { color: themeColors.success }]}>
+                  {formatCurrency(stats.reportados.reduce((s, m) => s + (m.transaction.monto ?? 0), 0))}
+                </Text>
+                <Text style={[styles.statCount, { color: themeColors.success }]}>{stats.reportados.length} mov.</Text>
+              </View>
+              <View style={[styles.statCard, { backgroundColor: themeColors.danger + '12', borderColor: themeColors.danger + '40' }]}>
+                <Ionicons name="warning" size={22} color={themeColors.danger} />
+                <Text style={[styles.statLabel, { color: themeColors.danger }]}>SIN REPORTAR</Text>
+                <Text style={[styles.statValue, { color: themeColors.danger }]}>{formatCurrency(stats.totalNoReportado)}</Text>
+                <Text style={[styles.statCount, { color: themeColors.danger }]}>{stats.noReportados.length} mov.</Text>
+              </View>
             </View>
-            <View style={[styles.statCard, { backgroundColor: themeColors.success + '12', borderColor: themeColors.success + '40' }]}>
-              <Ionicons name="checkmark-circle" size={22} color={themeColors.success} />
-              <Text style={[styles.statLabel, { color: themeColors.success }]}>REPORTADOS</Text>
-              <Text style={[styles.statValue, { color: themeColors.success }]}>
-                {formatCurrency(stats.reportados.reduce((s, m) => s + (m.transaction.monto ?? 0), 0))}
+
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: themeColors.accent + '18',
+                borderColor: themeColors.accent,
+                borderWidth: 1,
+                paddingVertical: Spacing.two,
+                borderRadius: BorderRadius.small,
+              }}
+              onPress={generatePDFReport}
+              disabled={isGeneratingPDF}
+            >
+              {isGeneratingPDF ? (
+                <ActivityIndicator size="small" color={themeColors.accent} />
+              ) : (
+                <Ionicons name="document-text" size={18} color={themeColors.accent} />
+              )}
+              <Text style={{ marginLeft: Spacing.one, color: themeColors.accent, fontWeight: 'bold' }}>
+                {isGeneratingPDF ? 'Generando PDF...' : 'Exportar Reporte PDF'}
               </Text>
-              <Text style={[styles.statCount, { color: themeColors.success }]}>{stats.reportados.length} mov.</Text>
-            </View>
-            <View style={[styles.statCard, { backgroundColor: themeColors.danger + '12', borderColor: themeColors.danger + '40' }]}>
-              <Ionicons name="warning" size={22} color={themeColors.danger} />
-              <Text style={[styles.statLabel, { color: themeColors.danger }]}>SIN REPORTAR</Text>
-              <Text style={[styles.statValue, { color: themeColors.danger }]}>{formatCurrency(stats.totalNoReportado)}</Text>
-              <Text style={[styles.statCount, { color: themeColors.danger }]}>{stats.noReportados.length} mov.</Text>
-            </View>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -735,14 +1007,22 @@ export default function AuditoriaTarjetaScreen() {
         visible={!!selectedMatch}
         transparent
         animationType="slide"
-        onRequestClose={() => setSelectedMatch(null)}
+        onRequestClose={() => {
+          setSelectedMatch(null);
+          setSelectedGastosToLink(new Set());
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContainer, { backgroundColor: themeColors.backgroundElement }]}>
             {/* Modal header */}
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
-              <Text style={[styles.modalTitle, { color: themeColors.text }]}>Detalle de coincidencia</Text>
-              <TouchableOpacity onPress={() => setSelectedMatch(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                {selectedMatch?.matchedGastos && selectedMatch.matchedGastos.length > 0 ? 'Detalle de coincidencia' : 'Vincular Gastos Manualmente'}
+              </Text>
+              <TouchableOpacity onPress={() => {
+                setSelectedMatch(null);
+                setSelectedGastosToLink(new Set());
+              }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name="close" size={22} color={themeColors.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -789,71 +1069,147 @@ export default function AuditoriaTarjetaScreen() {
                 <View style={[styles.matchConnectorLine, { backgroundColor: themeColors.success + '50' }]} />
               </View>
 
-              {/* ── Panel derecho: Gasto registrado en la app ── */}
-              {selectedMatch?.matchedGasto && (
+              {/* ── Panel derecho: Gasto(s) registrado(s) o Selección Manual ── */}
+              {selectedMatch?.matchedGastos && selectedMatch.matchedGastos.length > 0 ? (
+                // ── MODO LECTURA: Mostrar gastos vinculados ──
                 <View style={[styles.modalPanel, { backgroundColor: themeColors.background, borderColor: themeColors.success + '60' }]}>
                   <View style={styles.modalPanelHeader}>
                     <View style={[styles.modalPanelBadge, { backgroundColor: themeColors.success + '20' }]}>
                       <Ionicons name="receipt" size={14} color={themeColors.success} />
-                      <Text style={[styles.modalPanelBadgeText, { color: themeColors.success }]}>Gasto en la App</Text>
+                      <Text style={[styles.modalPanelBadgeText, { color: themeColors.success }]}>Gastos Vinculados ({selectedMatch.matchedGastos.length})</Text>
                     </View>
                   </View>
 
-                  {/* Foto del comprobante */}
-                  {selectedMatch.matchedGasto.foto_url ? (
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => setPhotoViewerUrl(selectedMatch!.matchedGasto!.foto_url!)}
-                    >
-                      <Image
-                        source={{ uri: selectedMatch.matchedGasto.foto_url }}
-                        style={styles.modalPhoto}
-                        resizeMode="cover"
-                      />
-                      <View style={[styles.photoTapHint, { backgroundColor: 'rgba(0,0,0,0.35)' }]}>
-                        <Ionicons name="expand-outline" size={16} color="#fff" />
-                        <Text style={styles.photoTapHintText}>Toca para ampliar</Text>
+                  {selectedMatch.matchedGastos.map((gasto, index) => (
+                    <View key={gasto.id} style={{ marginBottom: index < selectedMatch.matchedGastos.length - 1 ? Spacing.four : 0, paddingBottom: index < selectedMatch.matchedGastos.length - 1 ? Spacing.four : 0, borderBottomWidth: index < selectedMatch.matchedGastos.length - 1 ? 1 : 0, borderBottomColor: themeColors.border }}>
+                      {/* Foto del comprobante */}
+                      {gasto.foto_url ? (
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          onPress={() => setPhotoViewerUrl(gasto.foto_url!)}
+                        >
+                          <Image
+                            source={{ uri: gasto.foto_url }}
+                            style={styles.modalPhoto}
+                            resizeMode="cover"
+                          />
+                          <View style={[styles.photoTapHint, { backgroundColor: 'rgba(0,0,0,0.35)' }]}>
+                            <Ionicons name="expand-outline" size={16} color="#fff" />
+                            <Text style={styles.photoTapHintText}>Toca para ampliar</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ) : (
+                        <View style={[styles.modalPhotoPlaceholder, { backgroundColor: themeColors.border + '40' }]}>
+                          <Ionicons name="image-outline" size={28} color={themeColors.textSecondary} />
+                          <Text style={[styles.modalPhotoPlaceholderText, { color: themeColors.textSecondary }]}>Sin foto de comprobante</Text>
+                        </View>
+                      )}
+
+                      <View style={styles.modalFieldList}>
+                        <ModalField label="Empleado" value={gasto.empleado_nombre ?? '—'} themeColors={themeColors} />
+                        <ModalField label="Proveedor" value={gasto.proveedor ?? '—'} themeColors={themeColors} />
+                        <ModalField label="Justificación" value={gasto.justificacion ?? '—'} themeColors={themeColors} />
+                        <ModalField label="Fecha comprobante" value={gasto.fecha_comprobante ?? '—'} themeColors={themeColors} />
+                        <ModalField
+                          label="Monto registrado"
+                          value={formatCurrency(Number(gasto.monto) || 0)}
+                          themeColors={themeColors}
+                          valueColor={themeColors.success}
+                          bold
+                        />
+                        <ModalField label="Método de pago" value={`${gasto.metodo_pago}${gasto.tipo_tarjeta ? ` (${gasto.tipo_tarjeta})` : ''}`} themeColors={themeColors} />
+                        {gasto.categoria ? (
+                          <ModalField label="Categoría" value={`${gasto.categoria}${gasto.subcategoria ? ` / ${gasto.subcategoria}` : ''}`} themeColors={themeColors} />
+                        ) : null}
                       </View>
-                    </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                // ── MODO VINCULACIÓN MANUAL ──
+                <View style={[styles.modalPanel, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                  <View style={styles.modalPanelHeader}>
+                    <View style={[styles.modalPanelBadge, { backgroundColor: themeColors.border }]}>
+                      <Ionicons name="search" size={14} color={themeColors.text} />
+                      <Text style={[styles.modalPanelBadgeText, { color: themeColors.text }]}>Gastos Disponibles</Text>
+                    </View>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Selecciona uno o más</Text>
+                  </View>
+
+                  {availableGastos.length === 0 ? (
+                    <Text style={{ color: themeColors.textSecondary, fontStyle: 'italic', paddingVertical: Spacing.two, textAlign: 'center' }}>
+                      No hay gastos sin vincular para esta tarjeta.
+                    </Text>
                   ) : (
-                    <View style={[styles.modalPhotoPlaceholder, { backgroundColor: themeColors.border + '40' }]}>
-                      <Ionicons name="image-outline" size={28} color={themeColors.textSecondary} />
-                      <Text style={[styles.modalPhotoPlaceholderText, { color: themeColors.textSecondary }]}>Sin foto de comprobante</Text>
+                    <View style={{ gap: Spacing.two }}>
+                      {availableGastos.map(gasto => {
+                        const isSelected = selectedGastosToLink.has(gasto.id);
+                        return (
+                          <TouchableOpacity
+                            key={gasto.id}
+                            activeOpacity={0.7}
+                            onPress={() => {
+                              const next = new Set(selectedGastosToLink);
+                              if (isSelected) next.delete(gasto.id);
+                              else next.add(gasto.id);
+                              setSelectedGastosToLink(next);
+                            }}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              padding: Spacing.two,
+                              borderRadius: BorderRadius.small,
+                              borderWidth: 1,
+                              borderColor: isSelected ? themeColors.accent : themeColors.border,
+                              backgroundColor: isSelected ? themeColors.accent + '15' : themeColors.backgroundElement,
+                            }}
+                          >
+                            <Ionicons
+                              name={isSelected ? "checkbox" : "square-outline"}
+                              size={20}
+                              color={isSelected ? themeColors.accent : themeColors.textSecondary}
+                              style={{ marginRight: Spacing.two }}
+                            />
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: themeColors.text, fontWeight: 'bold' }}>{formatCurrency(Number(gasto.monto) || 0)}</Text>
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 12 }} numberOfLines={1}>
+                                {gasto.fecha_comprobante} · {gasto.justificacion || gasto.proveedor || 'Sin descripción'}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
                   )}
-
-                  <View style={styles.modalFieldList}>
-                    <ModalField label="Empleado" value={selectedMatch.matchedGasto.empleado_nombre ?? '—'} themeColors={themeColors} />
-                    <ModalField label="Proveedor" value={selectedMatch.matchedGasto.proveedor ?? '—'} themeColors={themeColors} />
-                    <ModalField label="Justificación" value={selectedMatch.matchedGasto.justificacion ?? '—'} themeColors={themeColors} />
-                    <ModalField label="Fecha comprobante" value={selectedMatch.matchedGasto.fecha_comprobante ?? '—'} themeColors={themeColors} />
-                    <ModalField
-                      label="Monto registrado"
-                      value={formatCurrency(Number(selectedMatch.matchedGasto.monto) || 0)}
-                      themeColors={themeColors}
-                      valueColor={themeColors.success}
-                      bold
-                    />
-                    <ModalField label="Método de pago" value={`${selectedMatch.matchedGasto.metodo_pago}${selectedMatch.matchedGasto.tipo_tarjeta ? ` (${selectedMatch.matchedGasto.tipo_tarjeta})` : ''}`} themeColors={themeColors} />
-                    {selectedMatch.matchedGasto.categoria ? (
-                      <ModalField label="Categoría" value={`${selectedMatch.matchedGasto.categoria}${selectedMatch.matchedGasto.subcategoria ? ` / ${selectedMatch.matchedGasto.subcategoria}` : ''}`} themeColors={themeColors} />
-                    ) : null}
-                    {selectedMatch.matchedGasto.cliente ? (
-                      <ModalField label="Cliente" value={selectedMatch.matchedGasto.cliente} themeColors={themeColors} />
-                    ) : null}
-                    {selectedMatch.matchedGasto.estado ? (
-                      <ModalField label="Estado" value={selectedMatch.matchedGasto.estado} themeColors={themeColors} />
-                    ) : null}
-                    {selectedMatch.matchedGasto.facturado !== null && selectedMatch.matchedGasto.facturado !== undefined ? (
-                      <ModalField label="Facturado" value={selectedMatch.matchedGasto.facturado ? 'Sí' : 'No'} themeColors={themeColors} />
-                    ) : null}
-                  </View>
+                  
+                  {selectedGastosToLink.size > 0 && (
+                    <View style={{ marginTop: Spacing.four, padding: Spacing.two, backgroundColor: themeColors.accent + '10', borderRadius: BorderRadius.small }}>
+                      <Text style={{ color: themeColors.text, fontSize: 12, marginBottom: 4 }}>
+                        Total seleccionado: 
+                        <Text style={{ fontWeight: 'bold', color: themeColors.accent }}>
+                          {' '}{formatCurrency(Array.from(selectedGastosToLink).reduce((acc, id) => {
+                            const g = availableGastos.find(g => g.id === id);
+                            return acc + (Number(g?.monto) || 0);
+                          }, 0))}
+                        </Text>
+                      </Text>
+                      <TouchableOpacity
+                        style={{ backgroundColor: themeColors.accent, padding: Spacing.two, borderRadius: BorderRadius.small, alignItems: 'center', marginTop: Spacing.one }}
+                        onPress={handleLinkSelectedGastos}
+                      >
+                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>Vincular Selección</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               )}
 
               <TouchableOpacity
                 style={[styles.modalCloseBtn, { backgroundColor: themeColors.accent }]}
-                onPress={() => setSelectedMatch(null)}
+                onPress={() => {
+                  setSelectedMatch(null);
+                  setSelectedGastosToLink(new Set());
+                }}
               >
                 <Text style={styles.modalCloseBtnText}>Cerrar</Text>
               </TouchableOpacity>
