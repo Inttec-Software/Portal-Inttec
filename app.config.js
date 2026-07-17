@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: "Portal Inttec",
     slug: "app-movil",
-    version: "1.0.1",
+    version: "1.1.7",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "appmovil",
@@ -10,7 +10,7 @@ module.exports = {
     ios: {
       icon: "./assets/expo.icon",
       config: {
-        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyDgvQcdXQYx8uSGNJJ4wENAGkIVbDIaUXc"
+        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""
       }
     },
     android: {
@@ -24,7 +24,7 @@ module.exports = {
       package: "com.alexisef23.appmovil",
       config: {
         googleMaps: {
-          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyDgvQcdXQYx8uSGNJJ4wENAGkIVbDIaUXc"
+          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""
         }
       }
     },
@@ -34,6 +34,8 @@ module.exports = {
     },
     plugins: [
       "expo-router",
+      "expo-font",
+      "expo-image",
       [
         "expo-splash-screen",
         {

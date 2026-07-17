@@ -467,3 +467,108 @@ export async function recalculateVentaTotals(ventaId: string): Promise<void> {
   }
 }
 
+export interface Vehiculo {
+  id: string;
+  marca: string;
+  modelo: string;
+  anio: number;
+  placas: string;
+  numero_economico?: string | null;
+  activo: boolean;
+  created_at?: string;
+}
+
+export interface RegistroGasolina {
+  id: string;
+  gasto_id?: string | null;
+  vehiculo_id: string;
+  empleado_id: string;
+  fecha: string;
+  kilometraje_actual: number;
+  litros: number;
+  costo_total: number;
+  ticket_foto_url?: string | null;
+  observaciones?: string | null;
+  created_at?: string;
+  vehiculo_marca?: string;
+  vehiculo_modelo?: string;
+  vehiculo_placas?: string;
+  empleado_nombre?: string;
+}
+
+export const VehiculoService = {
+  async getVehiculos(soloActivos = true): Promise<Vehiculo[]> {
+    let query = supabase.from('vehiculos').select('*');
+    if (soloActivos) {
+      query = query.eq('activo', true);
+    }
+    const { data, error } = await query.order('marca', { ascending: true });
+    if (error) throw error;
+    return (data || []) as Vehiculo[];
+  },
+
+  async crearVehiculo(vehiculo: Omit<Vehiculo, 'id' | 'created_at'>): Promise<Vehiculo> {
+    const { data, error } = await supabase
+      .from('vehiculos')
+      .insert([vehiculo])
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Vehiculo;
+  },
+
+  async actualizarVehiculo(id: string, updates: Partial<Vehiculo>): Promise<Vehiculo> {
+    const { data, error } = await supabase
+      .from('vehiculos')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Vehiculo;
+  },
+
+  async eliminarVehiculo(id: string): Promise<void> {
+    const { error } = await supabase.from('vehiculos').delete().eq('id', id);
+    if (error) throw error;
+  },
+
+  async getRegistrosGasolina(filtros?: { vehiculoId?: string; empleadoId?: string }): Promise<RegistroGasolina[]> {
+    let query = supabase
+      .from('registro_gasolina')
+      .select(`
+        *,
+        vehiculo:vehiculo_id (marca, modelo, placas),
+        empleado:empleado_id (nombre)
+      `);
+
+    if (filtros?.vehiculoId) {
+      query = query.eq('vehiculo_id', filtros.vehiculoId);
+    }
+    if (filtros?.empleadoId) {
+      query = query.eq('empleado_id', filtros.empleadoId);
+    }
+
+    const { data, error } = await query.order('fecha', { ascending: false });
+    if (error) throw error;
+
+    return (data || []).map((row: any) => ({
+      ...row,
+      vehiculo_marca: row.vehiculo?.marca,
+      vehiculo_modelo: row.vehiculo?.modelo,
+      vehiculo_placas: row.vehiculo?.placas,
+      empleado_nombre: row.empleado?.nombre,
+    })) as RegistroGasolina[];
+  },
+
+  async crearRegistroGasolina(registro: Omit<RegistroGasolina, 'id' | 'created_at'>): Promise<RegistroGasolina> {
+    const { data, error } = await supabase
+      .from('registro_gasolina')
+      .insert([registro])
+      .select()
+      .single();
+    if (error) throw error;
+    return data as RegistroGasolina;
+  },
+};
+

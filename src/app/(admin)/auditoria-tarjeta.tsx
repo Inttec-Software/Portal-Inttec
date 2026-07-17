@@ -146,6 +146,7 @@ export default function AuditoriaTarjetaScreen() {
 
       try {
         if (Platform.OS !== 'web') {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
           const FileSys = require('expo-file-system/legacy');
           const tempFileName = `temp_${Date.now()}_${asset.name || 'estado.pdf'}`;
           const targetUri = `${FileSys.cacheDirectory}${tempFileName}`;
@@ -500,6 +501,7 @@ export default function AuditoriaTarjetaScreen() {
         
         try {
           // Rename the temp file so the shared PDF has the correct name
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
           const FileSys = require('expo-file-system');
           const cleanTitle = reportTitle.replace(/[^a-zA-Z0-9_]/g, '_');
           const newUri = `${FileSys.cacheDirectory}${cleanTitle}.pdf`;

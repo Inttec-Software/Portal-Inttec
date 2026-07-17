@@ -22,7 +22,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem } from '@/services/supabase';
+import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, Vehiculo, VehiculoService } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { GeminiService } from '@/services/gemini';
 import { getComentariosPlaceholder } from '@/utils/helpers';
@@ -103,6 +103,7 @@ export default function GastoForm() {
   const [monto, setMonto] = useState('');
   const [proveedor, setProveedor] = useState('');
   const [facturado, setFacturado] = useState<boolean | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [facturaUri, setFacturaUri] = useState<string | null>(null);
   const [facturaBase64, setFacturaBase64] = useState<string | null>(null);
   const [facturaExt, setFacturaExt] = useState<string | null>(null);
@@ -169,6 +170,13 @@ export default function GastoForm() {
   const [clienteSearch, setClienteSearch] = useState('');
   const [justificacion, setJustificacion] = useState('');
 
+  // Vehículos y Gasolina
+  const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
+  const [selectedVehiculoId, setSelectedVehiculoId] = useState<string>('');
+  const [kilometrajeActual, setKilometrajeActual] = useState<string>('');
+  const [litrosGasolina, setLitrosGasolina] = useState<string>('');
+  const [showVehiculoDropdown, setShowVehiculoDropdown] = useState(false);
+
   // División de Gasto
   const [isSplit, setIsSplit] = useState(false);
   const [splits, setSplits] = useState<{ id: string; clienteId: string; monto: string }[]>([]);
@@ -177,6 +185,7 @@ export default function GastoForm() {
   const [showCatDropdown, setShowCatDropdown] = useState(false);
   const [showSubDropdown, setShowSubDropdown] = useState(false);
   const [showCliDropdown, setShowCliDropdown] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [activeSplitDropdownId, setActiveSplitDropdownId] = useState<string | null>(null);
 
   // Modal para agregar división de gasto
@@ -217,17 +226,19 @@ export default function GastoForm() {
 
   const loadCatalogos = async () => {
     try {
-      const [catRes, subRes, cliRes, usrRes] = await Promise.all([
+      const [catRes, subRes, cliRes, usrRes, vehList] = await Promise.all([
         supabase.from('categorias').select('*').order('nombre'),
         supabase.from('subcategorias').select('*').order('nombre'),
         supabase.from('clientes').select('*').order('nombre'),
         supabase.from('usuarios').select('*').order('nombre'),
+        VehiculoService.getVehiculos(true),
       ]);
 
       if (catRes.data) setCategorias(catRes.data);
       if (subRes.data) setSubcategorias(subRes.data);
       if (cliRes.data) setClientes(cliRes.data);
       if (usrRes.data) setAllUsers(usrRes.data);
+      if (vehList) setVehiculos(vehList);
     } catch (err) {
       console.error('Error loading catalogs:', err);
     }
@@ -599,6 +610,24 @@ export default function GastoForm() {
       return;
     }
 
+    const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
+    const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
+    const esGasolina = esVehiculos && esSubGasolina;
+    if (esGasolina) {
+      if (!selectedVehiculoId) {
+        showAlert('Validación', 'Por favor selecciona el vehículo.');
+        return;
+      }
+      if (!kilometrajeActual || isNaN(Number(kilometrajeActual)) || Number(kilometrajeActual) <= 0) {
+        showAlert('Validación', 'Por favor ingresa un kilometraje (odómetro) válido.');
+        return;
+      }
+      if (!litrosGasolina || isNaN(Number(litrosGasolina)) || Number(litrosGasolina) <= 0) {
+        showAlert('Validación', 'Por favor ingresa los litros cargados de forma válida.');
+        return;
+      }
+    }
+
     if (!tipoServicioProyecto) {
       showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto, Venta u Operativo.');
       return;
@@ -766,12 +795,45 @@ export default function GastoForm() {
           }
         }
 
-        const { error: dbError } = await supabase.from('gastos').insert(payloadsToInsert);
+        const { data: insertedGastos, error: dbError } = await supabase
+          .from('gastos')
+          .insert(payloadsToInsert)
+          .select();
 
         if (dbError) throw dbError;
+
+        // Si es combustible, guardar bitácora de gasolina vinculada
+        const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
+        const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
+        const esGasolina = esVehiculos && esSubGasolina;
+        if (esGasolina && insertedGastos && insertedGastos.length > 0) {
+          const mainGastoId = insertedGastos[0].id;
+          const { error: gasError } = await supabase
+            .from('registro_gasolina')
+            .insert([
+              {
+                gasto_id: mainGastoId,
+                vehiculo_id: selectedVehiculoId,
+                empleado_id: currentUser.id,
+                fecha: dbFecha,
+                kilometraje_actual: Number(kilometrajeActual),
+                litros: Number(litrosGasolina),
+                costo_total: totalGasto,
+                ticket_foto_url: publicUrl || null,
+              },
+            ]);
+
+          if (gasError) {
+            console.error('Error insertando en registro_gasolina:', gasError.message);
+          }
+        }
+
         showAlert('Éxito', 'Gasto registrado correctamente en el servidor.');
       } else {
         // Fuera de línea: Guardar localmente
+        const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
+        const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
+        const esGasolina = esVehiculos && esSubGasolina;
         if (isSplit) {
           for (let i = 0; i < splits.length; i++) {
             const s = splits[i];
@@ -782,6 +844,9 @@ export default function GastoForm() {
               justificacion: `[Gasto dividido del ticket total de $${totalGasto}] - División ${i + 1}/${splits.length}\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
               fotoExt: imageExt,
+              vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
+              kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
+              litros: esGasolina ? Number(litrosGasolina) : undefined,
             });
           }
           const sum = splits.reduce((acc, curr) => acc + Number(curr.monto), 0);
@@ -794,6 +859,9 @@ export default function GastoForm() {
               justificacion: `[Gasto principal / Restante del ticket total de $${totalGasto}]\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
               fotoExt: imageExt,
+              vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
+              kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
+              litros: esGasolina ? Number(litrosGasolina) : undefined,
             });
           }
         } else {
@@ -801,6 +869,9 @@ export default function GastoForm() {
             ...gastoPayload,
             base64Foto: imageBase64 || undefined,
             fotoExt: imageExt,
+            vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
+            kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
+            litros: esGasolina ? Number(litrosGasolina) : undefined,
           });
         }
         showAlert(
@@ -865,6 +936,7 @@ export default function GastoForm() {
   };
 
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isAnyDropdownOpen = !!(showEmpList || showEstDropdown || showCatDropdown || showSubDropdown || showCliDropdown);
 
   return (
@@ -1704,6 +1776,95 @@ export default function GastoForm() {
                       </View>
                     </View>
                   )}
+                </View>
+              )}
+
+              {/* Información de Gasolina (Solo si la categoría es Vehículos y subcategoría es Gasolina) */}
+              {(selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos' &&
+                selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina') && (
+                <View style={{
+                  padding: Spacing.three,
+                  borderRadius: BorderRadius.medium,
+                  backgroundColor: themeColors.primary + '08',
+                  borderColor: themeColors.primary + '20',
+                  borderWidth: 1,
+                  marginBottom: Spacing.three,
+                }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.primary, marginBottom: Spacing.two }}>
+                    Detalles de Combustible / Bitácora
+                  </Text>
+
+                  {/* Selector de Vehículo */}
+                  <View style={styles.customDropdownContainer}>
+                    <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Vehículo *</Text>
+                    <TouchableOpacity
+                      style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowVehiculoDropdown(!showVehiculoDropdown);
+                        setShowCatDropdown(false);
+                        setShowSubDropdown(false);
+                        setShowCliDropdown(false);
+                      }}
+                    >
+                      <Text style={{ color: selectedVehiculoId ? themeColors.text : themeColors.textSecondary }}>
+                        {vehiculos.find(v => v.id === selectedVehiculoId) 
+                          ? `${vehiculos.find(v => v.id === selectedVehiculoId)?.marca} ${vehiculos.find(v => v.id === selectedVehiculoId)?.modelo} (${vehiculos.find(v => v.id === selectedVehiculoId)?.placas})` 
+                          : 'Selecciona un vehículo'}
+                      </Text>
+                      <Ionicons name={showVehiculoDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                    </TouchableOpacity>
+                    {showVehiculoDropdown && (
+                      <View style={{ width: '100%', zIndex: 1001 }}>
+                        <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
+                            {vehiculos.map((veh, index, array) => (
+                              <TouchableOpacity
+                                key={veh.id}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
+                                onPress={() => {
+                                  setSelectedVehiculoId(veh.id);
+                                  setShowVehiculoDropdown(false);
+                                }}
+                              >
+                                <Ionicons name="car-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 13 }}>
+                                  {veh.marca} {veh.modelo} - {veh.placas}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                            {vehiculos.length === 0 && (
+                              <Text style={{ padding: Spacing.two, color: themeColors.textSecondary, textAlign: 'center' }}>
+                                No hay vehículos registrados.
+                              </Text>
+                            )}
+                          </ScrollView>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Kilometraje Actual */}
+                  <CustomInput
+                    label="Kilometraje Actual (Odómetro) *"
+                    placeholder="Ej. 142500"
+                    value={kilometrajeActual}
+                    onChangeText={setKilometrajeActual}
+                    keyboardType="numeric"
+                  />
+
+                  {/* Litros de Gasolina */}
+                  <CustomInput
+                    label="Litros Cargados *"
+                    placeholder="Ej. 45.5"
+                    value={litrosGasolina}
+                    onChangeText={setLitrosGasolina}
+                    keyboardType="numeric"
+                  />
                 </View>
               )}
 

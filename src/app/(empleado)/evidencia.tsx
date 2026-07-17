@@ -15,7 +15,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, Evidencia } from '@/services/supabase';
+import { supabase, AuthService, Usuario } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import StepIndicator from '@/components/StepIndicator';

@@ -60,7 +60,7 @@ export default function NuevaCotizacionScreen() {
   const showAlert = (title: string, message: string) => {
     setFormMessage({ type: title.toLowerCase().includes('error') ? 'error' : 'success', text: message });
     if (Platform.OS === 'web') {
-      try { window.alert(`${title}: ${message}`); } catch(e) {}
+      try { window.alert(`${title}: ${message}`); } catch(_e) {}
     } else {
       Alert.alert(title, message);
     }

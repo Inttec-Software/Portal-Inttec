@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   Alert,
   Image,
   KeyboardAvoidingView,
@@ -19,8 +18,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, Gasto, recalculateVentaTotals } from '@/services/supabase';
-import { SyncService, base64ToArrayBuffer } from '@/services/sync';
+import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, recalculateVentaTotals } from '@/services/supabase';
+import { base64ToArrayBuffer } from '@/services/sync';
 import { GeminiService } from '@/services/gemini';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
@@ -101,7 +100,9 @@ export default function EditarGastoForm() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageExt, setImageExt] = useState<string>('jpg');
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isScanning, setIsScanning] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [scanSuccess, setScanSuccess] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
 
@@ -114,6 +115,7 @@ export default function EditarGastoForm() {
   const [monto, setMonto] = useState('');
   const [proveedor, setProveedor] = useState('');
   const [facturado, setFacturado] = useState<boolean | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [facturaUri, setFacturaUri] = useState<string | null>(null);
   const [facturaBase64, setFacturaBase64] = useState<string | null>(null);
   const [facturaExt, setFacturaExt] = useState<string | null>(null);
@@ -234,6 +236,7 @@ export default function EditarGastoForm() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isLoadingGasto, setIsLoadingGasto] = useState(true);
 
   useEffect(() => {
@@ -302,7 +305,7 @@ export default function EditarGastoForm() {
             // pero podemos asumir que incluyePropina = true para que no requiera el montoPropina forzado.
             setIncluyePropina(true); 
           }
-        } catch (error) {
+        } catch {
           showAlert('Error', 'No se pudo cargar el gasto a editar.');
           router.replace('/(empleado)/dashboard');
         } finally {

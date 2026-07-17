@@ -12,6 +12,7 @@ import {
   Pressable,
   Keyboard,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -26,6 +27,8 @@ export default function CatalogosManager() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { width: windowWidth } = useWindowDimensions();
+  const isDesktop = windowWidth >= 768;
 
   const [categorias, setCategorias] = useState<CatalogoItem[]>([]);
   const [subcategorias, setSubcategorias] = useState<SubcategoriaItem[]>([]);
@@ -222,14 +225,29 @@ export default function CatalogosManager() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: themeColors.text }]}>Catálogos</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <View style={isDesktop ? { maxWidth: 800, width: '100%', alignSelf: 'center', flex: 1, paddingHorizontal: Spacing.two } : { flex: 1 }}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color={themeColors.text} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: themeColors.text }]}>Catálogos de Empresa</Text>
+          <TouchableOpacity
+            onPress={() => setAddModalVisible(true)}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              backgroundColor: themeColors.accent,
+              borderRadius: 15,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Ionicons name="add" size={16} color="#ffffff" />
+            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 12 }}>Agregar</Text>
+          </TouchableOpacity>
+        </View>
 
       {/* Catalog Selectors */}
       <View style={styles.selectorsContainer}>
@@ -329,23 +347,27 @@ export default function CatalogosManager() {
       )}
 
       {/* FAB - Agregar elemento */}
-      <TouchableOpacity
-        activeOpacity={0.8}
-        onPress={() => setAddModalVisible(true)}
-        style={[styles.fab, { backgroundColor: themeColors.accent }]}
-      >
-        <Ionicons name="add" size={28} color="#ffffff" />
-      </TouchableOpacity>
+      {!isDesktop && (
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => setAddModalVisible(true)}
+          style={[styles.fab, { backgroundColor: themeColors.accent }]}
+        >
+          <Ionicons name="add" size={28} color="#ffffff" />
+        </TouchableOpacity>
+      )}
+
+      </View>
 
       {/* Modal para Agregar Elemento */}
       <Modal
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         visible={addModalVisible}
         onRequestClose={() => setAddModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '50%' }]}>
+        <View style={[styles.modalOverlay, isDesktop && { justifyContent: 'center', alignItems: 'center' }]}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background }, isDesktop ? { width: 480, borderRadius: BorderRadius.large, height: 'auto', maxHeight: '90%', padding: Spacing.four } : { height: '50%' }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: themeColors.text }]}>
                 Agregar a {activeCatalog === 'categorias' ? 'Categorías' : activeCatalog === 'clientes' ? 'Clientes' : 'Subcategorías'}
@@ -433,7 +455,7 @@ export default function CatalogosManager() {
 
       {/* Modal para Editar Elemento */}
       <Modal
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         visible={editModalVisible}
         onRequestClose={() => {
@@ -444,8 +466,8 @@ export default function CatalogosManager() {
           setShowEditParentCatDropdown(false);
         }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '50%' }]}>
+        <View style={[styles.modalOverlay, isDesktop && { justifyContent: 'center', alignItems: 'center' }]}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background }, isDesktop ? { width: 480, borderRadius: BorderRadius.large, height: 'auto', maxHeight: '90%', padding: Spacing.four } : { height: '50%' }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: themeColors.text }]}>
                 Editar en {activeCatalog === 'categorias' ? 'Categorías' : activeCatalog === 'clientes' ? 'Clientes' : 'Subcategorías'}

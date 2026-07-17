@@ -32,6 +32,7 @@ export default function AdminEvidenciasScreen() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [adminUser, setAdminUser] = useState<Usuario | null>(null);
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
   const [employees, setEmployees] = useState<Usuario[]>([]);
@@ -455,7 +456,7 @@ export default function AdminEvidenciasScreen() {
                         listTrabajos = JSON.parse(selectedEvidencia.descripcion_trabajo);
                         isJson = true;
                       }
-                    } catch (e) {}
+                    } catch (_e) {}
 
                     if (isJson && listTrabajos.length > 0) {
                       return (

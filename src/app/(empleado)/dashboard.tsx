@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,27 +11,26 @@ import {
   Alert,
   Image,
   Platform,
-  Dimensions,
   Linking,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient } from '@/services/supabase';
+import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
 import { SyncService, OfflineGastoItem } from '@/services/sync';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
-import MapView, { Marker } from 'react-native-maps';
+
 import { useAuth } from '@/context/AuthContext';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 
 export default function EmpleadoDashboard() {
   const router = useRouter();
@@ -54,6 +53,7 @@ export default function EmpleadoDashboard() {
   
   // Feedback para Action Required
   const [repondFeedback, setRespondFeedback] = useState('');
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isSubmittingResponse, setIsSubmittingResponse] = useState(false);
 
   // Modal de Perfil
@@ -61,6 +61,11 @@ export default function EmpleadoDashboard() {
   const [profilePhone, setProfilePhone] = useState('');
   const [profilePassword, setProfilePassword] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  // Vehículos y Gasolina
+  const [employeeVehiculosModalVisible, setEmployeeVehiculosModalVisible] = useState(false);
+  const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
+  const [misRegistrosGasolina, setMisRegistrosGasolina] = useState<RegistroGasolina[]>([]);
 
   // --- Auto-Checador ---
   const [checadorInstructionVisible, setChecadorInstructionVisible] = useState(false);
@@ -107,7 +112,6 @@ export default function EmpleadoDashboard() {
 
   // --- Checador: Lógica ---
   const handleOpenChecador = async () => {
-    console.log('[Checador] Abriendo checador (handleOpenChecador)...');
     if (!user) {
       console.error('[Checador] Error: user es nulo o indefinido en handleOpenChecador');
       if (Platform.OS === 'web') {
@@ -115,15 +119,11 @@ export default function EmpleadoDashboard() {
       }
       return;
     }
-    console.log('[Checador] Usuario logueado:', user.id, user.nombre);
     setIsLoadingChecador(true);
     try {
-      console.log('[Checador] Llamando a getRegistroHoy...');
       const registro = await AsistenciaService.getRegistroHoy(user.id);
-      console.log('[Checador] Resultado de getRegistroHoy:', registro);
       setRegistroHoy(registro);
       if (registro && registro.hora_entrada && registro.hora_salida) {
-        console.log('[Checador] Turno completo detectado hoy.');
         if (Platform.OS === 'web') {
           window.alert(`Turno Completo ✅\n\nYa registraste tu entrada (${registro.hora_entrada?.substring(0,5)}) y salida (${registro.hora_salida?.substring(0,5)}) el día de hoy.`);
         } else {
@@ -134,7 +134,6 @@ export default function EmpleadoDashboard() {
         }
         return;
       }
-      console.log('[Checador] Mostrando modal de instrucciones...');
       setChecadorInstructionVisible(true);
     } catch (err: any) {
       console.error('[Checador] Error en handleOpenChecador:', err.message || err);
@@ -148,102 +147,62 @@ export default function EmpleadoDashboard() {
     }
   };
   const handleStartCamera = async () => {
-    console.log('[Checador] Iniciando proceso de checador...');
     setChecadorInstructionVisible(false);
 
-    // Pedir permiso de cámara
-    console.log('[Checador] Verificando permisos de cámara...');
     if (!cameraPermission?.granted) {
-      console.log('[Checador] Permiso de cámara no concedido, solicitando...');
       const { granted } = await requestCameraPermission();
-      console.log('[Checador] Resultado de permiso de cámara:', granted);
       if (!granted) {
         Alert.alert('Permisos', 'Se necesita acceso a la cámara para el checador.');
         return;
       }
-    } else {
-      console.log('[Checador] Permiso de cámara ya concedido.');
     }
 
-    // Pedir permiso de ubicación
-    console.log('[Checador] Solicitando permisos de ubicación...');
     const { status } = await Location.requestForegroundPermissionsAsync();
-    console.log('[Checador] Resultado de permiso de ubicación:', status);
     if (status !== 'granted') {
       Alert.alert('Permisos', 'Se necesita acceso a la ubicación para registrar la asistencia.');
       return;
     }
 
-    // Obtener ubicación y geocodificación
     try {
-      console.log('[Checador] Obteniendo ubicación actual del GPS...');
       setCurrentAddress('Obteniendo dirección...');
       const loc = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
       const lat = loc.coords.latitude;
       const lng = loc.coords.longitude;
-      console.log('[Checador] Ubicación obtenida:', lat, lng);
       setCurrentLocation({ lat, lng });
 
       try {
-        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "AIzaSyDgvQcdXQYx8uSGNJJ4wENAGkIVbDIaUXc";
-        console.log('[Checador] Iniciando geocodificación de Google con apiKey:', apiKey ? 'Presente' : 'Ausente');
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
         const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`);
-        console.log('[Checador] Respuesta HTTP de Google Geocoding recibida:', response.status);
         const data = await response.json();
-        console.log('[Checador] Datos de Google Geocoding parseados, status:', data.status);
 
         if (data.status === 'OK' && data.results && data.results.length > 0) {
           const formatted = data.results[0].formatted_address;
-          console.log('[Checador] Dirección formateada de Google:', formatted);
           setCurrentAddress(formatted || 'Dirección no identificada');
         } else {
           throw new Error(data.error_message || `Google Geocoding API status: ${data.status}`);
         }
-      } catch (googleErr: any) {
-        console.warn('[Checador] Falló la geocodificación de Google, intentando fallback nativo:', googleErr.message || googleErr);
+      } catch {
         try {
-          console.log('[Checador] Ejecutando geocodificación nativa de Expo...');
-          const reverse = await Location.reverseGeocodeAsync({
-            latitude: lat,
-            longitude: lng,
-          });
-          console.log('[Checador] Resultado de geocodificación nativa de Expo:', reverse);
-
+          const reverse = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
           if (reverse && reverse.length > 0) {
             const addr = reverse[0];
-            const street = addr.street || '';
-            const number = addr.streetNumber || '';
-            const district = addr.district || ''; // Colonia
-            const postalCode = addr.postalCode || ''; // CP
-            const city = addr.city || ''; // Ciudad
-            const region = addr.region || ''; // Estado
-
             const parts = [];
-            if (street || number) {
-              parts.push(`${street} ${number}`.trim());
-            }
-            if (district) {
-              parts.push(district);
-            }
-            if (postalCode || city || region) {
+            if (addr.street || addr.streetNumber) parts.push(`${addr.street || ''} ${addr.streetNumber || ''}`.trim());
+            if (addr.district) parts.push(addr.district);
+            if (addr.postalCode || addr.city || addr.region) {
               let line = '';
-              if (postalCode) line += `${postalCode} `;
-              if (city) line += city;
-              if (region) line += (city ? ', ' : '') + region;
+              if (addr.postalCode) line += `${addr.postalCode} `;
+              if (addr.city) line += addr.city;
+              if (addr.region) line += (addr.city ? ', ' : '') + addr.region;
               parts.push(line.trim());
             }
-
-            const formatted = parts.join(', ');
-            console.log('[Checador] Dirección formateada nativa:', formatted);
-            setCurrentAddress(formatted || 'Dirección no identificada');
+            setCurrentAddress(parts.join(', ') || 'Dirección no identificada');
           } else {
-            console.log('[Checador] Geocodificación nativa devolvió array vacío.');
             setCurrentAddress('Dirección no disponible');
           }
-        } catch (geoErr: any) {
-          console.error('[Checador] Error en geocodificación nativa de fallback:', geoErr.message || geoErr);
+        } catch {
           setCurrentAddress(`Coordenadas: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
         }
       }
@@ -253,81 +212,49 @@ export default function EmpleadoDashboard() {
       setCurrentAddress('Ubicación no disponible');
     }
 
-    // Iniciar reloj en tiempo real
-    console.log('[Checador] Iniciando intervalo de reloj de checador...');
     setCurrentDateTime(new Date());
     dateIntervalRef.current = setInterval(() => {
       setCurrentDateTime(new Date());
     }, 1000);
 
-    console.log('[Checador] Mostrando cámara...');
     setChecadorCameraVisible(true);
   };
 
   const handleCaptureSelfie = async () => {
-    console.log('[Checador] Presionado botón para capturar selfie...');
-    if (!cameraRef.current) {
-      console.error('[Checador] Error: cameraRef.current es nulo');
-      return;
-    }
-    if (isCapturing) {
-      console.log('[Checador] Omitiendo captura: ya hay una captura en curso...');
-      return;
-    }
-    if (!user) {
-      console.error('[Checador] Error: no hay usuario logueado');
-      return;
-    }
+    if (!cameraRef.current || isCapturing || !user) return;
     setIsCapturing(true);
 
     try {
-      console.log('[Checador] Tomando foto con takePictureAsync...');
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.7,
         base64: true,
         shutterSound: true,
       });
-      console.log('[Checador] takePictureAsync finalizado.');
-      console.log('[Checador] Propiedades de photo devueltas:', photo ? Object.keys(photo) : 'null');
-      if (photo) {
-        console.log('[Checador] photo.uri:', photo.uri ? photo.uri.substring(0, 80) + '...' : 'vacío');
-        console.log('[Checador] photo.base64 longitud:', photo.base64 ? photo.base64.length : 'vacío');
-      }
 
       let base64Data = photo?.base64;
       if (!base64Data && photo?.uri && photo.uri.startsWith('data:image')) {
-        console.log('[Checador] photo.base64 es nulo, pero photo.uri contiene un Data URL base64. Extrayendo...');
         base64Data = photo.uri;
       }
 
       if (!base64Data) {
-        console.error('[Checador] Error: base64Data no pudo ser resuelto de ninguna propiedad.');
         throw new Error('No se pudo capturar la foto.');
       }
 
-      // Detener reloj
-      console.log('[Checador] Deteniendo intervalo de reloj...');
       if (dateIntervalRef.current) clearInterval(dateIntervalRef.current);
       setChecadorCameraVisible(false);
 
-      // Subir foto
       const tipoRegistro = registroHoy?.hora_entrada ? 'salida' : 'entrada';
-      console.log(`[Checador] Subiendo foto de ${tipoRegistro} a Supabase Storage...`);
       const fotoUrl = await AsistenciaService.subirFotoAsistencia(user.id, base64Data, tipoRegistro);
-      console.log('[Checador] Foto subida exitosamente, URL pública:', fotoUrl);
 
       const lat = currentLocation?.lat || 0;
       const lng = currentLocation?.lng || 0;
       const addressToSave = currentAddress || 'Ubicación registrada';
-      console.log(`[Checador] Registrando en la base de datos (${tipoRegistro}). Lat: ${lat}, Lng: ${lng}, Dir: ${addressToSave}`);
 
       if (tipoRegistro === 'entrada') {
         await AsistenciaService.registrarEntrada(user.id, fotoUrl, lat, lng, addressToSave);
-        console.log('[Checador] Registro de entrada exitoso en base de datos.');
         setChecadorResultMsg('Entrada registrada correctamente');
       } else {
         await AsistenciaService.registrarSalida(registroHoy!.id, fotoUrl, lat, lng, addressToSave);
-        console.log('[Checador] Registro de salida exitoso en base de datos.');
         setChecadorResultMsg('Salida registrada correctamente');
       }
 
@@ -356,6 +283,7 @@ export default function EmpleadoDashboard() {
     return date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const formatChecadorDate = (date: Date) => {
     return date.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   };
@@ -435,6 +363,7 @@ export default function EmpleadoDashboard() {
     });
 
     return () => unsubscribe();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company]);
 
   useEffect(() => {
@@ -463,6 +392,15 @@ export default function EmpleadoDashboard() {
       // 2. Obtener cola local offline
       const localQueue = await SyncService.getOfflineQueue();
       setOfflineGastos(localQueue.filter((item) => item.empleado_id === userId));
+
+      // 3. Obtener vehículos activos
+      const activeVehicles = await VehiculoService.getVehiculos(true);
+      setVehiculos(activeVehicles || []);
+
+      // 4. Obtener mis registros de gasolina
+      const allGasLogs = await VehiculoService.getRegistrosGasolina();
+      const myGasLogs = allGasLogs.filter(reg => reg.empleado_id === userId);
+      setMisRegistrosGasolina(myGasLogs);
     } catch (err: any) {
       console.error('Error al cargar datos:', err);
     } finally {
@@ -618,6 +556,12 @@ export default function EmpleadoDashboard() {
             style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
           >
             <Ionicons name="briefcase-outline" size={20} color={themeColors.accent} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setEmployeeVehiculosModalVisible(true)}
+            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
+          >
+            <Ionicons name="car-outline" size={20} color={themeColors.accent} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={handleOpenProfile}
@@ -1228,6 +1172,158 @@ export default function EmpleadoDashboard() {
                 </View>
               </ScrollView>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de Vehículos y Gasolina (Empleado) */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={employeeVehiculosModalVisible}
+        onRequestClose={() => setEmployeeVehiculosModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '85%', paddingBottom: Spacing.four }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: themeColors.text }]}>Vehículos y Gasolina</Text>
+              <TouchableOpacity onPress={() => setEmployeeVehiculosModalVisible(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={{ paddingBottom: Spacing.four }} style={{ flex: 1 }}>
+              
+              {/* Sección: Parque Vehicular */}
+              <View style={{
+                marginHorizontal: Spacing.two,
+                marginTop: Spacing.two,
+                padding: Spacing.three,
+                backgroundColor: themeColors.backgroundElement,
+                borderRadius: BorderRadius.medium,
+                borderWidth: 1,
+                borderColor: themeColors.border,
+              }}>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: themeColors.text, marginBottom: Spacing.two }}>
+                  Vehículos de la Empresa
+                </Text>
+
+                {vehiculos.length === 0 ? (
+                  <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginVertical: Spacing.two }}>
+                    No hay vehículos registrados para esta empresa.
+                  </Text>
+                ) : (
+                  <View style={{ gap: Spacing.one }}>
+                    {vehiculos.map((veh) => (
+                      <View
+                        key={veh.id}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          padding: Spacing.two,
+                          backgroundColor: themeColors.background,
+                          borderRadius: BorderRadius.small,
+                          borderWidth: 1,
+                          borderColor: themeColors.border,
+                          gap: 10,
+                        }}
+                      >
+                        <Ionicons name="car" size={22} color={themeColors.primary} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontWeight: 'bold', color: themeColors.text, fontSize: 13 }}>
+                            {veh.marca} {veh.modelo} ({veh.anio})
+                          </Text>
+                          <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                            Placas: <Text style={{ fontWeight: 'bold' }}>{veh.placas}</Text>
+                            {veh.numero_economico ? ` • Eco: ${veh.numero_economico}` : ''}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              {/* Sección: Mis Cargas de Gasolina */}
+              <View style={{
+                marginHorizontal: Spacing.two,
+                marginTop: Spacing.three,
+                padding: Spacing.three,
+                backgroundColor: themeColors.backgroundElement,
+                borderRadius: BorderRadius.medium,
+                borderWidth: 1,
+                borderColor: themeColors.border,
+              }}>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: themeColors.text, marginBottom: Spacing.two }}>
+                  Mis Consumos de Gasolina
+                </Text>
+
+                {misRegistrosGasolina.length === 0 ? (
+                  <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginVertical: Spacing.two }}>
+                    No has registrado cargas de combustible.
+                  </Text>
+                ) : (
+                  <View style={{ gap: Spacing.two }}>
+                    {misRegistrosGasolina.map((reg) => {
+                      const dateParts = reg.fecha.split('-');
+                      const formattedDate = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : reg.fecha;
+                      return (
+                        <View
+                          key={reg.id}
+                          style={{
+                            padding: Spacing.two,
+                            backgroundColor: themeColors.background,
+                            borderRadius: BorderRadius.small,
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: themeColors.border, paddingBottom: 6, marginBottom: 6 }}>
+                            <Text style={{ fontSize: 11, fontWeight: 'bold', color: themeColors.textSecondary }}>
+                              {formattedDate}
+                            </Text>
+                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: themeColors.success }}>
+                              ${Number(reg.costo_total).toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                                Vehículo: <Text style={{ color: themeColors.text, fontWeight: '500' }}>{reg.vehiculo_marca} {reg.vehiculo_modelo}</Text>
+                              </Text>
+                              <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                                Carga: <Text style={{ color: themeColors.text }}>{reg.litros} Lts</Text> • Odómetro: <Text style={{ color: themeColors.text }}>{reg.kilometraje_actual} km</Text>
+                              </Text>
+                            </View>
+                            {reg.ticket_foto_url ? (
+                              <TouchableOpacity
+                                onPress={() => {
+                                  setActivePreviewUrl(reg.ticket_foto_url || null);
+                                  setViewerVisible(true);
+                                }}
+                                style={{
+                                  paddingHorizontal: 8,
+                                  paddingVertical: 4,
+                                  backgroundColor: themeColors.primary + '15',
+                                  borderRadius: 8,
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  flexDirection: 'row',
+                                  gap: 2,
+                                }}
+                              >
+                                <Ionicons name="image-outline" size={12} color={themeColors.primary} />
+                                <Text style={{ fontSize: 9, fontWeight: 'bold', color: themeColors.primary }}>Ver Ticket</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>

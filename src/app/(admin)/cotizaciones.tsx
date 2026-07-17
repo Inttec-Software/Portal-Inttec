@@ -219,6 +219,7 @@ export default function CotizacionesListScreen() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDuplicate = async (cot: any) => {
     try {
       setIsLoading(true);
@@ -289,7 +290,7 @@ export default function CotizacionesListScreen() {
           ]
         );
       }
-    } catch (err) {
+    } catch (_err) {
       showAlert('Error', 'No se pudo obtener el correo del cliente.');
     }
   };

@@ -28,6 +28,9 @@ export interface OfflineGastoItem {
   motivo_sin_factura?: string | null;
   tipo_servicio_proyecto?: string | null;
   detalle_servicio_proyecto?: string | null;
+  vehiculo_id?: string | null;
+  kilometraje_actual?: number | null;
+  litros?: number | null;
   created_at: string;
 }
 
@@ -179,35 +182,61 @@ export const SyncService = {
           }
 
           // 2. Insertar registro en Supabase Gastos Table
-          const { error: dbError } = await supabase.from('gastos').insert([
-            {
-              empleado_id: item.empleado_id,
-              empleado_nombre: item.empleado_nombre,
-              monto: item.monto,
-              categoria: item.categoria,
-              subcategoria: item.subcategoria,
-              metodo_pago: item.metodo_pago,
-              justificacion: item.justificacion,
-              foto_url: publicUrl || null,
-              status: 'PENDING',
-              fecha_comprobante: item.fecha_comprobante || new Date().toISOString().split('T')[0],
-              proveedor: item.proveedor || null,
-              cliente: item.cliente || null,
-              sucursal: item.sucursal || null,
-              tipo_tarjeta: item.tipo_tarjeta || null,
-              ubicacion_registro: item.ubicacion_registro || 'Móvil (Offline Sync)',
-              estado: item.estado || null,
-              facturado: item.facturado || false,
-              factura_url: publicInvoiceUrl || null,
-              motivo_sin_factura: item.motivo_sin_factura || null,
-              tipo_servicio_proyecto: item.tipo_servicio_proyecto || null,
-              detalle_servicio_proyecto: item.detalle_servicio_proyecto || null,
-              created_at: item.created_at,
-            },
-          ]);
+          const { data: insertedData, error: dbError } = await supabase
+            .from('gastos')
+            .insert([
+              {
+                empleado_id: item.empleado_id,
+                empleado_nombre: item.empleado_nombre,
+                monto: item.monto,
+                categoria: item.categoria,
+                subcategoria: item.subcategoria,
+                metodo_pago: item.metodo_pago,
+                justificacion: item.justificacion,
+                foto_url: publicUrl || null,
+                status: 'PENDING',
+                fecha_comprobante: item.fecha_comprobante || new Date().toISOString().split('T')[0],
+                proveedor: item.proveedor || null,
+                cliente: item.cliente || null,
+                sucursal: item.sucursal || null,
+                tipo_tarjeta: item.tipo_tarjeta || null,
+                ubicacion_registro: item.ubicacion_registro || 'Móvil (Offline Sync)',
+                estado: item.estado || null,
+                facturado: item.facturado || false,
+                factura_url: publicInvoiceUrl || null,
+                motivo_sin_factura: item.motivo_sin_factura || null,
+                tipo_servicio_proyecto: item.tipo_servicio_proyecto || null,
+                detalle_servicio_proyecto: item.detalle_servicio_proyecto || null,
+                created_at: item.created_at,
+              },
+            ])
+            .select();
 
           if (dbError) {
             throw new Error(`Database insert error: ${dbError.message}`);
+          }
+
+          // 3. Si es combustible y se insertó con éxito, insertar el registro de gasolina
+          if (insertedData && insertedData.length > 0 && item.vehiculo_id) {
+            const gastoId = insertedData[0].id;
+            const { error: gasError } = await supabase
+              .from('registro_gasolina')
+              .insert([
+                {
+                  gasto_id: gastoId,
+                  vehiculo_id: item.vehiculo_id,
+                  empleado_id: item.empleado_id,
+                  fecha: item.fecha_comprobante || new Date().toISOString().split('T')[0],
+                  kilometraje_actual: item.kilometraje_actual || 0,
+                  litros: item.litros || 0,
+                  costo_total: item.monto,
+                  ticket_foto_url: publicUrl || null,
+                },
+              ]);
+
+            if (gasError) {
+              console.error('Failed to insert gasoline log during sync:', gasError);
+            }
           }
 
           syncedCount++;

@@ -15,7 +15,6 @@ import {
   useWindowDimensions,
   Modal,
   Pressable,
-  Keyboard,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -23,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, Venta, VentaPartida, recalculateVentaTotals } from '@/services/supabase';
-import { GeminiService, GeminiSalesResult } from '@/services/gemini';
+import { GeminiService } from '@/services/gemini';
 import { base64ToArrayBuffer } from '@/services/sync';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
@@ -62,6 +61,7 @@ const getTimestampFileName = (userId: string, ext: string) => {
 export default function VentasScreen() {
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isMobile = windowWidth < 600;
   const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
   const scheme = useColorScheme();
@@ -130,6 +130,7 @@ export default function VentasScreen() {
       }
     };
     init();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // === Cargar Historial ===
@@ -442,6 +443,7 @@ export default function VentasScreen() {
         // Leer el archivo como base64 de manera robusta
         try {
           if (Platform.OS !== 'web') {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
             const FileSys = require('expo-file-system/legacy');
             
             // Copiar el archivo desde content:// al directorio de caché privado de nuestro sandbox

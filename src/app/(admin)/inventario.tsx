@@ -113,6 +113,7 @@ export default function InventarioDashboard() {
   const [newProvModalVisible, setNewProvModalVisible] = useState(false);
 
   // ID del ítem de staging seleccionado para asociar producto
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [activeStagingItemId, setActiveStagingItemId] = useState<string | null>(null);
 
   // Ajuste rápido de stock por producto
@@ -661,6 +662,7 @@ export default function InventarioDashboard() {
           reader.readAsDataURL(blob);
         });
       } else {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
         const FileSystem = require('expo-file-system/legacy');
         
         // Copiar archivo temporal a la sandbox para evitar restricciones de lectura nativas en Android
