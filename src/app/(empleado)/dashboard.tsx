@@ -18,7 +18,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService } from '@/services/supabase';
+import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient } from '@/services/supabase';
 import { SyncService, OfflineGastoItem } from '@/services/sync';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
@@ -37,7 +37,7 @@ export default function EmpleadoDashboard() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { setUser: setAuthUser } = useAuth();
+  const { setUser: setAuthUser, company, changeCompany } = useAuth();
 
   const [user, setUser] = useState<Usuario | null>(null);
   const [gastos, setGastos] = useState<Gasto[]>([]);
@@ -381,14 +381,19 @@ export default function EmpleadoDashboard() {
         updates.password = profilePassword.trim();
       }
 
-      const { data, error } = await supabase
+      const { error: errorInttec } = await inttecClient
         .from('usuarios')
         .update(updates)
-        .eq('id', user.id)
-        .select()
-        .single();
+        .eq('id', user.id);
+      if (errorInttec) throw errorInttec;
 
-      if (error) throw error;
+      const { error: errorDaravisa } = await daravisaClient
+        .from('usuarios')
+        .update(updates)
+        .eq('id', user.id);
+      if (errorDaravisa) {
+        console.error('Error actualizando perfil en Daravisa:', errorDaravisa);
+      }
 
       // Actualizar el estado local y AsyncStorage
       const updatedUser: Usuario = {
@@ -430,7 +435,7 @@ export default function EmpleadoDashboard() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [company]);
 
   useEffect(() => {
     if (!user) return;
@@ -505,6 +510,10 @@ export default function EmpleadoDashboard() {
         onPress: performLogout,
       },
     ]);
+  };
+
+  const handleToggleCompany = async (nextCompany: 'inttec' | 'daravisa') => {
+    await changeCompany(nextCompany);
   };
 
   // Reenviar gasto observado (ACTION_REQUIRED)
@@ -584,7 +593,7 @@ export default function EmpleadoDashboard() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary }]}>Bienvenido de nuevo,</Text>
           <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
             {user?.nombre || 'Empleado'}
@@ -621,6 +630,61 @@ export default function EmpleadoDashboard() {
             style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
           >
             <Ionicons name="log-out-outline" size={20} color={themeColors.danger} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Switch de Empresa - Fila Dedicada */}
+      <View style={{
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: Spacing.four,
+        marginBottom: Spacing.two,
+      }}>
+        <View style={{
+          flexDirection: 'row',
+          backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+          borderRadius: 20,
+          padding: 2,
+          alignItems: 'center',
+          width: 220,
+        }}>
+          <TouchableOpacity
+            onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
+            style={{
+              flex: 1,
+              paddingVertical: 6,
+              borderRadius: 18,
+              backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
+              alignItems: 'center'
+            }}
+          >
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+            }}>
+              INTTEC
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
+            style={{
+              flex: 1,
+              paddingVertical: 6,
+              borderRadius: 18,
+              backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
+              alignItems: 'center'
+            }}
+          >
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+            }}>
+              DARAVISA
+            </Text>
           </TouchableOpacity>
         </View>
       </View>

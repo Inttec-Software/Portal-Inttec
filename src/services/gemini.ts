@@ -48,9 +48,13 @@ function cleanAndParseJson<T>(rawText: string): T {
     cleanJsonStr = cleanJsonStr.substring(startIdx, endIdx + 1);
   }
   
-  // 3. Eliminar comentarios de una línea (//...) y comentarios multilínea (/*...*/)
-  cleanJsonStr = cleanJsonStr.replace(/\/\/.*$/gm, '');
-  cleanJsonStr = cleanJsonStr.replace(/\/\*[\s\S]*?\*\//g, '');
+  // 3. Eliminar comentarios de una línea (//...) y comentarios multilínea (/*...*/) de forma segura
+  cleanJsonStr = cleanJsonStr.replace(/("([^"\\]|\\.)*")|(\/\/.*)|(\/\*[\s\S]*?\*\/)/g, (match, g1) => {
+    if (g1 !== undefined) {
+      return match; // Si es un string literal, no lo tocamos
+    }
+    return ""; // Si es un comentario, lo eliminamos
+  });
   
   // 4. Eliminar comas sueltas antes de un cierre de objeto o arreglo (trailing commas)
   cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');

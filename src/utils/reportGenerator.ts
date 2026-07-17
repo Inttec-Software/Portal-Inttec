@@ -2,9 +2,26 @@ import { cacheDirectory, writeAsStringAsync, EncodingType } from 'expo-file-syst
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform, Alert } from 'react-native';
-import { Gasto, Asistencia, Usuario } from '../services/supabase';
+import { Gasto, Asistencia, Usuario, CompanyService } from '../services/supabase';
 import { LOGO_BASE64 } from './logoBase64';
+import { LOGO_DARAVISA_BASE64 } from './logoDaravisaBase64';
 import { Cotizacion } from '@/types/ventas';
+
+const getCompanyBranding = () => {
+  const company = CompanyService.getActiveCompany();
+  if (company === 'daravisa') {
+    return {
+      logo: LOGO_DARAVISA_BASE64,
+      name: 'DARAVISA',
+      tagline: 'DARAVISA S.A. DE C.V.'
+    };
+  }
+  return {
+    logo: LOGO_BASE64,
+    name: 'INTTEC',
+    tagline: 'INTEGRACIÓN DE TECNOLOGÍAS'
+  };
+};
 
 export interface ReportProducto {
   id: string;
@@ -251,11 +268,11 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">INTTEC</span><br/>
-                    <span class="logo-tagline">INTEGRACIÓN DE TECNOLOGÍAS</span>
+                    <span class="logo-brand">${getCompanyBranding().name}</span><br/>
+                    <span class="logo-tagline">${getCompanyBranding().tagline}</span>
                   </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${LOGO_BASE64}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${getCompanyBranding().logo}" style="width: 32px; height: 32px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -616,11 +633,11 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">INTTEC</span><br/>
-                    <span class="logo-tagline">INTEGRACIÓN DE TECNOLOGÍAS</span>
+                    <span class="logo-brand">${getCompanyBranding().name}</span><br/>
+                    <span class="logo-tagline">${getCompanyBranding().tagline}</span>
                   </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${LOGO_BASE64}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${getCompanyBranding().logo}" style="width: 32px; height: 32px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -955,11 +972,11 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">INTTEC</span><br/>
-                    <span class="logo-tagline">INTEGRACIÓN DE TECNOLOGÍAS</span>
+                    <span class="logo-brand">${getCompanyBranding().name}</span><br/>
+                    <span class="logo-tagline">${getCompanyBranding().tagline}</span>
                   </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${LOGO_BASE64}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${getCompanyBranding().logo}" style="width: 32px; height: 32px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -1287,11 +1304,11 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">INTTEC</span><br/>
-                    <span class="logo-tagline">INTEGRACIÓN DE TECNOLOGÍAS</span>
+                    <span class="logo-brand">${getCompanyBranding().name}</span><br/>
+                    <span class="logo-tagline">${getCompanyBranding().tagline}</span>
                   </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${LOGO_BASE64}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${getCompanyBranding().logo}" style="width: 32px; height: 32px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -1612,7 +1629,7 @@ export const ReportGenerator = {
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
-              <img src="${LOGO_BASE64}" style="width: 60px; height: 60px; object-fit: contain;" />
+              <img src="${getCompanyBranding().logo}" style="width: 60px; height: 60px; object-fit: contain;" />
             </td>
           </tr>
         </table>
@@ -1922,12 +1939,12 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
         
         <div class="header-content">
           <div style="width: 50%;">
-            <img src="${LOGO_BASE64}" alt="Logo" style="max-height: 150px; 
+            <img src="${getCompanyBranding().logo}" alt="Logo" style="max-height: 150px; 
             height: 170px; width: 450px; margin-top: 
             -10px; z-index: 10; position: relative;">
           </div>
           <div class="company-details" style="width: 50%;">
-            <div>INTTEC</div>
+            <div>${getCompanyBranding().name}</div>
             <div>Ozorno 811</div>
             <div>31107 Chihuahua, CHH</div>
             <div>México</div>

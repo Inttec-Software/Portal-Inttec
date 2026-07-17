@@ -11,7 +11,7 @@ export default function EmpleadoLayout() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
-  if (isLoading || !user) {
+  if (!user) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors.background }}>
         <ActivityIndicator size="large" color={themeColors.accent} />

@@ -2,14 +2,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+const sanitizeUrl = (url: string) => {
+  return url ? url.replace(/\/rest\/v1\/?$/, '') : url;
+};
 
-if (!process.env.EXPO_PUBLIC_SUPABASE_URL || !process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY) {
+const inttecUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_INTTEC || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
+const inttecAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_INTTEC || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+
+const daravisaUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
+const daravisaAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+
+if (!inttecUrl || !inttecAnonKey) {
   console.warn(
     'WARNING: Supabase URL or Anon Key is missing in environment variables (.env file).\n' +
-    'The app is running with placeholder credentials and database operations will fail.\n' +
-    'Please configure EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your .env file.'
+    'The app is running with placeholder credentials and database operations will fail.'
   );
 }
 
@@ -34,7 +40,7 @@ const ssrSafeStorage = {
   },
 };
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const inttecClient = createClient(inttecUrl, inttecAnonKey, {
   auth: {
     storage: ssrSafeStorage,
     autoRefreshToken: true,
@@ -42,6 +48,51 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: false,
   },
 });
+
+export const daravisaClient = createClient(daravisaUrl, daravisaAnonKey, {
+  auth: {
+    storage: ssrSafeStorage,
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+
+let activeCompany: 'inttec' | 'daravisa' = 'inttec';
+let activeClient = inttecClient;
+
+export const supabase = new Proxy({}, {
+  get(target, prop) {
+    const value = Reflect.get(activeClient, prop);
+    if (typeof value === 'function') {
+      return value.bind(activeClient);
+    }
+    return value;
+  }
+}) as unknown as typeof inttecClient;
+
+export const CompanyService = {
+  getActiveCompany(): 'inttec' | 'daravisa' {
+    return activeCompany;
+  },
+  async setActiveCompany(company: 'inttec' | 'daravisa'): Promise<void> {
+    activeCompany = company;
+    activeClient = company === 'daravisa' ? daravisaClient : inttecClient;
+    if (isBrowser) {
+      await AsyncStorage.setItem('active_company', company);
+    }
+  },
+  async loadSavedCompany(): Promise<'inttec' | 'daravisa'> {
+    if (isBrowser) {
+      const saved = await AsyncStorage.getItem('active_company');
+      if (saved === 'daravisa' || saved === 'inttec') {
+        activeCompany = saved;
+        activeClient = saved === 'daravisa' ? daravisaClient : inttecClient;
+      }
+    }
+    return activeCompany;
+  }
+};
 
 
 export interface Usuario {
@@ -130,20 +181,23 @@ export const AuthService = {
 
     // Guardar usuario en almacenamiento local
     if (isBrowser) {
-      await AsyncStorage.setItem('logged_user', JSON.stringify(data));
+      const company = CompanyService.getActiveCompany();
+      await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(data));
     }
     return data as Usuario;
   },
 
   async logout(): Promise<void> {
     if (isBrowser) {
-      await AsyncStorage.removeItem('logged_user');
+      const company = CompanyService.getActiveCompany();
+      await AsyncStorage.removeItem(`logged_user_${company}`);
     }
   },
 
   async getCurrentUser(): Promise<Usuario | null> {
     if (isBrowser) {
-      const userStr = await AsyncStorage.getItem('logged_user');
+      const company = CompanyService.getActiveCompany();
+      const userStr = await AsyncStorage.getItem(`logged_user_${company}`);
       if (!userStr) return null;
       try {
         return JSON.parse(userStr) as Usuario;

@@ -9,6 +9,7 @@ import {
   ScrollView,
   useColorScheme,
   Image,
+  TouchableOpacity,
 } from 'react-native';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { AuthService } from '@/services/supabase';
@@ -22,7 +23,7 @@ export default function LoginScreen() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
-  const { isLoading, setUser } = useAuth();
+  const { isLoading, setUser, company, changeCompany } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -100,20 +101,52 @@ export default function LoginScreen() {
           <View style={styles.header}>
             <View style={styles.logoContainer}>
               <Image
-                source={require('@/assets/images/logo.jpeg')}
+                source={company === 'daravisa' ? require('@/assets/images/logo_daravisa.png') : require('@/assets/images/logo.jpeg')}
                 style={styles.logoImage}
                 resizeMode="contain"
               />
             </View>
-            <Text style={[styles.title, { color: themeColors.text }]}>INTTEC</Text>
+            <Text style={[styles.title, { color: themeColors.text }]}>{company === 'daravisa' ? 'DARAVISA' : 'INTTEC'}</Text>
             <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
-              Control de Gastos
+              {company === 'daravisa' ? 'Portal de Gestión' : 'Control de Gastos'}
             </Text>
           </View>
 
           <View style={[styles.card, { backgroundColor: cardBackground, borderColor: cardBorderColor }]}>
             <Text style={[styles.cardTitle, { color: themeColors.text }]}>Iniciar Sesión</Text>
             
+            {/* Selector de Empresa */}
+            <View style={styles.companySelectorContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.companySelectorBtn,
+                  company === 'inttec' && { backgroundColor: themeColors.accent }
+                ]}
+                onPress={() => changeCompany('inttec')}
+              >
+                <Text style={[
+                  styles.companySelectorText,
+                  { color: company === 'inttec' ? '#ffffff' : themeColors.text }
+                ]}>
+                  INTTEC
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.companySelectorBtn,
+                  company === 'daravisa' && { backgroundColor: themeColors.accent }
+                ]}
+                onPress={() => changeCompany('daravisa')}
+              >
+                <Text style={[
+                  styles.companySelectorText,
+                  { color: company === 'daravisa' ? '#ffffff' : themeColors.text }
+                ]}>
+                  DARAVISA
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {errorMsg ? (
               <View style={[styles.errorAlert, { backgroundColor: themeColors.danger + '15' }]}>
                 <Ionicons name="alert-circle" size={20} color={themeColors.danger} />
@@ -257,5 +290,22 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     marginTop: Spacing.two,
+  },
+  companySelectorContainer: {
+    flexDirection: 'row',
+    borderRadius: BorderRadius.medium,
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    padding: 4,
+    marginBottom: Spacing.three,
+  },
+  companySelectorBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: BorderRadius.medium,
+  },
+  companySelectorText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

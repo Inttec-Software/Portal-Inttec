@@ -19,7 +19,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals } from '@/services/supabase';
+import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient } from '@/services/supabase';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
@@ -50,7 +50,7 @@ export default function AdminDashboard() {
   const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { setUser } = useAuth();
+  const { setUser, company, changeCompany } = useAuth();
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -222,14 +222,19 @@ export default function AdminDashboard() {
         updates.password = profilePassword.trim();
       }
 
-      const { data, error } = await supabase
+      const { error: errorInttec } = await inttecClient
         .from('usuarios')
         .update(updates)
-        .eq('id', adminUser.id)
-        .select()
-        .single();
+        .eq('id', adminUser.id);
+      if (errorInttec) throw errorInttec;
 
-      if (error) throw error;
+      const { error: errorDaravisa } = await daravisaClient
+        .from('usuarios')
+        .update(updates)
+        .eq('id', adminUser.id);
+      if (errorDaravisa) {
+        console.error('Error actualizando perfil en Daravisa:', errorDaravisa);
+      }
 
       // Actualizar el estado local y AsyncStorage
       const updatedUser: Usuario = {
@@ -268,7 +273,7 @@ export default function AdminDashboard() {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [company]);
 
   async function refreshData(silent = false) {
     if (!silent) setIsLoading(true);
@@ -322,6 +327,10 @@ export default function AdminDashboard() {
         onPress: performLogout,
       },
     ]);
+  };
+
+  const handleToggleCompany = async (nextCompany: 'inttec' | 'daravisa') => {
+    await changeCompany(nextCompany);
   };
 
   // Acciones de Revisión de Gastos
@@ -869,17 +878,21 @@ export default function AdminDashboard() {
 
     setIsAddingUser(true);
     try {
-      const { error } = await supabase.from('usuarios').insert([
-        {
-          nombre: newUserName.trim(),
-          email: newUserEmail.trim().toLowerCase(),
-          password: newUserPassword,
-          rol: newUserRole,
-          telefono: newUserPhone.trim() || null,
-        },
-      ]);
+      const newUserObj = {
+        nombre: newUserName.trim(),
+        email: newUserEmail.trim().toLowerCase(),
+        password: newUserPassword,
+        rol: newUserRole,
+        telefono: newUserPhone.trim() || null,
+      };
 
-      if (error) throw error;
+      const { error: errorInttec } = await inttecClient.from('usuarios').insert([newUserObj]);
+      if (errorInttec) throw errorInttec;
+
+      const { error: errorDaravisa } = await daravisaClient.from('usuarios').insert([newUserObj]);
+      if (errorDaravisa) {
+        console.error('Error insertando usuario en Daravisa:', errorDaravisa);
+      }
 
       showAlert('Éxito', 'Personal registrado correctamente.');
       setAddUserModalVisible(false);
@@ -929,12 +942,21 @@ export default function AdminDashboard() {
         updatePayload.password = editUserPassword;
       }
 
-      const { error } = await supabase
+      const { error: errorInttec } = await inttecClient
         .from('usuarios')
         .update(updatePayload)
         .eq('id', editingUser.id);
 
-      if (error) throw error;
+      if (errorInttec) throw errorInttec;
+
+      const { error: errorDaravisa } = await daravisaClient
+        .from('usuarios')
+        .update(updatePayload)
+        .eq('id', editingUser.id);
+
+      if (errorDaravisa) {
+        console.error('Error actualizando usuario en Daravisa:', errorDaravisa);
+      }
 
       showAlert('Éxito', 'Información de personal actualizada correctamente.');
       setEditUserModalVisible(false);
@@ -951,12 +973,20 @@ export default function AdminDashboard() {
   const handleDeleteUser = async (id: string, name: string) => {
     const performDelete = async () => {
       try {
-        const { error } = await supabase.from('usuarios').delete().eq('id', id);
-        if (error) {
-          if (error.code === '23503') {
-            throw new Error('No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
+        const { error: errorInttec } = await inttecClient.from('usuarios').delete().eq('id', id);
+        if (errorInttec) {
+          if (errorInttec.code === '23503') {
+            throw new Error('No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas en Inttec. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
           }
-          throw error;
+          throw errorInttec;
+        }
+
+        const { error: errorDaravisa } = await daravisaClient.from('usuarios').delete().eq('id', id);
+        if (errorDaravisa) {
+          if (errorDaravisa.code === '23503') {
+            throw new Error('No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas en Daravisa. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
+          }
+          throw errorDaravisa;
         }
         showAlert('Éxito', 'Personal eliminado.');
         await refreshData();
@@ -1283,6 +1313,61 @@ export default function AdminDashboard() {
             style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
           >
             <Ionicons name="log-out-outline" size={20} color={themeColors.danger} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Switch de Empresa - Fila Dedicada */}
+      <View style={{
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: Spacing.four,
+        marginBottom: Spacing.two,
+      }}>
+        <View style={{
+          flexDirection: 'row',
+          backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+          borderRadius: 20,
+          padding: 2,
+          alignItems: 'center',
+          width: 220,
+        }}>
+          <TouchableOpacity
+            onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
+            style={{
+              flex: 1,
+              paddingVertical: 6,
+              borderRadius: 18,
+              backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
+              alignItems: 'center'
+            }}
+          >
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+            }}>
+              INTTEC
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
+            style={{
+              flex: 1,
+              paddingVertical: 6,
+              borderRadius: 18,
+              backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
+              alignItems: 'center'
+            }}
+          >
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+            }}>
+              DARAVISA
+            </Text>
           </TouchableOpacity>
         </View>
       </View>

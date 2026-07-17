@@ -1566,49 +1566,7 @@ export default function GastoForm() {
                 </View>
               </View>
 
-              {facturado === true && (
-                <View style={{ marginBottom: Spacing.two }}>
-                  <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13 }]}>Adjuntar Factura</Text>
-                  {facturaUri ? (
-                    <View style={[styles.invoicePreviewCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <View style={styles.pdfPreviewContainer}>
-                        <Ionicons name="document-text" size={24} color={themeColors.danger} />
-                        <Text style={[styles.pdfFileName, { color: themeColors.text }]} numberOfLines={1}>
-                          {facturaUri.split('/').pop()}
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={[styles.removeInvoiceBtn, { backgroundColor: themeColors.danger + '15' }]}
-                        onPress={() => {
-                          setFacturaUri(null);
-                          setFacturaBase64(null);
-                          setFacturaExt(null);
-                        }}
-                      >
-                        <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
-                        <Text style={{ color: themeColors.danger, fontSize: 12, fontWeight: '700' }}>Quitar</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={{ flexDirection: 'row', gap: Spacing.one, marginTop: Spacing.one }}>
-                      <TouchableOpacity
-                        style={[styles.actionBtn, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                        onPress={handleCaptureFactura}
-                      >
-                        <Ionicons name="camera" size={20} color={themeColors.text} />
-                        <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Cámara</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.actionBtn, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                        onPress={handleSelectFacturaGallery}
-                      >
-                        <Ionicons name="images" size={20} color={themeColors.text} />
-                        <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Galería</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              )}
+
 
               {facturado === false && (
                 <View style={{ marginBottom: Spacing.two }}>
