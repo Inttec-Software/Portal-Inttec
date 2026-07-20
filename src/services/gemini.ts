@@ -82,16 +82,14 @@ export const GeminiService = {
   "sucursal": string (nombre de la sucursal o filial si aparece en el ticket, si no usa null),
   "fecha": string (la fecha de compra o emisión del ticket en formato DD/MM/AAAA, si no es legible o no hay, usa null),
   "metodo_pago": string (debe ser exactamente uno de estos valores: "efectivo", "tarjeta_debito", "tarjeta_credito". Identifícalo según el ticket por palabras como "EFECTIVO", "PAGO EN EFECTIVO", "DÉBITO", "CRÉDITO", "VISA", "MASTERCARD", "DEBIT", "CREDIT". Si no se puede determinar o no dice, usa null),
-  "justificacion_sugerida": string (una breve sugerencia de justificación comercial en español basada en los artículos comprados o el establecimiento, ej: "Consumo de alimentos en comisión de trabajo" o "Compra de insumos de papelería para oficina", si no se puede determinar usa null),
-  "categoria": string (una categoría sugerida de gasto como Alimentos, Transporte, Papelería, Peajes, Combustible, etc. de acuerdo a la compra),
-  "subcategoria": string (una subcategoría específica sugerida de acuerdo a la categoría anterior, ej: Desayuno, Taxis, Gasolina, Hojas bond, si no hay usa null),
+  "justificacion_sugerida": string (una breve sugerencia de justificación comercial en español basada en los artículos comprados o el establecimiento, ej: "Consumo de alimentos en comisión de trabajo" o "Compra de herramientas de trabajo" o "Hospedaje por viaje de trabajo", si no se puede determinar usa null),
+  "categoria": string (categoría sugerida del gasto. REGLA DE CLASIFICACIÓN ESTRICTA: Si es de ferretería, Home Depot, herramientas, plomería o materiales, usa "Materiales y Herramientas". Si es de hotel, posada, Airbnb u hospedaje, usa "Hospedaje". Si es de gasolinera o combustible, usa "Vehículos". Si es de restaurante, cafetería o fonda, usa "Alimentos"),
+  "subcategoria": string (subcategoría específica sugerida de acuerdo a la categoría anterior, ej: Desayuno, Herramientas, Hospedaje, Gasolina, Hojas bond, si no hay usa null),
   "estado": string (debe ser exactamente uno de los 32 estados de la República Mexicana: Aguascalientes, Baja California, Baja California Sur, Campeche, Chiapas, Chihuahua, Coahuila, Colima, Ciudad de México, Durango, Guanajuato, Guerrero, Hidalgo, Jalisco, Estado de México, Michoacán, Morelos, Nayarit, Nuevo León, Oaxaca, Puebla, Querétaro, Quintana Roo, San Luis Potosí, Sinaloa, Sonora, Tabasco, Tamaulipas, Tlaxcala, Veracruz, Yucatán, Zacatecas. Identifícalo de forma inteligente según la dirección, RFC, código postal, sucursal, teléfono o texto del ticket. Si no se puede determinar usa null),
   "alerta_politica": string (Genera una alerta descriptiva en español si detectas alguna de las siguientes infracciones:
   - Consumo de alcohol/bebidas alcohólicas, cigarros o tabaco (totalmente prohibido).
   - Consumo de dulces, chocolates, galletas, chucherías o comida chatarra (como papitas, papas fritas, frituras, gomitas, etc.). Nota: La compra de refrescos/bebidas gaseosas normales SÍ está permitida y NO debe generar alerta.
-  - Gastos excesivos o sin sentido comercial justificable.
-  - Compras en tiendas de conveniencia (como Oxxo, 7-Eleven) o restaurantes de artículos que NO sean estrictamente alimentos (comidas/bebidas), por ejemplo: cargadores de celular, juguetes, medicamentos, cigarros, etc.
-  - Si se trata de consumo de alimentos (comida, restaurante, cafetería) y el monto total de consumo (incluyendo propina si la hubiera en el ticket) supera los $${280 * cantidadPersonas} MXN, genera una alerta indicando que se excedió el límite general por comida de $${280 * cantidadPersonas} MXN (límite de $280 MXN por persona, el cual incluye comida y propina, calculado para ${cantidadPersonas} personas).
+  - REGLA DE LÍMITE DE MONTO: El límite de $${280 * cantidadPersonas} MXN ($280 por persona) APLICA ÚNICA Y EXCLUSIVAMENTE A GASTOS ESTRICTAMENTE DE ALIMENTOS / COMIDA / RESTAURANTE. NUNCA, BAJO NINGUNA CIRCUNSTANCIA, GENERES ALERTA DE LÍMITE DE $280 MXN PARA GASTOS DE HERRAMIENTAS, MATERIALES, HOSPEDAJE, HOTELES, GASOLINA O PEAJES, SIN IMPORTAR EL MONTO.
   Si no detectas ninguna de estas infracciones de política, usa null)
 }`;
 

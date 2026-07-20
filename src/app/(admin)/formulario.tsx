@@ -196,17 +196,22 @@ export default function GastoForm() {
   const alertaLocal = useMemo(() => {
     const alerts: string[] = [];
 
-    // 1. Validar límite de alimentos general de $280 MXN por persona (comida + propina)
-    const valMonto = Number(monto);
-    if (valMonto && !isNaN(valMonto) && selectedCategoria) {
-      const isAlimentos = esComida;
+    // ÚNICAMENTE aplicar alerta de monto en gastos de COMIDAS / ALIMENTOS
+    if (esComida) {
+      let totalGasto = Number(monto) || 0;
+      if (isSplit && splits.length > 0) {
+        totalGasto = splits.reduce((sum, s) => sum + (Number(s.monto) || 0), 0);
+      }
+
+      if (incluyePropina === false) {
+        totalGasto += Number(montoPropina || 0);
+      }
 
       const cantidadPersonas = 1 + selectedEmpleados.length;
       const limiteCalculado = 280 * cantidadPersonas;
-      const totalGasto = valMonto + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
 
-      if (isAlimentos && totalGasto > limiteCalculado) {
-        alerts.push(`Límite de alimentos excedido: el límite general por comida es de $${limiteCalculado} MXN para ${cantidadPersonas} personas (Total con Propina: $${totalGasto} MXN)`);
+      if (totalGasto > limiteCalculado) {
+        alerts.push(`Límite de alimentos excedido: el límite general por comida es de $${limiteCalculado} MXN para ${cantidadPersonas} persona(s) (Total con Propina/División: $${totalGasto.toFixed(2)} MXN)`);
       }
     }
 
@@ -222,7 +227,7 @@ export default function GastoForm() {
     }
 
     return alerts.length > 0 ? alerts.join(' | ') : null;
-  }, [monto, selectedCategoria, justificacion, proveedor, selectedEmpleados, esComida, incluyePropina, montoPropina]);
+  }, [monto, isSplit, splits, selectedCategoria, justificacion, proveedor, selectedEmpleados, esComida, incluyePropina, montoPropina]);
 
   const loadCatalogos = async () => {
     try {
@@ -591,13 +596,21 @@ export default function GastoForm() {
   const handleSaveGasto = async () => {
     if (!currentUser) return;
     
-    // Validar campos requeridos
-    if (!monto || isNaN(Number(monto))) {
-      showAlert('Validación', 'Por favor ingresa un monto válido.');
+    // 1. Validar Foto de comprobante
+    if (!imageUri) {
+      showAlert('Validación', 'Por favor toma o selecciona una foto del comprobante/ticket.');
+      setCurrentStep(1);
+      return;
+    }
+
+    // 2. Validar Monto
+    if (!monto || isNaN(Number(monto)) || Number(monto) <= 0) {
+      showAlert('Validación', 'Por favor ingresa un monto válido mayor a 0.');
       setCurrentStep(2);
       return;
     }
 
+    // 3. Validar Fecha
     const fechaRegex = /^\d{2}\/\d{2}\/\d{4}$/;
     if (!fechaRegex.test(fechaComprobante)) {
       showAlert('Validación', 'Por favor ingresa la fecha en formato DD/MM/AAAA (ej. 09/06/2026).');
@@ -605,44 +618,34 @@ export default function GastoForm() {
       return;
     }
 
-    if (!selectedCategoria) {
-      showAlert('Validación', 'Por favor selecciona una categoría.');
+    // 4. Validar Proveedor
+    if (!proveedor.trim()) {
+      showAlert('Validación', 'Por favor ingresa el nombre del proveedor o comercio.');
+      setCurrentStep(2);
       return;
     }
 
-    const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
-    const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
-    const esGasolina = esVehiculos && esSubGasolina;
-    if (esGasolina) {
-      if (!selectedVehiculoId) {
-        showAlert('Validación', 'Por favor selecciona el vehículo.');
-        return;
-      }
-      if (!kilometrajeActual || isNaN(Number(kilometrajeActual)) || Number(kilometrajeActual) <= 0) {
-        showAlert('Validación', 'Por favor ingresa un kilometraje (odómetro) válido.');
-        return;
-      }
-      if (!litrosGasolina || isNaN(Number(litrosGasolina)) || Number(litrosGasolina) <= 0) {
-        showAlert('Validación', 'Por favor ingresa los litros cargados de forma válida.');
-        return;
-      }
-    }
-
-    if (!tipoServicioProyecto) {
-      showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto, Venta u Operativo.');
+    // 5. Validar Sucursal
+    if (!sucursal.trim()) {
+      showAlert('Validación', 'Por favor ingresa la sucursal o ubicación del comercio.');
+      setCurrentStep(2);
       return;
     }
 
-    if (!detalleServicioProyecto.trim()) {
-      showAlert('Validación', 'Por favor ingresa el detalle del Servicio, Proyecto, Venta u Operativo.');
+    // 6. Validar Método de Pago y Tarjeta
+    if (!metodoPago) {
+      showAlert('Validación', 'Por favor selecciona el método de pago.');
+      setCurrentStep(2);
       return;
     }
 
-    if (!justificacion.trim()) {
-      showAlert('Validación', 'Por favor escribe tus comentarios del gasto.');
+    if (metodoPago !== 'efectivo' && (!tipoTarjeta || !tipoTarjeta.trim())) {
+      showAlert('Validación', 'Por favor especifica la tarjeta o tipo de pago.');
+      setCurrentStep(2);
       return;
     }
 
+    // 7. Validar Factura / Motivo Sin Factura
     if (facturado === null) {
       showAlert('Validación', 'Por favor especifica si el gasto está facturado.');
       setCurrentStep(2);
@@ -652,6 +655,68 @@ export default function GastoForm() {
     if (facturado === false && !motivoSinFactura.trim()) {
       showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
       setCurrentStep(2);
+      return;
+    }
+
+    // 8. Validar Categoría y Subcategoría
+    if (!selectedCategoria) {
+      showAlert('Validación', 'Por favor selecciona una categoría.');
+      setCurrentStep(3);
+      return;
+    }
+
+    if (!selectedSubcategoria) {
+      showAlert('Validación', 'Por favor selecciona una subcategoría.');
+      setCurrentStep(3);
+      return;
+    }
+
+    // 9. Validar Cliente / Proyecto (si no está dividido)
+    if (!isSplit && !selectedCliente.trim()) {
+      showAlert('Validación', 'Por favor selecciona o ingresa el cliente o proyecto asignado.');
+      setCurrentStep(3);
+      return;
+    }
+
+    // 10. Validar Vehículos / Gasolina
+    const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
+    const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
+    const esGasolina = esVehiculos && esSubGasolina;
+    if (esGasolina) {
+      if (!selectedVehiculoId) {
+        showAlert('Validación', 'Por favor selecciona el vehículo.');
+        setCurrentStep(3);
+        return;
+      }
+      if (!kilometrajeActual || isNaN(Number(kilometrajeActual)) || Number(kilometrajeActual) <= 0) {
+        showAlert('Validación', 'Por favor ingresa un kilometraje (odómetro) válido.');
+        setCurrentStep(3);
+        return;
+      }
+      if (!litrosGasolina || isNaN(Number(litrosGasolina)) || Number(litrosGasolina) <= 0) {
+        showAlert('Validación', 'Por favor ingresa los litros cargados de forma válida.');
+        setCurrentStep(3);
+        return;
+      }
+    }
+
+    // 11. Validar Tipo y Detalle de Servicio/Proyecto
+    if (!tipoServicioProyecto) {
+      showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto, Venta u Operativo.');
+      setCurrentStep(3);
+      return;
+    }
+
+    if (!detalleServicioProyecto.trim()) {
+      showAlert('Validación', 'Por favor ingresa el detalle del Servicio, Proyecto, Venta u Operativo.');
+      setCurrentStep(3);
+      return;
+    }
+
+    // 12. Validar Comentarios / Justificación
+    if (!justificacion.trim()) {
+      showAlert('Validación', 'Por favor escribe tus comentarios del gasto.');
+      setCurrentStep(3);
       return;
     }
 

@@ -17,7 +17,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, CatalogoItem, SubcategoriaItem } from '@/services/supabase';
+import { supabase, CatalogoItem, SubcategoriaItem, ClienteItem } from '@/services/supabase';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,7 +32,7 @@ export default function CatalogosManager() {
 
   const [categorias, setCategorias] = useState<CatalogoItem[]>([]);
   const [subcategorias, setSubcategorias] = useState<SubcategoriaItem[]>([]);
-  const [clientes, setClientes] = useState<CatalogoItem[]>([]);
+  const [clientes, setClientes] = useState<ClienteItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeCatalog, setActiveCatalog] = useState<'categorias' | 'subcategorias' | 'clientes'>('categorias');
 
@@ -41,6 +41,10 @@ export default function CatalogosManager() {
   const [newItemName, setNewItemName] = useState('');
   const [selectedParentCatId, setSelectedParentCatId] = useState('');
   const [showParentCatDropdown, setShowParentCatDropdown] = useState(false);
+  const [newClientRfc, setNewClientRfc] = useState('');
+  const [newClientCorreo, setNewClientCorreo] = useState('');
+  const [newClientDireccion, setNewClientDireccion] = useState('');
+  const [newClientCp, setNewClientCp] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   // Modales de Edición
@@ -49,6 +53,10 @@ export default function CatalogosManager() {
   const [editItemName, setEditItemName] = useState('');
   const [editParentCatId, setEditParentCatId] = useState('');
   const [showEditParentCatDropdown, setShowEditParentCatDropdown] = useState(false);
+  const [editClientRfc, setEditClientRfc] = useState('');
+  const [editClientCorreo, setEditClientCorreo] = useState('');
+  const [editClientDireccion, setEditClientDireccion] = useState('');
+  const [editClientCp, setEditClientCp] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
@@ -96,7 +104,15 @@ export default function CatalogosManager() {
         const { error } = await supabase.from('categorias').insert([{ nombre: newItemName.trim() }]);
         if (error) throw error;
       } else if (activeCatalog === 'clientes') {
-        const { error } = await supabase.from('clientes').insert([{ nombre: newItemName.trim() }]);
+        const { error } = await supabase.from('clientes').insert([
+          {
+            nombre: newItemName.trim(),
+            rfc: newClientRfc.trim().toUpperCase() || null,
+            correo_electronico: newClientCorreo.trim().toLowerCase() || null,
+            direccion: newClientDireccion.trim() || null,
+            codigo_postal: newClientCp.trim() || null,
+          },
+        ]);
         if (error) throw error;
       } else if (activeCatalog === 'subcategorias') {
         const { error } = await supabase.from('subcategorias').insert([
@@ -113,6 +129,10 @@ export default function CatalogosManager() {
       setNewItemName('');
       setSelectedParentCatId('');
       setShowParentCatDropdown(false);
+      setNewClientRfc('');
+      setNewClientCorreo('');
+      setNewClientDireccion('');
+      setNewClientCp('');
       await loadData();
     } catch (err: any) {
       Alert.alert('Error', err.message || 'No se pudo guardar el nuevo elemento.');
@@ -162,6 +182,11 @@ export default function CatalogosManager() {
     setEditItemName(item.nombre);
     if (activeCatalog === 'subcategorias') {
       setEditParentCatId(item.categoria_id || '');
+    } else if (activeCatalog === 'clientes') {
+      setEditClientRfc(item.rfc || '');
+      setEditClientCorreo(item.correo_electronico || '');
+      setEditClientDireccion(item.direccion || '');
+      setEditClientCp(item.codigo_postal || '');
     } else {
       setEditParentCatId('');
     }
@@ -192,7 +217,13 @@ export default function CatalogosManager() {
       } else if (activeCatalog === 'clientes') {
         const { error } = await supabase
           .from('clientes')
-          .update({ nombre: editItemName.trim() })
+          .update({
+            nombre: editItemName.trim(),
+            rfc: editClientRfc.trim().toUpperCase() || null,
+            correo_electronico: editClientCorreo.trim().toLowerCase() || null,
+            direccion: editClientDireccion.trim() || null,
+            codigo_postal: editClientCp.trim() || null,
+          })
           .eq('id', editingItem.id);
         if (error) throw error;
       } else if (activeCatalog === 'subcategorias') {
@@ -314,6 +345,14 @@ export default function CatalogosManager() {
             if (activeCatalog === 'subcategorias') {
               const cat = categorias.find((c) => c.id === item.categoria_id);
               subtext = cat ? `Categoría: ${cat.nombre}` : 'Categoría huérfana';
+            } else if (activeCatalog === 'clientes') {
+              const cli = item as ClienteItem;
+              const parts: string[] = [];
+              if (cli.rfc) parts.push(`RFC: ${cli.rfc}`);
+              if (cli.correo_electronico) parts.push(`Email: ${cli.correo_electronico}`);
+              if (cli.direccion) parts.push(`Dir: ${cli.direccion}`);
+              if (cli.codigo_postal) parts.push(`CP: ${cli.codigo_postal}`);
+              subtext = parts.join(' • ');
             }
 
             return (
@@ -390,12 +429,49 @@ export default function CatalogosManager() {
                 style={{ flex: 1, gap: Spacing.three }}
               >
                 <CustomInput
-                  label="Nombre del Elemento *"
-                  placeholder="Ej. Papelería, Walmart, etc."
+                  label={activeCatalog === 'clientes' ? "Nombre / Razón Social *" : "Nombre del Elemento *"}
+                  placeholder={activeCatalog === 'clientes' ? "Ej. Empresa S.A. de C.V." : "Ej. Papelería, Walmart, etc."}
                   value={newItemName}
                   onChangeText={setNewItemName}
                   iconName="bookmark-outline"
                 />
+
+                {activeCatalog === 'clientes' && (
+                  <>
+                    <CustomInput
+                      label="RFC"
+                      placeholder="Ej. ABC123456T10"
+                      value={newClientRfc}
+                      onChangeText={setNewClientRfc}
+                      autoCapitalize="characters"
+                      iconName="card-outline"
+                    />
+                    <CustomInput
+                      label="Correo Electrónico"
+                      placeholder="ejemplo@cliente.com"
+                      value={newClientCorreo}
+                      onChangeText={setNewClientCorreo}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      iconName="mail-outline"
+                    />
+                    <CustomInput
+                      label="Dirección / Domicilio Fiscal"
+                      placeholder="Calle, Número, Colonia, Ciudad"
+                      value={newClientDireccion}
+                      onChangeText={setNewClientDireccion}
+                      iconName="location-outline"
+                    />
+                    <CustomInput
+                      label="Código Postal"
+                      placeholder="Ej. 31000"
+                      value={newClientCp}
+                      onChangeText={setNewClientCp}
+                      keyboardType="numeric"
+                      iconName="navigate-outline"
+                    />
+                  </>
+                )}
 
                 {/* Lógica condicional para Subcategoría (pedir Categoría Padre) */}
                 {activeCatalog === 'subcategorias' && (
@@ -491,12 +567,49 @@ export default function CatalogosManager() {
                 style={{ flex: 1, gap: Spacing.three }}
               >
                 <CustomInput
-                  label="Nombre del Elemento *"
-                  placeholder="Ej. Papelería, Walmart, etc."
+                  label={activeCatalog === 'clientes' ? "Nombre / Razón Social *" : "Nombre del Elemento *"}
+                  placeholder={activeCatalog === 'clientes' ? "Ej. Empresa S.A. de C.V." : "Ej. Papelería, Walmart, etc."}
                   value={editItemName}
                   onChangeText={setEditItemName}
                   iconName="bookmark-outline"
                 />
+
+                {activeCatalog === 'clientes' && (
+                  <>
+                    <CustomInput
+                      label="RFC"
+                      placeholder="Ej. ABC123456T10"
+                      value={editClientRfc}
+                      onChangeText={setEditClientRfc}
+                      autoCapitalize="characters"
+                      iconName="card-outline"
+                    />
+                    <CustomInput
+                      label="Correo Electrónico"
+                      placeholder="ejemplo@cliente.com"
+                      value={editClientCorreo}
+                      onChangeText={setEditClientCorreo}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      iconName="mail-outline"
+                    />
+                    <CustomInput
+                      label="Dirección / Domicilio Fiscal"
+                      placeholder="Calle, Número, Colonia, Ciudad"
+                      value={editClientDireccion}
+                      onChangeText={setEditClientDireccion}
+                      iconName="location-outline"
+                    />
+                    <CustomInput
+                      label="Código Postal"
+                      placeholder="Ej. 31000"
+                      value={editClientCp}
+                      onChangeText={setEditClientCp}
+                      keyboardType="numeric"
+                      iconName="navigate-outline"
+                    />
+                  </>
+                )}
 
                 {/* Lógica condicional para Subcategoría (pedir Categoría Padre) */}
                 {activeCatalog === 'subcategorias' && (

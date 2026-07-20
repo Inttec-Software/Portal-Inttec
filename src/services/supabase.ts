@@ -160,6 +160,15 @@ export interface SubcategoriaItem {
   nombre: string;
 }
 
+export interface ClienteItem {
+  id: string;
+  nombre: string;
+  rfc?: string | null;
+  correo_electronico?: string | null;
+  direccion?: string | null;
+  codigo_postal?: string | null;
+}
+
 /**
  * Servicio de Autenticación
  */

@@ -2584,6 +2584,15 @@ export default function AdminDashboard() {
                           </Text>
                         </View>
 
+                        {(!selectedGasto.facturado || selectedGasto.motivo_sin_factura) && (
+                          <View style={[styles.detailItem, { backgroundColor: themeColors.warning + '15', padding: Spacing.two, borderRadius: BorderRadius.medium, borderLeftWidth: 4, borderLeftColor: themeColors.warning, marginVertical: Spacing.one }]}>
+                            <Text style={[styles.detailLabel, { color: themeColors.warning, fontWeight: '700' }]}>⚠️ Motivo de Falta de Factura</Text>
+                            <Text style={[styles.detailValue, { color: themeColors.text, fontWeight: '600', marginTop: 2 }]}>
+                              {selectedGasto.motivo_sin_factura || localMotivo || 'No especificado por el empleado'}
+                            </Text>
+                          </View>
+                        )}
+
                         <View style={[styles.detailItem, { marginTop: Spacing.one, borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: Spacing.two }]}>
                           <Text style={[styles.detailLabel, { color: themeColors.textSecondary, fontWeight: '700', marginBottom: Spacing.one }]}>GESTIÓN DE FACTURACIÓN (ADMIN)</Text>
                           
