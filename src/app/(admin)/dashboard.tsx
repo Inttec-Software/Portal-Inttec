@@ -1793,8 +1793,26 @@ export default function AdminDashboard() {
                                </View>
                             </View>
                             <Text style={[styles.tableCell, { color: themeColors.text, width: '15%', fontWeight: '700', textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
-                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', gap: 12 }}>
-                              <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+                              <TouchableOpacity
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedGasto(item);
+                                  setReviewModalVisible(true);
+                                }}
+                                style={{ padding: 4 }}
+                              >
+                                <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteGasto(item.id);
+                                }}
+                                style={{ padding: 4 }}
+                              >
+                                <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
+                              </TouchableOpacity>
                             </View>
                           </Pressable>
                         );
@@ -1914,8 +1932,26 @@ export default function AdminDashboard() {
                                </View>
                             </View>
                             <Text style={[styles.tableCell, { width: '15%', fontWeight: '700', color: themeColors.text, textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
-                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', gap: 12 }}>
-                              <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+                              <TouchableOpacity
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedGasto(item);
+                                  setReviewModalVisible(true);
+                                }}
+                                style={{ padding: 4 }}
+                              >
+                                <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteGasto(item.id);
+                                }}
+                                style={{ padding: 4 }}
+                              >
+                                <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
+                              </TouchableOpacity>
                             </View>
                           </Pressable>
                         );
@@ -1937,6 +1973,7 @@ export default function AdminDashboard() {
                         setSelectedGasto(item);
                         setReviewModalVisible(true);
                       }}
+                      onDelete={() => handleDeleteGasto(item.id)}
                     />
                   )}
                   ListEmptyComponent={
@@ -2776,6 +2813,14 @@ export default function AdminDashboard() {
                             variant="primary"
                             style={{ width: '100%', marginTop: Spacing.one }}
                             disabled={isProcessingAction}
+                          />
+                          <CustomButton
+                            title="Eliminar Gasto Permanente"
+                            onPress={() => handleDeleteGasto(selectedGasto.id)}
+                            variant="danger"
+                            style={{ width: '100%', marginTop: Spacing.one }}
+                            loading={isProcessingAction}
+                            icon={<Ionicons name="trash-outline" size={20} color="#fff" style={{ marginRight: 8 }} />}
                           />
                         </>
                       ) : (

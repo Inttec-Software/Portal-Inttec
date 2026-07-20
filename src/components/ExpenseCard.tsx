@@ -8,12 +8,14 @@ import { Ionicons } from '@expo/vector-icons';
 interface ExpenseCardProps {
   gasto: Gasto & { isOffline?: boolean };
   onPress: () => void;
+  onDelete?: () => void;
   showEmployeeName?: boolean;
 }
 
 export default function ExpenseCard({
   gasto,
   onPress,
+  onDelete,
   showEmployeeName = false,
 }: ExpenseCardProps) {
   const scheme = useColorScheme();
@@ -69,9 +71,9 @@ export default function ExpenseCard({
         },
       ]}
     >
-      {/* Header: Categoria & Status Badge */}
+      {/* Header: Categoria & Status Badge + Delete Button */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
           <Ionicons
             name={
               gasto.categoria?.toLowerCase().includes('transporte')
@@ -90,9 +92,27 @@ export default function ExpenseCard({
             {gasto.subcategoria ? ` - ${gasto.subcategoria}` : ''}
           </Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: statusColor + '18' }]}>
-          <Ionicons name={statusIcon} size={11} color={statusColor} />
-          <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={[styles.statusBadge, { backgroundColor: statusColor + '18' }]}>
+            <Ionicons name={statusIcon} size={11} color={statusColor} />
+            <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>
+          </View>
+          {onDelete && (
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              style={{
+                padding: 4,
+                backgroundColor: themeColors.danger + '15',
+                borderRadius: BorderRadius.small,
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="trash-outline" size={14} color={themeColors.danger} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
       
