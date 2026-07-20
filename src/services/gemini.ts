@@ -1,4 +1,12 @@
+import { logger } from '../utils/logger';
+
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
+
+const FALLBACK_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+];
 
 export interface GeminiOcrResult {
   monto: number | null;
@@ -13,29 +21,68 @@ export interface GeminiOcrResult {
   estado: string | null;
 }
 
+export interface CardTransaction {
+  fecha: string | null;        // YYYY-MM-DD
+  monto: number | null;
+  descripcion: string | null;  // comercio / concepto
+  tipo: 'cargo' | 'abono' | 'desconocido';
+}
+
+export interface CardStatementResult {
+  periodo_inicio: string | null;  // YYYY-MM-DD
+  periodo_fin: string | null;     // YYYY-MM-DD
+  titular: string | null;
+  numero_tarjeta_parcial: string | null; // últimos 4 dígitos
+  transacciones: CardTransaction[];
+}
+
+export interface GeminiSalesResult {
+  informacion_general: {
+    fecha: string | null;
+    cliente: string | null;
+    factura_o_referencia: string | null;
+    tipo_de_proyecto: string | null;
+    proveedor: string | null;
+    descripcion: string | null;
+  };
+  partidas_o_productos: Array<{
+    descripcion: string;
+    cantidad: number;
+    unidad: string;
+    precio_unitario_venta: number;
+    costo_unitario_proveedor: number;
+    precio_total_venta: number;
+    costo_total_proveedor: number;
+  }>;
+  totales_calculados: {
+    precio_total_facturado: number;
+    costo_total: number;
+    utilidad_bruta: number;
+    margen_porcentual: number;
+  };
+}
 
 /**
- * Limpia y parsea de forma robusta la respuesta JSON de Gemini, eliminando markdown,
- * comentarios de una línea o multilínea, y comas finales adicionales (trailing commas).
+ * Limpia y parsea de forma robusta la respuesta JSON de Gemini.
  */
 function cleanAndParseJson<T>(rawText: string): T {
   let cleanJsonStr = rawText.trim();
-  
+
   // 1. Quitar bloques de código markdown si los hay
-  const markdownMatch = cleanJsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  const markdownMatch = cleanJsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (markdownMatch) {
     cleanJsonStr = markdownMatch[1].trim();
   }
-  
-  // 2. Extraer el primer objeto o arreglo JSON para evitar texto basura antes o después
+
+  // 2. Extraer el primer objeto o arreglo JSON
   const firstBrace = cleanJsonStr.indexOf('{');
   const lastBrace = cleanJsonStr.lastIndexOf('}');
   const firstBracket = cleanJsonStr.indexOf('[');
   const lastBracket = cleanJsonStr.lastIndexOf(']');
-  
+
   let startIdx = -1;
   let endIdx = -1;
-  
+
   if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
     startIdx = firstBrace;
     endIdx = lastBrace;
@@ -43,38 +90,71 @@ function cleanAndParseJson<T>(rawText: string): T {
     startIdx = firstBracket;
     endIdx = lastBracket;
   }
-  
+
   if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
     cleanJsonStr = cleanJsonStr.substring(startIdx, endIdx + 1);
   }
-  
-  // 3. Eliminar comentarios de una línea (//...) y comentarios multilínea (/*...*/) de forma segura
+
+  // 3. Eliminar comentarios
   cleanJsonStr = cleanJsonStr.replace(/("([^"\\]|\\.)*")|(\/\/.*)|(\/\*[\s\S]*?\*\/)/g, (match, g1) => {
-    if (g1 !== undefined) {
-      return match; // Si es un string literal, no lo tocamos
-    }
-    return ""; // Si es un comentario, lo eliminamos
+    if (g1 !== undefined) return match;
+    return "";
   });
-  
-  // 4. Eliminar comas sueltas antes de un cierre de objeto o arreglo (trailing commas)
+
+  // 4. Eliminar comas sueltas finales (trailing commas)
   cleanJsonStr = cleanJsonStr.replace(/,\s*([}\]])/g, '$1');
-  
+
   try {
     return JSON.parse(cleanJsonStr) as T;
   } catch (e: any) {
-    console.error('Failed to parse Gemini output:', cleanJsonStr);
-    throw new Error('Error al interpretar el JSON generado por Gemini: ' + e.message);
+    logger.error('Failed to parse Gemini output:', cleanJsonStr);
+    throw new Error('Error al interpretar la respuesta de la IA: ' + e.message);
   }
+}
+
+/**
+ * Ejecuta una petición HTTP a la API de Gemini intentando con modelos en cascada (fallback).
+ */
+async function callGeminiAPI(requestBody: any): Promise<string> {
+  if (!GEMINI_API_KEY) {
+    throw new Error('La clave API de Gemini no está configurada.');
+  }
+
+  let lastErrorMsg = '';
+
+  for (const model of FALLBACK_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.ok) {
+        const resData = await response.json();
+        const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (textResult) {
+          return textResult.trim();
+        }
+      } else {
+        const errorText = await response.text();
+        logger.warn(`Modelo Gemini ${model} falló con código ${response.status}: ${errorText}`);
+        lastErrorMsg = `Respuesta ${response.status}`;
+      }
+    } catch (err: any) {
+      logger.warn(`Excepción en petición a modelo ${model}:`, err);
+      lastErrorMsg = err.message || 'Error de conexión';
+    }
+  }
+
+  throw new Error(`No se pudo procesar la imagen con la Inteligencia Artificial (${lastErrorMsg}). Intenta de nuevo con una foto más clara.`);
 }
 
 export const GeminiService = {
   async scanTicket(base64Image: string, cantidadPersonas: number = 1, mimeType: string = 'image/jpeg'): Promise<GeminiOcrResult> {
-    if (!GEMINI_API_KEY) {
-      throw new Error('Gemini API Key is missing. Check your environment variables.');
-    }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
     const prompt = `Analiza la imagen de este ticket de compra de gastos. Extrae y devuelve un objeto JSON puro (sin formato markdown ni bloques de código, solo el texto del JSON) con las siguientes propiedades:
 {
   "monto": number (monto total del ticket incluyendo centavos/decimales de forma exacta, no redondees el valor, si no es legible o no hay, usa null),
@@ -93,7 +173,7 @@ export const GeminiService = {
   Si no detectas ninguna de estas infracciones de política, usa null)
 }`;
 
-    // Gemini inlineData.data must be pure base64 (no "data:image/...;base64," prefix)
+    // Limpieza estricta del string base64
     let cleanBase64 = base64Image;
     let detectedMime = mimeType;
     const dataUrlMatch = base64Image.match(/^data:([a-zA-Z0-9+\-./]+);base64,(.+)$/s);
@@ -101,6 +181,7 @@ export const GeminiService = {
       detectedMime = dataUrlMatch[1];
       cleanBase64 = dataUrlMatch[2];
     }
+    cleanBase64 = cleanBase64.replace(/[\r\n\s]/g, '');
 
     const requestBody = {
       contents: [
@@ -122,30 +203,11 @@ export const GeminiService = {
     };
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API Error (${response.status}): ${errorText}`);
-      }
-
-      const resData = await response.json();
-      const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!textResult) {
-        throw new Error('No se pudo extraer texto del ticket.');
-      }
-
+      const textResult = await callGeminiAPI(requestBody);
       const parsed = cleanAndParseJson<GeminiOcrResult>(textResult);
 
       return {
-        monto: parsed.monto ?? null,
+        monto: typeof parsed.monto === 'number' ? parsed.monto : (parsed.monto ? Number(parsed.monto) || null : null),
         proveedor: parsed.proveedor ?? null,
         sucursal: parsed.sucursal ?? null,
         fecha: parsed.fecha ?? null,
@@ -157,7 +219,7 @@ export const GeminiService = {
         estado: parsed.estado ?? null,
       };
     } catch (err: any) {
-      console.error('Error in scanTicket:', err);
+      logger.error('Error en scanTicket:', err);
       throw new Error(err.message || 'Error al procesar el ticket con Inteligencia Artificial.');
     }
   },
@@ -173,12 +235,6 @@ export const GeminiService = {
       trabajos?: { descripcion: string; materiales?: string | null; observaciones?: string | null; solucion?: string | null }[];
     }
   ): Promise<string> {
-    if (!GEMINI_API_KEY) {
-      throw new Error('Gemini API Key is missing. Check your environment variables.');
-    }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
     let trabajosFormatted = '';
     if (detalles.trabajos && detalles.trabajos.length > 0) {
       trabajosFormatted = detalles.trabajos.map((t, idx) => `
@@ -216,7 +272,7 @@ Instrucciones para el reporte:
       parts.push({
         inlineData: {
           mimeType: 'image/jpeg',
-          data: antesBase64.replace(/^data:image\/[a-z]+;base64,/, ''),
+          data: antesBase64.replace(/^data:image\/[a-z]+;base64,/, '').replace(/[\r\n\s]/g, ''),
         },
       });
     }
@@ -225,7 +281,7 @@ Instrucciones para el reporte:
       parts.push({
         inlineData: {
           mimeType: 'image/jpeg',
-          data: despuesBase64.replace(/^data:image\/[a-z]+;base64,/, ''),
+          data: despuesBase64.replace(/^data:image\/[a-z]+;base64,/, '').replace(/[\r\n\s]/g, ''),
         },
       });
     }
@@ -239,29 +295,10 @@ Instrucciones para el reporte:
     };
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API Error (${response.status}): ${errorText}`);
-      }
-
-      const resData = await response.json();
-      const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!textResult) {
-        throw new Error('No se pudo generar el reporte formal con la IA.');
-      }
-
-      return textResult.trim();
+      const textResult = await callGeminiAPI(requestBody);
+      return textResult;
     } catch (err: any) {
-      console.error('Error in generateTechnicalSummary:', err);
+      logger.error('Error en generateTechnicalSummary:', err);
       throw new Error(err.message || 'Error al generar el reporte técnico con Inteligencia Artificial.');
     }
   },
@@ -290,12 +327,6 @@ Instrucciones para el reporte:
       };
     }>;
   }> {
-    if (!GEMINI_API_KEY) {
-      throw new Error('Gemini API Key is missing. Check your environment variables.');
-    }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
     const prompt = `Eres un agente experto en análisis de datos y normalización de inventarios para la plataforma corporativa Portal Inttec. 
 
 Tu tarea es analizar la factura o recibo de compra adjunto (en formato PDF o imagen) y extraer las partidas de productos, ignorando servicios, cargos por envío o pagos electrónicos.
@@ -338,7 +369,7 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
   ]
 }`;
 
-    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '');
+    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '').replace(/[\r\n\s]/g, '');
 
     const requestBody = {
       contents: [
@@ -360,29 +391,10 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
     };
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API Error (${response.status}): ${errorText}`);
-      }
-
-      const resData = await response.json();
-      const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!textResult) {
-        throw new Error('No se pudo extraer el contenido de la factura.');
-      }
-
+      const textResult = await callGeminiAPI(requestBody);
       return cleanAndParseJson<any>(textResult);
     } catch (err: any) {
-      console.error('Error in extractInvoiceProducts:', err);
+      logger.error('Error en extractInvoiceProducts:', err);
       throw new Error(err.message || 'Error al procesar la factura con Inteligencia Artificial.');
     }
   },
@@ -391,12 +403,6 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
     base64File: string,
     mimeType: string
   ): Promise<GeminiSalesResult> {
-    if (!GEMINI_API_KEY) {
-      throw new Error('Gemini API Key is missing. Check your environment variables.');
-    }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
     const prompt = `Rol: Eres un asistente experto en contabilidad y extracción de datos de facturas de compra.
 
 Tarea: Analiza el documento adjunto (imagen o PDF). Este es una ORDEN DE COMPRA (PO) o pedido de un cliente. Los precios que aparecen en el documento representan el monto que el cliente nos va a pagar, es decir, el PRECIO DE VENTA.
@@ -414,7 +420,7 @@ Reglas de extracción:
 - Si aparece el nombre del cliente final (a quién se le revenderá), extráelo; si no, usa null
 - Extrae cada partida/producto con: descripción exacta, cantidad, unidad de medida, y precio (como precio_unitario_venta, dejando costo_unitario_proveedor en 0)
 
-Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, sin texto adicional:
+Formato de Salida: Devuelve strictly un objeto JSON con esta estructura, sin texto adicional:
 {
   "informacion_general": {
     "fecha": "YYYY-MM-DD o null",
@@ -443,7 +449,7 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
   }
 }`;
 
-    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '');
+    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '').replace(/[\r\n\s]/g, '');
 
     const requestBody = {
       contents: [
@@ -465,29 +471,9 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
     };
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API Error (${response.status}): ${errorText}`);
-      }
-
-      const resData = await response.json();
-      const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!textResult) {
-        throw new Error('No se pudo extraer el contenido de la factura de venta.');
-      }
-
+      const textResult = await callGeminiAPI(requestBody);
       const parsed = cleanAndParseJson<GeminiSalesResult>(textResult);
 
-      // Re-calcular totales en código para evitar errores matemáticos de la IA
       let precioTotalFacturado = 0;
       let costoTotal = 0;
 
@@ -534,7 +520,7 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
         },
       };
     } catch (err: any) {
-      console.error('Error in analyzeInvoiceSales:', err);
+      logger.error('Error en analyzeInvoiceSales:', err);
       throw new Error(err.message || 'Error al procesar la factura de venta con Inteligencia Artificial.');
     }
   },
@@ -543,12 +529,6 @@ Formato de Salida: Devuelve estrictamente un objeto JSON con esta estructura, si
     base64File: string,
     mimeType: string
   ): Promise<CardStatementResult> {
-    if (!GEMINI_API_KEY) {
-      throw new Error('Gemini API Key is missing. Check your environment variables.');
-    }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
     const prompt = `Eres un experto en análisis de estados de cuenta bancarios y tarjetas corporativas. Analiza el documento adjunto (PDF o imagen de un estado de cuenta de tarjeta de crédito o débito) y extrae TODAS las transacciones que aparezcan.
 
 INSTRUCCIONES:
@@ -575,7 +555,7 @@ Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin mark
   ]
 }`;
 
-    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '');
+    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '').replace(/[\r\n\s]/g, '');
 
     const requestBody = {
       contents: [
@@ -597,24 +577,7 @@ Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin mark
     };
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API Error (${response.status}): ${errorText}`);
-      }
-
-      const resData = await response.json();
-      const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!textResult) {
-        throw new Error('No se pudo extraer el contenido del estado de cuenta.');
-      }
-
+      const textResult = await callGeminiAPI(requestBody);
       const parsed = cleanAndParseJson<CardStatementResult>(textResult);
 
       return {
@@ -630,53 +593,8 @@ Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin mark
         })),
       };
     } catch (err: any) {
-      console.error('Error in analyzeCardStatement:', err);
+      logger.error('Error en analyzeCardStatement:', err);
       throw new Error(err.message || 'Error al procesar el estado de cuenta con Inteligencia Artificial.');
     }
   }
 };
-
-// ============================================================
-// Card Statement Analysis
-// ============================================================
-
-export interface CardTransaction {
-  fecha: string | null;        // YYYY-MM-DD
-  monto: number | null;
-  descripcion: string | null;  // comercio / concepto
-  tipo: 'cargo' | 'abono' | 'desconocido';
-}
-
-export interface CardStatementResult {
-  periodo_inicio: string | null;  // YYYY-MM-DD
-  periodo_fin: string | null;     // YYYY-MM-DD
-  titular: string | null;
-  numero_tarjeta_parcial: string | null; // últimos 4 dígitos
-  transacciones: CardTransaction[];
-}
-
-export interface GeminiSalesResult {
-  informacion_general: {
-    fecha: string | null;
-    cliente: string | null;
-    factura_o_referencia: string | null;
-    tipo_de_proyecto: string | null;
-    proveedor: string | null;
-    descripcion: string | null;
-  };
-  partidas_o_productos: Array<{
-    descripcion: string;
-    cantidad: number;
-    unidad: string;
-    precio_unitario_venta: number;
-    costo_unitario_proveedor: number;
-    precio_total_venta: number;
-    costo_total_proveedor: number;
-  }>;
-  totales_calculados: {
-    precio_total_facturado: number;
-    costo_total: number;
-    utilidad_bruta: number;
-    margen_porcentual: number;
-  };
-}
