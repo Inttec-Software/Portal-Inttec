@@ -3040,30 +3040,37 @@ export default function AdminDashboard() {
 
       {/* MODAL DE FILTRO DE FECHAS Y CALENDARIO */}
       <Modal
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         visible={dateFilterModalVisible}
         onRequestClose={() => setDateFilterModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, maxWidth: 450, padding: Spacing.three }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: themeColors.text }]}>📅 Filtrar por Fecha / Calendario</Text>
-              <TouchableOpacity onPress={() => setDateFilterModalVisible(false)}>
-                <Ionicons name="close" size={24} color={themeColors.text} />
+        <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.6)', justifyContent: 'center', alignItems: 'center', padding: Spacing.three }}>
+          <View style={{ backgroundColor: themeColors.background, width: '100%', maxWidth: 440, borderRadius: BorderRadius.large, padding: Spacing.three, borderWidth: 1, borderColor: themeColors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 15, elevation: 10 }}>
+            {/* Encabezado */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.two, borderBottomWidth: 1, borderBottomColor: themeColors.border, paddingBottom: Spacing.two }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="calendar" size={22} color={themeColors.accent} />
+                <Text style={{ fontSize: 16, fontWeight: '700', color: themeColors.text }}>Filtrar por Fecha</Text>
+              </View>
+              <TouchableOpacity onPress={() => setDateFilterModalVisible(false)} style={{ padding: 4 }}>
+                <Ionicons name="close-circle" size={24} color={themeColors.textSecondary} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView contentContainerStyle={{ gap: Spacing.two, paddingVertical: Spacing.two }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.textSecondary }}>Filtros Rápidos:</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one }}>
+            <ScrollView contentContainerStyle={{ gap: Spacing.two }}>
+              {/* Presets Rápidos */}
+              <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>Filtros Rápidos</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <TouchableOpacity
                   onPress={() => {
                     setStartDateFilter(null);
                     setEndDateFilter(null);
+                    setTempStartDate('');
+                    setTempEndDate('');
                     setDateFilterModalVisible(false);
                   }}
-                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: (!startDateFilter && !endDateFilter) ? themeColors.accent : themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: (!startDateFilter && !endDateFilter) ? themeColors.accent : themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }}
                 >
                   <Text style={{ fontSize: 12, fontWeight: '600', color: (!startDateFilter && !endDateFilter) ? '#fff' : themeColors.text }}>Todas las Fechas</Text>
                 </TouchableOpacity>
@@ -3073,9 +3080,11 @@ export default function AdminDashboard() {
                     const todayStr = new Date().toISOString().split('T')[0];
                     setStartDateFilter(todayStr);
                     setEndDateFilter(todayStr);
+                    setTempStartDate(todayStr);
+                    setTempEndDate(todayStr);
                     setDateFilterModalVisible(false);
                   }}
-                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: (startDateFilter === new Date().toISOString().split('T')[0] && endDateFilter === new Date().toISOString().split('T')[0]) ? themeColors.accent : themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: (startDateFilter === new Date().toISOString().split('T')[0] && endDateFilter === new Date().toISOString().split('T')[0]) ? themeColors.accent : themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }}
                 >
                   <Text style={{ fontSize: 12, fontWeight: '600', color: (startDateFilter === new Date().toISOString().split('T')[0] && endDateFilter === new Date().toISOString().split('T')[0]) ? '#fff' : themeColors.text }}>Hoy</Text>
                 </TouchableOpacity>
@@ -3087,32 +3096,89 @@ export default function AdminDashboard() {
                     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
                     setStartDateFilter(firstDay);
                     setEndDateFilter(lastDay);
+                    setTempStartDate(firstDay);
+                    setTempEndDate(lastDay);
                     setDateFilterModalVisible(false);
                   }}
-                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }}
                 >
                   <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>Este Mes</Text>
                 </TouchableOpacity>
               </View>
 
+              {/* Calendario / Selector Interactivo */}
               <View style={{ borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: Spacing.two, marginTop: Spacing.one }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text, marginBottom: 8 }}>Día Único o Rango Personalizado:</Text>
-                <CustomInput
-                  label="Fecha Inicio (DD/MM/AAAA) ó Día Único *"
-                  placeholder="Ej. 20/07/2026"
-                  value={tempStartDate}
-                  onChangeText={setTempStartDate}
-                  iconName="calendar-outline"
-                />
-                <CustomInput
-                  label="Fecha Fin (Opcional - DD/MM/AAAA)"
-                  placeholder="Ej. 25/07/2026"
-                  value={tempEndDate}
-                  onChangeText={setTempEndDate}
-                  iconName="calendar-outline"
-                />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text, marginBottom: 10 }}>📅 Seleccionar Fecha / Rango:</Text>
+
+                {Platform.OS === 'web' ? (
+                  <View style={{ gap: Spacing.two }}>
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.textSecondary }}>Fecha Inicio (ó Día Único):</Text>
+                      {/* @ts-ignore */}
+                      <input
+                        type="date"
+                        value={tempStartDate}
+                        onChange={(e: any) => setTempStartDate(e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: '42px',
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          border: `1px solid ${themeColors.border}`,
+                          backgroundColor: themeColors.backgroundElement,
+                          color: themeColors.text,
+                          fontSize: '14px',
+                          outline: 'none',
+                          boxSizing: 'border-box',
+                          cursor: 'pointer'
+                        }}
+                      />
+                    </View>
+
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.textSecondary }}>Fecha Fin (Opcional para Rango):</Text>
+                      {/* @ts-ignore */}
+                      <input
+                        type="date"
+                        value={tempEndDate}
+                        onChange={(e: any) => setTempEndDate(e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: '42px',
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          border: `1px solid ${themeColors.border}`,
+                          backgroundColor: themeColors.backgroundElement,
+                          color: themeColors.text,
+                          fontSize: '14px',
+                          outline: 'none',
+                          boxSizing: 'border-box',
+                          cursor: 'pointer'
+                        }}
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <View style={{ gap: Spacing.two }}>
+                    <CustomInput
+                      label="Fecha Inicio (AAAA-MM-DD) *"
+                      placeholder="Ej. 2026-07-20"
+                      value={tempStartDate}
+                      onChangeText={setTempStartDate}
+                      iconName="calendar-outline"
+                    />
+                    <CustomInput
+                      label="Fecha Fin (AAAA-MM-DD)"
+                      placeholder="Ej. 2026-07-25"
+                      value={tempEndDate}
+                      onChangeText={setTempEndDate}
+                      iconName="calendar-outline"
+                    />
+                  </View>
+                )}
               </View>
 
+              {/* Botones de Acción */}
               <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two }}>
                 <View style={{ flex: 1 }}>
                   <CustomButton
@@ -3131,14 +3197,8 @@ export default function AdminDashboard() {
                   <CustomButton
                     title="Aplicar Fechas"
                     onPress={() => {
-                      const convertToDb = (str: string) => {
-                        if (!str.trim()) return null;
-                        const parts = str.trim().split('/');
-                        if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
-                        return str.trim();
-                      };
-                      const s = convertToDb(tempStartDate);
-                      const e = convertToDb(tempEndDate) || s;
+                      const s = tempStartDate.trim() || null;
+                      const e = tempEndDate.trim() || s;
                       setStartDateFilter(s);
                       setEndDateFilter(e);
                       setDateFilterModalVisible(false);
