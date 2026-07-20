@@ -502,52 +502,10 @@ export const ReportGenerator = {
     const formatMXN = (n: number) =>
       new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
 
-    // Mapa para seguimiento de odómetro anterior por vehículo
-    const prevKmByVehiculo: Record<string, number> = {};
-
-    // Ordenar por vehículo y odómetro ascendente para procesar consecución de kilometraje
-    const sortedForKm = [...registros].sort((a, b) => {
-      const vA = a.vehiculo_id || a.vehiculo_placas || '';
-      const vB = b.vehiculo_id || b.vehiculo_placas || '';
-      if (vA !== vB) return vA.localeCompare(vB);
-      return (Number(a.kilometraje_actual) || 0) - (Number(b.kilometraje_actual) || 0);
-    });
-
-    const kmDataMap: Record<string, { dist: number; kmL: number | null; error?: boolean }> = {};
-    sortedForKm.forEach((r) => {
-      const vId = r.vehiculo_id || r.vehiculo_placas || 'gen';
-      const prev = prevKmByVehiculo[vId];
-      const curr = Number(r.kilometraje_actual || 0);
-      if (prev !== undefined) {
-        if (curr > prev) {
-          const dist = curr - prev;
-          const kmL = r.litros && Number(r.litros) > 0 ? dist / Number(r.litros) : null;
-          kmDataMap[r.id] = { dist, kmL };
-        } else {
-          kmDataMap[r.id] = { dist: 0, kmL: null, error: true };
-        }
-      }
-      prevKmByVehiculo[vId] = curr;
-    });
-
     let tableRows = '';
     registros.forEach((r) => {
       const dateParts = (r.fecha || '').split('-');
       const fecha = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : r.fecha;
-      
-      const kmInfo = kmDataMap[r.id];
-      let distStr = '—';
-      let kmLStr = '—';
-      if (kmInfo) {
-        if (kmInfo.error) {
-          distStr = '0 km';
-          kmLStr = '<span style="color:#e11d48; font-size:9px">⚠️ Odómetro</span>';
-        } else {
-          distStr = `+${kmInfo.dist.toLocaleString('es-MX')} km`;
-          kmLStr = kmInfo.kmL ? `${kmInfo.kmL.toFixed(2)} km/L` : '—';
-        }
-      }
-
       tableRows += `
         <tr>
           <td>${fecha}</td>
@@ -555,9 +513,8 @@ export const ReportGenerator = {
           <td>${r.vehiculo_marca || ''} ${r.vehiculo_modelo || ''}<br/><small style="color:#888">${r.vehiculo_placas || ''}</small></td>
           <td style="text-align:center">${Number(r.litros || 0).toFixed(2)} L</td>
           <td style="text-align:center">${Number(r.kilometraje_actual || 0).toLocaleString('es-MX')} km</td>
-          <td style="text-align:center; font-weight:600; color:#0ea5e9">${distStr}</td>
-          <td style="text-align:center; font-weight:700; color:#16a34a">${kmLStr}</td>
           <td style="text-align:right; font-weight:bold; color:#059669">${formatMXN(Number(r.costo_total || 0))}</td>
+          <td>${r.observaciones || 'â€”'}</td>
         </tr>`;
     });
 
@@ -626,12 +583,20 @@ export const ReportGenerator = {
             <tr>
               <th>Fecha</th>
               <th>Conductor</th>
-              <th>Vehículo</th>
+              <th>VehÃ­culo</th>
               <th>Litros</th>
-              <th>Odómetro</th>
-              <th style="text-align:center">Km Recorridos</th>
-              <th style="text-align:center">Rendimiento</th>
+              <th>OdÃ³metro</th>
               <th style="text-align:right">Costo</th>
+              <th>Observaciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Reporte de Consumo de Combustible â€” ${branding.tagline} â€” Sistema Automatizado
         </div>
       </body>
       </html>`;
@@ -691,69 +656,29 @@ export const ReportGenerator = {
       throw new Error('No hay registros de gasolina para exportar.');
     }
 
-    // Mapa para seguimiento de odómetro anterior por vehículo
-    const prevKmByVehiculo: Record<string, number> = {};
-
-    // Ordenar por vehículo y odómetro ascendente para procesar consecución de kilometraje
-    const sortedForKm = [...registros].sort((a, b) => {
-      const vA = a.vehiculo_id || a.vehiculo_placas || '';
-      const vB = b.vehiculo_id || b.vehiculo_placas || '';
-      if (vA !== vB) return vA.localeCompare(vB);
-      return (Number(a.kilometraje_actual) || 0) - (Number(b.kilometraje_actual) || 0);
-    });
-
-    const kmDataMap: Record<string, { dist: number; kmL: number | null; error?: boolean }> = {};
-    sortedForKm.forEach((r) => {
-      const vId = r.vehiculo_id || r.vehiculo_placas || 'gen';
-      const prev = prevKmByVehiculo[vId];
-      const curr = Number(r.kilometraje_actual || 0);
-      if (prev !== undefined) {
-        if (curr > prev) {
-          const dist = curr - prev;
-          const kmL = r.litros && Number(r.litros) > 0 ? dist / Number(r.litros) : null;
-          kmDataMap[r.id] = { dist, kmL };
-        } else {
-          kmDataMap[r.id] = { dist: 0, kmL: null, error: true };
-        }
-      }
-      prevKmByVehiculo[vId] = curr;
-    });
-
     const escape = (text?: string | null) => {
       if (!text) return '';
       return `"${String(text).replace(/"/g, '""')}"`;
     };
 
     let csvContent = '\uFEFF'; // BOM para Excel UTF-8
-    csvContent += 'Fecha,Conductor,Vehículo Marca,Vehículo Modelo,Placas,Litros,Kilometraje Actual (km),Km Recorridos (km),Rendimiento (km/L),Costo Total (MXN),Observaciones\n';
+    csvContent += 'Fecha,Empresa Registradora,Conductor,Vehículo Marca,Vehículo Modelo,Placas,Km Anterior,Km Actual,Distancia Recorrida (km),Litros,Rendimiento (km/L),Costo Total (MXN),Observaciones\n';
 
     registros.forEach((r) => {
       const dateParts = (r.fecha || '').split('-');
       const fecha = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : r.fecha;
-      
-      const kmInfo = kmDataMap[r.id];
-      let distVal = '';
-      let kmLVal = '';
-      if (kmInfo) {
-        if (kmInfo.error) {
-          distVal = '0';
-          kmLVal = 'Incoherencia Odometro';
-        } else {
-          distVal = String(kmInfo.dist);
-          kmLVal = kmInfo.kmL ? kmInfo.kmL.toFixed(2) : '';
-        }
-      }
-
       const row = [
         fecha,
+        escape(r.empresa_origen || 'N/A'),
         escape(r.empleado_nombre),
         escape(r.vehiculo_marca),
         escape(r.vehiculo_modelo),
         escape(r.vehiculo_placas),
-        Number(r.litros || 0).toFixed(2),
+        r.kilometraje_anterior ?? 'N/A',
         r.kilometraje_actual || 0,
-        distVal,
-        kmLVal,
+        r.distancia_recorrida ?? 'N/A',
+        Number(r.litros || 0).toFixed(2),
+        r.rendimiento_km_l ? `${r.rendimiento_km_l} km/L` : 'N/A',
         Number(r.costo_total || 0).toFixed(2),
         escape(r.observaciones),
       ].join(',');

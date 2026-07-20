@@ -867,7 +867,7 @@ export default function GastoForm() {
 
         if (dbError) throw dbError;
 
-        // Si es combustible, guardar bitácora de gasolina vinculada
+        // Si es combustible, guardar bitácora de gasolina vinculada y sincronizar kilometraje en ambas empresas
         const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
         const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
         const esGasolina = esVehiculos && esSubGasolina;
@@ -890,6 +890,11 @@ export default function GastoForm() {
 
           if (gasError) {
             console.error('Error insertando en registro_gasolina:', gasError.message);
+          } else {
+            const vehiculoObj = vehiculos.find((v) => v.id === selectedVehiculoId);
+            if (vehiculoObj?.placas) {
+              await VehiculoService.syncVehiculoKilometraje(vehiculoObj.placas, Number(kilometrajeActual));
+            }
           }
         }
 
