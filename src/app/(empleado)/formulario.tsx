@@ -102,6 +102,8 @@ export default function GastoForm() {
   const [monto, setMonto] = useState('');
   const [proveedor, setProveedor] = useState('');
   const [facturado, setFacturado] = useState<boolean | null>(null);
+  const [facturaStatus, setFacturaStatus] = useState<'SI' | 'PENDIENTE' | 'NO' | null>(null);
+  const [comentarioPendiente, setComentarioPendiente] = useState('');
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [facturaUri, setFacturaUri] = useState<string | null>(null);
   const [facturaBase64, setFacturaBase64] = useState<string | null>(null);
@@ -780,7 +782,11 @@ export default function GastoForm() {
       tipo_tarjeta: tipoTarjeta,
       ubicacion_registro: 'Móvil',
       estado: selectedEstado || null,
-      motivo_sin_factura: facturado ? null : (motivoSinFactura.trim() || null),
+      motivo_sin_factura: facturado === true
+        ? null
+        : (facturaStatus === 'PENDIENTE' || (facturado === false && (motivoSinFactura === 'PENDIENTE_ENTREGA' || motivoSinFactura.startsWith('PENDIENTE'))))
+            ? (comentarioPendiente.trim() ? `PENDIENTE_ENTREGA: ${comentarioPendiente.trim()}` : 'PENDIENTE_ENTREGA')
+            : (motivoSinFactura.trim() || null),
       tipo_servicio_proyecto: tipoServicioProyecto,
       detalle_servicio_proyecto: detalleServicioProyecto.trim(),
     };
@@ -1666,7 +1672,9 @@ export default function GastoForm() {
                   <TouchableOpacity
                     onPress={() => {
                       setFacturado(true);
+                      setFacturaStatus('SI');
                       setMotivoSinFactura('');
+                      setComentarioPendiente('');
                     }}
                     style={[
                       styles.paymentOption,
@@ -1687,6 +1695,7 @@ export default function GastoForm() {
                   <TouchableOpacity
                     onPress={() => {
                       setFacturado(false);
+                      setFacturaStatus('PENDIENTE');
                       setMotivoSinFactura('PENDIENTE_ENTREGA');
                       setFacturaUri(null);
                       setFacturaBase64(null);
@@ -1695,15 +1704,15 @@ export default function GastoForm() {
                     style={[
                       styles.paymentOption,
                       {
-                        backgroundColor: (facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA') ? themeColors.warning : themeColors.backgroundElement,
-                        borderColor: (facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA') ? 'transparent' : themeColors.border,
+                        backgroundColor: (facturado === false && (facturaStatus === 'PENDIENTE' || motivoSinFactura.startsWith('PENDIENTE'))) ? themeColors.warning : themeColors.backgroundElement,
+                        borderColor: (facturado === false && (facturaStatus === 'PENDIENTE' || motivoSinFactura.startsWith('PENDIENTE'))) ? 'transparent' : themeColors.border,
                         flex: 1,
                         paddingVertical: 8,
                         alignItems: 'center',
                       },
                     ]}
                   >
-                    <Text style={[styles.paymentOptionText, { color: (facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
+                    <Text style={[styles.paymentOptionText, { color: (facturado === false && (facturaStatus === 'PENDIENTE' || motivoSinFactura.startsWith('PENDIENTE'))) ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
                       Pendiente
                     </Text>
                   </TouchableOpacity>
@@ -1711,9 +1720,11 @@ export default function GastoForm() {
                   <TouchableOpacity
                     onPress={() => {
                       setFacturado(false);
-                      if (motivoSinFactura === 'PENDIENTE_ENTREGA') {
+                      setFacturaStatus('NO');
+                      if (motivoSinFactura.startsWith('PENDIENTE')) {
                         setMotivoSinFactura('');
                       }
+                      setComentarioPendiente('');
                       setFacturaUri(null);
                       setFacturaBase64(null);
                       setFacturaExt(null);
@@ -1721,30 +1732,42 @@ export default function GastoForm() {
                     style={[
                       styles.paymentOption,
                       {
-                        backgroundColor: (facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA') ? themeColors.accent : themeColors.backgroundElement,
-                        borderColor: (facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA') ? 'transparent' : themeColors.border,
+                        backgroundColor: (facturado === false && (facturaStatus === 'NO' || (motivoSinFactura !== '' && !motivoSinFactura.startsWith('PENDIENTE')))) ? themeColors.accent : themeColors.backgroundElement,
+                        borderColor: (facturado === false && (facturaStatus === 'NO' || (motivoSinFactura !== '' && !motivoSinFactura.startsWith('PENDIENTE')))) ? 'transparent' : themeColors.border,
                         flex: 1,
                         paddingVertical: 8,
                         alignItems: 'center',
                       },
                     ]}
                   >
-                    <Text style={[styles.paymentOptionText, { color: (facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
+                    <Text style={[styles.paymentOptionText, { color: (facturado === false && (facturaStatus === 'NO' || (motivoSinFactura !== '' && !motivoSinFactura.startsWith('PENDIENTE')))) ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
                       No Facturado
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
-              {facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA' && (
-                <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning, marginBottom: Spacing.two, padding: Spacing.two, borderRadius: BorderRadius.medium }]}>
-                  <Text style={{ color: themeColors.warning, fontWeight: '700', fontSize: 12 }}>
-                    ⚠️ Factura Pendiente de Entregar: Podrás o el administrador podrá adjuntar el archivo posteriormente.
-                  </Text>
+              {facturado === false && (facturaStatus === 'PENDIENTE' || motivoSinFactura.startsWith('PENDIENTE')) && (
+                <View style={{ marginBottom: Spacing.two }}>
+                  <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning, marginBottom: Spacing.two, padding: Spacing.two, borderRadius: BorderRadius.medium }]}>
+                    <Text style={{ color: themeColors.warning, fontWeight: '700', fontSize: 12 }}>
+                      ⚠️ Factura Pendiente de Entregar: Se podrá adjuntar el archivo posteriormente.
+                    </Text>
+                  </View>
+                  <CustomInput
+                    label="Comentario u Observación de Factura Pendiente (Opcional)"
+                    placeholder="Ej. El proveedor enviará el archivo el próximo lunes..."
+                    value={comentarioPendiente}
+                    onChangeText={setComentarioPendiente}
+                    iconName="chatbox-outline"
+                    multiline
+                    numberOfLines={2}
+                    style={{ height: 60 }}
+                  />
                 </View>
               )}
 
-              {facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA' && (
+              {facturado === false && (facturaStatus === 'NO' || (!motivoSinFactura.startsWith('PENDIENTE') && facturaStatus !== 'PENDIENTE')) && (
                 <View style={{ marginBottom: Spacing.two }}>
                   <CustomInput
                     label="Motivo por el cual no se cuenta con factura *"

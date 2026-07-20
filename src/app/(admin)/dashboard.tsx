@@ -2737,9 +2737,15 @@ export default function AdminDashboard() {
 
                         {(!selectedGasto.facturado || selectedGasto.motivo_sin_factura) && (
                           <View style={[styles.detailItem, { backgroundColor: themeColors.warning + '15', padding: Spacing.two, borderRadius: BorderRadius.medium, borderLeftWidth: 4, borderLeftColor: themeColors.warning, marginVertical: Spacing.one }]}>
-                            <Text style={[styles.detailLabel, { color: themeColors.warning, fontWeight: '700' }]}>⚠️ Motivo de Falta de Factura</Text>
+                            <Text style={[styles.detailLabel, { color: themeColors.warning, fontWeight: '700' }]}>
+                              {selectedGasto.motivo_sin_factura?.startsWith('PENDIENTE') ? '⏳ Factura Pendiente de Entregar' : '⚠️ Motivo de Falta de Factura'}
+                            </Text>
                             <Text style={[styles.detailValue, { color: themeColors.text, fontWeight: '600', marginTop: 2 }]}>
-                              {selectedGasto.motivo_sin_factura || localMotivo || 'No especificado por el empleado'}
+                              {selectedGasto.motivo_sin_factura
+                                ? (selectedGasto.motivo_sin_factura.includes('PENDIENTE_ENTREGA:')
+                                    ? selectedGasto.motivo_sin_factura.replace('PENDIENTE_ENTREGA:', 'Comentario:')
+                                    : (selectedGasto.motivo_sin_factura === 'PENDIENTE_ENTREGA' ? 'Sin comentarios adicionales.' : selectedGasto.motivo_sin_factura))
+                                : localMotivo || 'No especificado por el empleado'}
                             </Text>
                           </View>
                         )}
