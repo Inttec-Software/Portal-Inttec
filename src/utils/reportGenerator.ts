@@ -406,7 +406,7 @@ export const ReportGenerator = {
 
     // Encabezados
     let csvContent = '\uFEFF'; // BOM para que Excel abra UTF-8 correctamente
-    csvContent += 'ID,Fecha,Empleado Nombre,Monto,Categoria,Subcategoria,Proveedor,Cliente,Servicio/Proyecto,Detalle,Sucursal,Metodo Pago,Tipo Tarjeta,Status,Alerta Politica\n';
+    csvContent += 'ID,Fecha,Empleado Nombre,Monto,Categoria,Subcategoria,Proveedor,Cliente,Servicio/Proyecto,Detalle,Sucursal,Metodo Pago,Tipo Tarjeta,Estado Factura,Motivo Sin Factura,Status,Alerta Politica\n';
 
     // Rellenar filas
     gastos.forEach((g) => {
@@ -418,6 +418,13 @@ export const ReportGenerator = {
       };
 
       const { alert, reason } = hasPolicyAlert(g);
+
+      let estadoFactura = 'No Facturado';
+      if (g.facturado === true) {
+        estadoFactura = 'Facturado';
+      } else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) {
+        estadoFactura = 'Pendiente de Entregar';
+      }
 
       const row = [
         g.id,
@@ -433,6 +440,8 @@ export const ReportGenerator = {
         escape(g.sucursal),
         g.metodo_pago,
         escape(g.tipo_tarjeta),
+        escape(estadoFactura),
+        escape(g.motivo_sin_factura),
         g.status,
         alert ? escape(`ALERTA: ${reason}`) : '',
       ].join(',');

@@ -1657,8 +1657,8 @@ export default function GastoForm() {
 
               {/* Selector de ¿Está facturado? */}
               <View style={styles.selectorGroup}>
-                <Text style={[styles.selectorLabel, { color: themeColors.text }]}>¿Está facturado? *</Text>
-                <View style={styles.paymentSelector}>
+                <Text style={[styles.selectorLabel, { color: themeColors.text }]}>¿Estado de Facturación? *</Text>
+                <View style={[styles.paymentSelector, { flexDirection: 'row', gap: 6 }]}>
                   <TouchableOpacity
                     onPress={() => {
                       setFacturado(true);
@@ -1670,18 +1670,20 @@ export default function GastoForm() {
                         backgroundColor: facturado === true ? themeColors.accent : themeColors.backgroundElement,
                         borderColor: facturado === true ? 'transparent' : themeColors.border,
                         flex: 1,
+                        paddingVertical: 8,
                         alignItems: 'center',
                       },
                     ]}
                   >
-                    <Text style={[styles.paymentOptionText, { color: facturado === true ? '#ffffff' : themeColors.text }]}>
-                      Sí
+                    <Text style={[styles.paymentOptionText, { color: facturado === true ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
+                      Sí, Facturado
                     </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
                     onPress={() => {
                       setFacturado(false);
+                      setMotivoSinFactura('PENDIENTE_ENTREGA');
                       setFacturaUri(null);
                       setFacturaBase64(null);
                       setFacturaExt(null);
@@ -1689,23 +1691,56 @@ export default function GastoForm() {
                     style={[
                       styles.paymentOption,
                       {
-                        backgroundColor: facturado === false ? themeColors.accent : themeColors.backgroundElement,
-                        borderColor: facturado === false ? 'transparent' : themeColors.border,
+                        backgroundColor: (facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA') ? themeColors.warning : themeColors.backgroundElement,
+                        borderColor: (facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA') ? 'transparent' : themeColors.border,
                         flex: 1,
+                        paddingVertical: 8,
                         alignItems: 'center',
                       },
                     ]}
                   >
-                    <Text style={[styles.paymentOptionText, { color: facturado === false ? '#ffffff' : themeColors.text }]}>
-                      No
+                    <Text style={[styles.paymentOptionText, { color: (facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
+                      Pendiente
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      setFacturado(false);
+                      if (motivoSinFactura === 'PENDIENTE_ENTREGA') {
+                        setMotivoSinFactura('');
+                      }
+                      setFacturaUri(null);
+                      setFacturaBase64(null);
+                      setFacturaExt(null);
+                    }}
+                    style={[
+                      styles.paymentOption,
+                      {
+                        backgroundColor: (facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA') ? themeColors.accent : themeColors.backgroundElement,
+                        borderColor: (facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA') ? 'transparent' : themeColors.border,
+                        flex: 1,
+                        paddingVertical: 8,
+                        alignItems: 'center',
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.paymentOptionText, { color: (facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
+                      No Facturado
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
+              {facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA' && (
+                <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning, marginBottom: Spacing.two, padding: Spacing.two, borderRadius: BorderRadius.medium }]}>
+                  <Text style={{ color: themeColors.warning, fontWeight: '700', fontSize: 12 }}>
+                    ⚠️ Factura Pendiente de Entregar: El administrador o empleado podrá adjuntar el archivo posteriormente.
+                  </Text>
+                </View>
+              )}
 
-
-              {facturado === false && (
+              {facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA' && (
                 <View style={{ marginBottom: Spacing.two }}>
                   <CustomInput
                     label="Motivo por el cual no se cuenta con factura *"

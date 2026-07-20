@@ -3,6 +3,7 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   FlatList,
   Modal,
@@ -66,7 +67,16 @@ export default function AdminDashboard() {
   const [personal, setPersonal] = useState<Usuario[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
-  const [facturaFilter, setFacturaFilter] = useState<'TODOS' | 'FACTURADOS' | 'PENDIENTES'>('TODOS');
+  const [facturaFilter, setFacturaFilter] = useState<'TODOS' | 'FACTURADOS' | 'PENDIENTE_ENTREGA' | 'NO_FACTURADOS'>('TODOS');
+
+  // Buscador y Filtro por Calendario (Día Único o Rango de Fechas)
+  const [searchQuery, setSearchQuery] = useState('');
+  const [startDateFilter, setStartDateFilter] = useState<string | null>(null);
+  const [endDateFilter, setEndDateFilter] = useState<string | null>(null);
+  const [dateFilterModalVisible, setDateFilterModalVisible] = useState(false);
+  const [tempSingleDate, setTempSingleDate] = useState('');
+  const [tempStartDate, setTempStartDate] = useState('');
+  const [tempEndDate, setTempEndDate] = useState('');
 
   // Vehículos y Gasolina
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
@@ -1341,20 +1351,61 @@ export default function AdminDashboard() {
     }
   };
 
-  // Filtrados por pestañas
-  const pendingGastos = gastos.filter((g) => g.status === 'PENDING');
-  const historyGastos = gastos.filter((g) => {
+  // Master Filter: Búsqueda (Empleado, Cliente, Categoría, Proveedor, Detalle) y Fechas (Día Único o Rango)
+  const filteredGastos = useMemo(() => {
+    return gastos.filter((g) => {
+      // 1. Buscador de Texto (Empleado, Cliente, Categoría, Proveedor, Detalle)
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase().trim();
+        const empName = (g.empleado_nombre || '').toLowerCase();
+        const clientName = (g.cliente || '').toLowerCase();
+        const catName = (g.categoria || '').toLowerCase();
+        const subCatName = (g.subcategoria || '').toLowerCase();
+        const provName = (g.proveedor || '').toLowerCase();
+        const detailStr = (g.detalle_servicio_proyecto || '').toLowerCase();
+
+        const matches = empName.includes(query) ||
+                        clientName.includes(query) ||
+                        catName.includes(query) ||
+                        subCatName.includes(query) ||
+                        provName.includes(query) ||
+                        detailStr.includes(query);
+
+        if (!matches) return false;
+      }
+
+      // 2. Filtro por Fecha de Comprobante / Creación (Día Único o Rango)
+      const gastoFecha = g.fecha_comprobante || g.created_at?.split('T')[0];
+      if (startDateFilter && gastoFecha) {
+        if (gastoFecha < startDateFilter) return false;
+      }
+      if (endDateFilter && gastoFecha) {
+        if (gastoFecha > endDateFilter) return false;
+      }
+
+      return true;
+    });
+  }, [gastos, searchQuery, startDateFilter, endDateFilter]);
+
+  // Filtrados por Pestañas y Facturación
+  const pendingGastos = filteredGastos.filter((g) => g.status === 'PENDING');
+  const historyGastos = filteredGastos.filter((g) => {
     const isHistoryStatus = g.status === 'APPROVED' || g.status === 'REJECTED' || g.status === 'ACTION_REQUIRED';
     if (!isHistoryStatus) return false;
     
     if (facturaFilter === 'FACTURADOS') return g.facturado === true;
-    if (facturaFilter === 'PENDIENTES') return !g.facturado;
+    if (facturaFilter === 'PENDIENTE_ENTREGA') {
+      return !g.facturado && (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente'));
+    }
+    if (facturaFilter === 'NO_FACTURADOS') {
+      return !g.facturado && g.motivo_sin_factura !== 'PENDIENTE_ENTREGA' && !g.motivo_sin_factura?.toLowerCase().includes('pendiente');
+    }
     return true; // TODOS
   });
 
   // Totales
   const totalPendientes = pendingGastos.reduce((sum, g) => sum + Number(g.monto), 0);
-  const totalAprobados = gastos.filter((g) => g.status === 'APPROVED').reduce((sum, g) => sum + Number(g.monto), 0);
+  const totalAprobados = filteredGastos.filter((g) => g.status === 'APPROVED').reduce((sum, g) => sum + Number(g.monto), 0);
 
   const formatCurrency = (monto: number) => {
     return new Intl.NumberFormat('es-MX', {
@@ -1695,6 +1746,63 @@ export default function AdminDashboard() {
 
       </View>
 
+      {/* BARRA DE BÚSQUEDA Y FILTRO DE CALENDARIO DE FECHAS */}
+      <View style={{ paddingHorizontal: Spacing.three, marginBottom: Spacing.two, gap: Spacing.one }}>
+        <View style={{ flexDirection: 'row', gap: Spacing.one, alignItems: 'center' }}>
+          {/* Campo de Búsqueda (Empleado, Cliente, Categoría, Proveedor, Detalle) */}
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, paddingHorizontal: Spacing.two, height: 42 }}>
+            <Ionicons name="search-outline" size={18} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
+            <TextInput
+              placeholder="Buscar empleado, cliente, categoría, proveedor..."
+              placeholderTextColor={themeColors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={{ flex: 1, color: themeColors.text, fontSize: 13 }}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Botón de Calendario / Filtro de Fechas */}
+          <TouchableOpacity
+            onPress={() => setDateFilterModalVisible(true)}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: (startDateFilter || endDateFilter) ? themeColors.accent + '20' : themeColors.backgroundElement,
+              borderColor: (startDateFilter || endDateFilter) ? themeColors.accent : themeColors.border,
+              borderWidth: 1,
+              borderRadius: BorderRadius.medium,
+              paddingHorizontal: Spacing.two,
+              height: 42,
+              gap: 6
+            }}
+          >
+            <Ionicons name="calendar-outline" size={18} color={(startDateFilter || endDateFilter) ? themeColors.accent : themeColors.text} />
+            <Text style={{ fontSize: 12, fontWeight: '700', color: (startDateFilter || endDateFilter) ? themeColors.accent : themeColors.text }}>
+              {startDateFilter && endDateFilter
+                ? (startDateFilter === endDateFilter ? formatFriendlyDate(startDateFilter) : `${formatFriendlyDate(startDateFilter)} - ${formatFriendlyDate(endDateFilter)}`)
+                : 'Fechas'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Indicador de Fechas Activas */}
+        {(startDateFilter || endDateFilter) && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start' }}>
+            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+              Filtrado: {startDateFilter === endDateFilter ? formatFriendlyDate(startDateFilter) : `${formatFriendlyDate(startDateFilter)} a ${formatFriendlyDate(endDateFilter)}`}
+            </Text>
+            <TouchableOpacity onPress={() => { setStartDateFilter(null); setEndDateFilter(null); }}>
+              <Text style={{ fontSize: 11, color: themeColors.danger, fontWeight: 'bold' }}>Limpiar fechas</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
       {/* Segmented Control Tabs */}
       <View style={[styles.tabsSegmentedContainer, { backgroundColor: themeColors.border }]}>
         <TouchableOpacity
@@ -1856,21 +1964,27 @@ export default function AdminDashboard() {
               <View style={{ flexDirection: 'row', marginHorizontal: Spacing.three, marginBottom: Spacing.two, marginTop: Spacing.one, backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, overflow: 'hidden', borderWidth: 1, borderColor: themeColors.border }}>
                 <TouchableOpacity
                   onPress={() => setFacturaFilter('TODOS')}
-                  style={{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: facturaFilter === 'TODOS' ? themeColors.accent + '20' : 'transparent' }}
+                  style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: facturaFilter === 'TODOS' ? themeColors.accent + '20' : 'transparent' }}
                 >
-                  <Text style={{ fontSize: 12, fontWeight: facturaFilter === 'TODOS' ? 'bold' : 'normal', color: facturaFilter === 'TODOS' ? themeColors.accent : themeColors.textSecondary }}>TODOS</Text>
+                  <Text style={{ fontSize: 10, fontWeight: facturaFilter === 'TODOS' ? 'bold' : '600', color: facturaFilter === 'TODOS' ? themeColors.accent : themeColors.textSecondary }}>TODOS</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => setFacturaFilter('FACTURADOS')}
-                  style={{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: facturaFilter === 'FACTURADOS' ? themeColors.accent + '20' : 'transparent', borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}
+                  style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: facturaFilter === 'FACTURADOS' ? themeColors.accent + '20' : 'transparent', borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}
                 >
-                  <Text style={{ fontSize: 12, fontWeight: facturaFilter === 'FACTURADOS' ? 'bold' : 'normal', color: facturaFilter === 'FACTURADOS' ? themeColors.accent : themeColors.textSecondary }}>FACTURADOS</Text>
+                  <Text style={{ fontSize: 10, fontWeight: facturaFilter === 'FACTURADOS' ? 'bold' : '600', color: facturaFilter === 'FACTURADOS' ? themeColors.accent : themeColors.textSecondary }}>FACTURADOS</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setFacturaFilter('PENDIENTES')}
-                  style={{ flex: 1, paddingVertical: 10, alignItems: 'center', backgroundColor: facturaFilter === 'PENDIENTES' ? themeColors.accent + '20' : 'transparent' }}
+                  onPress={() => setFacturaFilter('PENDIENTE_ENTREGA')}
+                  style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: facturaFilter === 'PENDIENTE_ENTREGA' ? themeColors.warning + '20' : 'transparent', borderRightWidth: 1, borderColor: themeColors.border }}
                 >
-                  <Text style={{ fontSize: 12, fontWeight: facturaFilter === 'PENDIENTES' ? 'bold' : 'normal', color: facturaFilter === 'PENDIENTES' ? themeColors.accent : themeColors.textSecondary }}>PENDIENTES</Text>
+                  <Text style={{ fontSize: 10, fontWeight: facturaFilter === 'PENDIENTE_ENTREGA' ? 'bold' : '600', color: facturaFilter === 'PENDIENTE_ENTREGA' ? themeColors.warning : themeColors.textSecondary }}>PEND. ENTREGAR</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setFacturaFilter('NO_FACTURADOS')}
+                  style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: facturaFilter === 'NO_FACTURADOS' ? themeColors.danger + '20' : 'transparent' }}
+                >
+                  <Text style={{ fontSize: 10, fontWeight: facturaFilter === 'NO_FACTURADOS' ? 'bold' : '600', color: facturaFilter === 'NO_FACTURADOS' ? themeColors.danger : themeColors.textSecondary }}>NO FACTURADOS</Text>
                 </TouchableOpacity>
               </View>
               {isDesktop ? (
@@ -2920,6 +3034,120 @@ export default function AdminDashboard() {
                 </View>
               </ScrollView>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL DE FILTRO DE FECHAS Y CALENDARIO */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={dateFilterModalVisible}
+        onRequestClose={() => setDateFilterModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, maxWidth: 450, padding: Spacing.three }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: themeColors.text }]}>📅 Filtrar por Fecha / Calendario</Text>
+              <TouchableOpacity onPress={() => setDateFilterModalVisible(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={{ gap: Spacing.two, paddingVertical: Spacing.two }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.textSecondary }}>Filtros Rápidos:</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setStartDateFilter(null);
+                    setEndDateFilter(null);
+                    setDateFilterModalVisible(false);
+                  }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: (!startDateFilter && !endDateFilter) ? themeColors.accent : themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: (!startDateFilter && !endDateFilter) ? '#fff' : themeColors.text }}>Todas las Fechas</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    setStartDateFilter(todayStr);
+                    setEndDateFilter(todayStr);
+                    setDateFilterModalVisible(false);
+                  }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: (startDateFilter === new Date().toISOString().split('T')[0] && endDateFilter === new Date().toISOString().split('T')[0]) ? themeColors.accent : themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: (startDateFilter === new Date().toISOString().split('T')[0] && endDateFilter === new Date().toISOString().split('T')[0]) ? '#fff' : themeColors.text }}>Hoy</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    const now = new Date();
+                    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+                    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+                    setStartDateFilter(firstDay);
+                    setEndDateFilter(lastDay);
+                    setDateFilterModalVisible(false);
+                  }}
+                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>Este Mes</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: Spacing.two, marginTop: Spacing.one }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text, marginBottom: 8 }}>Día Único o Rango Personalizado:</Text>
+                <CustomInput
+                  label="Fecha Inicio (DD/MM/AAAA) ó Día Único *"
+                  placeholder="Ej. 20/07/2026"
+                  value={tempStartDate}
+                  onChangeText={setTempStartDate}
+                  iconName="calendar-outline"
+                />
+                <CustomInput
+                  label="Fecha Fin (Opcional - DD/MM/AAAA)"
+                  placeholder="Ej. 25/07/2026"
+                  value={tempEndDate}
+                  onChangeText={setTempEndDate}
+                  iconName="calendar-outline"
+                />
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two }}>
+                <View style={{ flex: 1 }}>
+                  <CustomButton
+                    title="Limpiar"
+                    onPress={() => {
+                      setTempStartDate('');
+                      setTempEndDate('');
+                      setStartDateFilter(null);
+                      setEndDateFilter(null);
+                      setDateFilterModalVisible(false);
+                    }}
+                    variant="secondary"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <CustomButton
+                    title="Aplicar Fechas"
+                    onPress={() => {
+                      const convertToDb = (str: string) => {
+                        if (!str.trim()) return null;
+                        const parts = str.trim().split('/');
+                        if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+                        return str.trim();
+                      };
+                      const s = convertToDb(tempStartDate);
+                      const e = convertToDb(tempEndDate) || s;
+                      setStartDateFilter(s);
+                      setEndDateFilter(e);
+                      setDateFilterModalVisible(false);
+                    }}
+                    variant="primary"
+                  />
+                </View>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
