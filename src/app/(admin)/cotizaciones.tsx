@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/services/supabase';
 import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { Cotizacion } from '@/types/ventas';
+import { useAuth } from '@/context/AuthContext';
 
 const getStatusConfig = (estado: string, isDark: boolean) => {
   switch(estado) {
@@ -80,6 +81,7 @@ export default function CotizacionesListScreen() {
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
   const styles = React.useMemo(() => getStyles(themeColors), [themeColors]);
+  const { company } = useAuth();
 
   // Se considera Desktop si es ambiente web y el ancho de pantalla es >= 1024
   const isDesktop = Platform.OS === 'web' && width >= 1024;
@@ -325,13 +327,21 @@ export default function CotizacionesListScreen() {
     <View style={styles.desktopNavBar}>
       <View style={styles.desktopNavBarLeft}>
         <Image 
-          source={require('@/assets/images/logo.jpeg')} 
+          source={
+            company === 'daravisa'
+              ? require('@/assets/images/logo_daravisa.png')
+              : require('@/assets/images/logo.jpeg')
+          } 
           style={styles.desktopLogo} 
           resizeMode="contain"
         />
         <View style={styles.desktopLogoTexts}>
-          <Text style={styles.desktopLogoTitle}>INTTEC</Text>
-          <Text style={styles.desktopLogoSubtitle}>INTEGRACIÓN DE TECNOLOGÍAS</Text>
+          <Text style={styles.desktopLogoTitle}>
+            {company === 'daravisa' ? 'DARAVISA' : 'INTTEC'}
+          </Text>
+          <Text style={styles.desktopLogoSubtitle}>
+            {company === 'daravisa' ? 'PORTAL DE GESTIÓN' : 'INTEGRACIÓN DE TECNOLOGÍAS'}
+          </Text>
         </View>
       </View>
       <View style={styles.desktopNavBarRight}>
@@ -533,6 +543,15 @@ export default function CotizacionesListScreen() {
               <TouchableOpacity onPress={() => router.push('/(admin)/dashboard')} style={{ paddingRight: Spacing.two }}>
                 <Ionicons name="arrow-back" size={24} color={themeColors.text} />
               </TouchableOpacity>
+              <Image
+                source={
+                  company === 'daravisa'
+                    ? require('@/assets/images/logo_daravisa.png')
+                    : require('@/assets/images/logo.jpeg')
+                }
+                style={{ width: 28, height: 28, borderRadius: 6, marginRight: 8 }}
+                resizeMode="contain"
+              />
               <Text style={styles.headerTitle}>Cotizaciones</Text>
             </View>
             <TouchableOpacity 

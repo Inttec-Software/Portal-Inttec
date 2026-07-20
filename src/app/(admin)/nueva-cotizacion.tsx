@@ -10,6 +10,7 @@ import { ThemedText } from '@/components/themed-text';
 import { supabase } from '@/services/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useAuth } from '@/context/AuthContext';
 
 export default function NuevaCotizacionScreen() {
   const router = useRouter();
@@ -19,6 +20,7 @@ export default function NuevaCotizacionScreen() {
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
+  const { user } = useAuth();
 
   const [cotizacion, setCotizacion] = useState<Cotizacion>({
     numeroCotizacion: '26063002',
@@ -28,7 +30,7 @@ export default function NuevaCotizacionScreen() {
     clienteCP: '',
     direccionFactura: '',
     fechaCreacion: new Date().toLocaleDateString(),
-    vendedor: 'Rafael Fernandez',
+    vendedor: user?.nombre || '',
     moneda: 'MXN',
     lineas: [],
     terminosCondiciones: 'https://inttec.odoo.com/terms',
@@ -164,7 +166,7 @@ export default function NuevaCotizacionScreen() {
             clienteCP: clientData?.codigo_postal || '',
             direccionFactura: clientData?.direccion || '',
             fechaCreacion: data.fecha_creacion,
-            vendedor: data.vendedor || 'Rafael Fernandez',
+            vendedor: data.vendedor || user?.nombre || '',
             moneda: data.moneda || 'MXN',
             lineas: data.lineas || [],
             terminosCondiciones: data.terminos_condiciones || 'https://inttec.odoo.com/terms',
@@ -197,6 +199,16 @@ export default function NuevaCotizacionScreen() {
 
     fetchCotizacion();
   }, [editId]);
+
+  // Actualizar vendedor con el nombre del usuario cuando se cargue (sólo en nueva cotización)
+  useEffect(() => {
+    if (!editId && user?.nombre) {
+      setCotizacion(prev => ({
+        ...prev,
+        vendedor: prev.vendedor || user.nombre,
+      }));
+    }
+  }, [user, editId]);
 
   const subtotal = useMemo(() => cotizacion.lineas.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0), [cotizacion.lineas]);
   const iva = useMemo(() => cotizacion.lineas.reduce((acc, item) => acc + ((item.cantidad * item.precioUnitario) * (item.impuestoPorcentaje / 100)), 0), [cotizacion.lineas]);

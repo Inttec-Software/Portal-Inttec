@@ -106,7 +106,7 @@ export default function LoginScreen() {
                 resizeMode="contain"
               />
             </View>
-            <Text style={[styles.title, { color: themeColors.text }]}>{company === 'daravisa' ? 'DARAVISA' : 'INTTEC'}</Text>
+            <Text style={[styles.title, { color: themeColors.text }]}>INTTEC & DARAVISA</Text>
             <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
               {company === 'daravisa' ? 'Portal de Gestión' : 'Control de Gastos'}
             </Text>
@@ -156,7 +156,7 @@ export default function LoginScreen() {
 
             <CustomInput
               label="Correo Electrónico"
-              placeholder="ejemplo@inttec.com"
+              placeholder={company === 'daravisa' ? 'ejemplo@daravisa.com' : 'ejemplo@inttec.com'}
               keyboardType="email-address"
               autoCapitalize="none"
               iconName="mail-outline"

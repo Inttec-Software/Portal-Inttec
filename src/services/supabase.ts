@@ -1,3 +1,4 @@
+import { logger } from '@/utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
@@ -13,7 +14,7 @@ const daravisaUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA ||
 const daravisaAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
 if (!inttecUrl || !inttecAnonKey) {
-  console.warn(
+  logger.error(
     'WARNING: Supabase URL or Anon Key is missing in environment variables (.env file).\n' +
     'The app is running with placeholder credentials and database operations will fail.'
   );
@@ -243,7 +244,7 @@ export const AsistenciaService = {
       .maybeSingle();
 
     if (error) {
-      console.error('Error al obtener registro de hoy:', error);
+      logger.error('Error al obtener registro de hoy:', error);
       throw error;
     }
     return data as Asistencia | null;
@@ -331,33 +332,33 @@ export const AsistenciaService = {
     base64Data: string,
     tipo: 'entrada' | 'salida'
   ): Promise<string> {
-    console.log('[Supabase Storage] Iniciando subirFotoAsistencia...');
+    logger.error('[Supabase Storage] Iniciando subirFotoAsistencia...');
     const fileName = `asistencias/${empleadoId}/${new Date().toISOString().split('T')[0]}_${tipo}_${Date.now()}.jpg`;
-    console.log('[Supabase Storage] Nombre de archivo generado:', fileName);
+    logger.error('[Supabase Storage] Nombre de archivo generado:', fileName);
 
     let cleanBase64 = base64Data;
     if (base64Data.includes(';base64,')) {
-      console.log('[Supabase Storage] Detectado prefijo de Data URL, limpiando base64...');
+      logger.error('[Supabase Storage] Detectado prefijo de Data URL, limpiando base64...');
       const parts = base64Data.split(';base64,');
       if (parts.length > 1) {
         cleanBase64 = parts[1];
-        console.log('[Supabase Storage] Limpieza completada. Nueva longitud base64:', cleanBase64.length);
+        logger.error('[Supabase Storage] Limpieza completada. Nueva longitud base64:', cleanBase64.length);
       }
     } else {
-      console.log('[Supabase Storage] Base64 recibido parece ser binario puro. Longitud:', base64Data.length);
+      logger.error('[Supabase Storage] Base64 recibido parece ser binario puro. Longitud:', base64Data.length);
     }
 
     try {
       // Convertir base64 a ArrayBuffer
-      console.log('[Supabase Storage] Convirtiendo base64 a ArrayBuffer mediante atob...');
+      logger.error('[Supabase Storage] Convirtiendo base64 a ArrayBuffer mediante atob...');
       const binaryStr = atob(cleanBase64);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) {
         bytes[i] = binaryStr.charCodeAt(i);
       }
-      console.log('[Supabase Storage] ArrayBuffer creado, bytes:', bytes.length);
+      logger.error('[Supabase Storage] ArrayBuffer creado, bytes:', bytes.length);
 
-      console.log('[Supabase Storage] Subiendo archivo al bucket "tickets"...');
+      logger.error('[Supabase Storage] Subiendo archivo al bucket "tickets"...');
       const { error: uploadError } = await supabase.storage
         .from('tickets')
         .upload(fileName, bytes.buffer, {
@@ -366,19 +367,19 @@ export const AsistenciaService = {
         });
 
       if (uploadError) {
-        console.error('[Supabase Storage] Error en supabase.storage.upload:', uploadError);
+        logger.error('[Supabase Storage] Error en supabase.storage.upload:', uploadError);
         throw uploadError;
       }
-      console.log('[Supabase Storage] Subida completada con éxito.');
+      logger.error('[Supabase Storage] Subida completada con éxito.');
 
       const { data: urlData } = supabase.storage
         .from('tickets')
         .getPublicUrl(fileName);
 
-      console.log('[Supabase Storage] URL pública obtenida:', urlData.publicUrl);
+      logger.error('[Supabase Storage] URL pública obtenida:', urlData.publicUrl);
       return urlData.publicUrl;
     } catch (err: any) {
-      console.error('[Supabase Storage] Excepción capturada en subirFotoAsistencia:', err.message || err);
+      logger.error('[Supabase Storage] Excepción capturada en subirFotoAsistencia:', err.message || err);
       throw err;
     }
   },
@@ -461,9 +462,9 @@ export async function recalculateVentaTotals(ventaId: string): Promise<void> {
       .eq('id', ventaId);
     
     if (updateErr) throw updateErr;
-    console.log(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Partidas: ${costoPartidas}, Costo Gastos: ${costoGastos}, Costo Total: ${costoTotal}`);
+    logger.error(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Partidas: ${costoPartidas}, Costo Gastos: ${costoGastos}, Costo Total: ${costoTotal}`);
   } catch (err) {
-    console.error('[Recalculate] Error recalculating venta totals:', err);
+    logger.error('[Recalculate] Error recalculating venta totals:', err);
   }
 }
 

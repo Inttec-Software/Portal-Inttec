@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import { logger } from '@/utils/logger';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -246,7 +247,7 @@ export default function AdminDashboard() {
         .update(updates)
         .eq('id', adminUser.id);
       if (errorDaravisa) {
-        console.error('Error actualizando perfil en Daravisa:', errorDaravisa);
+        logger.error('Error actualizando perfil en Daravisa:', errorDaravisa);
       }
 
       // Actualizar el estado local y AsyncStorage
@@ -289,43 +290,32 @@ export default function AdminDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company]);
 
-  async function refreshData(silent = false) {
+  const refreshData = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
     try {
-      // 1. Obtener TODOS los gastos
-      const { data: gastosData, error: gastosErr } = await supabase
-        .from('gastos')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [gastosRes, usersRes, vehList, gasLogs] = await Promise.all([
+        supabase.from('gastos').select('*').order('created_at', { ascending: false }),
+        supabase.from('usuarios').select('*').order('nombre'),
+        VehiculoService.getVehiculos(false),
+        VehiculoService.getRegistrosGasolina(),
+      ]);
 
-      if (gastosErr) throw gastosErr;
-      setGastos(gastosData || []);
+      if (gastosRes.error) throw gastosRes.error;
+      if (usersRes.error) throw usersRes.error;
 
-      // 2. Obtener usuarios (personal)
-      const { data: usersData, error: usersErr } = await supabase
-        .from('usuarios')
-        .select('*')
-        .order('nombre');
-
-      if (usersErr) throw usersErr;
-      setPersonal(usersData || []);
-
-      // 3. Obtener Vehículos (todos, incluso inactivos)
-      const vehList = await VehiculoService.getVehiculos(false);
+      setGastos(gastosRes.data || []);
+      setPersonal(usersRes.data || []);
       setVehiculos(vehList);
-
-      // 4. Obtener Bitácora de Gasolina
-      const gasLogs = await VehiculoService.getRegistrosGasolina();
       setRegistrosGasolina(gasLogs);
     } catch (err: any) {
-      console.error('Error loading admin data:', err);
+      logger.error('Error loading admin data:', err);
       if (!silent) {
         Alert.alert('Error', err.message || 'No se pudieron recuperar los datos.');
       }
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }
+  }, []);
 
   const handleLogout = async () => {
     const performLogout = async () => {
@@ -351,9 +341,9 @@ export default function AdminDashboard() {
     ]);
   };
 
-  const handleToggleCompany = async (nextCompany: 'inttec' | 'daravisa') => {
+  const handleToggleCompany = useCallback(async (nextCompany: 'inttec' | 'daravisa') => {
     await changeCompany(nextCompany);
-  };
+  }, [changeCompany]);
 
   // Acciones de Revisión de Gastos
   const handleUpdateStatus = async (status: 'APPROVED' | 'REJECTED' | 'ACTION_REQUIRED' | 'PENDING') => {
@@ -425,22 +415,15 @@ export default function AdminDashboard() {
   const loadSalesForLinking = async () => {
     setIsLoadingSalesForLinking(true);
     try {
-      const { data, error } = await supabase
-        .from('ventas')
-        .select('*')
-        .order('fecha', { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      setSalesForLinking(data || []);
-
-      // Cargar catálogo de clientes
-      const { data: cliData } = await supabase
-        .from('clientes')
-        .select('*')
-        .order('nombre');
-      setClientesCatalog(cliData || []);
+      const [ventasRes, cliRes] = await Promise.all([
+        supabase.from('ventas').select('*').order('fecha', { ascending: false }).limit(50),
+        supabase.from('clientes').select('*').order('nombre'),
+      ]);
+      if (ventasRes.error) throw ventasRes.error;
+      setSalesForLinking(ventasRes.data || []);
+      setClientesCatalog(cliRes.data || []);
     } catch (err) {
-      console.error('Error loading sales for linking:', err);
+      logger.error('Error loading sales for linking:', err);
     } finally {
       setIsLoadingSalesForLinking(false);
     }
@@ -540,7 +523,7 @@ export default function AdminDashboard() {
 
       showAlert('Éxito', 'Factura cargada y registrada correctamente.');
     } catch (err: any) {
-      console.error('Error al subir factura:', err);
+      logger.error('Error al subir factura:', err);
       showAlert('Error', err.message || 'No se pudo subir la factura.');
     } finally {
       setIsUploadingInvoice(false);
@@ -580,7 +563,7 @@ export default function AdminDashboard() {
         await uploadInvoiceToSupabase(result.assets[0].uri, b64, 'jpg');
       }
     } catch (err) {
-      console.error('Camera invoice capture error:', err);
+      logger.error('Camera invoice capture error:', err);
       if (Platform.OS === 'web') {
         await handleSelectAdminInvoiceGallery();
       } else {
@@ -608,7 +591,7 @@ export default function AdminDashboard() {
         await uploadInvoiceToSupabase(result.assets[0].uri, result.assets[0].base64, 'jpg');
       }
     } catch (err) {
-      console.error('Gallery invoice select error:', err);
+      logger.error('Gallery invoice select error:', err);
       showAlert('Error', 'No se pudo abrir la galería.');
     }
   };
@@ -663,7 +646,7 @@ export default function AdminDashboard() {
         }
       }
     } catch (err) {
-      console.error('Document invoice select error:', err);
+      logger.error('Document invoice select error:', err);
       showAlert('Error', 'No se pudo seleccionar el archivo.');
     }
   };
@@ -914,7 +897,7 @@ export default function AdminDashboard() {
 
       const { error: errorDaravisa } = await daravisaClient.from('usuarios').insert([newUserObj]);
       if (errorDaravisa) {
-        console.error('Error insertando usuario en Daravisa:', errorDaravisa);
+        logger.error('Error insertando usuario en Daravisa:', errorDaravisa);
       }
 
       showAlert('Éxito', 'Personal registrado correctamente.');
@@ -978,7 +961,7 @@ export default function AdminDashboard() {
         .eq('id', editingUser.id);
 
       if (errorDaravisa) {
-        console.error('Error actualizando usuario en Daravisa:', errorDaravisa);
+        logger.error('Error actualizando usuario en Daravisa:', errorDaravisa);
       }
 
       showAlert('Éxito', 'Información de personal actualizada correctamente.');
@@ -999,7 +982,7 @@ export default function AdminDashboard() {
         const { error: errorInttec } = await inttecClient.from('usuarios').delete().eq('id', id);
         if (errorInttec) {
           if (errorInttec.code === '23503') {
-            throw new Error('No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas en Inttec. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
+            throw new Error('No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
           }
           throw errorInttec;
         }
@@ -1212,7 +1195,7 @@ export default function AdminDashboard() {
   // Exportar reportes
   const handleExportPDF = async () => {
     try {
-      await ReportGenerator.exportToPDF(gastos, 'Historial General de Gastos INTTEC');
+      await ReportGenerator.exportToPDF(gastos, `Historial General de Gastos ${company === 'daravisa' ? 'DARAVISA' : 'INTTEC'}`);
     } catch (err: any) {
       Alert.alert('Error PDF', err.message);
     }
@@ -1220,7 +1203,7 @@ export default function AdminDashboard() {
 
   const handleExportCSV = async () => {
     try {
-      await ReportGenerator.exportToCSV(gastos, 'historial_gastos_inttec.csv');
+      await ReportGenerator.exportToCSV(gastos, `historial_gastos_${company === 'daravisa' ? 'daravisa' : 'inttec'}.csv`);
     } catch (err: any) {
       Alert.alert('Error CSV', err.message);
     }
@@ -2170,8 +2153,58 @@ export default function AdminDashboard() {
                     borderColor: themeColors.border,
                   }}>
                     <View style={{ marginBottom: Spacing.two }}>
-                      <Text style={{ fontSize: 16, fontWeight: '700', color: themeColors.text }}>Bitácora de Gasolina</Text>
-                      <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Consumo e historial detallado de cargas</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                        <View>
+                          <Text style={{ fontSize: 16, fontWeight: '700', color: themeColors.text }}>Bitácora de Gasolina</Text>
+                          <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Consumo e historial detallado de cargas</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <TouchableOpacity
+                            onPress={async () => {
+                              try {
+                                const companyLabel = company === 'daravisa' ? 'daravisa' : 'inttec';
+                                await ReportGenerator.exportGasolinaToCSV(
+                                  registrosGasolina,
+                                  `reporte_gasolina_${companyLabel}_${new Date().toISOString().split('T')[0]}.csv`
+                                );
+                              } catch (err: any) {
+                                showAlert('Error CSV', err.message);
+                              }
+                            }}
+                            style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 4,
+                              paddingHorizontal: 10, paddingVertical: 6,
+                              backgroundColor: '#d1fae5',
+                              borderRadius: 8, borderWidth: 1, borderColor: '#6ee7b7',
+                            }}
+                          >
+                            <Ionicons name="document-text-outline" size={14} color="#059669" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#059669' }}>CSV</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={async () => {
+                              try {
+                                const companyLabel = company === 'daravisa' ? 'Daravisa' : 'Inttec';
+                                await ReportGenerator.exportGasolinaToPDF(
+                                  registrosGasolina,
+                                  `Reporte de Gasolina ${companyLabel}`
+                                );
+                              } catch (err: any) {
+                                showAlert('Error PDF', err.message);
+                              }
+                            }}
+                            style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 4,
+                              paddingHorizontal: 10, paddingVertical: 6,
+                              backgroundColor: '#fee2e2',
+                              borderRadius: 8, borderWidth: 1, borderColor: '#fca5a5',
+                            }}
+                          >
+                            <Ionicons name="print-outline" size={14} color="#dc2626" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#dc2626' }}>PDF</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
                     </View>
 
                     {registrosGasolina.length === 0 ? (
@@ -3232,7 +3265,7 @@ export default function AdminDashboard() {
 
               <CustomInput
                 label="Correo Electrónico *"
-                placeholder="correo@inttec.com"
+                placeholder={`correo@${company === 'daravisa' ? 'daravisa' : 'inttec'}.com`}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={newUserEmail}
@@ -3333,7 +3366,7 @@ export default function AdminDashboard() {
 
               <CustomInput
                 label="Correo Electrónico *"
-                placeholder="correo@inttec.com"
+                placeholder={`correo@${company === 'daravisa' ? 'daravisa' : 'inttec'}.com`}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={editUserEmail}

@@ -26,6 +26,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto } from '@/services/supabase';
 import { GeminiService, CardTransaction, CardStatementResult } from '@/services/gemini';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import { useAuth } from '@/context/AuthContext';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,8 @@ export default function AuditoriaTarjetaScreen() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const isMobile = windowWidth < 600;
+  const { company } = useAuth();
+  const companyName = company === 'daravisa' ? 'Daravisa' : 'Inttec';
 
   // Card selector
   const [selectedTarjeta, setSelectedTarjeta] = useState<TarjetaKey | null>(null);
@@ -463,7 +466,7 @@ export default function AuditoriaTarjetaScreen() {
           ${noReportadosHtml}
 
           <div class="footer">
-            Reporte generado automáticamente por el Portal Administrativo Inttec.<br>
+            Reporte generado automáticamente por el Portal Administrativo ${companyName}.<br>
             Archivo fuente procesado: ${fileName || 'Desconocido'}
           </div>
         </body>

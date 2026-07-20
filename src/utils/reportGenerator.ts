@@ -1,25 +1,28 @@
+import { logger } from './logger';
 import { cacheDirectory, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform, Alert } from 'react-native';
 import { Gasto, Asistencia, Usuario, CompanyService } from '../services/supabase';
-import { LOGO_BASE64 } from './logoBase64';
-import { LOGO_DARAVISA_BASE64 } from './logoDaravisaBase64';
 import { Cotizacion } from '@/types/ventas';
 
-const getCompanyBranding = () => {
+// Logos se cargan de forma LAZY solo cuando se genera un PDF
+// Esto evita ~959 KB en el bundle principal de la app
+const getCompanyBranding = async () => {
   const company = CompanyService.getActiveCompany();
   if (company === 'daravisa') {
+    const { LOGO_DARAVISA_BASE64 } = await import('./logoDaravisaBase64');
     return {
       logo: LOGO_DARAVISA_BASE64,
       name: 'DARAVISA',
-      tagline: 'DARAVISA S.A. DE C.V.'
+      tagline: 'DARAVISA S.A. DE C.V.',
     };
   }
+  const { LOGO_BASE64 } = await import('./logoBase64');
   return {
     logo: LOGO_BASE64,
     name: 'INTTEC',
-    tagline: 'INTEGRACIÓN DE TECNOLOGÍAS'
+    tagline: 'INTEGRACIÃ“N DE TECNOLOGÃAS',
   };
 };
 
@@ -38,21 +41,21 @@ export interface ReportCategoria {
 }
 
 /**
- * Detecta si un gasto tiene alguna alerta de política (como alcohol, tabaco o montos sospechosos)
+ * Detecta si un gasto tiene alguna alerta de polÃ­tica (como alcohol, tabaco o montos sospechosos)
  */
 const hasPolicyAlert = (g: Gasto): { alert: boolean; reason: string } => {
   const just = g.justificacion || '';
   
-  // 1. Detectar si el formulario guardó una alerta estructurada de la IA
+  // 1. Detectar si el formulario guardÃ³ una alerta estructurada de la IA
   const match = just.match(/^\[ALERTA IA:\s*([\s\S]*?)\]/);
   if (match) {
     return { alert: true, reason: match[1].trim() };
   }
   
-  // 2. Búsqueda complementaria de palabras clave en la justificación, categoría, subcategoría o proveedor
+  // 2. BÃºsqueda complementaria de palabras clave en la justificaciÃ³n, categorÃ­a, subcategorÃ­a o proveedor
   const textToSearch = `${just} ${g.categoria || ''} ${g.subcategoria || ''} ${g.proveedor || ''}`.toLowerCase();
   
-  if (textToSearch.includes('alcohol') || textToSearch.includes('cerveza') || textToSearch.includes('vino') || textToSearch.includes('licor') || textToSearch.includes('bebida alcohólica')) {
+  if (textToSearch.includes('alcohol') || textToSearch.includes('cerveza') || textToSearch.includes('vino') || textToSearch.includes('licor') || textToSearch.includes('bebida alcohÃ³lica')) {
     return { alert: true, reason: 'Posible compra de alcohol' };
   }
   if (textToSearch.includes('cigarro') || textToSearch.includes('cigarrillo') || textToSearch.includes('tabaco') || textToSearch.includes('cajetilla')) {
@@ -73,6 +76,7 @@ export const ReportGenerator = {
     if (gastos.length === 0) {
       throw new Error('No hay gastos para exportar.');
     }
+    const branding = await getCompanyBranding();
 
     const totalMonto = gastos.reduce((sum, g) => sum + Number(g.monto), 0);
     const approvedCount = gastos.filter((g) => g.status === 'APPROVED').length;
@@ -98,7 +102,7 @@ export const ReportGenerator = {
       if (alert) {
         // Fondo rojo suave y texto rojo oscuro para resaltar alertas
         rowStyle = `style="background-color: #ffebee; color: #b71c1c;"`;
-        alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">⚠️ ALERTA: ${reason}</div>`;
+        alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">âš ï¸ ALERTA: ${reason}</div>`;
       }
 
       tableRows += `
@@ -268,11 +272,11 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">${getCompanyBranding().name}</span><br/>
-                    <span class="logo-tagline">${getCompanyBranding().tagline}</span>
+                    <span class="logo-brand">${branding.name}</span><br/>
+                    <span class="logo-tagline">${branding.tagline}</span>
                   </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${getCompanyBranding().logo}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" style="width: 32px; height: 32px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -318,7 +322,7 @@ export const ReportGenerator = {
               <th style="width: 12%">Fecha</th>
               <th style="width: 20%">Empleado</th>
               <th style="width: 18%">Proveedor</th>
-              <th style="width: 20%">Categoría</th>
+              <th style="width: 20%">CategorÃ­a</th>
               <th style="width: 12%">Pago</th>
               <th style="width: 8%">Estado</th>
               <th style="width: 10%; text-align: right;">Monto</th>
@@ -384,10 +388,10 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La función de compartir no está disponible en este dispositivo.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible en este dispositivo.');
       }
     } catch (error: any) {
-      console.error('Error generating PDF report:', error);
+      logger.error('Error generating PDF report:', error);
       throw new Error(error.message || 'Error al generar el reporte PDF.');
     }
   },
@@ -463,17 +467,243 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La función de compartir no está disponible en este dispositivo.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible en este dispositivo.');
       }
     } catch (error: any) {
-      console.error('Error generating CSV report:', error);
+      logger.error('Error generating CSV report:', error);
       throw new Error(error.message || 'Error al generar el reporte CSV.');
     }
   },
 
   /**
-   * Genera un reporte PDF de asistencia y lo comparte
+   * Genera un reporte PDF del consumo de gasolina y lo comparte
    */
+  async exportGasolinaToPDF(
+    registros: any[],
+    title: string = 'Reporte de Consumo de Gasolina'
+  ): Promise<void> {
+    if (registros.length === 0) {
+      throw new Error('No hay registros de gasolina para exportar.');
+    }
+
+    const branding = await getCompanyBranding();
+
+    const totalLitros = registros.reduce((sum, r) => sum + Number(r.litros || 0), 0);
+    const totalCosto = registros.reduce((sum, r) => sum + Number(r.costo_total || 0), 0);
+    const formatMXN = (n: number) =>
+      new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
+
+    let tableRows = '';
+    registros.forEach((r) => {
+      const dateParts = (r.fecha || '').split('-');
+      const fecha = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : r.fecha;
+      tableRows += `
+        <tr>
+          <td>${fecha}</td>
+          <td>${r.empleado_nombre || 'N/A'}</td>
+          <td>${r.vehiculo_marca || ''} ${r.vehiculo_modelo || ''}<br/><small style="color:#888">${r.vehiculo_placas || ''}</small></td>
+          <td style="text-align:center">${Number(r.litros || 0).toFixed(2)} L</td>
+          <td style="text-align:center">${Number(r.kilometraje_actual || 0).toLocaleString('es-MX')} km</td>
+          <td style="text-align:right; font-weight:bold; color:#059669">${formatMXN(Number(r.costo_total || 0))}</td>
+          <td>${r.observaciones || 'â€”'}</td>
+        </tr>`;
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8"/>
+        <title>${title}</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #222; background: #fff; padding: 24px; }
+          .header { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid #0ea5e9; padding-bottom: 16px; margin-bottom: 20px; }
+          .logo-img { width: 52px; height: 52px; object-fit: contain; }
+          .logo-brand { font-size: 22px; font-weight: 900; color: #0ea5e9; letter-spacing: 2px; }
+          .logo-tagline { font-size: 10px; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+          h1 { font-size: 17px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+          .subtitle { font-size: 11px; color: #64748b; margin-bottom: 20px; }
+          .summary { display: flex; gap: 12px; margin-bottom: 20px; }
+          .stat { flex: 1; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 12px; text-align: center; }
+          .stat-value { font-size: 20px; font-weight: 900; color: #0369a1; }
+          .stat-label { font-size: 10px; color: #64748b; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          thead tr { background: #0ea5e9; color: white; }
+          th { padding: 8px 6px; text-align: left; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+          td { padding: 7px 6px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+          tr:nth-child(even) td { background: #f8fafc; }
+          tr:hover td { background: #e0f2fe; }
+          .footer { margin-top: 24px; font-size: 9px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <img class="logo-img" src="${branding.logo}" />
+          <div>
+            <div class="logo-brand">${branding.name}</div>
+            <div class="logo-tagline">${branding.tagline}</div>
+          </div>
+          <div style="margin-left:auto; text-align:right">
+            <h1>${title}</h1>
+            <div class="subtitle">Generado: ${new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+          </div>
+        </div>
+
+        <div class="summary">
+          <div class="stat">
+            <div class="stat-value">${registros.length}</div>
+            <div class="stat-label">Cargas Registradas</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">${totalLitros.toFixed(1)} L</div>
+            <div class="stat-label">Total Litros</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">${formatMXN(totalCosto)}</div>
+            <div class="stat-label">Costo Total</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">${totalLitros > 0 ? formatMXN(totalCosto / totalLitros) : '$0.00'}</div>
+            <div class="stat-label">Precio Prom. / Litro</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Conductor</th>
+              <th>VehÃ­culo</th>
+              <th>Litros</th>
+              <th>OdÃ³metro</th>
+              <th style="text-align:right">Costo</th>
+              <th>Observaciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Reporte de Consumo de Combustible â€” ${branding.tagline} â€” Sistema Automatizado
+        </div>
+      </body>
+      </html>`;
+
+    try {
+      if (Platform.OS === 'web') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+          setTimeout(() => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => document.body.removeChild(iframe), 1000);
+          }, 500);
+        }
+        return;
+      }
+
+      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      const pdfFileName = `reporte_gasolina_${Date.now()}.pdf`;
+      const safeUri = `${cacheDirectory}${pdfFileName}`;
+      await writeAsStringAsync(safeUri, base64 || '', { encoding: EncodingType.Base64 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(safeUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Exportar Reporte PDF',
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible en este dispositivo.');
+      }
+    } catch (error: any) {
+      logger.error('Error generating gasolina PDF:', error);
+      throw new Error(error.message || 'Error al generar el reporte PDF de gasolina.');
+    }
+  },
+
+  /**
+   * Genera un CSV del consumo de gasolina y lo comparte/descarga
+   */
+  async exportGasolinaToCSV(
+    registros: any[],
+    fileName: string = 'reporte_gasolina.csv'
+  ): Promise<void> {
+    if (registros.length === 0) {
+      throw new Error('No hay registros de gasolina para exportar.');
+    }
+
+    const escape = (text?: string | null) => {
+      if (!text) return '';
+      return `"${String(text).replace(/"/g, '""')}"`;
+    };
+
+    let csvContent = '\uFEFF'; // BOM para Excel UTF-8
+    csvContent += 'Fecha,Conductor,VehÃ­culo Marca,VehÃ­culo Modelo,Placas,Litros,Kilometraje (km),Costo Total (MXN),Observaciones\n';
+
+    registros.forEach((r) => {
+      const dateParts = (r.fecha || '').split('-');
+      const fecha = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : r.fecha;
+      const row = [
+        fecha,
+        escape(r.empleado_nombre),
+        escape(r.vehiculo_marca),
+        escape(r.vehiculo_modelo),
+        escape(r.vehiculo_placas),
+        Number(r.litros || 0).toFixed(2),
+        r.kilometraje_actual || 0,
+        Number(r.costo_total || 0).toFixed(2),
+        escape(r.observaciones),
+      ].join(',');
+      csvContent += row + '\n';
+    });
+
+    try {
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', fileName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      const fileUri = `${cacheDirectory}${fileName}`;
+      await writeAsStringAsync(fileUri, csvContent, { encoding: EncodingType.UTF8 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Exportar Reporte CSV',
+          UTI: 'public.comma-separated-values-text',
+        });
+      } else {
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible en este dispositivo.');
+      }
+    } catch (error: any) {
+      logger.error('Error generating gasolina CSV:', error);
+      throw new Error(error.message || 'Error al generar el reporte CSV de gasolina.');
+    }
+  },
+
+
   async exportAsistenciasToPDF(
     asistencias: Asistencia[],
     personal: Usuario[],
@@ -482,6 +712,7 @@ export const ReportGenerator = {
     if (asistencias.length === 0) {
       throw new Error('No hay registros de asistencia para exportar.');
     }
+    const branding = await getCompanyBranding();
 
     const empleadosMap = new Map(personal.map((p) => [p.id, p.nombre]));
 
@@ -633,11 +864,11 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">${getCompanyBranding().name}</span><br/>
-                    <span class="logo-tagline">${getCompanyBranding().tagline}</span>
+                    <span class="logo-brand">${branding.name}</span><br/>
+                    <span class="logo-tagline">${branding.tagline}</span>
                   </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${getCompanyBranding().logo}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" style="width: 32px; height: 32px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -674,9 +905,9 @@ export const ReportGenerator = {
               <th style="width: 12%">Fecha</th>
               <th style="width: 18%">Empleado</th>
               <th style="width: 10%">Entrada</th>
-              <th style="width: 30%">Ubicación Entrada</th>
+              <th style="width: 30%">UbicaciÃ³n Entrada</th>
               <th style="width: 10%">Salida</th>
-              <th style="width: 30%">Ubicación Salida</th>
+              <th style="width: 30%">UbicaciÃ³n Salida</th>
             </tr>
           </thead>
           <tbody>
@@ -734,10 +965,10 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La función de compartir no está disponible.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
       }
     } catch (error: any) {
-      console.error('Error generating attendance PDF:', error);
+      logger.error('Error generating attendance PDF:', error);
       throw new Error(error.message || 'Error al generar el reporte de asistencia.');
     }
   },
@@ -757,7 +988,7 @@ export const ReportGenerator = {
     const empleadosMap = new Map(personal.map((p) => [p.id, p.nombre]));
 
     let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Registro,Fecha,Empleado,Hora Entrada,Ubicación Entrada,Hora Salida,Ubicación Salida\n';
+    csvContent += 'ID Registro,Fecha,Empleado,Hora Entrada,UbicaciÃ³n Entrada,Hora Salida,UbicaciÃ³n Salida\n';
 
     asistencias.forEach((a) => {
       const empleadoNombre = empleadosMap.get(a.empleado_id) || 'Desconocido';
@@ -805,10 +1036,10 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La función de compartir no está disponible.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
       }
     } catch (error: any) {
-      console.error('Error generating attendance CSV:', error);
+      logger.error('Error generating attendance CSV:', error);
       throw new Error(error.message || 'Error al generar reporte CSV.');
     }
   },
@@ -824,6 +1055,7 @@ export const ReportGenerator = {
     if (productos.length === 0) {
       throw new Error('No hay productos en el inventario para exportar.');
     }
+    const branding = await getCompanyBranding();
 
     const categoriasMap = new Map(categorias.map((c) => [c.id, c.nombre]));
 
@@ -972,11 +1204,11 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">${getCompanyBranding().name}</span><br/>
-                    <span class="logo-tagline">${getCompanyBranding().tagline}</span>
+                    <span class="logo-brand">${branding.name}</span><br/>
+                    <span class="logo-tagline">${branding.tagline}</span>
                   </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${getCompanyBranding().logo}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" style="width: 32px; height: 32px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -988,7 +1220,7 @@ export const ReportGenerator = {
           <tr>
             <td style="width: 33%; padding-right: 10px; border: none;">
               <div class="summary-card">
-                <div class="label">Total Artículos Catálogo</div>
+                <div class="label">Total ArtÃ­culos CatÃ¡logo</div>
                 <div class="value">${productos.length}</div>
               </div>
             </td>
@@ -1012,7 +1244,7 @@ export const ReportGenerator = {
             <tr>
               <th style="width: 15%">SKU Interno</th>
               <th style="width: 40%">Nombre Oficial</th>
-              <th style="width: 20%">Categoría</th>
+              <th style="width: 20%">CategorÃ­a</th>
               <th style="width: 15%; text-align: right;">Existencias</th>
               <th style="width: 10%">Estado</th>
             </tr>
@@ -1072,10 +1304,10 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La función de compartir no está disponible.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
       }
     } catch (error: any) {
-      console.error('Error generating inventory PDF:', error);
+      logger.error('Error generating inventory PDF:', error);
       throw new Error(error.message || 'Error al generar el reporte de inventario.');
     }
   },
@@ -1095,7 +1327,7 @@ export const ReportGenerator = {
     const categoriasMap = new Map(categorias.map((c) => [c.id, c.nombre]));
 
     let csvContent = '\uFEFF'; // BOM
-    csvContent += 'SKU Interno,Nombre Oficial,Categoría,Stock Actual,Estado (Activo)\n';
+    csvContent += 'SKU Interno,Nombre Oficial,CategorÃ­a,Stock Actual,Estado (Activo)\n';
 
     productos.forEach((p) => {
       const categoriaNombre = categoriasMap.get(p.categoria_id) || 'N/A';
@@ -1141,10 +1373,10 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La función de compartir no está disponible.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
       }
     } catch (error: any) {
-      console.error('Error generating inventory CSV:', error);
+      logger.error('Error generating inventory CSV:', error);
       throw new Error(error.message || 'Error al generar reporte CSV.');
     }
   },
@@ -1159,6 +1391,7 @@ export const ReportGenerator = {
     if (consumos.length === 0) {
       throw new Error('No hay registros de consumo para exportar.');
     }
+    const branding = await getCompanyBranding();
 
     let tableRows = '';
     consumos.forEach((c) => {
@@ -1304,11 +1537,11 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">${getCompanyBranding().name}</span><br/>
-                    <span class="logo-tagline">${getCompanyBranding().tagline}</span>
+                    <span class="logo-brand">${branding.name}</span><br/>
+                    <span class="logo-tagline">${branding.tagline}</span>
                   </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${getCompanyBranding().logo}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" style="width: 32px; height: 32px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -1397,10 +1630,10 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La función de compartir no está disponible.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
       }
     } catch (error: any) {
-      console.error('Error generating consumptions PDF:', error);
+      logger.error('Error generating consumptions PDF:', error);
       throw new Error(error.message || 'Error al generar el reporte de consumos.');
     }
   },
@@ -1464,10 +1697,10 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La función de compartir no está disponible.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
       }
     } catch (error: any) {
-      console.error('Error generating consumptions CSV:', error);
+      logger.error('Error generating consumptions CSV:', error);
       throw new Error(error.message || 'Error al generar reporte CSV.');
     }
   },
@@ -1482,6 +1715,8 @@ export const ReportGenerator = {
     if (ventas.length === 0) {
       throw new Error('No hay registros de ventas para exportar.');
     }
+
+    const branding = await getCompanyBranding();
 
     const totalFacturado = ventas.reduce((sum, v) => sum + Number(v.precio_total_facturado || 0), 0);
     const totalCosto = ventas.reduce((sum, v) => sum + Number(v.costo_total || 0), 0);
@@ -1629,7 +1864,7 @@ export const ReportGenerator = {
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
-              <img src="${getCompanyBranding().logo}" style="width: 60px; height: 60px; object-fit: contain;" />
+              <img src="${branding.logo}" style="width: 60px; height: 60px; object-fit: contain;" />
             </td>
           </tr>
         </table>
@@ -1721,10 +1956,10 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La función de compartir no está disponible.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
       }
     } catch (error: any) {
-      console.error('Error generating sales PDF:', error);
+      logger.error('Error generating sales PDF:', error);
       throw new Error(error.message || 'Error al generar el reporte de ventas.');
     }
   },
@@ -1794,16 +2029,17 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La función de compartir no está disponible.');
+        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
       }
     } catch (error: any) {
-      console.error('Error generating sales CSV:', error);
+      logger.error('Error generating sales CSV:', error);
       throw new Error(error.message || 'Error al generar reporte CSV de ventas.');
     }
   },
 };
 
 export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 'view' | 'download' = 'view') {
+  const branding = await getCompanyBranding();
   const title = `Cotizacion - ${cotizacion.numeroCotizacion}`;
   
   const renderDescription = (name: string, description: string) => {
@@ -1939,15 +2175,15 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
         
         <div class="header-content">
           <div style="width: 50%;">
-            <img src="${getCompanyBranding().logo}" alt="Logo" style="max-height: 150px; 
+            <img src="${branding.logo}" alt="Logo" style="max-height: 150px; 
             height: 170px; width: 450px; margin-top: 
             -10px; z-index: 10; position: relative;">
           </div>
           <div class="company-details" style="width: 50%;">
-            <div>${getCompanyBranding().name}</div>
+            <div>${branding.name}</div>
             <div>Ozorno 811</div>
             <div>31107 Chihuahua, CHH</div>
-            <div>México</div>
+            <div>MÃ©xico</div>
           </div>
         </div>
 
@@ -1956,7 +2192,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
               <div class="col-6">
               </div>
               <div class="col-6 text-end">
-                  <h1 class="inttec-red fw-bold" style="font-size: 26px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">COTIZACIÓN</h1>
+                  <h1 class="inttec-red fw-bold" style="font-size: 26px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">COTIZACIÃ“N</h1>
                   <h2 class="text-muted" style="font-size: 20px; font-weight: normal; margin-top: 0;">${cotizacion.numeroCotizacion}</h2>
               </div>
           </div>
@@ -1993,7 +2229,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
           <table class="table table-red mt-4">
               <thead>
                   <tr>
-                      <th width="40%" style="text-align: left;">DESCRIPCIÓN</th>
+                      <th width="40%" style="text-align: left;">DESCRIPCIÃ“N</th>
                       <th width="15%" class="text-center">ENTREGA</th>
                       <th class="text-center">CANT</th>
                       <th class="text-end">PRECIO UNIT</th>
@@ -2028,7 +2264,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
                   <div class="info-text mt-2">
                       <div class="section-header">Informacion Adicional</div>
                       <div style="padding-top: 4px;">
-                        Términos y condiciones: <a href="${cotizacion.terminosCondiciones}" style="color: #0000ee; text-decoration: none;">${cotizacion.terminosCondiciones}</a>
+                        TÃ©rminos y condiciones: <a href="${cotizacion.terminosCondiciones}" style="color: #0000ee; text-decoration: none;">${cotizacion.terminosCondiciones}</a>
                       </div>
                   </div>
               </div>
@@ -2060,7 +2296,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
             CUENTAHABIENTE: Rafael Alonso Fernandez Tinajero
           </div>
           <div style="width: 15%; text-align: right; color: #666; display: flex; align-items: flex-end; justify-content: flex-end;">
-            Página 1 / 1
+            PÃ¡gina 1 / 1
           </div>
         </div>
       </div>
@@ -2105,10 +2341,10 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
       }
     } else {
       if (action === 'view') {
-        // En móviles, para "solo ver", usamos printAsync que abre el visor de impresión nativo (muy bueno para visualizar)
+        // En mÃ³viles, para "solo ver", usamos printAsync que abre el visor de impresiÃ³n nativo (muy bueno para visualizar)
         await Print.printAsync({ html: htmlContent });
       } else {
-        // Para "descargar", generamos el archivo físico y abrimos el menú de compartir/guardar
+        // Para "descargar", generamos el archivo fÃ­sico y abrimos el menÃº de compartir/guardar
         const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
         
         const customNameUri = `${cacheDirectory}Cotizacion - ${cotizacion.numeroCotizacion}.pdf`;
@@ -2116,11 +2352,11 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
           encoding: EncodingType.Base64,
         });
 
-        await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: 'Compartir Cotización' });
+        await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: 'Compartir CotizaciÃ³n' });
       }
     }
   } catch (error: any) {
-    console.error('Error generando PDF:', error);
+    logger.error('Error generando PDF:', error);
     if (Platform.OS === 'web') {
       window.alert('Error: No se pudo generar el documento PDF corporativo. ' + (error.message || ''));
     } else {
@@ -2128,3 +2364,5 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     }
   }
 }
+
+
