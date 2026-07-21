@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: "Portal Inttec & Daravisa",
     slug: "app-movil",
-    version: "1.1.8",
+    version: "1.1.9",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "appmovil",
