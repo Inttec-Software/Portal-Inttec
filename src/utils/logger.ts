@@ -3,7 +3,6 @@
  * Logs messages in development (__DEV__) and suppresses verbose logs in production.
  */
 
-/* eslint-disable no-console */
 export const logger = {
   log: (...args: any[]) => {
     if (__DEV__) {

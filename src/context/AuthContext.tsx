@@ -126,7 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
          router.replace('/(admin)/dashboard');
       }
     }
-  }, [user, isLoading, segments]);
+  }, [user, isLoading, segments, router]);
 
   return (
     <AuthContext.Provider value={{ user, isLoading, company, refreshSession, setUser, changeCompany }}>

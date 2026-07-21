@@ -5,9 +5,6 @@ const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const FALLBACK_MODELS = [
   'gemini-3.5-flash',
   'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
 ];
 
 export interface GeminiOcrResult {
@@ -47,7 +44,7 @@ export interface GeminiSalesResult {
     proveedor: string | null;
     descripcion: string | null;
   };
-  partidas_o_productos: Array<{
+  partidas_o_productos: {
     descripcion: string;
     cantidad: number;
     unidad: string;
@@ -55,7 +52,7 @@ export interface GeminiSalesResult {
     costo_unitario_proveedor: number;
     precio_total_venta: number;
     costo_total_proveedor: number;
-  }>;
+  }[];
   totales_calculados: {
     precio_total_facturado: number;
     costo_total: number;
@@ -76,25 +73,65 @@ function cleanAndParseJson<T>(rawText: string): T {
     cleanJsonStr = markdownMatch[1].trim();
   }
 
-  // 2. Extraer el primer objeto o arreglo JSON
+  // 2. Extraer el primer objeto o arreglo JSON contando llaves/corchetes de manera robusta
   const firstBrace = cleanJsonStr.indexOf('{');
-  const lastBrace = cleanJsonStr.lastIndexOf('}');
   const firstBracket = cleanJsonStr.indexOf('[');
-  const lastBracket = cleanJsonStr.lastIndexOf(']');
 
   let startIdx = -1;
-  let endIdx = -1;
-
   if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
     startIdx = firstBrace;
-    endIdx = lastBrace;
   } else if (firstBracket !== -1) {
     startIdx = firstBracket;
-    endIdx = lastBracket;
   }
 
-  if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
-    cleanJsonStr = cleanJsonStr.substring(startIdx, endIdx + 1);
+  if (startIdx !== -1) {
+    let braceCount = 0;
+    let inString = false;
+    let escaped = false;
+    let endIdx = -1;
+
+    for (let i = startIdx; i < cleanJsonStr.length; i++) {
+      const char = cleanJsonStr[i];
+
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+
+      if (!inString) {
+        if (char === '{' || char === '[') {
+          braceCount++;
+        } else if (char === '}' || char === ']') {
+          braceCount--;
+          if (braceCount === 0) {
+            endIdx = i;
+            break;
+          }
+        }
+      }
+    }
+
+    if (endIdx !== -1) {
+      cleanJsonStr = cleanJsonStr.substring(startIdx, endIdx + 1);
+    } else {
+      // Fallback a extracción simple
+      const lastBrace = cleanJsonStr.lastIndexOf('}');
+      const lastBracket = cleanJsonStr.lastIndexOf(']');
+      const fallbackEnd = firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket) ? lastBrace : lastBracket;
+      if (fallbackEnd !== -1 && fallbackEnd >= startIdx) {
+        cleanJsonStr = cleanJsonStr.substring(startIdx, fallbackEnd + 1);
+      }
+    }
   }
 
   // 3. Eliminar comentarios
@@ -316,7 +353,7 @@ Instrucciones para el reporte:
       folio_factura: string | null;
       rfc_emisor: string | null;
     };
-    partidas_extraidas: Array<{
+    partidas_extraidas: {
       descripcion_proveedor: string;
       cantidad: number;
       unidad: string;
@@ -327,7 +364,7 @@ Instrucciones para el reporte:
         confianza_mapeo: number;
         requiere_revision: boolean;
       };
-    }>;
+    }[];
   }> {
     const prompt = `Eres un agente experto en análisis de datos y normalización de inventarios para la plataforma corporativa Portal Inttec. 
 

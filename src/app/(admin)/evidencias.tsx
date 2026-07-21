@@ -456,7 +456,7 @@ export default function AdminEvidenciasScreen() {
                         listTrabajos = JSON.parse(selectedEvidencia.descripcion_trabajo);
                         isJson = true;
                       }
-                    } catch (_e) {}
+                    } catch {}
 
                     if (isJson && listTrabajos.length > 0) {
                       return (

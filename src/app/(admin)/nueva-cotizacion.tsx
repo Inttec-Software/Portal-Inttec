@@ -62,7 +62,7 @@ export default function NuevaCotizacionScreen() {
   const showAlert = (title: string, message: string) => {
     setFormMessage({ type: title.toLowerCase().includes('error') ? 'error' : 'success', text: message });
     if (Platform.OS === 'web') {
-      try { window.alert(`${title}: ${message}`); } catch(_e) {}
+      try { window.alert(`${title}: ${message}`); } catch {}
     } else {
       Alert.alert(title, message);
     }
@@ -198,17 +198,25 @@ export default function NuevaCotizacionScreen() {
     };
 
     fetchCotizacion();
-  }, [editId]);
+  }, [editId, user?.nombre]);
 
   // Actualizar vendedor con el nombre del usuario cuando se cargue (sólo en nueva cotización)
   useEffect(() => {
     if (!editId && user?.nombre) {
-      setCotizacion(prev => ({
-        ...prev,
-        vendedor: prev.vendedor || user.nombre,
-      }));
+      const timer = setTimeout(() => {
+        setCotizacion(prev => {
+          if (!prev.vendedor && user.nombre) {
+            return {
+              ...prev,
+              vendedor: user.nombre,
+            };
+          }
+          return prev;
+        });
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [user, editId]);
+  }, [user?.nombre, editId]);
 
   const subtotal = useMemo(() => cotizacion.lineas.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0), [cotizacion.lineas]);
   const iva = useMemo(() => cotizacion.lineas.reduce((acc, item) => acc + ((item.cantidad * item.precioUnitario) * (item.impuestoPorcentaje / 100)), 0), [cotizacion.lineas]);

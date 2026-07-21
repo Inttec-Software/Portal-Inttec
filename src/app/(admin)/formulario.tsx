@@ -229,7 +229,7 @@ export default function GastoForm() {
     }
 
     return alerts.length > 0 ? alerts.join(' | ') : null;
-  }, [monto, isSplit, splits, selectedCategoria, justificacion, proveedor, selectedEmpleados, esComida, incluyePropina, montoPropina]);
+  }, [monto, isSplit, splits, justificacion, proveedor, selectedEmpleados, esComida, incluyePropina, montoPropina]);
 
   const loadCatalogos = async () => {
     try {
@@ -346,7 +346,7 @@ export default function GastoForm() {
     }
   };
 
-  const handleSelectDocument = async () => {
+  const _handleSelectDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['image/*'],
@@ -389,7 +389,7 @@ export default function GastoForm() {
   };
 
   // Métodos para seleccionar y capturar factura
-  const handleCaptureFactura = async () => {
+  const _handleCaptureFactura = async () => {
     const hasPermission = await requestCameraPermission();
     if (!hasPermission) return;
 

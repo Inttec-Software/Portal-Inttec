@@ -23,7 +23,7 @@ import * as Sharing from 'expo-sharing';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto } from '@/services/supabase';
+import { supabase, Gasto, AuditoriaService, AuditoriaTarjeta } from '@/services/supabase';
 import { GeminiService, CardTransaction, CardStatementResult } from '@/services/gemini';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import { useAuth } from '@/context/AuthContext';
@@ -84,8 +84,11 @@ export default function AuditoriaTarjetaScreen() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const isMobile = windowWidth < 600;
-  const { company } = useAuth();
+  const { company, user } = useAuth();
   const companyName = company === 'daravisa' ? 'Daravisa' : 'Inttec';
+
+  // Tab selector
+  const [activeTab, setActiveTab] = useState<'nueva' | 'historial'>('nueva');
 
   // Card selector
   const [selectedTarjeta, setSelectedTarjeta] = useState<TarjetaKey | null>(null);
@@ -102,6 +105,13 @@ export default function AuditoriaTarjetaScreen() {
   const [statementResult, setStatementResult] = useState<CardStatementResult | null>(null);
   const [matchedList, setMatchedList] = useState<MatchedTransaction[]>([]);
   const [appGastos, setAppGastos] = useState<Gasto[]>([]);
+
+  // History states
+  const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
+  const [auditoriasHistorial, setAuditoriasHistorial] = useState<AuditoriaTarjeta[]>([]);
+  const [historialTarjetaFilter, setHistorialTarjetaFilter] = useState<'TODAS' | TarjetaKey>('TODAS');
+  const [selectedSavedAudit, setSelectedSavedAudit] = useState<AuditoriaTarjeta | null>(null);
+  const [isSavingAuditoria, setIsSavingAuditoria] = useState(false);
 
   // UI
   const [searchQuery, setSearchQuery] = useState('');
@@ -325,6 +335,102 @@ export default function AuditoriaTarjetaScreen() {
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // Persisted History Operations
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const loadHistorialAuditorias = async () => {
+    setIsLoadingHistorial(true);
+    try {
+      const data = await AuditoriaService.obtenerAuditorias();
+      setAuditoriasHistorial(data);
+    } catch (err: any) {
+      console.error('Error loading card audit history:', err);
+      showAlert('Error', 'No se pudo cargar el historial de auditorías.');
+    } finally {
+      setIsLoadingHistorial(false);
+    }
+  };
+
+  const handleSaveAuditoria = async () => {
+    if (!selectedTarjeta) return;
+    if (matchedList.length === 0) {
+      showAlert('Sin datos', 'No hay un resultado de análisis para guardar.');
+      return;
+    }
+
+    setIsSavingAuditoria(true);
+    try {
+      const totalConciliado = stats.reportados.reduce((s, m) => s + (m.transaction.monto || 0), 0);
+      await AuditoriaService.guardarAuditoria({
+        tarjeta: selectedTarjeta,
+        metodo_pago: selectedMetodoPago,
+        titular: statementResult?.titular || 'Desconocido',
+        periodo_inicio: statementResult?.periodo_inicio || null,
+        periodo_fin: statementResult?.periodo_fin || null,
+        total_cargos: stats.totalCargos,
+        total_conciliado: totalConciliado,
+        total_faltante: stats.totalNoReportado,
+        resultado_json: {
+          matchedList,
+          statementResult,
+          stats
+        },
+        creado_por: user?.id || null,
+        creado_por_nombre: user?.nombre || null
+      });
+
+      showAlert('Éxito', 'La auditoría fue guardada correctamente en el historial.');
+      loadHistorialAuditorias();
+      setActiveTab('historial');
+    } catch (err: any) {
+      console.error('Error saving card audit:', err);
+      showAlert('Error', 'No se pudo guardar la auditoría en el historial: ' + (err.message || ''));
+    } finally {
+      setIsSavingAuditoria(false);
+    }
+  };
+
+  const handleDeleteAuditoria = async (id: string) => {
+    const performDelete = async () => {
+      setIsLoadingHistorial(true);
+      try {
+        await AuditoriaService.eliminarAuditoria(id);
+        showAlert('Éxito', 'La auditoría fue eliminada del historial.');
+        loadHistorialAuditorias();
+      } catch (err: any) {
+        console.error('Error deleting card audit:', err);
+        showAlert('Error', 'No se pudo eliminar la auditoría.');
+      } finally {
+        setIsLoadingHistorial(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Estás seguro de que deseas eliminar esta auditoría del historial?')) {
+        await performDelete();
+      }
+    } else {
+      Alert.alert(
+        'Confirmar Eliminación',
+        '¿Estás seguro de que deseas eliminar esta auditoría del historial?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Eliminar', style: 'destructive', onPress: performDelete }
+        ]
+      );
+    }
+  };
+
+  React.useEffect(() => {
+    if (activeTab === 'historial') {
+      const timer = setTimeout(() => {
+        loadHistorialAuditorias();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab]);
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Report Generation (PDF)
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -532,6 +638,413 @@ export default function AuditoriaTarjetaScreen() {
     }
   };
 
+  const generateSavedPDFReport = async (savedAudit: AuditoriaTarjeta) => {
+    setIsGeneratingPDF(true);
+    try {
+      const now = new Date(savedAudit.creado_en || new Date());
+      const dateString = now.toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      
+      const { matchedList: savedMatchedList, statementResult: savedStatementResult, stats: savedStats } = savedAudit.resultado_json;
+      const cardInfo = TARJETAS.find(t => t.key === savedAudit.tarjeta);
+      const payInfo = TIPOS_PAGO.find(p => p.key === savedAudit.metodo_pago);
+
+      const tableStyle = `
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+        th, td { border: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+        th { background-color: #f8fafc; color: #475569; font-weight: bold; text-transform: uppercase; font-size: 11px; }
+        .monto { text-align: right; font-weight: bold; }
+        .danger { color: #dc2626; }
+        .success { color: #059669; }
+        .sub-row td { background-color: #f0fdf4; border-top: none; color: #334155; padding-left: 24px; font-size: 11px; }
+      `;
+
+      let reportadosHtml = '';
+      const reportados = savedMatchedList.filter((m: any) => m.matchedGastos && m.matchedGastos.length > 0);
+      if (reportados.length > 0) {
+        reportadosHtml = `
+          <h3>✅ Cargos Conciliados (${reportados.length})</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Concepto Banco</th>
+                <th class="monto">Monto Banco</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${reportados.map((m: any) => `
+                <tr>
+                  <td>${m.transaction.fecha || '-'}</td>
+                  <td><strong>${m.transaction.descripcion || '-'}</strong></td>
+                  <td class="monto success">${formatCurrency(m.transaction.monto || 0)}</td>
+                </tr>
+                ${m.matchedGastos.map((g: any) => `
+                  <tr class="sub-row">
+                    <td colspan="2">↳ <em>Gasto App:</em> ${g.empleado_nombre || 'Empleado'} - ${g.justificacion || g.proveedor || 'Sin detalles'}</td>
+                    <td class="monto" style="color: #64748b; font-weight: normal;">${formatCurrency(Number(g.monto) || 0)}</td>
+                  </tr>
+                `).join('')}
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+
+      let noReportadosHtml = '';
+      const noReportados = savedMatchedList.filter((m: any) => !m.matchedGastos || m.matchedGastos.length === 0);
+      if (noReportados.length > 0) {
+        noReportadosHtml = `
+          <h3 style="margin-top: 30px; color: #dc2626;">⚠ Cargos Sin Reportar (${noReportados.length})</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Concepto Banco</th>
+                <th class="monto">Monto Banco</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${noReportados.map((m: any) => `
+                <tr>
+                  <td>${m.transaction.fecha || '-'}</td>
+                  <td>${m.transaction.descripcion || '-'}</td>
+                  <td class="monto danger">${formatCurrency(m.transaction.monto || 0)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; line-height: 1.5; padding: 40px; }
+            h1 { color: #0f172a; margin-bottom: 5px; font-size: 24px; }
+            h2 { color: #334155; font-size: 16px; margin-top: 0; font-weight: normal; margin-bottom: 30px; }
+            .header-info { display: flex; justify-content: space-between; margin-bottom: 30px; background-color: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; }
+            .header-info div { flex: 1; }
+            .header-info strong { display: block; font-size: 11px; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
+            .header-info span { font-size: 14px; font-weight: 600; }
+            
+            .stats-grid { display: flex; gap: 15px; margin-bottom: 40px; }
+            .stat-box { flex: 1; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center; }
+            .stat-box.primary { background-color: #f0f9ff; border-color: #bae6fd; }
+            .stat-box.success { background-color: #f0fdf4; border-color: #bbf7d0; }
+            .stat-box.danger { background-color: #fef2f2; border-color: #fecaca; }
+            .stat-label { font-size: 11px; font-weight: bold; color: #64748b; margin-bottom: 5px; display: block; }
+            .stat-value { font-size: 20px; font-weight: 800; }
+            .stat-box.primary .stat-value { color: #0284c7; }
+            .stat-box.success .stat-value { color: #16a34a; }
+            .stat-box.danger .stat-value { color: #dc2626; }
+            ${tableStyle}
+            .footer { margin-top: 50px; text-align: center; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <h1>Reporte de Auditoría de Tarjeta (Histórico)</h1>
+          <h2>Conciliado el ${dateString}</h2>
+
+          <div class="header-info">
+            <div>
+              <strong>Tarjeta Auditada</strong>
+              <span>${cardInfo?.label || savedAudit.tarjeta} (${payInfo?.label || 'Cualquiera'})</span>
+            </div>
+            <div>
+              <strong>Titular de Cuenta</strong>
+              <span>${savedStatementResult?.titular || 'No especificado'}</span>
+            </div>
+            <div>
+              <strong>Período</strong>
+              <span>${savedStatementResult?.periodo_inicio || '-'} al ${savedStatementResult?.periodo_fin || '-'}</span>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-box primary">
+              <span class="stat-label">TOTAL CARGOS (${savedMatchedList.length})</span>
+              <span class="stat-value">${formatCurrency(savedStats?.totalCargos || savedAudit.total_cargos)}</span>
+            </div>
+            <div class="stat-box success">
+              <span class="stat-label">CONCILIADO (${reportados.length})</span>
+              <span class="stat-value">${formatCurrency(savedStats?.reportados?.reduce((s: number, m: any) => s + (m.transaction.monto || 0), 0) || savedAudit.total_conciliado)}</span>
+            </div>
+            <div class="stat-box danger">
+              <span class="stat-label">FALTANTE (${noReportados.length})</span>
+              <span class="stat-value">${formatCurrency(savedStats?.totalNoReportado || savedAudit.total_faltante)}</span>
+            </div>
+          </div>
+
+          ${reportadosHtml}
+          ${noReportadosHtml}
+
+          <div class="footer">
+            Reporte recreado desde el Portal Administrativo ${companyName}.<br>
+            Auditoría original guardada por: ${savedAudit.creado_por_nombre || 'N/A'}
+          </div>
+        </body>
+        </html>
+      `;
+
+      const reportTitle = `Auditoria_historica_${cardInfo?.label || 'banco'}_${dateString.replace(/\s+/g, '_')}`;
+
+      if (Platform.OS === 'web') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'absolute';
+        iframe.style.width = '0px';
+        iframe.style.height = '0px';
+        iframe.style.border = 'none';
+        document.body.appendChild(iframe);
+        
+        const doc = iframe.contentWindow?.document || iframe.contentDocument;
+        if (doc) {
+          const htmlWithTitle = html.replace('<head>', `<head><title>${reportTitle}</title>`);
+          doc.open();
+          doc.write(htmlWithTitle);
+          doc.close();
+          
+          setTimeout(() => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            document.body.removeChild(iframe);
+          }, 500);
+        }
+      } else {
+        const { uri } = await Print.printToFileAsync({ html });
+        let shareUri = uri;
+        
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const FileSys = require('expo-file-system');
+          const cleanTitle = reportTitle.replace(/[^a-zA-Z0-9_]/g, '_');
+          const newUri = `${FileSys.cacheDirectory}${cleanTitle}.pdf`;
+          await FileSys.copyAsync({ from: uri, to: newUri });
+          shareUri = newUri;
+        } catch (copyErr) {
+          console.warn('Could not rename PDF file:', copyErr);
+        }
+
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(shareUri, {
+            mimeType: 'application/pdf',
+            dialogTitle: reportTitle,
+            UTI: 'com.adobe.pdf'
+          });
+        } else {
+          showAlert('Listo', 'PDF Generado en: ' + shareUri);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error generando PDF histórico:', err);
+      showAlert('Error', 'No se pudo generar el documento PDF histórico.');
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
+  const filteredAuditorias = useMemo(() => {
+    if (historialTarjetaFilter === 'TODAS') return auditoriasHistorial;
+    return auditoriasHistorial.filter(a => a.tarjeta === historialTarjetaFilter);
+  }, [auditoriasHistorial, historialTarjetaFilter]);
+
+  const renderCardFilter = () => {
+    const filters = [
+      { key: 'TODAS', label: 'Todas' },
+      { key: 'BBVA', label: 'BBVA' },
+      { key: 'AMEX', label: 'AMEX' },
+      { key: 'MARRIOT', label: 'Marriott' },
+      { key: 'BANORTE', label: 'Banorte' },
+    ] as const;
+
+    return (
+      <View style={{ marginBottom: Spacing.two }}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: Spacing.four, gap: Spacing.two, paddingVertical: Spacing.one }}
+        >
+          {filters.map(f => {
+            const isSelected = historialTarjetaFilter === f.key;
+            const cardInfo = TARJETAS.find(c => c.key === f.key);
+            const color = cardInfo ? cardInfo.color : themeColors.accent;
+
+            return (
+              <TouchableOpacity
+                key={f.key}
+                onPress={() => setHistorialTarjetaFilter(f.key)}
+                style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 8,
+                  borderRadius: BorderRadius.pill,
+                  borderWidth: 1,
+                  borderColor: isSelected ? color : themeColors.border,
+                  backgroundColor: isSelected ? color + '15' : themeColors.backgroundElement,
+                }}
+              >
+                <Text style={{ color: isSelected ? color : themeColors.textSecondary, fontWeight: 'bold', fontSize: 12 }}>
+                  {f.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  };
+
+  const renderHistorialView = () => {
+    return (
+      <View style={{ flex: 1 }}>
+        {renderCardFilter()}
+        {isLoadingHistorial ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.six }}>
+            <ActivityIndicator size="large" color={themeColors.accent} />
+            <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando historial...</Text>
+          </View>
+        ) : filteredAuditorias.length === 0 ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.six, gap: Spacing.two }}>
+            <Ionicons name="folder-open-outline" size={48} color={themeColors.textSecondary} />
+            <Text style={{ color: themeColors.textSecondary, fontWeight: '600', fontSize: 14 }}>
+              No hay auditorías guardadas en esta sección.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={filteredAuditorias}
+            keyExtractor={item => item.id}
+            contentContainerStyle={{ paddingHorizontal: Spacing.four, paddingBottom: 100, gap: Spacing.three }}
+            renderItem={({ item }) => {
+              const dateStr = item.creado_en ? new Date(item.creado_en).toLocaleDateString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit' }) : 'N/A';
+              const cardInfo = TARJETAS.find(c => c.key === item.tarjeta);
+              
+              return (
+                <View 
+                  style={{
+                    backgroundColor: themeColors.backgroundElement,
+                    borderRadius: BorderRadius.large,
+                    borderWidth: 1,
+                    borderColor: themeColors.border,
+                    padding: Spacing.three,
+                    ...Platform.select({
+                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6 },
+                      android: { elevation: 2 },
+                      web: { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }
+                    })
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.one }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: cardInfo?.color || themeColors.accent }} />
+                      <Text style={{ color: themeColors.text, fontWeight: '800', fontSize: 15 }}>
+                        Auditoría {cardInfo?.label || item.tarjeta}
+                      </Text>
+                    </View>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontWeight: '600' }}>
+                      {dateStr}
+                    </Text>
+                  </View>
+
+                  <View style={{ gap: 4, marginBottom: Spacing.two }}>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                      <Text style={{ fontWeight: '700', color: themeColors.text }}>Titular: </Text>
+                      {item.titular || 'Desconocido'}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                      <Text style={{ fontWeight: '700', color: themeColors.text }}>Período: </Text>
+                      {item.periodo_inicio || '-'} al {item.periodo_fin || '-'}
+                    </Text>
+                    {item.creado_por_nombre && (
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, fontStyle: 'italic' }}>
+                        Guardado por {item.creado_por_nombre}
+                      </Text>
+                    )}
+                  </View>
+
+                  {/* Summary values row */}
+                  <View style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
+                    padding: 8,
+                    borderRadius: BorderRadius.medium,
+                    marginBottom: Spacing.two
+                  }}>
+                    <View style={{ alignItems: 'center', flex: 1 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: themeColors.textSecondary }}>CARGOS</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.text }}>{formatCurrency(item.total_cargos)}</Text>
+                    </View>
+                    <View style={{ alignItems: 'center', flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border + '50' }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: themeColors.success }}>CONCILIADO</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.success }}>{formatCurrency(item.total_conciliado)}</Text>
+                    </View>
+                    <View style={{ alignItems: 'center', flex: 1 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: themeColors.danger }}>FALTANTE</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.danger }}>{formatCurrency(item.total_faltante)}</Text>
+                    </View>
+                  </View>
+
+                  {/* Actions buttons */}
+                  <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+                    <TouchableOpacity
+                      onPress={() => setSelectedSavedAudit(item)}
+                      style={{
+                        flex: 1,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderWidth: 1,
+                        borderColor: themeColors.accent,
+                        borderRadius: BorderRadius.small,
+                        paddingVertical: 8,
+                        gap: 6
+                      }}
+                    >
+                      <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                      <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: 'bold' }}>Detalle</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => generateSavedPDFReport(item)}
+                      style={{
+                        flex: 1,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: themeColors.accent,
+                        borderRadius: BorderRadius.small,
+                        paddingVertical: 8,
+                        gap: 6
+                      }}
+                    >
+                      <Ionicons name="document-text-outline" size={16} color="#fff" />
+                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>PDF</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => handleDeleteAuditoria(item.id)}
+                      style={{
+                        paddingHorizontal: 12,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: themeColors.danger + '15',
+                        borderRadius: BorderRadius.small,
+                      }}
+                    >
+                      <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            }}
+          />
+        )}
+      </View>
+    );
+  };
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Render helpers
   // ─────────────────────────────────────────────────────────────────────────────
@@ -635,15 +1148,63 @@ export default function AuditoriaTarjetaScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { maxWidth: 800, alignSelf: 'center', width: '100%' },
-        ]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
+      {/* Tabs Selector */}
+      <View style={[styles.tabsContainer, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
+        <TouchableOpacity
+          onPress={() => setActiveTab('nueva')}
+          style={[
+            styles.tab,
+            activeTab === 'nueva'
+              ? {
+                  backgroundColor: themeColors.accent,
+                  ...Platform.select({
+                    ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                    android: { elevation: 2 },
+                    web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                  })
+                }
+              : { backgroundColor: 'transparent' },
+          ]}
+        >
+          <Text style={[styles.tabText, { color: activeTab === 'nueva' ? '#fff' : themeColors.textSecondary }]}>
+            Nueva Auditoría
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => {
+            setActiveTab('historial');
+            loadHistorialAuditorias();
+          }}
+          style={[
+            styles.tab,
+            activeTab === 'historial'
+              ? {
+                  backgroundColor: themeColors.accent,
+                  ...Platform.select({
+                    ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                    android: { elevation: 2 },
+                    web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                  })
+                }
+              : { backgroundColor: 'transparent' },
+          ]}
+        >
+          <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#fff' : themeColors.textSecondary }]}>
+            Historial
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {activeTab === 'nueva' ? (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { maxWidth: 800, alignSelf: 'center', width: '100%' },
+          ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
 
         {/* ═══════════════════════════════════════
             PASO 1 — Seleccionar tarjeta
@@ -897,29 +1458,57 @@ export default function AuditoriaTarjetaScreen() {
               </View>
             </View>
 
-            <TouchableOpacity
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: themeColors.accent + '18',
-                borderColor: themeColors.accent,
-                borderWidth: 1,
-                paddingVertical: Spacing.two,
-                borderRadius: BorderRadius.small,
-              }}
-              onPress={generatePDFReport}
-              disabled={isGeneratingPDF}
-            >
-              {isGeneratingPDF ? (
-                <ActivityIndicator size="small" color={themeColors.accent} />
-              ) : (
-                <Ionicons name="document-text" size={18} color={themeColors.accent} />
-              )}
-              <Text style={{ marginLeft: Spacing.one, color: themeColors.accent, fontWeight: 'bold' }}>
-                {isGeneratingPDF ? 'Generando PDF...' : 'Exportar Reporte PDF'}
-              </Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.one }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: themeColors.accent + '18',
+                  borderColor: themeColors.accent,
+                  borderWidth: 1,
+                  paddingVertical: Spacing.two,
+                  borderRadius: BorderRadius.small,
+                }}
+                onPress={generatePDFReport}
+                disabled={isGeneratingPDF}
+              >
+                {isGeneratingPDF ? (
+                  <ActivityIndicator size="small" color={themeColors.accent} />
+                ) : (
+                  <Ionicons name="document-text" size={18} color={themeColors.accent} />
+                )}
+                <Text style={{ marginLeft: Spacing.one, color: themeColors.accent, fontWeight: 'bold', fontSize: 13 }} numberOfLines={1}>
+                  {isGeneratingPDF ? 'PDF...' : 'Exportar PDF'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: themeColors.success + '18',
+                  borderColor: themeColors.success,
+                  borderWidth: 1,
+                  paddingVertical: Spacing.two,
+                  borderRadius: BorderRadius.small,
+                }}
+                onPress={handleSaveAuditoria}
+                disabled={isSavingAuditoria}
+              >
+                {isSavingAuditoria ? (
+                  <ActivityIndicator size="small" color={themeColors.success} />
+                ) : (
+                  <Ionicons name="cloud-upload-outline" size={18} color={themeColors.success} />
+                )}
+                <Text style={{ marginLeft: Spacing.one, color: themeColors.success, fontWeight: 'bold', fontSize: 13 }} numberOfLines={1}>
+                  {isSavingAuditoria ? 'Guardando...' : 'Guardar Historial'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -1004,6 +1593,9 @@ export default function AuditoriaTarjetaScreen() {
 
         <View style={{ height: Spacing.six }} />
       </ScrollView>
+      ) : (
+        renderHistorialView()
+      )}
 
       {/* ══════════════════════════════════════════════════
           MODAL — Detalle de transacción vs gasto
@@ -1230,6 +1822,126 @@ export default function AuditoriaTarjetaScreen() {
         imageUrl={photoViewerUrl}
         onClose={() => setPhotoViewerUrl(null)}
       />
+
+      {/* Modal de Detalle de Auditoría Guardada */}
+      <Modal
+        visible={!!selectedSavedAudit}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setSelectedSavedAudit(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { backgroundColor: themeColors.background }]}>
+            {/* Header */}
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                Detalle de Auditoría Guardada
+              </Text>
+              <TouchableOpacity onPress={() => setSelectedSavedAudit(null)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {selectedSavedAudit && (
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: Spacing.four, gap: Spacing.three }}>
+                {/* Info Card */}
+                <View style={[styles.metaCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: themeColors.accent, marginBottom: 8 }}>INFORMACIÓN</Text>
+                  <ModalField label="Tarjeta" value={TARJETAS.find(t => t.key === selectedSavedAudit.tarjeta)?.label || selectedSavedAudit.tarjeta} themeColors={themeColors} />
+                  <ModalField label="Tipo Tarjeta" value={TIPOS_PAGO.find(p => p.key === selectedSavedAudit.metodo_pago)?.label || 'Cualquiera'} themeColors={themeColors} />
+                  <ModalField label="Titular" value={selectedSavedAudit.titular || 'Desconocido'} themeColors={themeColors} />
+                  <ModalField label="Período" value={`${selectedSavedAudit.periodo_inicio || '-'} al ${selectedSavedAudit.periodo_fin || '-'}`} themeColors={themeColors} />
+                  <ModalField label="Guardado por" value={selectedSavedAudit.creado_por_nombre || 'N/A'} themeColors={themeColors} />
+                </View>
+
+                {/* Stats */}
+                <View style={[styles.metaCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: themeColors.accent, marginBottom: 8 }}>RESUMEN CONCILIACIÓN</Text>
+                  <ModalField label="Total Cargos" value={formatCurrency(selectedSavedAudit.total_cargos)} themeColors={themeColors} bold />
+                  <ModalField label="Conciliado" value={formatCurrency(selectedSavedAudit.total_conciliado)} themeColors={themeColors} valueColor={themeColors.success} bold />
+                  <ModalField label="Faltante" value={formatCurrency(selectedSavedAudit.total_faltante)} themeColors={themeColors} valueColor={themeColors.danger} bold />
+                </View>
+
+                {/* Transactions list */}
+                <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.text, marginTop: Spacing.one }}>
+                  Transacciones Conciliadas y Pendientes (${selectedSavedAudit.resultado_json.matchedList?.length || 0})
+                </Text>
+
+                {(selectedSavedAudit.resultado_json.matchedList || []).map((m: any, idx: number) => {
+                  const isMatched = m.matchedGastos && m.matchedGastos.length > 0;
+                  return (
+                    <View
+                      key={idx}
+                      style={[
+                        styles.txCard,
+                        {
+                          backgroundColor: themeColors.backgroundElement,
+                          borderColor: isMatched ? themeColors.success : themeColors.danger,
+                          borderLeftWidth: 4,
+                          borderWidth: 1,
+                        },
+                      ]}
+                    >
+                      <View style={styles.txCardHeader}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.txDesc, { color: themeColors.text }]} numberOfLines={2}>
+                            {m.transaction.descripcion || 'Sin descripción'}
+                          </Text>
+                          <Text style={[styles.txFecha, { color: themeColors.textSecondary }]}>
+                            {m.transaction.fecha || 'Sin fecha'}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={[styles.txMonto, { color: themeColors.danger }]}>
+                            {formatCurrency(m.transaction.monto ?? 0)}
+                          </Text>
+                          <View
+                            style={[
+                              styles.statusBadge,
+                              { backgroundColor: isMatched ? themeColors.success + '25' : themeColors.danger + '25' },
+                            ]}
+                          >
+                            <Ionicons
+                              name={isMatched ? 'checkmark-circle' : 'warning'}
+                              size={12}
+                              color={isMatched ? themeColors.success : themeColors.danger}
+                            />
+                            <Text style={[styles.statusText, { color: isMatched ? themeColors.success : themeColors.danger }]}>
+                              {isMatched ? 'Conciliado' : 'Sin conciliar'}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {isMatched && (
+                        <View
+                          style={[
+                            styles.matchedDetail,
+                            { backgroundColor: themeColors.success + '10', borderColor: themeColors.success + '30', flexDirection: 'column', alignItems: 'flex-start' },
+                          ]}
+                        >
+                          {m.matchedGastos.map((g: any, gIdx: number) => (
+                            <Text key={gIdx} style={[styles.matchedText, { color: themeColors.textSecondary }]} numberOfLines={1}>
+                              • {formatCurrency(g.monto)} — {g.justificacion || g.proveedor || 'Gasto'} ({g.empleado_nombre})
+                            </Text>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+
+                <TouchableOpacity
+                  style={[styles.modalCloseBtn, { backgroundColor: themeColors.accent, marginVertical: Spacing.two }]}
+                  onPress={() => setSelectedSavedAudit(null)}
+                >
+                  <Text style={styles.modalCloseBtnText}>Cerrar Detalle</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -1482,6 +2194,25 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '800',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    padding: 4,
+    borderRadius: BorderRadius.medium,
+    marginHorizontal: Spacing.four,
+    marginTop: Spacing.two,
+    marginBottom: Spacing.one,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: BorderRadius.medium - 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
 

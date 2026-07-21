@@ -1,4 +1,4 @@
-import { cacheDirectory, writeAsStringAsync, copyAsync, getContentUriAsync, EncodingType } from 'expo-file-system/legacy';
+import { cacheDirectory, copyAsync, getContentUriAsync } from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';

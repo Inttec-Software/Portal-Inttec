@@ -44,6 +44,7 @@ const ssrSafeStorage = {
 export const inttecClient = createClient(inttecUrl, inttecAnonKey, {
   auth: {
     storage: ssrSafeStorage,
+    storageKey: 'supabase.auth.token.inttec',
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
@@ -53,6 +54,7 @@ export const inttecClient = createClient(inttecUrl, inttecAnonKey, {
 export const daravisaClient = createClient(daravisaUrl, daravisaAnonKey, {
   auth: {
     storage: ssrSafeStorage,
+    storageKey: 'supabase.auth.token.daravisa',
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
@@ -574,7 +576,7 @@ export const VehiculoService = {
       try {
         const { data: v } = await supabase.from('vehiculos').select('placas').eq('id', filtros.vehiculoId).single();
         if (v?.placas) targetPlacas = v.placas;
-      } catch (e) {}
+      } catch {}
     }
 
     const fetchFromClient = async (client: typeof supabase, empresaNombre: string) => {
@@ -601,7 +603,7 @@ export const VehiculoService = {
           empleado_nombre: row.empleado?.nombre,
           empresa_origen: empresaNombre,
         }));
-      } catch (e) {
+      } catch {
         return [];
       }
     };
@@ -673,9 +675,72 @@ export const VehiculoService = {
         if (v?.placas) {
           await VehiculoService.syncVehiculoKilometraje(v.placas, registro.kilometraje_actual);
         }
-      } catch (e) {}
+      } catch {}
     }
 
     return data as RegistroGasolina;
   },
 };
+
+export interface AuditoriaTarjeta {
+  id: string;
+  tarjeta: string;
+  metodo_pago: string;
+  titular?: string | null;
+  periodo_inicio?: string | null;
+  periodo_fin?: string | null;
+  total_cargos: number;
+  total_conciliado: number;
+  total_faltante: number;
+  resultado_json: any;
+  creado_por?: string | null;
+  creado_por_nombre?: string | null;
+  creado_en?: string;
+}
+
+export const AuditoriaService = {
+  async guardarAuditoria(auditoria: Omit<AuditoriaTarjeta, 'id' | 'creado_en'>): Promise<AuditoriaTarjeta> {
+    const { data, error } = await supabase
+      .from('auditorias_tarjeta')
+      .insert([auditoria])
+      .select()
+      .single();
+
+    if (error) {
+      logger.error('Error al guardar auditoría de tarjeta:', error);
+      throw error;
+    }
+    return data as AuditoriaTarjeta;
+  },
+
+  async obtenerAuditorias(tarjeta?: string): Promise<AuditoriaTarjeta[]> {
+    let query = supabase
+      .from('auditorias_tarjeta')
+      .select('*')
+      .order('creado_en', { ascending: false });
+
+    if (tarjeta && tarjeta !== 'TODAS') {
+      query = query.eq('tarjeta', tarjeta);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      logger.error('Error al obtener auditorías de tarjeta:', error);
+      throw error;
+    }
+    return (data || []) as AuditoriaTarjeta[];
+  },
+
+  async eliminarAuditoria(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('auditorias_tarjeta')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      logger.error('Error al eliminar auditoría de tarjeta:', error);
+      throw error;
+    }
+  }
+};
+

@@ -130,3 +130,22 @@ CREATE TABLE public.cotizaciones (
   creado_en timestamp with time zone DEFAULT now(),
   CONSTRAINT cotizaciones_pkey PRIMARY KEY (id)
 );
+
+CREATE TABLE public.auditorias_tarjeta (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tarjeta text NOT NULL,
+  metodo_pago text NOT NULL,
+  titular text,
+  periodo_inicio date,
+  periodo_fin date,
+  total_cargos numeric NOT NULL,
+  total_conciliado numeric NOT NULL,
+  total_faltante numeric NOT NULL,
+  resultado_json jsonb NOT NULL,
+  creado_por uuid,
+  creado_por_nombre text,
+  creado_en timestamp with time zone DEFAULT now(),
+  CONSTRAINT auditorias_tarjeta_pkey PRIMARY KEY (id),
+  CONSTRAINT auditorias_tarjeta_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id) ON DELETE SET NULL
+);
+

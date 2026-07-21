@@ -330,7 +330,7 @@ export default function EmpleadoDashboard() {
       };
 
       setUser(updatedUser);
-      await AsyncStorage.setItem('logged_user', JSON.stringify(updatedUser));
+      await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(updatedUser));
 
       Alert.alert('Éxito', 'Perfil actualizado correctamente.');
       setProfileModalVisible(false);
@@ -377,7 +377,13 @@ export default function EmpleadoDashboard() {
   }, [user]);
 
   async function refreshData(userId: string, silent = false) {
-    if (!silent) setIsLoading(true);
+    if (!silent) {
+      setIsLoading(true);
+      setGastos([]);
+      setOfflineGastos([]);
+      setVehiculos([]);
+      setMisRegistrosGasolina([]);
+    }
     try {
       // 1. Obtener de Supabase
       const { data, error } = await supabase
@@ -455,7 +461,7 @@ export default function EmpleadoDashboard() {
   };
 
   // Reenviar gasto observado (ACTION_REQUIRED)
-  const handleResubmitGasto = async () => {
+  const _handleResubmitGasto = async () => {
     if (!selectedGasto || !repondFeedback.trim()) return;
     setIsSubmittingResponse(true);
 

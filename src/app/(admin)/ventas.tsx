@@ -1138,7 +1138,7 @@ export default function VentasScreen() {
             </View>
 
             <TextInput
-              style={[styles.partidaInput, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+              style={[styles.partidaInput, { color: themeColors.text, borderColor: themeColors.textSecondary + '50', backgroundColor: themeColors.background }]}
               value={partida.descripcion}
               onChangeText={val => updatePartida(partida.id, 'descripcion', val)}
               placeholder="Descripción del producto/servicio"
@@ -1149,7 +1149,7 @@ export default function VentasScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.partidaFieldLabel, { color: themeColors.textSecondary }]}>Cantidad</Text>
                 <TextInput
-                  style={[styles.partidaInputSmall, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+                  style={[styles.partidaInputSmall, { color: themeColors.text, borderColor: themeColors.textSecondary + '50', backgroundColor: themeColors.background }]}
                   value={partida.cantidad}
                   onChangeText={val => updatePartida(partida.id, 'cantidad', val)}
                   keyboardType="numeric"
@@ -1160,7 +1160,7 @@ export default function VentasScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.partidaFieldLabel, { color: themeColors.textSecondary }]}>Unidad</Text>
                 <TextInput
-                  style={[styles.partidaInputSmall, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+                  style={[styles.partidaInputSmall, { color: themeColors.text, borderColor: themeColors.textSecondary + '50', backgroundColor: themeColors.background }]}
                   value={partida.unidad}
                   onChangeText={val => updatePartida(partida.id, 'unidad', val)}
                   placeholder="PZA"
@@ -1173,7 +1173,7 @@ export default function VentasScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.partidaFieldLabel, { color: themeColors.success }]}>💰 Precio Venta</Text>
                 <TextInput
-                  style={[styles.partidaInputSmall, { color: themeColors.text, borderColor: themeColors.success + '50', backgroundColor: themeColors.background }]}
+                  style={[styles.partidaInputSmall, { color: themeColors.text, borderColor: themeColors.success + '80', backgroundColor: themeColors.background }]}
                   value={partida.precio_unitario_venta}
                   onChangeText={val => updatePartida(partida.id, 'precio_unitario_venta', val)}
                   keyboardType="numeric"
@@ -1247,16 +1247,16 @@ export default function VentasScreen() {
         <View style={{ gap: Spacing.two, marginBottom: Spacing.two }}>
           {/* Fila 1 */}
           <View style={{ flexDirection: 'row', gap: Spacing.two }}>
-            <View style={[styles.financialCard, { backgroundColor: themeColors.accent + '15', borderColor: themeColors.accent + '30' }]}>
-              <Text style={[styles.financialLabel, { color: themeColors.accent }]}>FACTURADO</Text>
-              <Text style={[styles.financialAmount, { color: themeColors.accent }]}>
+            <View style={[styles.financialCard, { backgroundColor: themeColors.accent + '22', borderColor: themeColors.accent + '50' }]}>
+              <Text style={[styles.financialLabel, { color: themeColors.accent, fontWeight: '800' }]}>FACTURADO</Text>
+              <Text style={[styles.financialAmount, { color: themeColors.accent, fontWeight: '900' }]}>
                 {formatCurrency(calculatedTotals.precioTotal)}
               </Text>
             </View>
 
-            <View style={[styles.financialCard, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger + '30' }]}>
-              <Text style={[styles.financialLabel, { color: themeColors.danger }]}>COSTO</Text>
-              <Text style={[styles.financialAmount, { color: themeColors.danger }]}>
+            <View style={[styles.financialCard, { backgroundColor: themeColors.danger + '22', borderColor: themeColors.danger + '50' }]}>
+              <Text style={[styles.financialLabel, { color: themeColors.danger, fontWeight: '800' }]}>COSTO</Text>
+              <Text style={[styles.financialAmount, { color: themeColors.danger, fontWeight: '900' }]}>
                 {formatCurrency(calculatedTotals.costoTotal)}
               </Text>
             </View>
@@ -1267,14 +1267,14 @@ export default function VentasScreen() {
             <View style={[
               styles.financialCard,
               {
-                backgroundColor: isProfit ? themeColors.success + '15' : themeColors.danger + '15',
-                borderColor: isProfit ? themeColors.success + '30' : themeColors.danger + '30',
+                backgroundColor: isProfit ? themeColors.success + '22' : themeColors.danger + '22',
+                borderColor: isProfit ? themeColors.success + '50' : themeColors.danger + '50',
               },
             ]}>
-              <Text style={[styles.financialLabel, { color: isProfit ? themeColors.success : themeColors.danger }]}>
+              <Text style={[styles.financialLabel, { color: isProfit ? themeColors.success : themeColors.danger, fontWeight: '800' }]}>
                 UTILIDAD BRUTA
               </Text>
-              <Text style={[styles.financialAmount, { color: isProfit ? themeColors.success : themeColors.danger }]}>
+              <Text style={[styles.financialAmount, { color: isProfit ? themeColors.success : themeColors.danger, fontWeight: '900' }]}>
                 {formatCurrency(calculatedTotals.utilidad)}
               </Text>
             </View>
@@ -1282,14 +1282,14 @@ export default function VentasScreen() {
             <View style={[
               styles.financialCard,
               {
-                backgroundColor: isProfit ? themeColors.success + '15' : themeColors.danger + '15',
-                borderColor: isProfit ? themeColors.success + '30' : themeColors.danger + '30',
+                backgroundColor: isProfit ? themeColors.success + '22' : themeColors.danger + '22',
+                borderColor: isProfit ? themeColors.success + '50' : themeColors.danger + '50',
               },
             ]}>
-              <Text style={[styles.financialLabel, { color: isProfit ? themeColors.success : themeColors.danger }]}>
+              <Text style={[styles.financialLabel, { color: isProfit ? themeColors.success : themeColors.danger, fontWeight: '800' }]}>
                 MARGEN
               </Text>
-              <Text style={[styles.financialAmount, { color: isProfit ? themeColors.success : themeColors.danger }]}>
+              <Text style={[styles.financialAmount, { color: isProfit ? themeColors.success : themeColors.danger, fontWeight: '900' }]}>
                 {margenPercent}%
               </Text>
             </View>
@@ -1539,14 +1539,21 @@ export default function VentasScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={styles.tabsContainer}>
+        <View style={[styles.tabsContainer, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
           <TouchableOpacity
             onPress={() => setActiveTab('registrar')}
             style={[
               styles.tab,
               activeTab === 'registrar'
-                ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
-                : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+                ? {
+                    backgroundColor: themeColors.accent,
+                    ...Platform.select({
+                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                      android: { elevation: 2 },
+                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                    })
+                  }
+                : { backgroundColor: 'transparent' },
             ]}
           >
             <Text style={[styles.tabText, { color: activeTab === 'registrar' ? '#fff' : themeColors.textSecondary }]}>
@@ -1561,8 +1568,15 @@ export default function VentasScreen() {
             style={[
               styles.tab,
               activeTab === 'historial'
-                ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
-                : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+                ? {
+                    backgroundColor: themeColors.accent,
+                    ...Platform.select({
+                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                      android: { elevation: 2 },
+                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                    })
+                  }
+                : { backgroundColor: 'transparent' },
             ]}
           >
             <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#fff' : themeColors.textSecondary }]}>
@@ -1872,14 +1886,16 @@ const styles = StyleSheet.create({
   },
   tabsContainer: {
     flexDirection: 'row',
-    padding: Spacing.three,
-    gap: Spacing.one,
+    padding: 4,
+    borderRadius: BorderRadius.medium,
+    marginHorizontal: Spacing.three,
+    marginTop: Spacing.two,
+    marginBottom: Spacing.one,
   },
   tab: {
     flex: 1,
-    paddingVertical: Spacing.two,
-    borderRadius: BorderRadius.medium,
-    borderWidth: 1,
+    paddingVertical: 10,
+    borderRadius: BorderRadius.medium - 3,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2240,8 +2256,22 @@ const styles = StyleSheet.create({
   historialCard: {
     borderWidth: 1,
     borderRadius: BorderRadius.large,
-    padding: Spacing.two,
-    marginBottom: Spacing.one,
+    padding: Spacing.three,
+    marginBottom: Spacing.two,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 6,
+      },
+      android: {
+        elevation: 2,
+      },
+      web: {
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+      }
+    }),
   },
   historialHeader: {
     flexDirection: 'row',

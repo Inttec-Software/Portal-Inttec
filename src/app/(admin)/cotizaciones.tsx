@@ -292,7 +292,7 @@ export default function CotizacionesListScreen() {
           ]
         );
       }
-    } catch (_err) {
+    } catch {
       showAlert('Error', 'No se pudo obtener el correo del cliente.');
     }
   };

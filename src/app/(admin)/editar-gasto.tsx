@@ -118,8 +118,8 @@ export default function EditarGastoForm() {
   const [facturado, setFacturado] = useState<boolean | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [facturaUri, setFacturaUri] = useState<string | null>(null);
-  const [facturaBase64, setFacturaBase64] = useState<string | null>(null);
-  const [facturaExt, setFacturaExt] = useState<string | null>(null);
+  const [_facturaBase64, setFacturaBase64] = useState<string | null>(null);
+  const [_facturaExt, setFacturaExt] = useState<string | null>(null);
   const [motivoSinFactura, setMotivoSinFactura] = useState('');
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
 
@@ -237,7 +237,7 @@ export default function EditarGastoForm() {
     }
   };
 
-  const [isLoadingGasto, setIsLoadingGasto] = useState(true);
+  const [_isLoadingGasto, setIsLoadingGasto] = useState(true);
 
   useEffect(() => {
     const init = async () => {
@@ -443,7 +443,7 @@ export default function EditarGastoForm() {
   };
 
   // Métodos para seleccionar y capturar factura
-  const handleCaptureFactura = async () => {
+  const _handleCaptureFactura = async () => {
     const hasPermission = await requestCameraPermission();
     if (!hasPermission) return;
 
@@ -495,7 +495,7 @@ export default function EditarGastoForm() {
 
 
   // Escanear con IA (Gemini OCR)
-  const handleScanWithIA = async () => {
+  const _handleScanWithIA = async () => {
     if (!imageBase64) return;
     setIsScanning(true);
     try {

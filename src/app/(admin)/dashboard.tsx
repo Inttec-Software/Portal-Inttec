@@ -74,7 +74,7 @@ export default function AdminDashboard() {
   const [startDateFilter, setStartDateFilter] = useState<string | null>(null);
   const [endDateFilter, setEndDateFilter] = useState<string | null>(null);
   const [dateFilterModalVisible, setDateFilterModalVisible] = useState(false);
-  const [tempSingleDate, setTempSingleDate] = useState('');
+
   const [tempStartDate, setTempStartDate] = useState('');
   const [tempEndDate, setTempEndDate] = useState('');
 
@@ -267,7 +267,7 @@ export default function AdminDashboard() {
       };
 
       setAdminUser(updatedUser);
-      await AsyncStorage.setItem('logged_user', JSON.stringify(updatedUser));
+      await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(updatedUser));
 
       showAlert('Éxito', 'Perfil actualizado correctamente.');
       setProfileModalVisible(false);
@@ -279,29 +279,14 @@ export default function AdminDashboard() {
     }
   };
 
-  useEffect(() => {
-    const checkAdmin = async () => {
-      const user = await AuthService.getCurrentUser();
-      if (!user || user.rol !== 'ADMIN') {
-        router.replace('/');
-        return;
-      }
-      setAdminUser(user);
-      await refreshData();
-    };
-
-    checkAdmin();
-
-    const interval = setInterval(() => {
-      refreshData(true);
-    }, 30000);
-
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company]);
-
   const refreshData = useCallback(async (silent = false) => {
-    if (!silent) setIsLoading(true);
+    if (!silent) {
+      setIsLoading(true);
+      setGastos([]);
+      setPersonal([]);
+      setVehiculos([]);
+      setRegistrosGasolina([]);
+    }
     try {
       const [gastosRes, usersRes, vehList, gasLogs] = await Promise.all([
         supabase.from('gastos').select('*').order('created_at', { ascending: false }),
@@ -326,6 +311,29 @@ export default function AdminDashboard() {
       if (!silent) setIsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const checkAdmin = async () => {
+      const user = await AuthService.getCurrentUser();
+      if (!user || user.rol !== 'ADMIN') {
+        router.replace('/');
+        return;
+      }
+      setAdminUser(user);
+      await refreshData();
+    };
+
+    checkAdmin();
+
+    const interval = setInterval(() => {
+      refreshData(true);
+    }, 30000);
+
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company]);
+
+
 
   const handleLogout = async () => {
     const performLogout = async () => {

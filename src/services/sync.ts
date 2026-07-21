@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
-import { supabase, Gasto } from './supabase';
+import { supabase, CompanyService } from './supabase';
 
-const OFFLINE_QUEUE_KEY = 'offline_gastos_queue';
+const getOfflineQueueKey = () => `offline_gastos_queue_${CompanyService.getActiveCompany()}`;
 
 export interface OfflineGastoItem {
   id: string;
@@ -86,7 +86,8 @@ export const SyncService = {
    * Agrega un gasto a la cola local fuera de línea
    */
   async enqueueGasto(item: Omit<OfflineGastoItem, 'id' | 'created_at'>): Promise<void> {
-    const queueStr = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
+    const queueKey = getOfflineQueueKey();
+    const queueStr = await AsyncStorage.getItem(queueKey);
     const queue: OfflineGastoItem[] = queueStr ? JSON.parse(queueStr) : [];
 
     const newItem: OfflineGastoItem = {
@@ -96,14 +97,15 @@ export const SyncService = {
     };
 
     queue.push(newItem);
-    await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+    await AsyncStorage.setItem(queueKey, JSON.stringify(queue));
   },
 
   /**
    * Obtiene la cola actual de gastos offline
    */
   async getOfflineQueue(): Promise<OfflineGastoItem[]> {
-    const queueStr = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
+    const queueKey = getOfflineQueueKey();
+    const queueStr = await AsyncStorage.getItem(queueKey);
     return queueStr ? JSON.parse(queueStr) : [];
   },
 
@@ -123,8 +125,10 @@ export const SyncService = {
     isSyncingInProgress = true;
     let syncedCount = 0;
 
+    const queueKey = getOfflineQueueKey();
+
     try {
-      const queueStr = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
+      const queueStr = await AsyncStorage.getItem(queueKey);
       if (!queueStr) return 0;
 
       const queue: OfflineGastoItem[] = JSON.parse(queueStr);
@@ -144,7 +148,7 @@ export const SyncService = {
             const fileName = `${item.empleado_id}/${Date.now()}.${ext}`;
             const arrayBuffer = base64ToArrayBuffer(item.base64Foto);
 
-            const { data: uploadData, error: uploadError } = await supabase.storage
+            const { data: _uploadData, error: uploadError } = await supabase.storage
               .from('tickets')
               .upload(fileName, arrayBuffer, {
                 contentType: contentType,
@@ -166,7 +170,7 @@ export const SyncService = {
             const fileName = `${item.empleado_id}/factura_${Date.now()}.${ext}`;
             const arrayBuffer = base64ToArrayBuffer(item.base64Factura);
 
-            const { data: uploadData, error: uploadError } = await supabase.storage
+            const { data: _uploadData, error: uploadError } = await supabase.storage
               .from('tickets')
               .upload(fileName, arrayBuffer, {
                 contentType: contentType,
@@ -247,7 +251,7 @@ export const SyncService = {
         }
       }
 
-      await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remainingQueue));
+      await AsyncStorage.setItem(queueKey, JSON.stringify(remainingQueue));
     } catch (err) {
       console.error('Error general en syncPendingGastos:', err);
     } finally {
