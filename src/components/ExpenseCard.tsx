@@ -93,6 +93,24 @@ export default function ExpenseCard({
           </Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          {/* Factura Badge */}
+          {gasto.facturado ? (
+            <View style={[styles.statusBadge, { backgroundColor: themeColors.success + '18' }]}>
+              <Ionicons name="checkmark-circle-outline" size={11} color={themeColors.success} />
+              <Text style={[styles.statusText, { color: themeColors.success }]}>Facturado</Text>
+            </View>
+          ) : (gasto.motivo_sin_factura?.startsWith('PENDIENTE') || gasto.motivo_sin_factura?.toLowerCase().includes('pendiente')) ? (
+            <View style={[styles.statusBadge, { backgroundColor: themeColors.warning + '18' }]}>
+              <Ionicons name="time-outline" size={11} color={themeColors.warning} />
+              <Text style={[styles.statusText, { color: themeColors.warning }]}>Pend. Factura</Text>
+            </View>
+          ) : (
+            <View style={[styles.statusBadge, { backgroundColor: themeColors.danger + '15' }]}>
+              <Ionicons name="document-text-outline" size={11} color={themeColors.danger} />
+              <Text style={[styles.statusText, { color: themeColors.danger }]}>Sin Factura</Text>
+            </View>
+          )}
+
           <View style={[styles.statusBadge, { backgroundColor: statusColor + '18' }]}>
             <Ionicons name={statusIcon} size={11} color={statusColor} />
             <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>

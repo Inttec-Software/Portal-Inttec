@@ -1,7 +1,7 @@
 module.exports = {
   expo: {
     name: "Portal Inttec & Daravisa",
-    slug: "app-movil",
+    slug: "portal-inttec",
     version: "1.2.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
@@ -77,7 +77,7 @@ module.exports = {
     extra: {
       router: {},
       eas: {
-        projectId: "a94e3f64-b9a8-4a1c-b8aa-2fa716dd4752"
+        projectId: "b2643e41-e676-497d-ab34-27eedbbf9ae1"
       }
     }
   }

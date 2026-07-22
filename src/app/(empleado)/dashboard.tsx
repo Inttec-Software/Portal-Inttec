@@ -722,7 +722,16 @@ export default function EmpleadoDashboard() {
         />
       )}
 
-      {/* Floating Action Buttons */}
+      {/* IA Button (Left Side) */}
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => router.push('/(empleado)/chat-ia')}
+        style={[styles.fabSecondary, { position: 'absolute', bottom: Spacing.four, left: Spacing.four, backgroundColor: '#8b5cf6' }]}
+      >
+        <Ionicons name="sparkles" size={22} color="#ffffff" />
+      </TouchableOpacity>
+
+      {/* Floating Action Buttons (Right Side) */}
       <View style={styles.fabContainer}>
         {/* Auto-Checador */}
         <TouchableOpacity

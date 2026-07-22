@@ -717,15 +717,19 @@ export default function AdminDashboard() {
   const handleToggleAdminFacturado = async (val: boolean) => {
     if (!selectedGasto) return;
     try {
+      // Si se marca como No Facturado (val === false), limpiamos el estado de 'PENDIENTE_ENTREGA'
+      let newMotivo = val ? null : (selectedGasto.motivo_sin_factura === 'PENDIENTE_ENTREGA' ? null : selectedGasto.motivo_sin_factura);
+      
       const updateObj: Partial<Gasto> = {
         facturado: val,
-        motivo_sin_factura: val ? null : selectedGasto.motivo_sin_factura
+        motivo_sin_factura: newMotivo
       };
+
       if (!val) {
         updateObj.factura_url = null;
       }
 
-      if (val) {
+      if (val || newMotivo === null) {
         setLocalMotivo('');
       }
 
@@ -2761,37 +2765,75 @@ export default function AdminDashboard() {
                         <View style={[styles.detailItem, { marginTop: Spacing.one, borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: Spacing.two }]}>
                           <Text style={[styles.detailLabel, { color: themeColors.textSecondary, fontWeight: '700', marginBottom: Spacing.one }]}>GESTIÓN DE FACTURACIÓN (ADMIN)</Text>
                           
-                          {/* Selector de Sí / No */}
-                          <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.two }}>
+                          {/* Selector de 3 Opciones: Sí Facturado / Pendiente de Factura / No Facturable */}
+                          <View style={{ flexDirection: 'row', gap: Spacing.one, marginBottom: Spacing.two }}>
                             <TouchableOpacity
                               onPress={() => handleToggleAdminFacturado(true)}
                               style={{
                                 flex: 1,
-                                height: 36,
+                                height: 38,
                                 borderRadius: BorderRadius.small,
                                 borderWidth: 1,
                                 borderColor: selectedGasto.facturado ? 'transparent' : themeColors.border,
-                                backgroundColor: selectedGasto.facturado ? themeColors.accent : themeColors.backgroundElement,
+                                backgroundColor: selectedGasto.facturado ? themeColors.success : themeColors.backgroundElement,
                                 justifyContent: 'center',
-                                alignItems: 'center'
+                                alignItems: 'center',
+                                paddingHorizontal: 4
                               }}
                             >
-                              <Text style={{ color: selectedGasto.facturado ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 13 }}>Sí, Facturado</Text>
+                              <Text style={{ color: selectedGasto.facturado ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                ✓ Facturado
+                              </Text>
                             </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={async () => {
+                                try {
+                                  const updateObj = { facturado: false, motivo_sin_factura: 'PENDIENTE_ENTREGA', factura_url: null };
+                                  const { error: dbError } = await supabase.from('gastos').update(updateObj).eq('id', selectedGasto.id);
+                                  if (dbError) throw dbError;
+                                  const updated = { ...selectedGasto, ...updateObj };
+                                  setSelectedGasto(updated);
+                                  setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updated : g));
+                                  setLocalMotivo('PENDIENTE_ENTREGA');
+                                } catch (err: any) {
+                                  showAlert('Error', err.message);
+                                }
+                              }}
+                              style={{
+                                flex: 1.2,
+                                height: 38,
+                                borderRadius: BorderRadius.small,
+                                borderWidth: 1,
+                                borderColor: (!selectedGasto.facturado && selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? 'transparent' : themeColors.border,
+                                backgroundColor: (!selectedGasto.facturado && selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? themeColors.warning : themeColors.backgroundElement,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                paddingHorizontal: 4
+                              }}
+                            >
+                              <Text style={{ color: (!selectedGasto.facturado && selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                ⏳ Pend. Factura
+                              </Text>
+                            </TouchableOpacity>
+
                             <TouchableOpacity
                               onPress={() => handleToggleAdminFacturado(false)}
                               style={{
                                 flex: 1,
-                                height: 36,
+                                height: 38,
                                 borderRadius: BorderRadius.small,
                                 borderWidth: 1,
-                                borderColor: !selectedGasto.facturado ? 'transparent' : themeColors.border,
-                                backgroundColor: !selectedGasto.facturado ? themeColors.accent : themeColors.backgroundElement,
+                                borderColor: (!selectedGasto.facturado && !selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? 'transparent' : themeColors.border,
+                                backgroundColor: (!selectedGasto.facturado && !selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? themeColors.accent : themeColors.backgroundElement,
                                 justifyContent: 'center',
-                                alignItems: 'center'
+                                alignItems: 'center',
+                                paddingHorizontal: 4
                               }}
                             >
-                              <Text style={{ color: !selectedGasto.facturado ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 13 }}>No Facturado</Text>
+                              <Text style={{ color: (!selectedGasto.facturado && !selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                ❌ No Facturado
+                              </Text>
                             </TouchableOpacity>
                           </View>
 
@@ -4073,6 +4115,29 @@ export default function AdminDashboard() {
         style={[styles.fab, { backgroundColor: '#7b1fa2', bottom: Spacing.four + 72 }]}
       >
         <Ionicons name="card" size={24} color="#ffffff" />
+      </TouchableOpacity>
+      {/* Floating Action Button for IA Admin (Left Side) */}
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => router.push('/(admin)/chat-ia' as any)}
+        style={{
+          position: 'absolute',
+          bottom: Spacing.four,
+          left: Spacing.four,
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          justifyContent: 'center',
+          alignItems: 'center',
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.2,
+          shadowRadius: 8,
+          elevation: 5,
+          backgroundColor: '#8b5cf6'
+        }}
+      >
+        <Ionicons name="sparkles" size={24} color="#ffffff" />
       </TouchableOpacity>
     </SafeAreaView>
   );
