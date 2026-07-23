@@ -100,7 +100,7 @@ export default function EmployeeChatIA() {
       timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
     };
     
-    const historyToPass = messages.map(m => ({ role: m.role, text: m.text }));
+    const historyToPass = messages.slice(-6).map(m => ({ role: m.role, text: m.text }));
     
     setMessages(prev => [...prev, userMsg]);
     setInputText('');

@@ -172,8 +172,8 @@ export default function AdminChatIA() {
       timestamp: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
     };
     
-    // Guardar el historial para enviarlo a Gemini (excluyendo el msj actual y mensajes sin rol claro)
-    const historyToPass = messages.map(m => ({ role: m.role, text: m.text }));
+    // Guardar el historial para enviarlo a Gemini (excluyendo el msj actual y mensajes sin rol claro) limitándolo a los últimos 6 mensajes
+    const historyToPass = messages.slice(-6).map(m => ({ role: m.role, text: m.text }));
     
     setMessages(prev => [...prev, userMsg]);
     setInputText('');

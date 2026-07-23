@@ -192,6 +192,44 @@ async function callGeminiAPI(requestBody: any): Promise<string> {
   throw new Error(`No se pudo procesar la imagen con la Inteligencia Artificial (${lastErrorMsg}). Intenta de nuevo con una foto más clara.`);
 }
 
+/**
+ * Elimina propiedades pesadas e irrelevantes para ahorrar tokens en la IA
+ */
+function minifyData(data: any): any {
+  if (!data) return data;
+  if (Array.isArray(data)) {
+    return data.map(minifyData);
+  }
+  if (typeof data === 'object') {
+    const minified = { ...data };
+    
+    // Lista de campos largos o irrelevantes a eliminar
+    const keysToRemove = [
+      'factura_url', 'comprobante_url', 'evidencia_url', 'fotografia_url',
+      'factura_base64', 'comprobante_base64', 
+      'created_at', 'updated_at', 'deleted_at',
+      'device_info'
+    ];
+    
+    keysToRemove.forEach(k => delete minified[k]);
+
+    // Recortar campos de justificación si son excesivamente largos
+    if (minified.justificacion && typeof minified.justificacion === 'string' && minified.justificacion.length > 500) {
+      minified.justificacion = minified.justificacion.substring(0, 500) + '...';
+    }
+
+    // Iterar sub-objetos
+    for (const key in minified) {
+      if (typeof minified[key] === 'object') {
+        minified[key] = minifyData(minified[key]);
+      }
+    }
+    
+    return minified;
+  }
+  return data;
+}
+
 export const GeminiService = {
   async scanTicket(base64Image: string, cantidadPersonas: number = 1, mimeType: string = 'image/jpeg'): Promise<GeminiOcrResult> {
     const prompt = `Analiza la imagen de este ticket de compra de gastos. Extrae y devuelve un objeto JSON puro (sin formato markdown ni bloques de código, solo el texto del JSON) con las siguientes propiedades:
@@ -683,7 +721,7 @@ REGLAS DE RESPUESTA:
 - Muestra siempre montos en MXN ($).
 
 --- ESTRUCTURA DE BASE DE DATOS COMPLETA (INTTEC Y DARAVISA) ---
-${JSON.stringify(contextData)}
+${JSON.stringify(minifyData(contextData))}
 --- FIN DE LA BASE DE DATOS ---
 `;
 
@@ -826,7 +864,7 @@ Lista de Materiales y Herramientas a Considerar para Paneles Solares:
 - Impermeabilizante, Varilla de tierra, Silicon
 
 --- REGISTROS PERSONALES DEL EMPLEADO ---
-${JSON.stringify(employeeData)}
+${JSON.stringify(minifyData(employeeData))}
 --- FIN DEL CONTEXTO ---
 `;
 
