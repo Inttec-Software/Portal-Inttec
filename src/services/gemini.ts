@@ -193,6 +193,43 @@ async function callGeminiAPI(requestBody: any): Promise<string> {
 }
 
 /**
+ * Ejecuta una petición HTTP a la API de Gemini pero devuelve el JSON completo en lugar de solo texto.
+ * Esto es necesario para Function Calling (Tools).
+ */
+async function callGeminiRaw(requestBody: any): Promise<any> {
+  if (!GEMINI_API_KEY) {
+    throw new Error('La clave API de Gemini no está configurada.');
+  }
+
+  let lastErrorMsg = '';
+
+  for (const model of FALLBACK_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.ok) {
+        return await response.json();
+      } else {
+        const errorText = await response.text();
+        logger.warn(`Modelo Gemini ${model} falló en callGeminiRaw: ${errorText}`);
+        lastErrorMsg = `Respuesta ${response.status}`;
+      }
+    } catch (err: any) {
+      logger.warn(`Excepción en callGeminiRaw a modelo ${model}:`, err);
+      lastErrorMsg = err.message || 'Error de conexión';
+    }
+  }
+
+  throw new Error(`Error en la llamada a la IA (${lastErrorMsg}).`);
+}
+
+
+/**
  * Elimina propiedades pesadas e irrelevantes para ahorrar tokens en la IA
  */
 function minifyData(data: any): any {
@@ -681,52 +718,113 @@ Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin mark
     chatHistory: { role: 'user' | 'model'; text: string }[]
   ): Promise<string> {
     const systemPrompt = `Eres el Gerente de Operaciones Virtual y Analista Financiero de Portal Inttec y Daravisa.
-Tienes ACCESO COMPLETO a la base de datos de ambas empresas (Inttec y Daravisa) organizadas en el JSON provisto a continuación.
+TU OBJETIVO ES RESPONDER CON EXACTITUD A LAS CONSULTAS DEL ADMINISTRADOR. NO TIENES LA BASE DE DATOS EN TU PROMPT, DEBES USAR TUS HERRAMIENTAS (Function Calling) PARA BUSCAR DATOS ESPECÍFICOS CUANDO SE TE PREGUNTE.
 
-TU OBJETIVO ES RESPONDER CON EXACTITUD A LAS CONSULTAS DEL ADMINISTRADOR SOBRE LOS SIGUIENTES 6 EJES:
-
-1. **Análisis Financiero y Gastos (Trazabilidad Total)**:
-   - Calcular gastos por empleado, categoría, proveedor o rango de fechas.
-   - Detectar gastos sin factura o pendientes de aprobación/comprobación.
-   - Alertar sobre anomalías (aumentos bruscos de gastos en comida, viáticos o insumos).
-
-2. **Análisis de Rentabilidad de Ventas y Proyectos**:
-   - Cruzar la tabla de Ventas y Partidas con la tabla de Gastos vinculados.
-   - Calcular utilidad neta y margen de ganancia porcentual de un proyecto o cliente específico.
-   - Identificar cuáles han sido los proyectos/ventas más rentables.
-   - Consultar el estado de entregas ("Pendiente de Entrega") o pagos ("Pendiente de Pago") por empresa (Inttec o Daravisa).
-
-3. **Auditoría de Tarjetas y Conciliación**:
-   - Analizar las auditorías de tarjetas corporativas (tabla auditorias_tarjeta).
-   - Identificar transacciones sin comprobante o tickets faltantes.
-   - Calcular saldos pendientes por comprobar.
-
-4. **Control de Asistencia y Personal (Checador)**:
-   - Consultar la tabla de asistencias para ver hora de entrada/salida, retards y ubicación.
-   - Reportar qué empleados llegaron tarde o no registraron salida en un periodo.
-   - Indicar quiénes están trabajando actualmente y su ubicación de check-in.
-
-5. **Gestión de Vehículos y Gasolina**:
-   - Calcular el rendimiento promedio en kilómetros por litro (km/l) usando el odómetro (kilometraje_actual) y los litros cargados en la tabla registro_gasolina.
-   - Consultar quién fue el último empleado en cargar combustible a un vehículo por sus placas o número económico.
-
-6. **Generación de Reportes Automáticos**:
-   - Redactar resúmenes ejecutivos en texto limpios para copiar y enviar por WhatsApp.
-   - Sintetizar los motivos por los que los gastos fueron rechazados (campo motivo_rechazo).
+Herramientas disponibles que puedes usar si es necesario:
+- obtener_resumen_financiero: Muestra el total de registros.
+- buscar_gastos: Filtra gastos (por empleado, categoría, empresa).
+- buscar_ventas: Busca proyectos y ventas.
+- buscar_asistencias: Busca entradas/salidas en el checador.
 
 REGLAS DE RESPUESTA:
 - Sé analítico, preciso y profesional.
 - Usa Markdown (negritas para totales/nombres y viñetas) para facilitar la lectura.
-- Si una empresa (Inttec o Daravisa) se menciona explícitamente en la pregunta, filtra únicamente los datos de esa empresa. Si no se especifica, ofrece un desglose o total unificado.
 - Muestra siempre montos en MXN ($).
-
---- ESTRUCTURA DE BASE DE DATOS COMPLETA (INTTEC Y DARAVISA) ---
-${JSON.stringify(minifyData(contextData))}
---- FIN DE LA BASE DE DATOS ---
+- Responde de manera clara y amigable.
 `;
 
+    // Herramientas de Gemini
+    const geminiTools = [{
+      functionDeclarations: [
+        {
+          name: "obtener_resumen_financiero",
+          description: "Obtiene información general sobre cuántos datos hay cargados y datos consolidados",
+        },
+        {
+          name: "buscar_gastos",
+          description: "Busca gastos en la base de datos de Inttec o Daravisa según los filtros proporcionados",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              empresa: { type: "STRING", description: "Filtra por empresa (Inttec, Daravisa)" },
+              empleado_nombre: { type: "STRING", description: "Filtra por el nombre del empleado (ej. 'Carlos')" },
+              categoria: { type: "STRING", description: "Filtra por categoría del gasto" },
+              status: { type: "STRING", description: "Filtra por status (PENDING, APPROVED, REJECTED)" }
+            }
+          }
+        },
+        {
+          name: "buscar_ventas",
+          description: "Busca ventas o proyectos",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              empresa: { type: "STRING", description: "Filtra por empresa" },
+              cliente: { type: "STRING", description: "Filtra por nombre del cliente" }
+            }
+          }
+        },
+        {
+          name: "buscar_asistencias",
+          description: "Busca los registros del checador (asistencias)",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              empleado_nombre: { type: "STRING", description: "Filtra por nombre de empleado" },
+            }
+          }
+        }
+      ]
+    }];
+
+    // Implementación local de las herramientas
+    const localTools: Record<string, Function> = {
+      obtener_resumen_financiero: () => {
+        return {
+          datos_empresa_actual_autenticada: { 
+            empresa: contextData.datos_empresa_actual_autenticada?.empresa,
+            total_gastos: contextData.datos_empresa_actual_autenticada?.gastos?.length || 0,
+            total_ventas: contextData.datos_empresa_actual_autenticada?.ventas?.length || 0,
+            total_empleados: contextData.datos_empresa_actual_autenticada?.usuarios?.length || 0
+          },
+          datos_empresa_inttec: { 
+            total_gastos: contextData.datos_empresa_inttec?.gastos?.length || 0,
+          },
+          datos_empresa_daravisa: { 
+            total_gastos: contextData.datos_empresa_daravisa?.gastos?.length || 0,
+          }
+        };
+      },
+      buscar_gastos: (args: any) => {
+        let gastos: any[] = [];
+        if (args.empresa?.toLowerCase() === 'daravisa' && contextData.datos_empresa_daravisa) gastos = contextData.datos_empresa_daravisa.gastos;
+        else if (args.empresa?.toLowerCase() === 'inttec' && contextData.datos_empresa_inttec) gastos = contextData.datos_empresa_inttec.gastos;
+        else gastos = contextData.datos_empresa_actual_autenticada?.gastos || [];
+
+        if (args.empleado_nombre) gastos = gastos.filter(g => g.empleado_nombre?.toLowerCase().includes(args.empleado_nombre.toLowerCase()));
+        if (args.categoria) gastos = gastos.filter(g => g.categoria?.toLowerCase().includes(args.categoria.toLowerCase()));
+        if (args.status) gastos = gastos.filter(g => g.status === args.status);
+        
+        return minifyData(gastos).slice(0, 50); // Límite para proteger los tokens
+      },
+      buscar_ventas: (args: any) => {
+        let ventas: any[] = [];
+        if (args.empresa?.toLowerCase() === 'daravisa' && contextData.datos_empresa_daravisa) ventas = contextData.datos_empresa_daravisa.ventas;
+        else if (args.empresa?.toLowerCase() === 'inttec' && contextData.datos_empresa_inttec) ventas = contextData.datos_empresa_inttec.ventas;
+        else ventas = contextData.datos_empresa_actual_autenticada?.ventas || [];
+
+        if (args.cliente) ventas = ventas.filter(v => v.cliente?.toLowerCase().includes(args.cliente.toLowerCase()));
+        return minifyData(ventas).slice(0, 30);
+      },
+      buscar_asistencias: (args: any) => {
+        let asist: any[] = contextData.datos_empresa_actual_autenticada?.asistencias || [];
+        if (args.empleado_nombre) asist = asist.filter(a => a.empleado_nombre?.toLowerCase().includes(args.empleado_nombre.toLowerCase()));
+        return minifyData(asist).slice(0, 30);
+      }
+    };
+
     // Convert history to Gemini API format
-    const formattedContents = chatHistory.map(msg => ({
+    const formattedContents: any[] = chatHistory.map(msg => ({
       role: msg.role,
       parts: [{ text: msg.text }]
     }));
@@ -737,19 +835,52 @@ ${JSON.stringify(minifyData(contextData))}
       parts: [{ text: message }]
     });
 
-    const requestBody = {
-      systemInstruction: {
-        parts: [{ text: systemPrompt }]
-      },
-      contents: formattedContents,
-      generationConfig: {
-        temperature: 0.2 // Low temperature for factual data analysis
-      }
-    };
-
     try {
-      const textResult = await callGeminiAPI(requestBody);
-      return textResult;
+      let limitIterations = 5;
+      
+      while (limitIterations > 0) {
+        limitIterations--;
+        const requestBody = {
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: formattedContents,
+          tools: geminiTools,
+          generationConfig: { temperature: 0.2 }
+        };
+
+        const res = await callGeminiRaw(requestBody);
+        const part = res?.candidates?.[0]?.content?.parts?.[0];
+
+        if (part?.functionCall) {
+          const { name, args } = part.functionCall;
+          
+          formattedContents.push({
+            role: 'model',
+            parts: [{ functionCall: { name, args } }]
+          });
+
+          let resultData = null;
+          if (localTools[name]) {
+            resultData = localTools[name](args || {});
+          } else {
+            resultData = { error: "Herramienta no encontrada o no implementada" };
+          }
+
+          formattedContents.push({
+            role: 'function',
+            parts: [{
+              functionResponse: {
+                name,
+                response: { name, content: resultData }
+              }
+            }]
+          });
+        } else if (part?.text) {
+          return part.text;
+        } else {
+          return "Lo siento, no pude encontrar esa información de forma clara.";
+        }
+      }
+      return "El asistente tomó demasiado tiempo tratando de recolectar la información, inténtalo de nuevo con una pregunta más específica.";
     } catch (err: any) {
       logger.error('Error en chatWithContext:', err);
       throw new Error(err.message || 'No se pudo generar una respuesta. Por favor intenta de nuevo.');
@@ -765,111 +896,89 @@ ${JSON.stringify(minifyData(contextData))}
 Tu función es ayudar al empleado a responder dudas sobre SUS PROPIOS GASTOS registrados y guiarlo paso a paso con los CHECKLISTS Y LISTAS DE MATERIALES / HERRAMIENTAS OFICIALES de la empresa para trabajos técnicos.
 
 REGLAS DE SEGURIDAD Y PRIVACIDAD:
-1. El empleado ÚNICAMENTE puede consultar información sobre sus propios gastos y registros personales provistos en el JSON.
+1. El empleado ÚNICAMENTE puede consultar información sobre sus propios gastos y registros personales provistos en tu contexto inicial o mediante herramientas.
 2. Si el empleado pregunta por finanzas generales de la empresa, ventas de la empresa o datos de otros empleados, responde educadamente que no tienes acceso a esa información por políticas de privacidad.
 3. Responde siempre con amabilidad, claridad y precisión usando Markdown (listas con viñetas y negritas).
-
---- CONOCIMIENTO TÉCNICO OFICIAL DE LA EMPRESA (CHECKLISTS Y MATERIALES) ---
-
-📋 **CHECK LIST MINISPLITS (INSTALACIÓN Y MATERIALES)**
-Pasos de Instalación:
-1. Definir la ubicación de la unidad interior.
-2. Definir la ubicación de la unidad exterior.
-3. Definir si va a llevar ménsula para el soporte de la unidad exterior o si se va a colocar en el techo.
-4. Instalar plantilla de Unidad interior centrada, alineada y nivelada.
-5. Tomar en cuenta la altura del mini para dejar respiración en la parte superior del equipo.
-6. Hacer la Perforación de la pared, utilizando aspiradora para no propagar el polvo.
-7. Unir líneas de gas, asegurando que los conectores queden firmes.
-8. Colocar ya sea uñas o un tramo de tubo para el desagüe del mini Split.
-9. Formar un caracol junto al compresor.
-10. Hacer conexiones eléctricas, entre unidad interior y exterior.
-11. Instalar protección termomagnética.
-12. Hacer conexiones eléctricas de unidad exterior a protección termomagnética.
-13. En caso de usar tubería, separarla del piso con canal unistrut, usar siempre abrazaderas.
-14. Hacer vacío en las líneas de gas por 10-15 minutos para asegurar que no haya filtraciones.
-15. Asegurar que tengan espuma aislante las líneas.
-16. Aplicar cinta momia a las Líneas sobre la espuma aislante.
-17. Aplicar cinta Poliken sobre la cinta Momia.
-18. Aplicar plastilina en agujero.
-19. Poner cubierta de PVC para tapar agujero.
-20. Abrir líneas de gas.
-21. Encender equipo.
-22. Validar temperatura con pistola térmica.
-23. Recoger basura y escombro.
-24. Limpiar equipos.
-25. Entregar a cliente: control remoto, manuales y filtros (Firma Conformidad).
-
-Lista de Materiales y Herramientas a Considerar para Minisplits:
-- Taladro rotomartillo SDS Max para la perforación de las líneas
-- Broca de 2 pulgadas o 1 ½ (THOR)
-- Kit de taladros inalámbricos
-- Taquetes y tornillos 5/16 o 1/4 para fijar unidad interior y poner uñas
-- Broca de 1/4 y 5/16
-- Manómetros
-- Llaves cresent y pericas
-- Llaves Allen
-- Escalera de tijera y de extensión (si el domicilio no tiene para subir al techo)
-- Cinta poliken
-- Bomba de vacío
-- Desarmadores aislados
-- Pinzas aisladas eléctricas
-- Multímetro
-- Pistola de temperatura
-- Omegas y uñas
-- Extensión para la bomba de vacío
-- Aspiradora
-
----
-
-📋 **CHECK LIST PANELES SOLARES (1ER VISITA Y MATERIALES)**
-Pasos de Instalación (1er Visita):
-1. Revisar espacio y orientación de los paneles para considerar accesorios y cantidad de rieles.
-2. Revisar rutas para cableado eléctrico hacia tablero principal de AC.
-3. Confirmar ubicación del inversor para definir rutas de tubería de DC.
-4. Revisar sombras que puedan afectar a la producción, orientación al SUR e inclinación de 28 grados.
-5. Revisar si se va a usar taquete químico o barrenancla.
-6. Asegurar que en el domicilio ya se tenga conexión 220V (SI NO, preparar 5ta terminal y 2da fase).
-7. Poner varilla a tierra física para instalación de paneles, aterrizar estructura.
-8. Hacer perforaciones para LFOOT y colocar sellador dentro de la perforación para evitar goteras.
-9. Revisar que todos y cada uno de los tornillos de la estructura se encuentren correctamente apretados antes de montar los paneles.
-10. Impermeabilizar a conciencia todas las patas de la estructura.
-11. Montar los paneles siempre cuidando la escuadra de la estructura para que no se desnivele el arreglo y se vea chueco.
-12. Usar solo calibre 12 AWG para corriente directa mientras vaya por tubería y solo cable fotovoltaico cuando este esté expuesto.
-13. Usar mínimo cable calibre 10 para corriente alterna para llegar de inversor a centro de carga y cable uso rudo 3x10 de centro de carga a inversor.
-14. Siempre usar cable prefabricado MC4 para las conexiones de centro de carga DC a inversor.
-15. Revisar bien el anclaje que se va a usar para montar el inversor asegurando que por nada se vaya a caer.
-16. Dejar una separación mínima de 30 cm hacia los lados y hacia arriba del inversor para cuestión de garantías.
-17. Ya que estén montados paneles, hacer pruebas de la resistencia de las barrenanclas para evitar que se vayan a soltar en un futuro.
-18. Conectar los paneles en serie respetando código de colores: ROJO + Y NEGRO – (el cable verde siempre va a ser tierra).
-19. Revisar polaridad de corriente directa antes de conectar al inversor para evitar algún daño por polaridades invertidas.
-20. Colocar registro hermético de conexiones en pata de estructura con su conector glándula y sus terminales ponchables.
-21. Colocar puesta a tierra en estructura y módulos.
-22. Tomar fotografías de paneles instalados, etiqueta de inversor, inversor instalado, medidor y etiqueta de paneles para preparación de documentación ante CFE (Firma Conformidad).
-
-Lista de Materiales y Herramientas a Considerar para Paneles Solares:
-- SDS plus, brocas de 3/8 y 1/2 para SDS plus
-- Kit taladros inalámbricos, brocas de 5/16 y 1/4
-- Taquetes y tornillos de 5/16 y 1/4
-- Lfoot, Tilt conector (N3), Climber (TopClip), Rail conector
-- EndClamp, MidClamp, Groundy (Conector Tierra)
-- Llave cresent, Llave perica, Pistola de silicón, Martillo, Desarmadores, Pinzas eléctricas, Multímetro
-- Escalera de tijera, Aspiradora, Barrenanclas, Kit ponchador MC4, Esmeriladora angular, Flexómetro, Terminales ponchables
-- Cable rojo, negro y verde calibre 12
-- Cable negro y verde calibre 10
-- Fotovoltaico rojo y negro
-- Nivel, Dobla tubos, Tubería 3/4 conduit pared delgada
-- Conectores compresión 3/4, Coples de compresión 3/4, Canal unistrut, Abrazaderas unistrut, Uñas, Monitores
-- LB, LL, LR tipo C tipo TEE cajas Fs, Conectores glándulas, Registro de conexiones
-- Prefabricados MC4, Centros de carga, Térmicos de AC, Térmicos de DC, Uso rudo 3x10
-- Impermeabilizante, Varilla de tierra, Silicon
+4. NO tienes los manuales de instalación técnicos en tu memoria inmediata. Para responder sobre instalación de minisplits o paneles solares, DEBES usar obligatoriamente la herramienta "consultar_manual_tecnico".
 
 --- REGISTROS PERSONALES DEL EMPLEADO ---
 ${JSON.stringify(minifyData(employeeData))}
 --- FIN DEL CONTEXTO ---
 `;
 
+    // Herramientas de Gemini para el Empleado
+    const geminiTools = [{
+      functionDeclarations: [
+        {
+          name: "consultar_manual_tecnico",
+          description: "Consulta el checklist oficial de la empresa para instalación de equipos (minisplits, paneles solares). Úsalo cuando el empleado pida guía sobre instalación, procedimientos técnicos o lista de materiales.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              tema: { type: "STRING", description: "El tema a consultar. Ejemplos: 'minisplit', 'paneles'" }
+            },
+            required: ["tema"]
+          }
+        }
+      ]
+    }];
+
+    // Diccionario de manuales
+    const manuales: Record<string, string> = {
+      minisplit: `📋 CHECK LIST MINISPLITS (INSTALACIÓN Y MATERIALES)
+Pasos de Instalación:
+1. Definir la ubicación de la unidad interior y exterior.
+2. Definir si va a llevar ménsula para soporte exterior.
+3. Instalar plantilla de Unidad interior centrada, alineada y nivelada.
+4. Tomar en cuenta la altura para dejar respiración superior.
+5. Hacer la Perforación de la pared (usando aspiradora).
+6. Unir líneas de gas, conectores firmes.
+7. Colocar tubo para el desagüe del mini Split.
+8. Formar un caracol junto al compresor.
+9. Conexiones eléctricas interior/exterior y protección termomagnética.
+10. Separar tubería del piso con canal unistrut y abrazaderas.
+11. Hacer vacío en las líneas de gas por 10-15 minutos.
+12. Aplicar espuma aislante, cinta momia y cinta Poliken.
+13. Aplicar plastilina y cubierta PVC en agujero.
+14. Abrir líneas de gas y encender equipo. Validar temperatura.
+15. Recoger escombro, limpiar y entregar a cliente.
+
+Materiales: Taladro rotomartillo SDS Max, broca 2" o 1 1/2, taquetes/tornillos 5/16 o 1/4, manómetros, llaves cresent/pericas/allen, escalera, cinta poliken/momia, bomba vacío, desarmadores y pinzas aisladas, multímetro, pistola temperatura.`,
+      paneles: `📋 CHECK LIST PANELES SOLARES (1ER VISITA Y MATERIALES)
+Pasos de Instalación:
+1. Revisar espacio, orientación y rutas para cableado eléctrico y tubería DC.
+2. Revisar sombras, orientación al SUR e inclinación 28 grados.
+3. Confirmar anclaje (taquete químico o barrenancla).
+4. Asegurar 220V en domicilio. Poner varilla a tierra física.
+5. Perforaciones para LFOOT con sellador. Apretar todos los tornillos.
+6. Impermeabilizar patas. Montar paneles cuidando escuadra.
+7. Usar calibre 12 AWG DC por tubería y fotovoltaico expuesto.
+8. Usar mínimo calibre 10 para corriente alterna (inversor a centro carga).
+9. Usar cable prefabricado MC4 para conexiones DC.
+10. Separación mínima 30 cm para inversor.
+11. Pruebas de resistencia a barrenanclas.
+12. Conectar paneles en serie: ROJO + Y NEGRO - (Verde tierra).
+13. Revisar polaridad DC. Colocar registro hermético en pata.
+14. Tomar fotografías de evidencia para CFE.
+
+Materiales: SDS plus (brocas 3/8 y 1/2), Lfoot, Tilt conector, Climber, Rail conector, EndClamp, MidClamp, Groundy. Cables calibres 10 y 12. Canal unistrut. Impermeabilizante. Varilla tierra.`
+    };
+
+    const localTools: Record<string, Function> = {
+      consultar_manual_tecnico: (args: any) => {
+        const tema = (args.tema || '').toLowerCase();
+        if (tema.includes('minisplit') || tema.includes('clima') || tema.includes('aire')) {
+          return manuales['minisplit'];
+        }
+        if (tema.includes('panel') || tema.includes('solar')) {
+          return manuales['paneles'];
+        }
+        return "Manual no encontrado para ese tema. Solo tenemos: minisplits y paneles solares.";
+      }
+    };
+
     // Convert history to Gemini API format
-    const formattedContents = chatHistory.map(msg => ({
+    const formattedContents: any[] = chatHistory.map(msg => ({
       role: msg.role,
       parts: [{ text: msg.text }]
     }));
@@ -879,19 +988,52 @@ ${JSON.stringify(minifyData(employeeData))}
       parts: [{ text: message }]
     });
 
-    const requestBody = {
-      systemInstruction: {
-        parts: [{ text: systemPrompt }]
-      },
-      contents: formattedContents,
-      generationConfig: {
-        temperature: 0.2
-      }
-    };
-
     try {
-      const textResult = await callGeminiAPI(requestBody);
-      return textResult;
+      let limitIterations = 3; // Menos iteraciones para el empleado
+      
+      while (limitIterations > 0) {
+        limitIterations--;
+        const requestBody = {
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: formattedContents,
+          tools: geminiTools,
+          generationConfig: { temperature: 0.2 }
+        };
+
+        const res = await callGeminiRaw(requestBody);
+        const part = res?.candidates?.[0]?.content?.parts?.[0];
+
+        if (part?.functionCall) {
+          const { name, args } = part.functionCall;
+          
+          formattedContents.push({
+            role: 'model',
+            parts: [{ functionCall: { name, args } }]
+          });
+
+          let resultData = null;
+          if (localTools[name]) {
+            resultData = localTools[name](args || {});
+          } else {
+            resultData = { error: "Herramienta no encontrada" };
+          }
+
+          formattedContents.push({
+            role: 'function',
+            parts: [{
+              functionResponse: {
+                name,
+                response: { name, content: resultData }
+              }
+            }]
+          });
+        } else if (part?.text) {
+          return part.text;
+        } else {
+          return "Lo siento, no pude procesar esa solicitud.";
+        }
+      }
+      return "El sistema tardó demasiado, inténtalo nuevamente.";
     } catch (err: any) {
       logger.error('Error en chatWithEmployeeContext:', err);
       throw new Error(err.message || 'No se pudo procesar tu consulta.');
