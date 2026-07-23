@@ -1,13 +1,6 @@
--- ===========================================================================
--- SCRIPT DE INICIALIZACIÓN DE BASE DE DATOS: DARAVISA
--- Ejecuta este script en el editor SQL de tu nuevo proyecto de Supabase
--- ===========================================================================
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
 
--- 1. Habilitar extensiones necesarias
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
--- 2. Crear tabla de Usuarios (Esquema de autenticación personalizada)
 CREATE TABLE public.usuarios (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   nombre text NOT NULL,
@@ -18,8 +11,6 @@ CREATE TABLE public.usuarios (
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT usuarios_pkey PRIMARY KEY (id)
 );
-
--- 3. Crear tabla de Perfiles (opcional, para compatibilidad)
 CREATE TABLE public.perfiles (
   id uuid NOT NULL,
   nombre text NOT NULL,
@@ -29,8 +20,6 @@ CREATE TABLE public.perfiles (
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT perfiles_pkey PRIMARY KEY (id)
 );
-
--- 4. Crear tabla de Clientes
 CREATE TABLE public.clientes (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   nombre text NOT NULL UNIQUE,
@@ -40,34 +29,18 @@ CREATE TABLE public.clientes (
   codigo_postal text,
   CONSTRAINT clientes_pkey PRIMARY KEY (id)
 );
-
--- 5. Crear tabla de Categorías
 CREATE TABLE public.categorias (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   nombre text NOT NULL UNIQUE,
   CONSTRAINT categorias_pkey PRIMARY KEY (id)
 );
-
--- 6. Crear tabla de Subcategorías
 CREATE TABLE public.subcategorias (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   categoria_id uuid NOT NULL,
   nombre text NOT NULL,
   CONSTRAINT subcategorias_pkey PRIMARY KEY (id),
-  CONSTRAINT subcat_cat_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias(id) ON DELETE CASCADE
+  CONSTRAINT subcat_cat_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias(id)
 );
-
--- 7. Crear tabla de Ventas
-CREATE TABLE public.ventas (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  cliente_id uuid,
-  total numeric,
-  creado_en timestamp with time zone DEFAULT now(),
-  CONSTRAINT ventas_pkey PRIMARY KEY (id),
-  CONSTRAINT ventas_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE SET NULL
-);
-
--- 8. Crear tabla de Gastos
 CREATE TABLE public.gastos (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   empleado_id uuid NOT NULL,
@@ -93,12 +66,12 @@ CREATE TABLE public.gastos (
   factura_url text,
   motivo_sin_factura text,
   venta_id uuid,
+  tipo_servicio_proyecto text,
+  detalle_servicio_proyecto text,
   CONSTRAINT gastos_pkey PRIMARY KEY (id),
-  CONSTRAINT gastos_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id) ON DELETE CASCADE,
-  CONSTRAINT gastos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id) ON DELETE SET NULL
+  CONSTRAINT gastos_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id),
+  CONSTRAINT gastos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id)
 );
-
--- 9. Crear tabla de Evidencias de Trabajo
 CREATE TABLE public.evidencias (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   empleado_id uuid NOT NULL,
@@ -109,14 +82,12 @@ CREATE TABLE public.evidencias (
   observaciones text,
   foto_antes_url text,
   foto_despues_url text,
-  fotos_adicionales_urls text[],
+  fotos_adicionales_urls ARRAY,
   resumen_ia text,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT evidencias_pkey PRIMARY KEY (id),
-  CONSTRAINT evidencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id) ON DELETE CASCADE
+  CONSTRAINT evidencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
 );
-
--- 10. Crear tabla de Asistencias (Check-in/out)
 CREATE TABLE public.asistencias (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   empleado_id uuid NOT NULL,
@@ -133,13 +104,8 @@ CREATE TABLE public.asistencias (
   direccion_salida text,
   creado_en timestamp with time zone DEFAULT now(),
   CONSTRAINT asistencias_pkey PRIMARY KEY (id),
-  CONSTRAINT asistencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id) ON DELETE CASCADE
+  CONSTRAINT asistencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
 );
-
--- Crear índice para mejorar consultas de asistencia
-CREATE INDEX IF NOT EXISTS idx_asistencias_empleado_fecha ON public.asistencias(empleado_id, fecha);
-
--- 11. Crear tabla de Cotizaciones
 CREATE TABLE public.cotizaciones (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   folio text NOT NULL UNIQUE,
@@ -152,77 +118,152 @@ CREATE TABLE public.cotizaciones (
   total numeric,
   lineas jsonb,
   terminos_condiciones text,
-  estado text DEFAULT 'Borrador',
+  estado text DEFAULT 'Borrador'::text,
   creado_en timestamp with time zone DEFAULT now(),
   CONSTRAINT cotizaciones_pkey PRIMARY KEY (id)
 );
-
--- 12. Crear tabla de Logs de Auditoría
 CREATE TABLE public.audit_logs (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   timestamp timestamp with time zone DEFAULT now(),
   action text CHECK (action = ANY (ARRAY['CREATE'::text, 'APPROVE'::text, 'REJECT'::text, 'UPDATE'::text])),
   actor_id uuid,
   target_id text NOT NULL,
+  details text,
   CONSTRAINT audit_logs_pkey PRIMARY KEY (id)
 );
-
--- 13. Crear tabla de Auditorías de Tarjeta
+CREATE TABLE public.vehiculos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  marca text NOT NULL,
+  modelo text NOT NULL,
+  anio integer NOT NULL,
+  placas text NOT NULL UNIQUE,
+  numero_economico text,
+  activo boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT vehiculos_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.registro_gasolina (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  gasto_id uuid,
+  vehiculo_id uuid NOT NULL,
+  empleado_id uuid NOT NULL,
+  fecha date NOT NULL DEFAULT CURRENT_DATE,
+  kilometraje_actual integer NOT NULL,
+  litros numeric NOT NULL,
+  costo_total numeric NOT NULL,
+  ticket_foto_url text,
+  observaciones text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT registro_gasolina_pkey PRIMARY KEY (id),
+  CONSTRAINT registro_gasolina_gasto_id_fkey FOREIGN KEY (gasto_id) REFERENCES public.gastos(id),
+  CONSTRAINT registro_gasolina_vehiculo_id_fkey FOREIGN KEY (vehiculo_id) REFERENCES public.vehiculos(id),
+  CONSTRAINT registro_gasolina_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.ventas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  registrado_por uuid,
+  fecha date NOT NULL DEFAULT CURRENT_DATE,
+  cliente text NOT NULL DEFAULT ''::text,
+  factura_referencia text,
+  tipo_proyecto text,
+  proveedor text,
+  precio_total_facturado numeric DEFAULT 0,
+  costo_total numeric DEFAULT 0,
+  utilidad_bruta numeric DEFAULT 0,
+  margen_porcentual numeric DEFAULT 0,
+  factura_url text,
+  notas text,
+  created_at timestamp with time zone DEFAULT now(),
+  descripcion text,
+  agregar_iva boolean DEFAULT false,
+  CONSTRAINT ventas_pkey PRIMARY KEY (id),
+  CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.categorias_productos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  nombre text NOT NULL UNIQUE,
+  descripcion text,
+  created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT categorias_productos_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.proveedores (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  nombre text NOT NULL,
+  rfc character varying UNIQUE,
+  created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT proveedores_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.productos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  sku_interno character varying NOT NULL UNIQUE,
+  nombre_oficial text NOT NULL,
+  categoria_id uuid NOT NULL,
+  stock_actual integer NOT NULL DEFAULT 0 CHECK (stock_actual >= 0),
+  activo boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  precio_unitario numeric DEFAULT 0,
+  impuesto_porcentaje numeric DEFAULT 16,
+  clave_facturacion text,
+  CONSTRAINT productos_pkey PRIMARY KEY (id),
+  CONSTRAINT productos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias_productos(id)
+);
+CREATE TABLE public.alias_proveedor_producto (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  proveedor_id uuid NOT NULL,
+  producto_id uuid NOT NULL,
+  nombre_segun_proveedor text NOT NULL,
+  created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT alias_proveedor_producto_pkey PRIMARY KEY (id),
+  CONSTRAINT alias_proveedor_producto_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id),
+  CONSTRAINT alias_proveedor_producto_producto_id_fkey FOREIGN KEY (producto_id) REFERENCES public.productos(id)
+);
+CREATE TABLE public.movimientos_inventario (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  producto_id uuid NOT NULL,
+  tipo character varying NOT NULL CHECK (tipo::text = ANY (ARRAY['ENTRADA'::character varying::text, 'SALIDA'::character varying::text])),
+  cantidad integer NOT NULL CHECK (cantidad > 0),
+  fecha timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+  folio_factura character varying,
+  proveedor_id uuid,
+  creado_por uuid,
+  CONSTRAINT movimientos_inventario_pkey PRIMARY KEY (id),
+  CONSTRAINT movimientos_inventario_producto_id_fkey FOREIGN KEY (producto_id) REFERENCES public.productos(id),
+  CONSTRAINT movimientos_inventario_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id),
+  CONSTRAINT movimientos_inventario_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.ventas_partidas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  venta_id uuid,
+  descripcion text NOT NULL,
+  cantidad numeric DEFAULT 1,
+  unidad text DEFAULT 'PZA'::text,
+  precio_unitario_venta numeric DEFAULT 0,
+  costo_unitario_proveedor numeric DEFAULT 0,
+  precio_total_venta numeric DEFAULT 0,
+  costo_total_proveedor numeric DEFAULT 0,
+  CONSTRAINT ventas_partidas_pkey PRIMARY KEY (id),
+  CONSTRAINT ventas_partidas_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id)
+);
 CREATE TABLE public.auditorias_tarjeta (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
-  tarjeta text NOT NULL, -- BBVA, AMEX, MARRIOT, BANORTE
-  metodo_pago text NOT NULL, -- tarjeta_credito, tarjeta_debito, tarjeta
+  tarjeta text NOT NULL,
+  metodo_pago text NOT NULL,
   titular text,
   periodo_inicio date,
   periodo_fin date,
   total_cargos numeric NOT NULL,
   total_conciliado numeric NOT NULL,
   total_faltante numeric NOT NULL,
-  resultado_json jsonb NOT NULL, -- snapshot de matchedList y statementResult
+  resultado_json jsonb NOT NULL,
   creado_por uuid,
   creado_por_nombre text,
   creado_en timestamp with time zone DEFAULT now(),
   CONSTRAINT auditorias_tarjeta_pkey PRIMARY KEY (id),
-  CONSTRAINT auditorias_tarjeta_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id) ON DELETE SET NULL
+  CONSTRAINT auditorias_tarjeta_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id)
 );
-
--- ===========================================================================
-
--- FUNCIONES PERSONALIZADAS (RPC)
--- ===========================================================================
-
--- Función de Login de Usuario
-CREATE OR REPLACE FUNCTION public.login_usuario(email_param text, password_param text)
-RETURNS SETOF public.usuarios AS $$
-BEGIN
-  RETURN QUERY
-  SELECT * FROM public.usuarios
-  WHERE LOWER(email) = LOWER(email_param)
-    AND password = password_param;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- ===========================================================================
--- DATOS SEMILLA (SEED DATA)
--- Modifica estas credenciales iniciales en tu primer inicio de sesión
--- ===========================================================================
-
--- Crear Administrador Inicial
-INSERT INTO public.usuarios (nombre, email, password, rol, telefono)
-VALUES (
-  'Administrador Daravisa', 
-  'admin@daravisa.com', 
-  'admin123', 
-  'ADMIN', 
-  '6141234567'
-) ON CONFLICT (email) DO NOTHING;
-
--- Crear Empleado Inicial
-INSERT INTO public.usuarios (nombre, email, password, rol, telefono)
-VALUES (
-  'Técnico Daravisa', 
-  'empleado@daravisa.com', 
-  'empleado123', 
-  'EMPLEADO', 
-  '6147654321'
-) ON CONFLICT (email) DO NOTHING;
+CREATE TABLE public.app_settings (
+  id integer NOT NULL DEFAULT 1,
+  min_version_code integer NOT NULL DEFAULT 1,
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT app_settings_pkey PRIMARY KEY (id)
+);
