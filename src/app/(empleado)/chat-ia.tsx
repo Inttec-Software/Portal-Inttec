@@ -322,6 +322,7 @@ const styles = StyleSheet.create({
   messageBubble: {
     padding: Spacing.three,
     borderRadius: BorderRadius.large,
+    flexShrink: 1,
   },
   messageText: {
     fontSize: 15,
