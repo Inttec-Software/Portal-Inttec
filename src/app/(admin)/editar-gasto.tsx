@@ -692,10 +692,17 @@ export default function EditarGastoForm() {
       return;
     }
 
-    if (facturado === false && !motivoSinFactura.trim()) {
-      showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
-      setCurrentStep(2);
-      return;
+    if (facturado === false) {
+      if (!motivoSinFactura.trim()) {
+        showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
+        setCurrentStep(2);
+        return;
+      }
+      if (motivoSinFactura.trim() === 'PENDIENTE_ENTREGA') {
+        showAlert('Validación', 'Por favor explica por qué la factura está pendiente.');
+        setCurrentStep(2);
+        return;
+      }
     }
 
     setIsSubmitting(false);
@@ -1568,19 +1575,19 @@ export default function EditarGastoForm() {
                 </View>
               </View>
 
-              {facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA' && (
+              {facturado === false && motivoSinFactura.startsWith('PENDIENTE') && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning, marginBottom: Spacing.two, padding: Spacing.two, borderRadius: BorderRadius.medium }]}>
                   <Text style={{ color: themeColors.warning, fontWeight: '700', fontSize: 12 }}>
-                    ⚠️ Factura Pendiente de Entregar: El administrador o empleado podrá adjuntar el archivo posteriormente.
+                    ⚠️ Factura Pendiente de Entregar: Por favor explica por qué está pendiente a continuación.
                   </Text>
                 </View>
               )}
 
-              {facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA' && (
+              {facturado === false && (
                 <View style={{ marginBottom: Spacing.two }}>
                   <CustomInput
-                    label="Motivo por el cual no se cuenta con factura *"
-                    placeholder="Ej. El establecimiento no emite facturas, régimen simplificado, etc."
+                    label={motivoSinFactura.startsWith('PENDIENTE') ? "Explicación (Obligatorio) *" : "Motivo por el cual no se cuenta con factura *"}
+                    placeholder={motivoSinFactura.startsWith('PENDIENTE') ? "Escribe la razón (ej: PENDIENTE_ENTREGA: Me la mandan mañana)" : "Ej. El establecimiento no emite facturas, régimen simplificado, etc."}
                     value={motivoSinFactura}
                     onChangeText={setMotivoSinFactura}
                     iconName="alert-circle-outline"

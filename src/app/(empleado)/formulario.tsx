@@ -654,7 +654,13 @@ export default function GastoForm() {
       return;
     }
 
-    if (facturado === false && !motivoSinFactura.trim()) {
+    if (facturado === false && facturaStatus === 'PENDIENTE' && !comentarioPendiente.trim()) {
+      showAlert('Validación', 'Por favor explica por qué la factura está pendiente.');
+      setCurrentStep(2);
+      return;
+    }
+
+    if (facturado === false && facturaStatus === 'NO' && !motivoSinFactura.trim()) {
       showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
       setCurrentStep(2);
       return;
@@ -1755,7 +1761,7 @@ export default function GastoForm() {
                     </Text>
                   </View>
                   <CustomInput
-                    label="Comentario u Observación de Factura Pendiente (Opcional)"
+                    label="Explicación de Factura Pendiente (Obligatorio) *"
                     placeholder="Ej. El proveedor enviará el archivo el próximo lunes..."
                     value={comentarioPendiente}
                     onChangeText={setComentarioPendiente}
