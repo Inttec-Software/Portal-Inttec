@@ -169,6 +169,9 @@ export interface ClienteItem {
   correo_electronico?: string | null;
   direccion?: string | null;
   codigo_postal?: string | null;
+  razon_social?: string | null;
+  regimen_fiscal?: string | null;
+  uso_cfdi?: string | null;
 }
 
 /**
@@ -413,6 +416,11 @@ export interface Venta {
   descripcion?: string | null;
   agregar_iva?: boolean;
   created_at?: string;
+  cfdi_uuid?: string | null;
+  cfdi_facturapi_id?: string | null;
+  cfdi_estado?: string | null;
+  cfdi_pdf_url?: string | null;
+  cfdi_xml_url?: string | null;
 }
 
 export interface VentaPartida {

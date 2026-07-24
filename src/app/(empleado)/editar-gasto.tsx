@@ -671,6 +671,11 @@ export default function EditarGastoForm() {
       return;
     }
 
+    if (!selectedCliente.trim()) {
+      showAlert('Validación', 'Por favor selecciona o ingresa el cliente o proyecto asignado.');
+      return;
+    }
+
     if (!tipoServicioProyecto) {
       showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto, Venta u Operativo.');
       return;
@@ -1715,7 +1720,7 @@ export default function EditarGastoForm() {
 
               {/* Selector de Cliente */}
               <View style={styles.customDropdownContainer}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado</Text>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
                 <TouchableOpacity
                   style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                   onPress={() => {

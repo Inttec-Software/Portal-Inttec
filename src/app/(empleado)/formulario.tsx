@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, createElement } from 'react';
 import {
   View,
   Text,
@@ -1371,27 +1371,42 @@ export default function GastoForm() {
                 </Text>
               ) : null}
 
-              {Platform.OS === 'web' ? (
+              <View style={{ position: 'relative' }}>
                 <CustomInput
-                  label="Fecha de Gasto (DD/MM/AAAA) *"
-                  placeholder="DD/MM/AAAA"
+                  label="Fecha de Gasto *"
+                  placeholder="Selecciona la fecha"
                   value={fechaComprobante}
-                  onChangeText={setFechaComprobante}
+                  editable={false}
                   iconName="calendar-outline"
                 />
-              ) : (
-                <>
-                  <TouchableOpacity onPress={() => setShowDatePicker(true)} activeOpacity={0.7}>
-                    <View pointerEvents="none">
-                      <CustomInput
-                        label="Fecha de Gasto *"
-                        placeholder="Selecciona la fecha"
-                        value={fechaComprobante}
-                        editable={false}
-                        iconName="calendar-outline"
-                      />
-                    </View>
-                  </TouchableOpacity>
+                {Platform.OS === 'web' ? (
+                  createElement('input', {
+                    type: 'date',
+                    style: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', zIndex: 100 },
+                    onClick: (e: any) => {
+                      try { e.target.showPicker(); } catch (err) {}
+                    },
+                    onChange: (e: any) => {
+                      if (e.target.value) {
+                        const parts = e.target.value.split('-');
+                        if (parts.length === 3) {
+                          const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                          setDateValue(d);
+                          const dd = String(d.getDate()).padStart(2, '0');
+                          const mm = String(d.getMonth() + 1).padStart(2, '0');
+                          const yyyy = d.getFullYear();
+                          setFechaComprobante(`${dd}/${mm}/${yyyy}`);
+                        }
+                      }
+                    }
+                  })
+                ) : (
+                  <TouchableOpacity 
+                    style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10 }}
+                    onPress={() => { Keyboard.dismiss(); setShowDatePicker(true); }}
+                  />
+                )}
+              </View>
 
                   {showDatePicker && (
                     <View style={{
@@ -1419,8 +1434,6 @@ export default function GastoForm() {
                       )}
                     </View>
                   )}
-                </>
-              )}
 
               <CustomInput
                 label="Proveedor / Comercio"
@@ -2012,7 +2025,7 @@ export default function GastoForm() {
 
               {!isSplit ? (
                 <View style={styles.customDropdownContainer}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado</Text>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
                   <TouchableOpacity
                     style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                     onPress={() => {
@@ -2153,7 +2166,7 @@ export default function GastoForm() {
 
               {/* Selector de Cliente */}
               <View style={[styles.customDropdownContainer, { zIndex: 100 }]}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado</Text>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
                 <TouchableOpacity
                   style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                   onPress={() => {

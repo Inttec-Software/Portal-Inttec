@@ -2015,7 +2015,7 @@ export default function GastoForm() {
 
               {!isSplit ? (
                 <View style={styles.customDropdownContainer}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado</Text>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
                   <TouchableOpacity
                     style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                     onPress={() => {
@@ -2168,7 +2168,7 @@ export default function GastoForm() {
 
               {/* Selector de Cliente */}
               <View style={[styles.customDropdownContainer, { zIndex: 100 }]}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado</Text>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
                 <TouchableOpacity
                   style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                   onPress={() => {

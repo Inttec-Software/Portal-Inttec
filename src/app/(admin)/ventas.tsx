@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
   Modal,
   Pressable,
+  Linking,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -24,6 +25,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, Venta, VentaPartida, recalculateVentaTotals } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
 import { base64ToArrayBuffer } from '@/services/sync';
+import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -97,6 +99,8 @@ export default function VentasScreen() {
   const [ventasHistorial, setVentasHistorial] = useState<Venta[]>([]);
   const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
   const [historialSearch, setHistorialSearch] = useState('');
+  const [filterDate, setFilterDate] = useState<Date | null>(null);
+  const [showFilterDatePicker, setShowFilterDatePicker] = useState(false);
 
   // === Edición y Detalle de Ventas ===
   const [selectedVenta, setSelectedVenta] = useState<Venta | null>(null);
@@ -301,17 +305,31 @@ export default function VentasScreen() {
 
   // === Filtrar Historial ===
   const ventasFiltradas = useMemo(() => {
+    let filtradas = ventasHistorial;
+
+    if (filterDate) {
+      const dd = String(filterDate.getDate()).padStart(2, '0');
+      const mm = String(filterDate.getMonth() + 1).padStart(2, '0');
+      const yyyy = filterDate.getFullYear();
+      const formattedFilterDate = `${yyyy}-${mm}-${dd}`;
+      
+      filtradas = filtradas.filter(v => v.fecha?.startsWith(formattedFilterDate));
+    }
+
     const q = historialSearch.trim().toLowerCase();
-    if (!q) return ventasHistorial;
-    return ventasHistorial.filter(v =>
-      v.cliente?.toLowerCase().includes(q) ||
-      v.factura_referencia?.toLowerCase().includes(q) ||
-      v.descripcion?.toLowerCase().includes(q) ||
-      v.fecha?.toLowerCase().includes(q) ||
-      v.tipo_proyecto?.toLowerCase().includes(q) ||
-      v.proveedor?.toLowerCase().includes(q)
-    );
-  }, [ventasHistorial, historialSearch]);
+    if (q) {
+      filtradas = filtradas.filter(v =>
+        v.cliente?.toLowerCase().includes(q) ||
+        v.factura_referencia?.toLowerCase().includes(q) ||
+        v.descripcion?.toLowerCase().includes(q) ||
+        v.fecha?.toLowerCase().includes(q) ||
+        v.tipo_proyecto?.toLowerCase().includes(q) ||
+        v.proveedor?.toLowerCase().includes(q)
+      );
+    }
+    
+    return filtradas;
+  }, [ventasHistorial, historialSearch, filterDate]);
 
   // === Calcular totales de las partidas ===
   const calculatedTotals = useMemo(() => {
@@ -743,6 +761,71 @@ export default function VentasScreen() {
 
   const prevStep = () => {
     setCurrentStep(prev => Math.max(prev - 1, 1));
+  };
+
+  // === Timbrado CFDI ===
+  const handleTimbrarFactura = async () => {
+    if (!selectedVenta) return;
+    setIsSubmitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('facturar-venta', {
+        body: { venta_id: selectedVenta.id }
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      showAlert('Éxito', 'Factura timbrada correctamente.');
+      setIsDetailModalVisible(false);
+      loadHistorial();
+    } catch (err: any) {
+      console.error('Error timbrando:', err);
+      showAlert('Error al timbrar', err.message || 'Error desconocido.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCancelarFactura = async () => {
+    if (!selectedVenta) return;
+
+    const performCancel = async () => {
+      setIsSubmitting(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('cancelar-factura', {
+          body: { venta_id: selectedVenta.id }
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+
+        showAlert('Éxito', 'La factura ha sido cancelada correctamente ante el SAT.');
+        setIsDetailModalVisible(false);
+        loadHistorial();
+      } catch (err: any) {
+        console.error('Error cancelando factura:', err);
+        showAlert('Error al cancelar', err.message || 'Ocurrió un error al intentar cancelar la factura.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Estás seguro de que deseas cancelar esta factura ante el SAT? Esta acción no se puede deshacer.')) {
+        await performCancel();
+      }
+    } else {
+      Alert.alert(
+        'Cancelar Factura',
+        '¿Estás seguro de que deseas cancelar esta factura ante el SAT? Esta acción no se puede deshacer.',
+        [
+          { text: 'No, regresar', style: 'cancel' },
+          { 
+            text: 'Sí, cancelar', 
+            style: 'destructive',
+            onPress: performCancel
+          }
+        ]
+      );
+    }
   };
 
   // ===========================
@@ -1368,11 +1451,64 @@ export default function VentasScreen() {
           clearButtonMode="while-editing"
         />
         {historialSearch.length > 0 && (
-          <TouchableOpacity onPress={() => setHistorialSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity onPress={() => setHistorialSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ marginRight: 8 }}>
             <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
           </TouchableOpacity>
         )}
+        <View style={{ position: 'relative' }}>
+          <TouchableOpacity
+            onPress={() => {
+              if (Platform.OS !== 'web') setShowFilterDatePicker(true);
+            }}
+            style={{ padding: 4, borderRadius: 6, backgroundColor: filterDate ? themeColors.accent + '20' : 'transparent' }}
+          >
+            <Ionicons name="calendar-outline" size={20} color={filterDate ? themeColors.accent : themeColors.textSecondary} />
+          </TouchableOpacity>
+          {Platform.OS === 'web' && createElement('input', {
+            type: 'date',
+            style: {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              opacity: 0,
+              cursor: 'pointer',
+              zIndex: 100,
+            },
+            onClick: (e: any) => {
+              try { e.target.showPicker(); } catch (err) {}
+            },
+            onChange: (e: any) => {
+              if (e.target.value) {
+                const parts = e.target.value.split('-');
+                if (parts.length === 3) {
+                  const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                  setFilterDate(d);
+                }
+              }
+            }
+          })}
+        </View>
+        {filterDate && (
+          <TouchableOpacity onPress={() => setFilterDate(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ marginLeft: 4 }}>
+            <Ionicons name="close" size={16} color={themeColors.danger} />
+          </TouchableOpacity>
+        )}
       </View>
+      
+      {showFilterDatePicker && Platform.OS !== 'web' && (
+        <DateTimePicker
+          value={filterDate || new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(event: any, selectedDate?: Date) => {
+            if (Platform.OS === 'android') setShowFilterDatePicker(false);
+            if (selectedDate) setFilterDate(selectedDate);
+          }}
+          maximumDate={new Date()}
+        />
+      )}
 
       {isLoadingHistorial ? (
         <View style={styles.loaderContainer}>
@@ -1835,24 +1971,142 @@ export default function VentasScreen() {
             )}
 
             {/* Acciones del Modal */}
-            <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
-              <TouchableOpacity
-                onPress={handleDeleteVenta}
-                disabled={isSubmitting}
-                style={[styles.modalActionBtn, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}
-              >
-                <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
-                <Text style={[styles.modalActionText, { color: themeColors.danger }]}>Eliminar</Text>
-              </TouchableOpacity>
+            <View style={[styles.modalFooter, { borderTopColor: themeColors.border, flexDirection: 'column', gap: 12 }]}>
+              {/* FILA 1: Documentos y Descargas */}
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (selectedVenta) {
+                      const cotData = {
+                        numeroCotizacion: selectedVenta.id.toString().slice(-6),
+                        clienteNombre: selectedVenta.cliente,
+                        fechaCreacion: selectedVenta.created_at || new Date().toISOString(),
+                        vendedor: 'Portal-Inttec',
+                        moneda: 'MXN',
+                        lineas: selectedVentaPartidas.map(p => ({
+                          id: p.id.toString(),
+                          productoNombre: p.descripcion,
+                          productoDescripcion: p.descripcion,
+                          tiempoEntrega: 'Inmediato',
+                          cantidad: Number(p.cantidad) || 1,
+                          unidad: p.unidad || 'PZA',
+                          precioUnitario: Number(p.precio_unitario_venta) || 0,
+                          impuestoPorcentaje: 16,
+                          importe: (Number(p.cantidad) || 1) * (Number(p.precio_unitario_venta) || 0)
+                        })),
+                        subtotal: Number(selectedVenta.precio_total_facturado) || 0,
+                        iva: (Number(selectedVenta.precio_total_facturado) || 0) * 0.16,
+                        total: (Number(selectedVenta.precio_total_facturado) || 0) * 1.16
+                      };
+                      try {
+                        await exportarCotizacionOdooPDF(cotData, 'download');
+                      } catch (err: any) {
+                        showAlert('Error', 'No se pudo generar el PDF de Venta: ' + err.message);
+                      }
+                    }
+                  }}
+                  style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
+                >
+                  <Ionicons name="document-outline" size={18} color={themeColors.primary} />
+                  <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>PDF Venta</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={handleEditVenta}
-                disabled={isSubmitting}
-                style={[styles.modalActionBtn, { backgroundColor: themeColors.accent + '15', borderColor: themeColors.accent }]}
-              >
-                <Ionicons name="create-outline" size={20} color={themeColors.accent} />
-                <Text style={[styles.modalActionText, { color: themeColors.accent }]}>Editar</Text>
-              </TouchableOpacity>
+                {selectedVenta?.cfdi_estado === 'TIMBRADA' ? (
+                  <>
+                    <TouchableOpacity
+                      onPress={async () => {
+                        if (selectedVenta?.cfdi_facturapi_id) {
+                          try {
+                            const url = `https://etpdebclhaxbpbuwxdmy.supabase.co/functions/v1/descargar-factura?id=${selectedVenta.cfdi_facturapi_id}&format=json`;
+                            const response = await fetch(url);
+                            if (!response.ok) {
+                              const errorText = await response.text();
+                              throw new Error(`Status: ${response.status}. Detalle: ${errorText}`);
+                            }
+                            const facturaData = await response.json();
+                            await exportarFacturaOdooPDF(selectedVenta, facturaData, 'download');
+                          } catch (err: any) {
+                            console.error("Error completo PDF:", err);
+                            showAlert('Error Descarga', err.message || 'No se pudo generar el PDF.');
+                          }
+                        } else {
+                          showAlert('Info', 'El ID de la factura no está disponible');
+                        }
+                      }}
+                      style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
+                    >
+                      <Ionicons name="document-text-outline" size={18} color={themeColors.primary} />
+                      <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>PDF CFDI</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (selectedVenta?.cfdi_facturapi_id) {
+                          const cliente = (selectedVenta.cliente || 'Cliente').replace(/[^a-z0-9]/gi, '_').substring(0, 20);
+                          const folio = selectedVenta.cfdi_uuid ? selectedVenta.cfdi_uuid.split('-')[0] : 'Factura';
+                          const fileName = `${cliente}_${folio}`;
+                          const url = `https://etpdebclhaxbpbuwxdmy.supabase.co/functions/v1/descargar-factura?id=${selectedVenta.cfdi_facturapi_id}&format=xml&filename=${fileName}`;
+                          Linking.openURL(url);
+                        } else {
+                          showAlert('Info', 'El ID de la factura no está disponible');
+                        }
+                      }}
+                      style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
+                    >
+                      <Ionicons name="code-outline" size={18} color={themeColors.primary} />
+                      <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>XML CFDI</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity
+                    onPress={handleTimbrarFactura}
+                    disabled={isSubmitting}
+                    style={[styles.modalActionBtn, { backgroundColor: themeColors.success + '15', borderColor: themeColors.success }]}
+                  >
+                    {isSubmitting ? (
+                      <ActivityIndicator size="small" color={themeColors.success} />
+                    ) : (
+                      <Ionicons name="receipt-outline" size={18} color={themeColors.success} />
+                    )}
+                    <Text style={[styles.modalActionText, { color: themeColors.success, fontSize: 12 }]}>Timbrar CFDI</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* FILA 2: Edición y Cancelación */}
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={handleEditVenta}
+                  disabled={isSubmitting}
+                  style={[styles.modalActionBtn, { backgroundColor: themeColors.accent + '15', borderColor: themeColors.accent }]}
+                >
+                  <Ionicons name="create-outline" size={18} color={themeColors.accent} />
+                  <Text style={[styles.modalActionText, { color: themeColors.accent, fontSize: 12 }]}>Editar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleDeleteVenta}
+                  disabled={isSubmitting}
+                  style={[styles.modalActionBtn, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}
+                >
+                  <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                  <Text style={[styles.modalActionText, { color: themeColors.danger, fontSize: 12 }]}>Eliminar</Text>
+                </TouchableOpacity>
+
+                {selectedVenta?.cfdi_estado === 'TIMBRADA' && (
+                  <TouchableOpacity
+                    onPress={handleCancelarFactura}
+                    disabled={isSubmitting}
+                    style={[styles.modalActionBtn, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}
+                  >
+                    {isSubmitting ? (
+                      <ActivityIndicator size="small" color={themeColors.danger} />
+                    ) : (
+                      <Ionicons name="close-circle-outline" size={18} color={themeColors.danger} />
+                    )}
+                    <Text style={[styles.modalActionText, { color: themeColors.danger, fontSize: 12 }]}>Cancelar CFDI</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           </View>
         </View>

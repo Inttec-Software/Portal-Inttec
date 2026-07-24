@@ -27,6 +27,9 @@ CREATE TABLE public.clientes (
   correo_electronico text,
   direccion text,
   codigo_postal text,
+  razon_social text,
+  regimen_fiscal character varying(3),
+  uso_cfdi character varying(3),
   CONSTRAINT clientes_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.categorias (
@@ -176,6 +179,10 @@ CREATE TABLE public.ventas (
   created_at timestamp with time zone DEFAULT now(),
   descripcion text,
   agregar_iva boolean DEFAULT false,
+  cfdi_uuid uuid UNIQUE,
+  cfdi_pdf_url text,
+  cfdi_xml_url text,
+  cfdi_estado text DEFAULT 'PENDIENTE',
   CONSTRAINT ventas_pkey PRIMARY KEY (id),
   CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
 );
