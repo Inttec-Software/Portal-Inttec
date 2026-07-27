@@ -71,83 +71,69 @@ serve(async (req) => {
       throw new Error('La venta no tiene partidas o productos')
     }
 
-    // Configurar Facturapi
-    const FACTURAPI_KEY = Deno.env.get('FACTURAPI_KEY')
-    if (!FACTURAPI_KEY) throw new Error('FACTURAPI_KEY no configurado en entorno')
+    // Configurar Finkok
+    const FINKOK_USERNAME = Deno.env.get('FINKOK_USERNAME')
+    const FINKOK_PASSWORD = Deno.env.get('FINKOK_PASSWORD')
+    const FINKOK_ENV = Deno.env.get('FINKOK_ENV') || 'sandbox' // 'sandbox' o 'production'
+    const isProduction = FINKOK_ENV === 'production';
 
-    const facturapiBaseUrl = 'https://www.facturapi.io/v2'
-    const headers = {
-      'Authorization': `Bearer ${FACTURAPI_KEY}`,
-      'Content-Type': 'application/json'
+    if (!FINKOK_USERNAME || !FINKOK_PASSWORD) {
+      throw new Error('Credenciales de Finkok no configuradas en el entorno')
     }
 
-    // 4. Mapear items
-    const items = partidas.map((p: any) => {
-      // Calcular taxes si aplica
-      const taxes = venta.agregar_iva ? [{ type: 'IVA', rate: 0.16 }] : []
-      
-      return {
-        product: {
-          description: p.descripcion,
-          product_key: "01010101", // Clave genérica (o buscar en tabla productos si se asocia)
-          price: p.precio_unitario_venta,
-          unit_key: "H87", // H87: Pieza (Clave genérica recomendada por el SAT para productos físicos)
-          taxes
-        },
-        quantity: p.cantidad
-      }
-    })
+    // Importar dependencias de Finkok
+    // Nota: Necesitamos usar importaciones relativas o absolutas dinámicas en Deno.
+    // Usaremos un hack local si el import de arriba fallara, pero Deno maneja imports locales bien.
+    const { buildAndSignCFDI } = await import('./finkok/xmlBuilder.ts')
+    const { timbrarFinkok } = await import('./finkok/soapClient.ts')
 
-    // 5. Construir payload de factura
-    const invoicePayload = {
-      customer: {
-        legal_name: cliente.razon_social || cliente.nombre,
-        tax_id: cliente.rfc || "XAXX010101000",
-        tax_system: cliente.regimen_fiscal || "616", 
-        address: {
-          zip: cliente.codigo_postal || "77500" // Facturapi v2 usa 'zip'
-        }
-      },
-      items,
-      use: cliente.uso_cfdi || "S01", // S01 es lo correcto para Público en General
-      payment_form: "01", // 01: Efectivo
-      payment_method: "PUE" // Pago en una sola exhibición
+    // 4. Construir y sellar el XML del CFDI 4.0
+    // Aquí es donde sucede la mayor complejidad: Generar la estructura XML según el SAT
+    // y firmar la Cadena Original con la llave privada del CSD.
+    const xmlFirmado = await buildAndSignCFDI(venta, cliente, partidas);
+
+    // 5. Solicitar timbrado a Finkok (SOAP)
+    const { success, uuid: sat_uuid, xml: xmlTimbrado } = await timbrarFinkok(xmlFirmado, FINKOK_USERNAME, FINKOK_PASSWORD, isProduction);
+
+    if (!success || !sat_uuid) {
+      throw new Error('Finkok no devolvió un UUID válido');
     }
 
-    // 6. Solicitar timbrado a Facturapi
-    const facturapiResponse = await fetch(`${facturapiBaseUrl}/invoices`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(invoicePayload)
-    })
+    // 6. Subir el XML timbrado a Supabase Storage
+    const xmlFileName = `${sat_uuid}.xml`;
+    const { data: storageData, error: storageError } = await supabaseClient
+      .storage
+      .from('facturas')
+      .upload(xmlFileName, xmlTimbrado, {
+        contentType: 'text/xml',
+        upsert: true
+      });
 
-    const facturapiData = await facturapiResponse.json()
-    
-    if (!facturapiResponse.ok) {
-      console.error("Facturapi Error Response:", facturapiData)
-      throw new Error(facturapiData.message || 'Error al timbrar factura en el PAC')
+    if (storageError) {
+      console.error("Error al guardar XML en storage:", storageError);
+      // No lanzamos error para no perder la factura que ya se timbró (costó un timbre),
+      // pero se registra el error.
     }
 
-    // En Facturapi, la propiedad 'uuid' es el UUID del SAT, 
-    // y 'id' (ej. "in_xxxx") es el id interno de facturapi.
-    const sat_uuid = facturapiData.uuid || null
+    const { data: publicUrlData } = supabaseClient.storage.from('facturas').getPublicUrl(xmlFileName);
+    const xmlUrl = publicUrlData?.publicUrl || '';
 
     // 7. Actualizar Venta en base de datos
     await supabaseClient
       .from('ventas')
       .update({
         cfdi_uuid: sat_uuid,
-        cfdi_facturapi_id: facturapiData.id,
         cfdi_estado: 'TIMBRADA'
+        // cfdi_facturapi_id ya no aplica para Finkok, usaríamos otra columna si fuera necesario
       })
       .eq('id', venta_id)
 
-    // Respondemos con el ID de Facturapi para que el frontend pueda solicitar descargas, 
-    // o descargar usando una Cloud Function que proxy el PDF.
+    // Respondemos con el UUID y la URL del XML. 
+    // Nota: Con Finkok, el PDF debe generarse a partir del XML en el frontend o mediante otra función.
     return new Response(JSON.stringify({ 
       success: true, 
       cfdi_uuid: sat_uuid,
-      facturapi_id: facturapiData.id
+      xml_url: xmlUrl
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

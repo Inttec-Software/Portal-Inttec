@@ -20,9 +20,11 @@ import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, recalculateVentaTotals } from '@/services/supabase';
-import { base64ToArrayBuffer } from '@/services/sync';
+import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { GeminiService } from '@/services/gemini';
+import { PushNotificationService } from '@/services/pushNotifications';
 import { getComentariosPlaceholder } from '@/utils/helpers';
+import { optimizeImage } from '@/utils/imageOptimizer';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -360,8 +362,9 @@ export default function EditarGastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setImageUri(result.assets[0].uri);
-        setImageBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setImageUri(optimized.uri);
+        setImageBase64(optimized.base64 || null);
         setScanSuccess(false); // Resetear bandera de escaneo anterior
         setAlertaPolitica(null);
       }
@@ -389,8 +392,9 @@ export default function EditarGastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setImageUri(result.assets[0].uri);
-        setImageBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setImageUri(optimized.uri);
+        setImageBase64(optimized.base64 || null);
         setImageExt('jpg');
         setScanSuccess(false);
         setAlertaPolitica(null);

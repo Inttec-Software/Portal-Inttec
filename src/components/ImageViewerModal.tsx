@@ -2,7 +2,6 @@ import React, { useRef } from 'react';
 import {
   Modal,
   View,
-  Image,
   StyleSheet,
   TouchableOpacity,
   SafeAreaView,
@@ -11,7 +10,9 @@ import {
   Text,
   Alert,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';

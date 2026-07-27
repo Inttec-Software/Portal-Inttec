@@ -221,6 +221,12 @@ export default function CotizacionesListScreen() {
     }
   };
 
+  const handleConvertirVenta = (cot: any) => {
+    // Navigate to ventas screen passing the quote data as a query param
+    const cotizacionData = encodeURIComponent(JSON.stringify(cot));
+    router.push(`/(admin)/ventas?fromCotizacion=true&cotizacionData=${cotizacionData}`);
+  };
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDuplicate = async (cot: any) => {
     try {
@@ -407,6 +413,7 @@ export default function CotizacionesListScreen() {
           <Ionicons name="mail-outline" size={12} color={themeColors.accent} />
           <Ionicons name="chatbubble-ellipses-outline" size={12} color={themeColors.accent} />
           <Ionicons name="chevron-down" size={12} color={themeColors.accent} />
+          <Ionicons name="cash-outline" size={12} color={themeColors.accent} />
           <Ionicons name="trash-outline" size={12} color={themeColors.danger} />
         </View>
       </View>
@@ -482,7 +489,11 @@ export default function CotizacionesListScreen() {
                   <TouchableOpacity onPress={() => toggleRowExpansion(cot.id)} style={styles.rowActionBtn}>
                     <Ionicons name={expandedRowId === cot.id ? "chevron-up" : "chevron-down"} size={14} color={themeColors.textSecondary} />
                   </TouchableOpacity>
-                  {/* 7. Eliminar */}
+                  {/* 7. Convertir a Venta */}
+                  <TouchableOpacity onPress={() => handleConvertirVenta(cot)} style={styles.rowActionBtn}>
+                    <Ionicons name="cash-outline" size={14} color={themeColors.primary} />
+                  </TouchableOpacity>
+                  {/* 8. Eliminar */}
                   <TouchableOpacity onPress={() => handleDelete(cot.id)} style={styles.rowActionBtn}>
                     <Ionicons name="trash-outline" size={14} color={themeColors.danger} />
                   </TouchableOpacity>
@@ -696,7 +707,15 @@ export default function CotizacionesListScreen() {
                           <Ionicons name="pencil-outline" size={15} color={getActionBtnStyle('edit', scheme === 'dark').color} />
                         </TouchableOpacity>
 
-                        {/* 5. Eliminar */}
+                        {/* 5. Convertir a Venta */}
+                        <TouchableOpacity 
+                          onPress={() => handleConvertirVenta(cot)}
+                          style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('download', scheme === 'dark').bg }]}
+                        >
+                          <Ionicons name="cash-outline" size={15} color={getActionBtnStyle('download', scheme === 'dark').color} />
+                        </TouchableOpacity>
+
+                        {/* 6. Eliminar */}
                         <TouchableOpacity 
                           onPress={() => handleDelete(cot.id)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('delete', scheme === 'dark').bg }]}

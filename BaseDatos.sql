@@ -57,6 +57,7 @@ CREATE TABLE public.usuarios (
   password text NOT NULL,
   rol text NOT NULL CHECK (rol = ANY (ARRAY['ADMIN'::text, 'EMPLEADO'::text])),
   telefono text,
+  expo_push_token text,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT usuarios_pkey PRIMARY KEY (id)
 );
@@ -191,7 +192,10 @@ CREATE TABLE public.ventas (
   cfdi_pdf_url text,
   cfdi_xml_url text,
   cfdi_estado text DEFAULT 'PENDIENTE',
+  cfdi_facturapi_id character varying(50),
+  cotizacion_id uuid,
   CONSTRAINT ventas_pkey PRIMARY KEY (id),
+  CONSTRAINT ventas_cotizacion_id_fkey FOREIGN KEY (cotizacion_id) REFERENCES public.cotizaciones(id),
   CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
 );
 CREATE TABLE public.ventas_partidas (

@@ -9,7 +9,6 @@ import {
   Alert,
   Modal,
   ScrollView,
-  Image,
   Platform,
   useWindowDimensions,
   Pressable,
@@ -21,6 +20,7 @@ import { supabase, AuthService, Usuario, Evidencia } from '@/services/supabase';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
@@ -288,6 +288,10 @@ export default function AdminEvidenciasScreen() {
         </ScrollView>
       ) : (
         <FlatList
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={5}
+          removeClippedSubviews={true}
           data={filteredEvidencias}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}

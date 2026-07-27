@@ -18,7 +18,7 @@ import {
   Linking,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
@@ -62,6 +62,7 @@ const getTimestampFileName = (userId: string, ext: string) => {
 
 export default function VentasScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const { width: windowWidth } = useWindowDimensions();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isMobile = windowWidth < 600;
@@ -93,6 +94,7 @@ export default function VentasScreen() {
   const [descripcion, setDescripcion] = useState('');
   const [agregarIva, setAgregarIva] = useState(false);
   const [partidas, setPartidas] = useState<PartidaEditable[]>([]);
+  const [cotizacionIdOrigen, setCotizacionIdOrigen] = useState<string | null>(null);
 
   // === Historial ===
   const [activeTab, setActiveTab] = useState<'registrar' | 'historial'>('registrar');
@@ -136,6 +138,48 @@ export default function VentasScreen() {
     init();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // === Recibir parámetros de Cotización ===
+  useEffect(() => {
+    if (params.fromCotizacion === 'true' && params.cotizacionData) {
+      setTimeout(() => {
+        try {
+          const data = JSON.parse(params.cotizacionData as string);
+          if (data.cliente_nombre) setCliente(data.cliente_nombre);
+          if (data.id) setCotizacionIdOrigen(data.id);
+          
+          // Auto-completar la fecha actual para la nueva venta
+          const today = new Date();
+          const yyyy = today.getFullYear();
+          const mm = String(today.getMonth() + 1).padStart(2, '0');
+          const dd = String(today.getDate()).padStart(2, '0');
+          setFecha(`${yyyy}-${mm}-${dd}`);
+          setDateValue(today);
+          
+          if (data.lineas && Array.isArray(data.lineas)) {
+             const partidasUI: PartidaEditable[] = data.lineas.map((l: any, idx: number) => {
+               const desc = [l.productoNombre, l.productoDescripcion].filter(Boolean).join(' - ');
+               return {
+                 id: `cot_${Date.now()}_${idx}`,
+                 descripcion: desc || 'Sin descripción',
+                 cantidad: String(l.cantidad || 1),
+                 unidad: 'PZA',
+                 precio_unitario_venta: String(l.precioUnitario || 0),
+                 costo_unitario_proveedor: '0',
+               };
+             });
+             setPartidas(partidasUI);
+          }
+          
+          setActiveTab('registrar');
+          setCurrentStep(2); // Avanzar directamente al paso 2
+        } catch (e) {
+          console.error("Error al parsear cotizacion para venta:", e);
+        }
+      }, 0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.fromCotizacion]);
 
   // === Cargar Historial ===
   const loadHistorial = async () => {
@@ -274,6 +318,9 @@ export default function VentasScreen() {
   const cancelEditing = () => {
     setEditingVentaId(null);
     resetForm();
+    if (params.fromCotizacion === 'true') {
+      router.setParams({ fromCotizacion: 'false', cotizacionData: '' });
+    }
   };
 
   const handleAddNewCliente = async (nombre: string) => {
@@ -638,6 +685,7 @@ export default function VentasScreen() {
         notas: notas.trim() || null,
         descripcion: descripcion.trim() || null,
         agregar_iva: agregarIva,
+        cotizacion_id: cotizacionIdOrigen || null,
       };
 
       let activeVentaId = '';
@@ -732,6 +780,7 @@ export default function VentasScreen() {
     setSelectedVenta(null);
     setSelectedVentaPartidas([]);
     setEditingVentaId(null);
+    setCotizacionIdOrigen(null);
   };
 
   // === Navigation between steps ===

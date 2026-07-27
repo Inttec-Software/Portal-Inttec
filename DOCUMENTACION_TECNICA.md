@@ -22,12 +22,15 @@ Este documento contiene la arquitectura, flujos de trabajo (workflows), estructu
 La aplicación interactúa principalmente con las siguientes tablas:
 
 - **`usuarios`**: Almacena las credenciales de ingreso y el rol de acceso.
-  - Campos: `id` (uuid, PK), `nombre`, `email`, `password`, `rol` (`'ADMIN'`, `'EMPLEADO'`), `telefono`, `created_at`.
+  - Campos: `id` (uuid, PK), `nombre`, `email`, `password`, `rol` (`'ADMIN'`, `'EMPLEADO'`), `telefono`, `expo_push_token` (Para recibir notificaciones nativas), `created_at`.
 - **`gastos`**: Registro de reembolsos y compras.
   - Campos: `id` (uuid, PK), `empleado_id` (FK a usuarios), `empleado_nombre`, `monto` (numeric), `categoria`, `subcategoria`, `cliente`, `proveedor`, `sucursal`, `metodo_pago` (Restricción CHECK: `efectivo`, `tarjeta`, `tarjeta_credito`, `tarjeta_debito`), `tipo_tarjeta`, `justificacion` (incluye logs de alertas IA), `foto_url`, `status` (`PENDING`, `APPROVED`, `REJECTED`, `ACTION_REQUIRED`), `rejection_feedback`, `created_at`, `approved_at`, `fecha_comprobante`, `proveedor`, `cliente`, `sucursal`, `tipo_tarjeta`, `ubicacion_registro`, `estado`.
+- **`ventas`**: Registro y seguimiento de utilidades de proyectos y ventas.
+  - Campos relevantes: `cotizacion_id` (FK), `precio_total_facturado`, `costo_total`, `utilidad_bruta`, datos CFDI (`cfdi_uuid`, `cfdi_estado`, `cfdi_xml_url`, `cfdi_pdf_url`, `cfdi_facturapi_id`).
 - **`evidencias`**: Registro histórico de actividades y reportes técnicos de trabajo.
   - Campos: `id` (uuid, PK), `empleado_id` (FK a usuarios), `empleado_nombre`, `cliente` (text), `descripcion_trabajo` (text), `materiales_usados` (text, opcional), `observaciones` (text, opcional), `foto_antes_url` (text, opcional), `foto_despues_url` (text, opcional), `resumen_ia` (text, reporte técnico IA), `created_at`.
-- **Catálogos (`clientes`, `categorias`, `subcategorias`)**:
+- **Catálogos (`clientes`, `categorias`, `subcategorias`, `cotizaciones`)**:
+  - `clientes` almacena datos CFDI 4.0: `razon_social`, `regimen_fiscal`, `uso_cfdi`, `rfc`, etc.
   - Tablas independientes para poblar selectores. `subcategorias` depende directamente de `categorias` mediante `categoria_id`.
 
 ---
@@ -107,6 +110,18 @@ sequenceDiagram
 3. Presiona **"GENERAR REPORTE CON IA"**: Gemini analiza las fotos y los detalles para redactar un informe formal.
 4. Genera la cabecera oficial en PDF utilizando la imagen del icono de INTTEC codificada en Base64, garantizando renderizado instantáneo y sin fallos de lectura de archivos locales en la WebView de `expo-print`.
 5. Si decide **Guardar en el Servidor**: Sube las fotos al bucket `tickets/`, obtiene las URLs públicas y guarda el reporte técnico en la tabla `evidencias`.
+
+### 4.4. Notificaciones Push Nativas (Expo + Supabase Edge Functions)
+1. Durante el inicio de sesión, la app recupera el `DevicePushToken` de Apple/Google vía `expo-notifications`.
+2. Dicho token se almacena en la tabla `usuarios` bajo `expo_push_token`.
+3. Al existir una actualización de estado de gasto, la app invoca la Supabase Edge Function (`send-push`), pasando el ID de usuario destino, el título y cuerpo del mensaje.
+4. La Edge Function obtiene el token desde la base de datos y manda la petición REST a los servidores de `exp.host` para disparar la notificación nativa al dispositivo físico.
+*Nota*: Para prevenir el crash automático introducido en SDK 53 dentro de Expo Go, el módulo `expo-notifications` se importa de manera dinámica asegurando que el ambiente `Constants.executionEnvironment` no sea `StoreClient` (Expo Go).
+
+### 4.5. Flujo de Cotizaciones y Ventas
+1. Las **Cotizaciones** pueden transformarse directamente en **Ventas**.
+2. Al ejecutar la acción "Convertir a Venta", se precarga el formulario de "Nueva Venta" usando todos los datos clave de la cotización (cliente, monto, descripción, utilidades proyectadas) añadiéndole de manera invisible la llave foránea `cotizacion_id`.
+3. El estado de la cotización original se mantiene intacto (no bloqueado) para permitir trazabilidad financiera.
 
 ---
 

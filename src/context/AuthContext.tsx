@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AuthService, Usuario, CompanyService, supabase } from '@/services/supabase';
 import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { PushNotificationService } from '@/services/pushNotifications';
 
 interface AuthContextType {
   user: Usuario | null;
@@ -101,6 +102,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      PushNotificationService.registerForPushNotificationsAsync().then(token => {
+        if (token) {
+          // Update user row in DB with this token
+          supabase.from('usuarios')
+            .update({ expo_push_token: token })
+            .eq('id', user.id)
+            .then(({ error }) => {
+              if (error) console.error('Error saving push token:', error);
+            });
+        }
+      });
+    }
+  }, [user]);
 
   useEffect(() => {
     if (isLoading) return;

@@ -11,7 +11,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Image,
   Platform,
   Linking,
   useWindowDimensions,
@@ -20,6 +19,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
 import { ReportGenerator } from '@/utils/reportGenerator';
@@ -33,6 +33,7 @@ import ImageViewerModal from '@/components/ImageViewerModal';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { base64ToArrayBuffer } from '@/services/sync';
+import { PushNotificationService } from '@/services/pushNotifications';
 
 interface PartidaEditable {
   id: string;
@@ -417,6 +418,12 @@ export default function AdminDashboard() {
       else if (status === 'REJECTED') friendlyStatus = 'Rechazado';
       else if (status === 'PENDING') friendlyStatus = 'Reversado (Pendiente)';
 
+      PushNotificationService.sendPushNotification(
+        selectedGasto.empleado_id,
+        `Gasto ${friendlyStatus}`,
+        `Tu gasto por ${formatCurrency(selectedGasto.monto)} ha sido marcado como ${friendlyStatus}.`
+      );
+
       showAlert('Éxito', `El gasto ha sido marcado como ${friendlyStatus}.`);
       setReviewModalVisible(false);
       setSelectedGasto(null);
@@ -486,6 +493,12 @@ export default function AdminDashboard() {
           details: `Gasto por ${selectedGasto.monto} aprobado por Admin.${ventaId ? ` Vinculado a venta ID: ${ventaId}.` : ''}`,
         },
       ]);
+
+      PushNotificationService.sendPushNotification(
+        selectedGasto.empleado_id,
+        `Gasto Aprobado`,
+        `Tu gasto por ${formatCurrency(selectedGasto.monto)} ha sido aprobado.`
+      );
 
       showAlert('Éxito', `El gasto ha sido marcado como Aprobado.${ventaId ? ' Vinculado a la venta seleccionada.' : ''}`);
       setReviewModalVisible(false);
@@ -2467,6 +2480,10 @@ export default function AdminDashboard() {
             </View>
 
             <FlatList
+              initialNumToRender={8}
+              maxToRenderPerBatch={8}
+              windowSize={5}
+              removeClippedSubviews={true}
               data={personal}
               keyExtractor={(item) => item.id}
               contentContainerStyle={{ paddingBottom: Spacing.seven }}

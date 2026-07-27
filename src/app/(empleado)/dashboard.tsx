@@ -9,13 +9,13 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Image,
   Platform,
   Linking,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
 import { SyncService, OfflineGastoItem } from '@/services/sync';
@@ -697,6 +697,10 @@ export default function EmpleadoDashboard() {
         </View>
       ) : (
         <FlatList
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={5}
+          removeClippedSubviews={true}
           data={activeTab === 'pendientes' ? pendingList : historyList}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}

@@ -15,8 +15,10 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario } from '@/services/supabase';
+import { supabase } from '@/services/supabase';
+import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { GeminiService } from '@/services/gemini';
+import { optimizeImage } from '@/utils/imageOptimizer';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
@@ -115,16 +117,17 @@ export default function EvidenciaForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
+        const optimized = await optimizeImage(result.assets[0].uri);
         if (type === 'antes') {
-          setImageUriAntes(result.assets[0].uri);
-          setImageBase64Antes(result.assets[0].base64 || null);
+          setImageUriAntes(optimized.uri);
+          setImageBase64Antes(optimized.base64 || null);
         } else if (type === 'despues') {
-          setImageUriDespues(result.assets[0].uri);
-          setImageBase64Despues(result.assets[0].base64 || null);
+          setImageUriDespues(optimized.uri);
+          setImageBase64Despues(optimized.base64 || null);
         } else if (type === 'adicional') {
           setFotosAdicionales((prev) => [
             ...prev,
-            { uri: result.assets[0].uri, base64: result.assets[0].base64 || null },
+            { uri: optimized.uri, base64: optimized.base64 || null },
           ]);
         }
       }
@@ -153,17 +156,19 @@ export default function EvidenciaForm() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         if (type === 'antes') {
-          setImageUriAntes(result.assets[0].uri);
-          setImageBase64Antes(result.assets[0].base64 || null);
+          const opt = await optimizeImage(result.assets[0].uri);
+          setImageUriAntes(opt.uri);
+          setImageBase64Antes(opt.base64 || null);
         } else if (type === 'despues') {
-          setImageUriDespues(result.assets[0].uri);
-          setImageBase64Despues(result.assets[0].base64 || null);
+          const opt = await optimizeImage(result.assets[0].uri);
+          setImageUriDespues(opt.uri);
+          setImageBase64Despues(opt.base64 || null);
         } else if (type === 'adicional') {
-          const newPhotos = result.assets.map((asset) => ({
-            uri: asset.uri,
-            base64: asset.base64 || null,
-          }));
-          setFotosAdicionales((prev) => [...prev, ...newPhotos]);
+          // Promise.all to optimize all simultaneously
+          const optimizedPhotos = await Promise.all(
+            result.assets.map((asset) => optimizeImage(asset.uri))
+          );
+          setFotosAdicionales((prev) => [...prev, ...optimizedPhotos]);
         }
       }
     } catch (err) {

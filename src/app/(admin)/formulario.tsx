@@ -26,6 +26,7 @@ import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, Vehicul
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { GeminiService } from '@/services/gemini';
 import { getComentariosPlaceholder } from '@/utils/helpers';
+import { optimizeImage } from '@/utils/imageOptimizer';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -305,8 +306,9 @@ export default function GastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setImageUri(result.assets[0].uri);
-        setImageBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setImageUri(optimized.uri);
+        setImageBase64(optimized.base64 || null);
         setScanSuccess(false); // Resetear bandera de escaneo anterior
         setAlertaPolitica(null);
       }
@@ -334,8 +336,9 @@ export default function GastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setImageUri(result.assets[0].uri);
-        setImageBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setImageUri(optimized.uri);
+        setImageBase64(optimized.base64 || null);
         setImageExt('jpg');
         setScanSuccess(false);
         setAlertaPolitica(null);
@@ -402,8 +405,9 @@ export default function GastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setFacturaUri(result.assets[0].uri);
-        setFacturaBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setFacturaUri(optimized.uri);
+        setFacturaBase64(optimized.base64 || null);
         setFacturaExt('jpg');
       }
     } catch (err) {
@@ -429,8 +433,9 @@ export default function GastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setFacturaUri(result.assets[0].uri);
-        setFacturaBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setFacturaUri(optimized.uri);
+        setFacturaBase64(optimized.base64 || null);
         setFacturaExt('jpg');
       }
     } catch (err) {

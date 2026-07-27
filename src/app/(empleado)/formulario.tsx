@@ -25,7 +25,9 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, Vehiculo, VehiculoService } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { GeminiService } from '@/services/gemini';
+import { PushNotificationService } from '@/services/pushNotifications';
 import { getComentariosPlaceholder } from '@/utils/helpers';
+import { optimizeImage } from '@/utils/imageOptimizer';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -304,8 +306,9 @@ export default function GastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setImageUri(result.assets[0].uri);
-        setImageBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setImageUri(optimized.uri);
+        setImageBase64(optimized.base64 || null);
         setScanSuccess(false); // Resetear bandera de escaneo anterior
         setAlertaPolitica(null);
       }
@@ -333,8 +336,9 @@ export default function GastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setImageUri(result.assets[0].uri);
-        setImageBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setImageUri(optimized.uri);
+        setImageBase64(optimized.base64 || null);
         setImageExt('jpg');
         setScanSuccess(false);
         setAlertaPolitica(null);
@@ -401,8 +405,9 @@ export default function GastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setFacturaUri(result.assets[0].uri);
-        setFacturaBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setFacturaUri(optimized.uri);
+        setFacturaBase64(optimized.base64 || null);
         setFacturaExt('jpg');
       }
     } catch (err) {
@@ -428,8 +433,9 @@ export default function GastoForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setFacturaUri(result.assets[0].uri);
-        setFacturaBase64(result.assets[0].base64 || null);
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setFacturaUri(optimized.uri);
+        setFacturaBase64(optimized.base64 || null);
         setFacturaExt('jpg');
       }
     } catch (err) {
@@ -877,6 +883,18 @@ export default function GastoForm() {
           .select();
 
         if (dbError) throw dbError;
+
+        // Notificar a los administradores del nuevo gasto
+        const { data: admins } = await supabase.from('usuarios').select('id').eq('rol', 'ADMIN');
+        if (admins && admins.length > 0) {
+          admins.forEach(admin => {
+            PushNotificationService.sendPushNotification(
+              admin.id,
+              'Nuevo Gasto Registrado',
+              `${currentUser.nombre} ha registrado un nuevo gasto por $${totalGasto.toFixed(2)}.`
+            );
+          });
+        }
 
         // Si es combustible, guardar bitácora de gasolina vinculada y sincronizar kilometraje en ambas empresas
         const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';

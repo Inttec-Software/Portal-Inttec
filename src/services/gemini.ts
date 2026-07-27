@@ -313,6 +313,7 @@ export const GeminiService = {
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 
