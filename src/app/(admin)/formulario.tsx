@@ -1553,121 +1553,124 @@ export default function GastoForm() {
               </View>
 
               {!isSplit ? (
-                <View style={styles.customDropdownContainer}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
-                  <TouchableOpacity
-                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                    onPress={() => {
-                      Keyboard.dismiss();
-                      setShowCliDropdown(!showCliDropdown);
-                      setShowCatDropdown(false);
-                      setShowSubDropdown(false);
-                      setShowEstDropdown(false);
-                    }}
-                  >
-                    <Text style={{ color: selectedCliente ? themeColors.text : themeColors.textSecondary }}>
-                      {selectedCliente || 'Selecciona un cliente'}
-                    </Text>
-                    <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-                  </TouchableOpacity>
-                  {showCliDropdown && (
-                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
-                      <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <CustomInput
-                          placeholder="Buscar o agregar cliente..."
-                          value={clienteSearch}
-                          onChangeText={setClienteSearch}
-                          iconName="search-outline"
-                          style={{ margin: Spacing.one, height: 40 }}
-                        />
-                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                          {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
-                            <TouchableOpacity
-                              style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
-                              onPress={() => handleAddNewCliente(clienteSearch)}
-                            >
-                              <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
-                              <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 14 }}>
-                                {`Agregar "${clienteSearch.trim()}"`}
-                              </Text>
-                            </TouchableOpacity>
-                          )}
-                          {clientes
-                            .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
-                            .map((cli, index, array) => (
+                <>
+                  <View style={styles.customDropdownContainer}>
+                    <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
+                    <TouchableOpacity
+                      style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowCliDropdown(!showCliDropdown);
+                        setShowCatDropdown(false);
+                        setShowSubDropdown(false);
+                        setShowEstDropdown(false);
+                      }}
+                    >
+                      <Text style={{ color: selectedCliente ? themeColors.text : themeColors.textSecondary }}>
+                        {selectedCliente || 'Selecciona un cliente'}
+                      </Text>
+                      <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                    </TouchableOpacity>
+                    {showCliDropdown && (
+                      <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                        <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                          <CustomInput
+                            placeholder="Buscar o agregar cliente..."
+                            value={clienteSearch}
+                            onChangeText={setClienteSearch}
+                            iconName="search-outline"
+                            style={{ margin: Spacing.one, height: 40 }}
+                          />
+                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                            {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
                               <TouchableOpacity
-                                key={cli.id}
-                                style={[
-                                  styles.dropdownItem,
-                                  index === array.length - 1 && { borderBottomWidth: 0 },
-                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                                ]}
-                                onPress={() => {
-                                  setSelectedCliente(cli.nombre);
-                                  setSucursal('');
-                                  setClienteSearch('');
-                                  setShowCliDropdown(false);
-                                }}
+                                style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                onPress={() => handleAddNewCliente(clienteSearch)}
                               >
-                                <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
-                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
+                                <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                                <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 14 }}>
+                                  {`Agregar "${clienteSearch.trim()}"`}
+                                </Text>
                               </TouchableOpacity>
-                            ))}
+                            )}
+                            {clientes
+                              .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                              .map((cli, index, array) => (
+                                <TouchableOpacity
+                                  key={cli.id}
+                                  style={[
+                                    styles.dropdownItem,
+                                    index === array.length - 1 && { borderBottomWidth: 0 },
+                                    { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                  ]}
+                                  onPress={() => {
+                                    setSelectedCliente(cli.nombre);
+                                    setSucursal('');
+                                    setClienteSearch('');
+                                    setShowCliDropdown(false);
+                                  }}
+                                >
+                                  <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
+                                  <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
+                                </TouchableOpacity>
+                              ))}
+                          </ScrollView>
+                        </View>
+                      </Pressable>
+                    )}
+                  </View>
+
+                  <View style={{ zIndex: 2000, marginBottom: Spacing.three }}>
+                    <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del cliente *</Text>
+                    <TouchableOpacity
+                      style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, opacity: !selectedCliente ? 0.5 : 1 }]}
+                      disabled={!selectedCliente}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowSucursalDropdown(!showSucursalDropdown);
+                        setShowEstDropdown(false);
+                        setShowCatDropdown(false);
+                        setShowSubDropdown(false);
+                        setShowCliDropdown(false);
+                      }}
+                    >
+                      <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
+                        {sucursal || (selectedCliente ? 'Selecciona una sucursal' : 'Selecciona un cliente primero')}
+                      </Text>
+                      <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                    </TouchableOpacity>
+                    {showSucursalDropdown && (
+                      <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                          {(() => {
+                             const currentCliente = clientes.find(c => c.nombre === selectedCliente);
+                             const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id) : [];
+                             if (filteredSucursales.length === 0) {
+                               return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas para este cliente.</Text>;
+                             }
+                             return filteredSucursales.map((suc, index, array) => (
+                                <TouchableOpacity
+                                  key={suc.id}
+                                  style={[
+                                    styles.dropdownItem,
+                                    index === array.length - 1 && { borderBottomWidth: 0 },
+                                    { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                  ]}
+                                  onPress={() => {
+                                    setSucursal(suc.nombre);
+                                    setShowSucursalDropdown(false);
+                                  }}
+                                >
+                                  <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                                  <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                                </TouchableOpacity>
+                             ));
+                          })()}
                         </ScrollView>
                       </View>
-                    </Pressable>
-                  )}
-                </View>
-                <View style={{ zIndex: 2000, marginBottom: Spacing.three }}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del cliente *</Text>
-                  <TouchableOpacity
-                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, opacity: !selectedCliente ? 0.5 : 1 }]}
-                    disabled={!selectedCliente}
-                    onPress={() => {
-                      Keyboard.dismiss();
-                      setShowSucursalDropdown(!showSucursalDropdown);
-                      setShowEstDropdown(false);
-                      setShowCatDropdown(false);
-                      setShowSubDropdown(false);
-                      setShowCliDropdown(false);
-                    }}
-                  >
-                    <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
-                      {sucursal || (selectedCliente ? 'Selecciona una sucursal' : 'Selecciona un cliente primero')}
-                    </Text>
-                    <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-                  </TouchableOpacity>
-                  {showSucursalDropdown && (
-                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                        {(() => {
-                           const currentCliente = clientes.find(c => c.nombre === selectedCliente);
-                           const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id) : [];
-                           if (filteredSucursales.length === 0) {
-                             return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas para este cliente.</Text>;
-                           }
-                           return filteredSucursales.map((suc, index, array) => (
-                              <TouchableOpacity
-                                key={suc.id}
-                                style={[
-                                  styles.dropdownItem,
-                                  index === array.length - 1 && { borderBottomWidth: 0 },
-                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                                ]}
-                                onPress={() => {
-                                  setSucursal(suc.nombre);
-                                  setShowSucursalDropdown(false);
-                                }}
-                              >
-                                <Ionicons name="business-outline" size={24} color={themeColors.primary} />
-                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
-                              </TouchableOpacity>
-                           ));
-                        })()}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
+                    )}
+                  </View>
+                </>
               ) : (
                 <View style={{ marginBottom: Spacing.three }}>
                   <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Divisiones del Gasto</Text>
