@@ -39,12 +39,12 @@ export const ForceUpdateScreen = () => {
           Actualización Obligatoria
         </Text>
 
-        <Text style={[styles.description, { color: themeColors.textSecondary || themeColors.text }]}>
+        <Text style={[styles.description, { color: themeColors.textSecondary }]}>
           Hay una nueva versión de la aplicación disponible. Para seguir utilizando el servicio de manera correcta y segura, es necesario que actualices la app a la última versión.
         </Text>
 
         <View style={styles.versionContainer}>
-          <Text style={[styles.versionText, { color: themeColors.textSecondary || themeColors.text }]}>
+          <Text style={[styles.versionText, { color: themeColors.textSecondary }]}>
             Versión actual: {currentVersion}
           </Text>
         </View>

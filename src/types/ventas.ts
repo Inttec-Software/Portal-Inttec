@@ -20,6 +20,7 @@ export interface Cotizacion {
   clienteCorreo?: string;
   clienteCP?: string;
   direccionFactura?: string;
+  sucursal?: string;
   fechaCreacion: string;
   vendedor: string; // Ej: 'Rafael Fernandez'
   moneda: string; // Ej: 'MXN'

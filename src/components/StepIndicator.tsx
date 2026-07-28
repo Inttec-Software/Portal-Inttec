@@ -1,13 +1,14 @@
 import React from 'react';
-import { View, Text, StyleSheet, useColorScheme } from 'react-native';
+import { View, Text, StyleSheet, useColorScheme, TouchableOpacity } from 'react-native';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 
 interface StepIndicatorProps {
   currentStep: number;
   steps: string[];
+  onStepPress?: (step: number) => void;
 }
 
-export default function StepIndicator({ currentStep, steps }: StepIndicatorProps) {
+export default function StepIndicator({ currentStep, steps, onStepPress }: StepIndicatorProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
@@ -21,7 +22,16 @@ export default function StepIndicator({ currentStep, steps }: StepIndicatorProps
         return (
           <React.Fragment key={index}>
             {/* Step Circle & Label */}
-            <View style={styles.stepWrapper}>
+            <TouchableOpacity 
+              style={styles.stepWrapper}
+              activeOpacity={0.7}
+              onPress={() => {
+                if (onStepPress) {
+                  onStepPress(stepNum);
+                }
+              }}
+              disabled={!onStepPress}
+            >
               <View
                 style={[
                   styles.circle,
@@ -58,7 +68,7 @@ export default function StepIndicator({ currentStep, steps }: StepIndicatorProps
               >
                 {step}
               </Text>
-            </View>
+            </TouchableOpacity>
 
             {/* Connecting Line (except for last step) */}
             {index < steps.length - 1 && (

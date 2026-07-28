@@ -446,7 +446,9 @@ export default function CotizacionesListScreen() {
                 <Text style={[styles.tableCell, { width: '8%', color: themeColors.textSecondary }]}>{cot.folio}</Text>
                 <Text style={[styles.tableCell, { width: '10%' }]}>{cot.fecha_creacion}</Text>
                 <Text style={[styles.tableCell, { width: '8%' }]}>{cot.vendedor || 'Admin'}</Text>
-                <Text style={[styles.tableCell, { width: '18%', fontWeight: '500' }]} numberOfLines={1}>{cot.cliente_nombre}</Text>
+                <Text style={[styles.tableCell, { width: '18%', fontWeight: 'bold', color: themeColors.text }]} numberOfLines={1}>
+                  {cot.cliente_nombre} {cot.sucursal ? `(${cot.sucursal})` : ''}
+                </Text>
                 <Text style={[styles.tableCell, { width: '13%', color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
                 <View style={[styles.tableCell, { width: '10%' }]}>
                   {(() => {
@@ -635,7 +637,7 @@ export default function CotizacionesListScreen() {
 
                     {/* Client Name */}
                     <Text style={styles.cardCliente}>
-                      {cot.cliente_nombre || 'Cliente sin nombre'}
+                      {cot.cliente_nombre || 'Cliente sin nombre'} {cot.sucursal ? `(${cot.sucursal})` : ''}
                     </Text>
 
                     {/* Summary of Line Items */}

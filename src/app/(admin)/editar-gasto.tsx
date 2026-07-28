@@ -1357,7 +1357,7 @@ export default function EditarGastoForm() {
               />
 
               <CustomInput
-                label="Sucursal"
+                label="Sucursal del cliente"
                 placeholder="Ej. Centro, Norte"
                 value={sucursal}
                 onChangeText={setSucursal}

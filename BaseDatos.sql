@@ -278,3 +278,13 @@ CREATE TABLE public.app_settings (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT app_settings_pkey PRIMARY KEY (id)
 );
+
+CREATE TABLE IF NOT EXISTS public.sucursales_cliente (
+    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+    cliente_id uuid NOT NULL REFERENCES public.clientes(id) ON DELETE CASCADE,
+    nombre text NOT NULL,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+\ n - -   U p d a t e   2 6   J u l \ n A L T E R   T A B L E   v e n t a s   A D D   C O L U M N   s u c u r s a l   t e x t ; \ n A L T E R   T A B L E   c o t i z a c i o n e s   A D D   C O L U M N   s u c u r s a l   t e x t ; \ n  
+ 

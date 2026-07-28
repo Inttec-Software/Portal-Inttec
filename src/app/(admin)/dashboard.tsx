@@ -179,6 +179,10 @@ export default function AdminDashboard() {
   const [quickSaleCliSearch, setQuickSaleCliSearch] = useState('');
   const [isSavingQuickSale, setIsSavingQuickSale] = useState(false);
   const [clientesCatalog, setClientesCatalog] = useState<any[]>([]);
+  
+  const [quickSaleSucursal, setQuickSaleSucursal] = useState('');
+  const [showQuickSaleSucursalDropdown, setShowQuickSaleSucursalDropdown] = useState(false);
+  const [sucursalesCatalog, setSucursalesCatalog] = useState<any[]>([]);
 
   const quickSaleTotals = useMemo(() => {
     let precioTotal = 0;
@@ -440,13 +444,15 @@ export default function AdminDashboard() {
   const loadSalesForLinking = async () => {
     setIsLoadingSalesForLinking(true);
     try {
-      const [ventasRes, cliRes] = await Promise.all([
+      const [ventasRes, cliRes, sucRes] = await Promise.all([
         supabase.from('ventas').select('*').order('fecha', { ascending: false }).limit(50),
         supabase.from('clientes').select('*').order('nombre'),
+        supabase.from('sucursales_cliente').select('*').order('nombre'),
       ]);
       if (ventasRes.error) throw ventasRes.error;
       setSalesForLinking(ventasRes.data || []);
       setClientesCatalog(cliRes.data || []);
+      setSucursalesCatalog(sucRes.data || []);
     } catch (err) {
       logger.error('Error loading sales for linking:', err);
     } finally {
@@ -792,6 +798,7 @@ export default function AdminDashboard() {
 
     setQuickSaleFecha(selectedGasto.fecha_comprobante || selectedGasto.created_at?.split('T')[0] || new Date().toISOString().split('T')[0]);
     setQuickSaleCliente(selectedGasto.cliente || '');
+    setQuickSaleSucursal('');
     setQuickSaleFactura(selectedGasto.facturado ? 'Factura' : '');
     setQuickSaleTipoProyecto(selectedGasto.tipo_servicio_proyecto || 'Otro');
     setQuickSaleProveedor(selectedGasto.sucursal || '');
@@ -856,6 +863,7 @@ export default function AdminDashboard() {
         registrado_por: adminUser.id,
         fecha: quickSaleFecha.trim(),
         cliente: quickSaleCliente.trim(),
+        sucursal: quickSaleSucursal || null,
         factura_referencia: quickSaleFactura.trim() || null,
         tipo_proyecto: quickSaleTipoProyecto || null,
         proveedor: quickSaleProveedor.trim() || null,
@@ -3451,6 +3459,47 @@ export default function AdminDashboard() {
                     )}
                   </View>
 
+                  {/* Sucursal Dropdown */}
+                  {(() => {
+                    const currentClient = clientesCatalog.find(c => c.nombre === quickSaleCliente);
+                    if (!currentClient) return null;
+                    const sucs = sucursalesCatalog.filter(s => s.cliente_id === currentClient.id);
+                    if (sucs.length === 0) return null;
+                    
+                    return (
+                      <View style={{ zIndex: 9, position: 'relative', marginBottom: Spacing.two }}>
+                        <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>Sucursal del cliente</Text>
+                        <TouchableOpacity
+                          onPress={() => setShowQuickSaleSucursalDropdown(!showQuickSaleSucursalDropdown)}
+                          style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                        >
+                          <Text style={{ color: quickSaleSucursal ? themeColors.text : themeColors.textSecondary }}>
+                            {quickSaleSucursal || 'Selecciona una sucursal...'}
+                          </Text>
+                          <Ionicons name="chevron-down" size={18} color={themeColors.textSecondary} />
+                        </TouchableOpacity>
+                        {showQuickSaleSucursalDropdown && (
+                          <View style={[styles.quickDropdown, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                            <ScrollView nestedScrollEnabled style={{ maxHeight: 150 }}>
+                              {sucs.map(s => (
+                                <TouchableOpacity
+                                  key={s.id}
+                                  onPress={() => {
+                                    setQuickSaleSucursal(s.nombre);
+                                    setShowQuickSaleSucursalDropdown(false);
+                                  }}
+                                  style={[styles.quickDropdownItem, { borderBottomColor: themeColors.border }]}
+                                >
+                                  <Text style={{ color: themeColors.text }}>{s.nombre}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
+
                   {/* Factura Referencia */}
                   <CustomInput
                     label="Factura / Referencia (Opcional)"
@@ -3461,7 +3510,7 @@ export default function AdminDashboard() {
                   />
 
                   {/* Tipo de Proyecto Selector */}
-                  <View style={{ zIndex: 9, position: 'relative' }}>
+                  <View style={{ zIndex: 8, position: 'relative', marginBottom: Spacing.two }}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>Tipo de Proyecto</Text>
                     <TouchableOpacity
                       onPress={() => setShowQuickSaleTipoDropdown(!showQuickSaleTipoDropdown)}
@@ -3490,9 +3539,9 @@ export default function AdminDashboard() {
                     )}
                   </View>
 
-                  {/* Sucursal */}
+                  {/* Proveedor */}
                   <CustomInput
-                    label="Sucursal (Opcional)"
+                    label="Proveedor (Opcional)"
                     placeholder="Ej. Centro, Norte o sucursal relacionada..."
                     value={quickSaleProveedor}
                     onChangeText={setQuickSaleProveedor}

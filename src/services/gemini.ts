@@ -271,7 +271,7 @@ export const GeminiService = {
   async scanTicket(base64Image: string, cantidadPersonas: number = 1, mimeType: string = 'image/jpeg'): Promise<GeminiOcrResult> {
     const prompt = `Analiza la imagen de este ticket de compra de gastos. Extrae y devuelve un objeto JSON puro (sin formato markdown ni bloques de código, solo el texto del JSON) con las siguientes propiedades:
 {
-  "monto": number (monto total del ticket incluyendo centavos/decimales de forma exacta, no redondees el valor, si no es legible o no hay, usa null),
+  "monto": number (monto total del ticket incluyendo centavos/decimales de forma exacta, no redondees el valor, si no es legible o no hay, usa null. INSTRUCCIÓN IMPORTANTE: Si detectas que la moneda del ticket está en Dólares/USD, primero verifica si la propia factura o ticket menciona explícitamente el tipo de cambio (T.C.) utilizado; si es así, usa obligatoriamente ese valor para la conversión. Si el ticket NO menciona el tipo de cambio, entonces utiliza tu herramienta de búsqueda en internet (googleSearch) para consultar el tipo de cambio oficial de Dólar a Pesos Mexicanos (MXN) para la fecha exacta del ticket. Realiza la conversión y pon el resultado FINAL EN PESOS MXN aquí),
   "proveedor": string (nombre del establecimiento o proveedor, si no hay usa null),
   "sucursal": string (nombre de la sucursal o filial si aparece en el ticket, si no usa null),
   "fecha": string (la fecha de compra o emisión del ticket en formato DD/MM/AAAA, si no es legible o no hay, usa null),
@@ -311,6 +311,7 @@ export const GeminiService = {
           ],
         },
       ],
+      tools: [{ googleSearch: {} }],
       generationConfig: {
         responseMimeType: 'application/json',
         maxOutputTokens: 8192,

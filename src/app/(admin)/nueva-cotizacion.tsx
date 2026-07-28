@@ -42,6 +42,8 @@ export default function NuevaCotizacionScreen() {
 
   const [clientSearchResults, setClientSearchResults] = useState<any[]>([]);
   const [showClientResults, setShowClientResults] = useState(false);
+  const [sucursales, setSucursales] = useState<any[]>([]);
+  const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
   
   const [formMessage, setFormMessage] = useState<{type: 'error'|'success', text: string} | null>(null);
 
@@ -98,8 +100,20 @@ export default function NuevaCotizacionScreen() {
       clienteCorreo: client.correo_electronico || '',
       clienteCP: client.codigo_postal || '',
       direccionFactura: client.direccion || '',
+      sucursal: '',
     }));
     setShowClientResults(false);
+    
+    // Fetch sucursales for this client
+    const fetchSuc = async () => {
+      const { data } = await supabase.from('sucursales_cliente').select('*').eq('cliente_id', client.id);
+      if (data && data.length > 0) {
+        setSucursales(data);
+      } else {
+        setSucursales([]);
+      }
+    };
+    fetchSuc();
   };
 
   const searchProducts = async (lineId: string, text: string) => {
@@ -165,6 +179,7 @@ export default function NuevaCotizacionScreen() {
             clienteCorreo: clientData?.correo_electronico || '',
             clienteCP: clientData?.codigo_postal || '',
             direccionFactura: clientData?.direccion || '',
+            sucursal: data.sucursal || '',
             fechaCreacion: data.fecha_creacion,
             vendedor: data.vendedor || user?.nombre || '',
             moneda: data.moneda || 'MXN',
@@ -175,6 +190,11 @@ export default function NuevaCotizacionScreen() {
             iva: data.iva || 0,
             total: data.total || 0,
           });
+
+          if (clientData?.id) {
+            const { data: sucData } = await supabase.from('sucursales_cliente').select('*').eq('cliente_id', clientData.id);
+            if (sucData) setSucursales(sucData);
+          }
           return;
         }
       }
@@ -348,6 +368,7 @@ export default function NuevaCotizacionScreen() {
         iva,
         total,
         lineas: lineasClonadas,
+        sucursal: cotizacion.sucursal || null,
         terminos_condiciones: cotizacion.terminosCondiciones,
         estado: cotizacion.estado || 'Borrador'
       };
@@ -493,7 +514,50 @@ export default function NuevaCotizacionScreen() {
                   </View>
                 )}
               </View>
-              <View style={{ flexDirection: 'row', gap: Spacing.two, zIndex: 1 }}>
+
+              {sucursales.length > 0 && (
+                <View style={{ zIndex: 9, marginTop: Spacing.one }}>
+                  <ThemedText style={{ fontSize: 13, fontWeight: '700', color: themeColors.textSecondary, marginBottom: Spacing.one }}>SUCURSAL DEL CLIENTE</ThemedText>
+                  <TouchableOpacity
+                    onPress={() => setShowSucursalDropdown(!showSucursalDropdown)}
+                    style={{
+                      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                      backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border,
+                      borderRadius: 8, padding: 12, height: 48
+                    }}
+                  >
+                    <ThemedText style={{ color: cotizacion.sucursal ? themeColors.text : themeColors.textSecondary }}>
+                      {cotizacion.sucursal || 'Selecciona una sucursal'}
+                    </ThemedText>
+                    <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={20} color={themeColors.textSecondary} />
+                  </TouchableOpacity>
+                  {showSucursalDropdown && (
+                    <View style={{ 
+                      position: 'absolute', top: 75, left: 0, right: 0, 
+                      backgroundColor: themeColors.backgroundElement, 
+                      borderWidth: 1, borderColor: themeColors.border, 
+                      borderRadius: 4, zIndex: 100,
+                      shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 4
+                    }}>
+                      <ScrollView style={{ maxHeight: 150 }} nestedScrollEnabled>
+                        {sucursales.map(suc => (
+                          <TouchableOpacity 
+                            key={suc.id} 
+                            onPress={() => {
+                              setCotizacion(prev => ({...prev, sucursal: suc.nombre}));
+                              setShowSucursalDropdown(false);
+                            }}
+                            style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: themeColors.border }}
+                          >
+                            <ThemedText style={{ fontWeight: 'bold', color: themeColors.text }}>{suc.nombre}</ThemedText>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+              )}
+              <View style={{ flexDirection: 'row', gap: Spacing.two, zIndex: 1, marginTop: Spacing.one }}>
                 <View style={{ flex: 1 }}>
                   <CustomInput 
                     label="RFC" 

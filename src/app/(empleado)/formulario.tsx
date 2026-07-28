@@ -22,7 +22,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, Vehiculo, VehiculoService } from '@/services/supabase';
+import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, Vehiculo, VehiculoService, ClienteItem, SucursalCliente } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { GeminiService } from '@/services/gemini';
 import { PushNotificationService } from '@/services/pushNotifications';
@@ -172,6 +172,8 @@ export default function GastoForm() {
   const [selectedCliente, setSelectedCliente] = useState<string>('');
   const [clienteSearch, setClienteSearch] = useState('');
   const [justificacion, setJustificacion] = useState('');
+  const [sucursalesCliente, setSucursalesCliente] = useState<SucursalCliente[]>([]);
+  const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
 
   // Vehículos y Gasolina
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
@@ -234,12 +236,13 @@ export default function GastoForm() {
 
   const loadCatalogos = async () => {
     try {
-      const [catRes, subRes, cliRes, usrRes, vehList] = await Promise.all([
+      const [catRes, subRes, cliRes, usrRes, vehList, sucRes] = await Promise.all([
         supabase.from('categorias').select('*').order('nombre'),
         supabase.from('subcategorias').select('*').order('nombre'),
         supabase.from('clientes').select('*').order('nombre'),
         supabase.from('usuarios').select('*').order('nombre'),
         VehiculoService.getVehiculos(true),
+        supabase.from('sucursales_cliente').select('*').order('nombre'),
       ]);
 
       if (catRes.data) setCategorias(catRes.data);
@@ -247,6 +250,7 @@ export default function GastoForm() {
       if (cliRes.data) setClientes(cliRes.data);
       if (usrRes.data) setAllUsers(usrRes.data);
       if (vehList) setVehiculos(vehList);
+      if (sucRes.data) setSucursalesCliente(sucRes.data);
     } catch (err) {
       console.error('Error loading catalogs:', err);
     }
@@ -554,7 +558,7 @@ export default function GastoForm() {
       } else {
         setAlertaPolitica(null);
       }
-
+      
       setScanSuccess(true);
       showAlert(
         'Datos Extraídos',
@@ -584,8 +588,17 @@ export default function GastoForm() {
       if (error) throw error;
       if (data && data.length > 0) {
         const newCli = data[0];
+        if (newCli) {
+          setSelectedCliente(newCli.nombre);
+          setSucursal('');
+        } else {
+          // Fallback optimista si no retornó
+          if (!clientes.some(c => c.nombre === nombre.trim())) {
+            setSelectedCliente(nombre.trim());
+            setSucursal('');
+          }
+        }
         setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-        setSelectedCliente(newCli.nombre);
       } else {
         const { data: allCli } = await supabase.from('clientes').select('*').order('nombre');
         if (allCli) {
@@ -796,7 +809,7 @@ export default function GastoForm() {
       estado: selectedEstado || null,
       motivo_sin_factura: facturado === true
         ? null
-        : (facturaStatus === 'PENDIENTE' || (facturado === false && (motivoSinFactura === 'PENDIENTE_ENTREGA' || motivoSinFactura.startsWith('PENDIENTE'))))
+        : (facturaStatus === 'PENDIENTE')
             ? (comentarioPendiente.trim() ? `PENDIENTE_ENTREGA: ${comentarioPendiente.trim()}` : 'PENDIENTE_ENTREGA')
             : (motivoSinFactura.trim() || null),
       tipo_servicio_proyecto: tipoServicioProyecto,
@@ -1022,7 +1035,11 @@ export default function GastoForm() {
         showAlert('Validación', 'Por favor especifica si el gasto está facturado.');
         return;
       }
-      if (facturado === false && !motivoSinFactura.trim()) {
+      if (facturado === false && facturaStatus === 'PENDIENTE' && !comentarioPendiente.trim()) {
+        showAlert('Validación', 'Por favor explica por qué la factura está pendiente.');
+        return;
+      }
+      if (facturado === false && facturaStatus === 'NO' && !motivoSinFactura.trim()) {
         showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
         return;
       }
@@ -1067,9 +1084,14 @@ export default function GastoForm() {
             }}
             style={{ flex: 1 }}
           >
-            <StepIndicator
-            currentStep={currentStep}
-            steps={['Evidencia', 'Detalles', 'Categoría']}
+            <StepIndicator 
+            currentStep={currentStep} 
+            steps={['Datos', 'Clasificación', 'Comprobante']} 
+            onStepPress={(step) => {
+              if (step < currentStep || true) {
+                setCurrentStep(step);
+              }
+            }}
           />
 
           {/* PASO 1: Evidencia e IA */}
@@ -1531,14 +1553,58 @@ export default function GastoForm() {
                 iconName="briefcase-outline"
               />
 
-              <CustomInput
-                label="Sucursal"
-                placeholder="Ej. Centro, Norte"
-                value={sucursal}
-                onChangeText={setSucursal}
-                iconName="location-outline"
-              />
-
+              <View style={styles.customDropdownContainer}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del cliente *</Text>
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, opacity: !selectedCliente ? 0.5 : 1 }]}
+                  disabled={!selectedCliente}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowSucursalDropdown(!showSucursalDropdown);
+                    setShowEstDropdown(false);
+                    setShowCatDropdown(false);
+                    setShowSubDropdown(false);
+                    setShowCliDropdown(false);
+                  }}
+                >
+                  <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
+                    {sucursal || (selectedCliente ? 'Selecciona una sucursal' : 'Selecciona un cliente primero')}
+                  </Text>
+                  <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                </TouchableOpacity>
+                {showSucursalDropdown && (
+                  <View style={{ width: '100%', zIndex: 1000 }}>
+                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        {(() => {
+                           const currentCliente = clientes.find(c => c.nombre === selectedCliente);
+                           const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id) : [];
+                           if (filteredSucursales.length === 0) {
+                             return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>;
+                           }
+                           return filteredSucursales.map((suc, index, array) => (
+                              <TouchableOpacity
+                                key={suc.id}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
+                                onPress={() => {
+                                  setSucursal(suc.nombre);
+                                  setShowSucursalDropdown(false);
+                                }}
+                              >
+                                <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                              </TouchableOpacity>
+                           ));
+                        })()}
+                      </ScrollView>
+                    </View>
+                  </View>
+                )}
+              </View>
               {/* Selector de Estado de la República */}
               <View style={styles.customDropdownContainer}>
                 <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Estado de la República *</Text>
@@ -1741,15 +1807,15 @@ export default function GastoForm() {
                     style={[
                       styles.paymentOption,
                       {
-                        backgroundColor: (facturado === false && (facturaStatus === 'PENDIENTE' || motivoSinFactura.startsWith('PENDIENTE'))) ? themeColors.warning : themeColors.backgroundElement,
-                        borderColor: (facturado === false && (facturaStatus === 'PENDIENTE' || motivoSinFactura.startsWith('PENDIENTE'))) ? 'transparent' : themeColors.border,
+                        backgroundColor: (facturado === false && facturaStatus === 'PENDIENTE') ? themeColors.warning : themeColors.backgroundElement,
+                        borderColor: (facturado === false && facturaStatus === 'PENDIENTE') ? 'transparent' : themeColors.border,
                         flex: 1,
                         paddingVertical: 8,
                         alignItems: 'center',
                       },
                     ]}
                   >
-                    <Text style={[styles.paymentOptionText, { color: (facturado === false && (facturaStatus === 'PENDIENTE' || motivoSinFactura.startsWith('PENDIENTE'))) ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
+                    <Text style={[styles.paymentOptionText, { color: (facturado === false && facturaStatus === 'PENDIENTE') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
                       Pendiente
                     </Text>
                   </TouchableOpacity>
@@ -1758,10 +1824,6 @@ export default function GastoForm() {
                     onPress={() => {
                       setFacturado(false);
                       setFacturaStatus('NO');
-                      if (motivoSinFactura.startsWith('PENDIENTE')) {
-                        setMotivoSinFactura('');
-                      }
-                      setComentarioPendiente('');
                       setFacturaUri(null);
                       setFacturaBase64(null);
                       setFacturaExt(null);
@@ -1769,22 +1831,22 @@ export default function GastoForm() {
                     style={[
                       styles.paymentOption,
                       {
-                        backgroundColor: (facturado === false && (facturaStatus === 'NO' || (motivoSinFactura !== '' && !motivoSinFactura.startsWith('PENDIENTE')))) ? themeColors.accent : themeColors.backgroundElement,
-                        borderColor: (facturado === false && (facturaStatus === 'NO' || (motivoSinFactura !== '' && !motivoSinFactura.startsWith('PENDIENTE')))) ? 'transparent' : themeColors.border,
+                        backgroundColor: (facturado === false && facturaStatus === 'NO') ? themeColors.accent : themeColors.backgroundElement,
+                        borderColor: (facturado === false && facturaStatus === 'NO') ? 'transparent' : themeColors.border,
                         flex: 1,
                         paddingVertical: 8,
                         alignItems: 'center',
                       },
                     ]}
                   >
-                    <Text style={[styles.paymentOptionText, { color: (facturado === false && (facturaStatus === 'NO' || (motivoSinFactura !== '' && !motivoSinFactura.startsWith('PENDIENTE')))) ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
+                    <Text style={[styles.paymentOptionText, { color: (facturado === false && facturaStatus === 'NO') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
                       No Facturado
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
-              {facturado === false && (facturaStatus === 'PENDIENTE' || motivoSinFactura.startsWith('PENDIENTE')) && (
+              {facturado === false && facturaStatus === 'PENDIENTE' && (
                 <View style={{ marginBottom: Spacing.two }}>
                   <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning, marginBottom: Spacing.two, padding: Spacing.two, borderRadius: BorderRadius.medium }]}>
                     <Text style={{ color: themeColors.warning, fontWeight: '700', fontSize: 12 }}>
@@ -1804,7 +1866,7 @@ export default function GastoForm() {
                 </View>
               )}
 
-              {facturado === false && (facturaStatus === 'NO' || (!motivoSinFactura.startsWith('PENDIENTE') && facturaStatus !== 'PENDIENTE')) && (
+              {facturado === false && facturaStatus === 'NO' && (
                 <View style={{ marginBottom: Spacing.two }}>
                   <CustomInput
                     label="Motivo por el cual no se cuenta con factura *"
@@ -2081,6 +2143,7 @@ export default function GastoForm() {
                                 ]}
                                 onPress={() => {
                                   setSelectedCliente(cli.nombre);
+                                  setSucursal('');
                                   setClienteSearch('');
                                   setShowCliDropdown(false);
                                 }}

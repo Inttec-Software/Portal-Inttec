@@ -174,6 +174,12 @@ export interface ClienteItem {
   uso_cfdi?: string | null;
 }
 
+export interface SucursalCliente {
+  id: string;
+  cliente_id: string;
+  nombre: string;
+}
+
 /**
  * Servicio de Autenticación
  */
@@ -419,8 +425,8 @@ export interface Venta {
   cfdi_uuid?: string | null;
   cfdi_facturapi_id?: string | null;
   cfdi_estado?: string | null;
-  cfdi_pdf_url?: string | null;
   cfdi_xml_url?: string | null;
+  sucursal?: string | null;
 }
 
 export interface VentaPartida {

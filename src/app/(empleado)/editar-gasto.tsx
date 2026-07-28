@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  Keyboard,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -18,7 +19,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, recalculateVentaTotals } from '@/services/supabase';
+import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, recalculateVentaTotals, ClienteItem, SucursalCliente } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { GeminiService } from '@/services/gemini';
 import { PushNotificationService } from '@/services/pushNotifications';
@@ -97,7 +98,7 @@ export default function EditarGastoForm() {
   // Catálogos desde Supabase
   const [categorias, setCategorias] = useState<CatalogoItem[]>([]);
   const [subcategorias, setSubcategorias] = useState<SubcategoriaItem[]>([]);
-  const [clientes, setClientes] = useState<CatalogoItem[]>([]);
+  const [clientes, setClientes] = useState<ClienteItem[]>([]);
 
   // Paso 1: Evidencia
   const [imageUri, setImageUri] = useState<string | null>(null);
@@ -142,6 +143,8 @@ export default function EditarGastoForm() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
   const [alertaPolitica, setAlertaPolitica] = useState<string | null>(null);
+  const [facturaStatus, setFacturaStatus] = useState<'SI' | 'PENDIENTE' | 'NO' | null>(null);
+  const [comentarioPendiente, setComentarioPendiente] = useState('');
   
   // Estado de la República
   const [selectedEstado, setSelectedEstado] = useState<string>('');
@@ -184,6 +187,8 @@ export default function EditarGastoForm() {
   const [selectedCliente, setSelectedCliente] = useState<string>('');
   const [clienteSearch, setClienteSearch] = useState('');
   const [justificacion, setJustificacion] = useState('');
+  const [sucursalesCliente, setSucursalesCliente] = useState<SucursalCliente[]>([]);
+  const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
 
   // Dropdown list visibility toggles (Mock pickers since RN Picker is external)
   const [showCatDropdown, setShowCatDropdown] = useState(false);
@@ -223,17 +228,19 @@ export default function EditarGastoForm() {
 
   const loadCatalogos = async () => {
     try {
-      const [catRes, subRes, cliRes, usrRes] = await Promise.all([
+      const [catRes, subRes, cliRes, usrRes, sucRes] = await Promise.all([
         supabase.from('categorias').select('*').order('nombre'),
         supabase.from('subcategorias').select('*').order('nombre'),
         supabase.from('clientes').select('*').order('nombre'),
         supabase.from('usuarios').select('*').order('nombre'),
+        supabase.from('sucursales_cliente').select('*').order('nombre'),
       ]);
 
       if (catRes.data) setCategorias(catRes.data);
       if (subRes.data) setSubcategorias(subRes.data);
       if (cliRes.data) setClientes(cliRes.data);
       if (usrRes.data) setAllUsers(usrRes.data);
+      if (sucRes.data) setSucursalesCliente(sucRes.data);
     } catch (err) {
       console.error('Error loading catalogs:', err);
     }
@@ -289,7 +296,22 @@ export default function EditarGastoForm() {
             setSelectedCategoria(data.categoria || '');
             setSelectedSubcategoria(data.subcategoria || '');
             setSelectedCliente(data.cliente || '');
-            setFacturado(data.facturado);
+            
+            if (data.motivo_sin_factura?.startsWith('PENDIENTE_ENTREGA')) {
+              setFacturado(false);
+              setFacturaStatus('PENDIENTE');
+              const partes = data.motivo_sin_factura.split('PENDIENTE_ENTREGA:');
+              if (partes.length > 1 && partes[1].trim() !== '') {
+                setComentarioPendiente(partes[1].trim());
+              }
+            } else if (data.facturado === false) {
+              setFacturado(false);
+              setFacturaStatus('NO');
+            } else {
+              setFacturado(true);
+              setFacturaStatus('SI');
+            }
+            
             setMotivoSinFactura(data.motivo_sin_factura || '');
             if (data.factura_url) setFacturaUri(data.factura_url);
             
@@ -638,12 +660,16 @@ export default function EditarGastoForm() {
       if (data && data.length > 0) {
         const newCli = data[0];
         setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-        setSelectedCliente(newCli.nombre);
+        if (newCli) {
+          setSelectedCliente(newCli.nombre);
+          setSucursal('');
+        }
       } else {
         const { data: allCli } = await supabase.from('clientes').select('*').order('nombre');
         if (allCli) {
           setClientes(allCli);
           setSelectedCliente(nombre.trim());
+          setSucursal('');
         }
       }
       setClienteSearch('');
@@ -703,14 +729,12 @@ export default function EditarGastoForm() {
     }
 
     if (facturado === false) {
-      if (!motivoSinFactura.trim()) {
-        showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
-        setCurrentStep(2);
+      if (facturaStatus === 'PENDIENTE' && !comentarioPendiente.trim()) {
+        showAlert('Validación', 'Por favor explica por qué la factura está pendiente.');
         return;
       }
-      if (motivoSinFactura.trim() === 'PENDIENTE_ENTREGA') {
-        showAlert('Validación', 'Por favor explica por qué la factura está pendiente.');
-        setCurrentStep(2);
+      if (facturaStatus === 'NO' && (!motivoSinFactura || !motivoSinFactura.trim())) {
+        showAlert('Validación', 'Por favor explica por qué no hay factura.');
         return;
       }
     }
@@ -753,7 +777,7 @@ export default function EditarGastoForm() {
       ubicacion_registro: 'Móvil',
       estado: selectedEstado || null,
       facturado: facturado,
-      motivo_sin_factura: facturado ? null : (motivoSinFactura.trim() || null),
+      motivo_sin_factura: facturado ? null : (facturaStatus === 'PENDIENTE' ? `PENDIENTE_ENTREGA: ${comentarioPendiente}` : motivoSinFactura.trim() || null),
       tipo_servicio_proyecto: tipoServicioProyecto,
       detalle_servicio_proyecto: detalleServicioProyecto.trim(),
     };
@@ -868,8 +892,12 @@ export default function EditarGastoForm() {
         showAlert('Validación', 'Por favor especifica si el gasto está facturado.');
         return;
       }
-      if (facturado === false && !motivoSinFactura.trim()) {
-        showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
+      if (facturado === false && facturaStatus === 'PENDIENTE' && !comentarioPendiente.trim()) {
+        showAlert('Validación', 'Por favor explica por qué la factura está pendiente.');
+        return;
+      }
+      if (facturado === false && facturaStatus === 'NO' && (!motivoSinFactura || !motivoSinFactura.trim())) {
+        showAlert('Validación', 'Por favor explica el motivo por el cual no se cuenta con factura.');
         return;
       }
     }
@@ -912,10 +940,15 @@ export default function EditarGastoForm() {
             }}
             style={{ flex: 1 }}
           >
-            <StepIndicator
-            currentStep={currentStep}
-            steps={['Evidencia', 'Detalles', 'Categoría']}
-          />
+            <StepIndicator 
+          currentStep={currentStep} 
+          steps={['Detalles', 'Categoría', 'Comprobante']} 
+          onStepPress={(step) => {
+            if (step < currentStep || true) {
+              setCurrentStep(step);
+            }
+          }}
+        />
 
           {/* PASO 1: Evidencia e IA */}
           {currentStep === 1 && (
@@ -1345,14 +1378,58 @@ export default function EditarGastoForm() {
                 iconName="briefcase-outline"
               />
 
-              <CustomInput
-                label="Sucursal"
-                placeholder="Ej. Centro, Norte"
-                value={sucursal}
-                onChangeText={setSucursal}
-                iconName="location-outline"
-              />
-
+              <View style={styles.customDropdownContainer}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del cliente *</Text>
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, opacity: !selectedCliente ? 0.5 : 1 }]}
+                  disabled={!selectedCliente}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowSucursalDropdown(!showSucursalDropdown);
+                    setShowEstDropdown(false);
+                    setShowCatDropdown(false);
+                    setShowSubDropdown(false);
+                    setShowCliDropdown(false);
+                  }}
+                >
+                  <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
+                    {sucursal || (selectedCliente ? 'Selecciona una sucursal' : 'Selecciona un cliente primero')}
+                  </Text>
+                  <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                </TouchableOpacity>
+                {showSucursalDropdown && (
+                  <View style={{ width: '100%', zIndex: 1000 }}>
+                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        {(() => {
+                           const currentCliente = clientes.find(c => c.nombre === selectedCliente);
+                           const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id) : [];
+                           if (filteredSucursales.length === 0) {
+                             return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>;
+                           }
+                           return filteredSucursales.map((suc, index, array) => (
+                              <TouchableOpacity
+                                key={suc.id}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
+                                onPress={() => {
+                                  setSucursal(suc.nombre);
+                                  setShowSucursalDropdown(false);
+                                }}
+                              >
+                                <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                              </TouchableOpacity>
+                           ));
+                        })()}
+                      </ScrollView>
+                    </View>
+                  </View>
+                )}
+              </View>
               {/* Selector de Estado de la República */}
               <View style={styles.customDropdownContainer}>
                 <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Estado de la República *</Text>
@@ -1517,6 +1594,7 @@ export default function EditarGastoForm() {
                   <TouchableOpacity
                     onPress={() => {
                       setFacturado(true);
+                      setFacturaStatus('SI');
                       setMotivoSinFactura('');
                     }}
                     style={[
@@ -1538,7 +1616,7 @@ export default function EditarGastoForm() {
                   <TouchableOpacity
                     onPress={() => {
                       setFacturado(false);
-                      setMotivoSinFactura('PENDIENTE_ENTREGA');
+                      setFacturaStatus('PENDIENTE');
                       setFacturaUri(null);
                       setFacturaBase64(null);
                       setFacturaExt(null);
@@ -1546,15 +1624,15 @@ export default function EditarGastoForm() {
                     style={[
                       styles.paymentOption,
                       {
-                        backgroundColor: (facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA') ? themeColors.warning : themeColors.backgroundElement,
-                        borderColor: (facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA') ? 'transparent' : themeColors.border,
+                        backgroundColor: (facturado === false && facturaStatus === 'PENDIENTE') ? themeColors.warning : themeColors.backgroundElement,
+                        borderColor: (facturado === false && facturaStatus === 'PENDIENTE') ? 'transparent' : themeColors.border,
                         flex: 1,
                         paddingVertical: 8,
                         alignItems: 'center',
                       },
                     ]}
                   >
-                    <Text style={[styles.paymentOptionText, { color: (facturado === false && motivoSinFactura === 'PENDIENTE_ENTREGA') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
+                    <Text style={[styles.paymentOptionText, { color: (facturado === false && facturaStatus === 'PENDIENTE') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
                       Pendiente
                     </Text>
                   </TouchableOpacity>
@@ -1562,9 +1640,7 @@ export default function EditarGastoForm() {
                   <TouchableOpacity
                     onPress={() => {
                       setFacturado(false);
-                      if (motivoSinFactura === 'PENDIENTE_ENTREGA') {
-                        setMotivoSinFactura('');
-                      }
+                      setFacturaStatus('NO');
                       setFacturaUri(null);
                       setFacturaBase64(null);
                       setFacturaExt(null);
@@ -1572,34 +1648,46 @@ export default function EditarGastoForm() {
                     style={[
                       styles.paymentOption,
                       {
-                        backgroundColor: (facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA') ? themeColors.accent : themeColors.backgroundElement,
-                        borderColor: (facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA') ? 'transparent' : themeColors.border,
+                        backgroundColor: (facturado === false && facturaStatus === 'NO') ? themeColors.accent : themeColors.backgroundElement,
+                        borderColor: (facturado === false && facturaStatus === 'NO') ? 'transparent' : themeColors.border,
                         flex: 1,
                         paddingVertical: 8,
                         alignItems: 'center',
                       },
                     ]}
                   >
-                    <Text style={[styles.paymentOptionText, { color: (facturado === false && motivoSinFactura !== 'PENDIENTE_ENTREGA') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
+                    <Text style={[styles.paymentOptionText, { color: (facturado === false && facturaStatus === 'NO') ? '#ffffff' : themeColors.text, fontSize: 11, fontWeight: '700' }]}>
                       No Facturado
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
-              {facturado === false && motivoSinFactura.startsWith('PENDIENTE') && (
-                <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning, marginBottom: Spacing.two, padding: Spacing.two, borderRadius: BorderRadius.medium }]}>
-                  <Text style={{ color: themeColors.warning, fontWeight: '700', fontSize: 12 }}>
-                    ⚠️ Factura Pendiente de Entregar: Por favor explica por qué está pendiente a continuación.
-                  </Text>
+              {facturado === false && facturaStatus === 'PENDIENTE' && (
+                <View style={{ marginBottom: Spacing.two }}>
+                  <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning, marginBottom: Spacing.two, padding: Spacing.two, borderRadius: BorderRadius.medium }]}>
+                    <Text style={{ color: themeColors.warning, fontWeight: '700', fontSize: 12 }}>
+                      ⚠️ Factura Pendiente de Entregar: Se podrá adjuntar el archivo posteriormente.
+                    </Text>
+                  </View>
+                  <CustomInput
+                    label="Explicación de Factura Pendiente (Obligatorio) *"
+                    placeholder="Ej. El proveedor enviará el archivo el próximo lunes..."
+                    value={comentarioPendiente}
+                    onChangeText={setComentarioPendiente}
+                    iconName="chatbox-outline"
+                    multiline
+                    numberOfLines={2}
+                    style={{ height: 60 }}
+                  />
                 </View>
               )}
 
-              {facturado === false && (
+              {facturado === false && facturaStatus === 'NO' && (
                 <View style={{ marginBottom: Spacing.two }}>
                   <CustomInput
-                    label={motivoSinFactura.startsWith('PENDIENTE') ? "Explicación (Obligatorio) *" : "Motivo por el cual no se cuenta con factura *"}
-                    placeholder={motivoSinFactura.startsWith('PENDIENTE') ? "Escribe la razón (ej: PENDIENTE_ENTREGA: Me la mandan mañana)" : "Ej. El establecimiento no emite facturas, etc."}
+                    label="Motivo por el cual no se cuenta con factura *"
+                    placeholder="Ej. El establecimiento no emite facturas, régimen simplificado, etc."
                     value={motivoSinFactura}
                     onChangeText={setMotivoSinFactura}
                     iconName="alert-circle-outline"
@@ -1768,10 +1856,11 @@ export default function EditarGastoForm() {
                               key={cli.id}
                               style={styles.dropdownItem}
                               onPress={() => {
-                                setSelectedCliente(cli.nombre);
-                                setClienteSearch('');
-                                setShowCliDropdown(false);
-                              }}
+                                  setSelectedCliente(cli.nombre);
+                                  setSucursal('');
+                                  setClienteSearch('');
+                                  setShowCliDropdown(false);
+                                }}
                             >
                               <Text style={{ color: themeColors.text }}>{cli.nombre}</Text>
                             </TouchableOpacity>

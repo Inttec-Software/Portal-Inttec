@@ -22,6 +22,7 @@ import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 export default function CatalogosManager() {
   const router = useRouter();
@@ -58,6 +59,21 @@ export default function CatalogosManager() {
   const [editClientDireccion, setEditClientDireccion] = useState('');
   const [editClientCp, setEditClientCp] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
+
+  // Search and Sucursales
+  const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [sucursalesModalVisible, setSucursalesModalVisible] = useState(false);
+  const [selectedClientForSucursales, setSelectedClientForSucursales] = useState<ClienteItem | null>(null);
+  const [clientSucursales, setClientSucursales] = useState<any[]>([]);
+  const [newSucursalName, setNewSucursalName] = useState('');
+  const [isSavingSucursal, setIsSavingSucursal] = useState(false);
+  const [isLoadingSucursales, setIsLoadingSucursales] = useState(false);
+
+  // Summary Modal
+  const [summaryModalVisible, setSummaryModalVisible] = useState(false);
+  const [selectedClientForSummary, setSelectedClientForSummary] = useState<ClienteItem | null>(null);
+  const [clientStats, setClientStats] = useState({ totalGastos: 0, montoGastos: 0, totalVentas: 0, montoVentas: 0 });
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -251,6 +267,98 @@ export default function CatalogosManager() {
     }
   };
 
+  const handleOpenSummary = async (cliente: ClienteItem) => {
+    setSelectedClientForSummary(cliente);
+    setSummaryModalVisible(true);
+    setIsLoadingSummary(true);
+    setClientStats({ totalGastos: 0, montoGastos: 0, totalVentas: 0, montoVentas: 0 });
+
+    try {
+      const [gastosRes, ventasRes] = await Promise.all([
+        supabase.from('gastos').select('monto').eq('cliente', cliente.nombre).neq('status', 'REJECTED'),
+        supabase.from('ventas').select('precio_total_facturado, costo_total').eq('cliente', cliente.nombre)
+      ]);
+
+      const gastosData = gastosRes.data || [];
+      const ventasData = ventasRes.data || [];
+
+      const totalGastos = gastosData.length;
+      const montoGastos = gastosData.reduce((sum, g) => sum + (Number(g.monto) || 0), 0);
+
+      const totalVentas = ventasData.length;
+      const montoVentas = ventasData.reduce((sum, v) => sum + (Number(v.precio_total_facturado) || Number(v.costo_total) || 0), 0);
+      const rentabilidad = montoVentas - montoGastos;
+      const margen = montoVentas > 0 ? (rentabilidad / montoVentas) * 100 : 0;
+
+      setClientStats({
+        totalGastos,
+        montoGastos,
+        totalVentas,
+        montoVentas,
+        rentabilidad,
+        margen
+      });
+    } catch (err: any) {
+      console.error('Error fetching client stats', err);
+      Alert.alert('Error', 'No se pudieron cargar las estadísticas del cliente.');
+    } finally {
+      setIsLoadingSummary(false);
+    }
+  };
+
+  const handleOpenSucursales = async (cliente: ClienteItem) => {
+    setSelectedClientForSucursales(cliente);
+    setSucursalesModalVisible(true);
+    await loadClientSucursales(cliente.id);
+  };
+
+  const loadClientSucursales = async (clienteId: string) => {
+    setIsLoadingSucursales(true);
+    try {
+      const { data, error } = await supabase
+        .from('sucursales_cliente')
+        .select('*')
+        .eq('cliente_id', clienteId)
+        .order('nombre');
+      if (error) throw error;
+      setClientSucursales(data || []);
+    } catch (err: any) {
+      console.error('Error fetching sucursales:', err);
+      Alert.alert('Error', err.message || 'No se pudieron cargar las sucursales.');
+    } finally {
+      setIsLoadingSucursales(false);
+    }
+  };
+
+  const handleAddSucursal = async () => {
+    if (!newSucursalName.trim() || !selectedClientForSucursales) return;
+    setIsSavingSucursal(true);
+    try {
+      const { error } = await supabase.from('sucursales_cliente').insert([
+        { cliente_id: selectedClientForSucursales.id, nombre: newSucursalName.trim() }
+      ]);
+      if (error) throw error;
+      setNewSucursalName('');
+      await loadClientSucursales(selectedClientForSucursales.id);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo agregar la sucursal.');
+    } finally {
+      setIsSavingSucursal(false);
+    }
+  };
+
+  const handleDeleteSucursal = async (id: string) => {
+    try {
+      const { error } = await supabase.from('sucursales_cliente').delete().eq('id', id);
+      if (error) throw error;
+      if (selectedClientForSucursales) {
+        await loadClientSucursales(selectedClientForSucursales.id);
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo eliminar la sucursal.');
+    }
+  };
+
   const parentCatName = categorias.find((c) => c.id === selectedParentCatId)?.nombre;
   const editParentCatName = categorias.find((c) => c.id === editParentCatId)?.nombre;
 
@@ -323,6 +431,18 @@ export default function CatalogosManager() {
         </TouchableOpacity>
       </View>
 
+      {/* Search Clientes */}
+      {activeCatalog === 'clientes' && (
+        <View style={{ paddingHorizontal: Spacing.four, paddingBottom: Spacing.two }}>
+          <CustomInput
+            placeholder="Buscar cliente por nombre..."
+            value={clientSearchQuery}
+            onChangeText={setClientSearchQuery}
+            iconName="search-outline"
+          />
+        </View>
+      )}
+
       {/* List */}
       {isLoading ? (
         <View style={styles.loaderContainer}>
@@ -335,7 +455,7 @@ export default function CatalogosManager() {
             activeCatalog === 'categorias'
               ? categorias
               : activeCatalog === 'clientes'
-              ? clientes
+              ? clientes.filter(c => c.nombre.toLowerCase().includes(clientSearchQuery.toLowerCase()))
               : (subcategorias as any[])
           }
           keyExtractor={(item) => item.id}
@@ -362,6 +482,16 @@ export default function CatalogosManager() {
                   {subtext ? <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>{subtext}</Text> : null}
                 </View>
                 <View style={{ flexDirection: 'row', gap: Spacing.three, alignItems: 'center' }}>
+                  {activeCatalog === 'clientes' && (
+                    <>
+                      <TouchableOpacity onPress={() => handleOpenSummary(item as ClienteItem)}>
+                        <Ionicons name="stats-chart-outline" size={20} color={themeColors.success || '#28a745'} />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleOpenSucursales(item as ClienteItem)}>
+                        <Ionicons name="business-outline" size={20} color={themeColors.primary} />
+                      </TouchableOpacity>
+                    </>
+                  )}
                   <TouchableOpacity onPress={() => handleOpenEditItem(item)}>
                     <Ionicons name="create-outline" size={20} color={themeColors.accent} />
                   </TouchableOpacity>
@@ -666,6 +796,195 @@ export default function CatalogosManager() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal para Gestionar Sucursales */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={sucursalesModalVisible}
+        onRequestClose={() => setSucursalesModalVisible(false)}
+      >
+        <View style={[styles.modalOverlay, isDesktop && { justifyContent: 'center', alignItems: 'center' }]}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background }, isDesktop ? { width: 500, borderRadius: BorderRadius.large, height: 'auto', maxHeight: '90%', padding: Spacing.four } : { height: '70%' }]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Sucursales</Text>
+                <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>Cliente: {selectedClientForSucursales?.nombre}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setSucursalesModalVisible(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.three }}>
+              <View style={{ flex: 1 }}>
+                <CustomInput
+                  placeholder="Nueva sucursal..."
+                  value={newSucursalName}
+                  onChangeText={setNewSucursalName}
+                  iconName="business-outline"
+                />
+              </View>
+              <TouchableOpacity
+                onPress={handleAddSucursal}
+                disabled={isSavingSucursal || !newSucursalName.trim()}
+                style={{
+                  backgroundColor: themeColors.primary,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  paddingHorizontal: Spacing.three,
+                  borderRadius: BorderRadius.medium,
+                  opacity: (!newSucursalName.trim() || isSavingSucursal) ? 0.5 : 1
+                }}
+              >
+                {isSavingSucursal ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Ionicons name="add" size={24} color="#fff" />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {isLoadingSucursales ? (
+              <View style={{ padding: Spacing.four, alignItems: 'center' }}>
+                <ActivityIndicator color={themeColors.primary} />
+              </View>
+            ) : (
+              <FlatList
+                data={clientSucursales}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={{ paddingBottom: Spacing.four }}
+                ListEmptyComponent={
+                  <Text style={{ textAlign: 'center', color: themeColors.textSecondary, marginTop: Spacing.three }}>
+                    No hay sucursales registradas para este cliente.
+                  </Text>
+                }
+                renderItem={({ item }) => (
+                  <View style={[styles.listItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, marginBottom: Spacing.one, padding: Spacing.two }]}>
+                    <Text style={{ color: themeColors.text, flex: 1 }}>{item.nombre}</Text>
+                    <TouchableOpacity onPress={() => {
+                      if (Platform.OS === 'web') {
+                        if (window.confirm('¿Seguro que deseas eliminar esta sucursal?')) {
+                          handleDeleteSucursal(item.id);
+                        }
+                      } else {
+                        Alert.alert('Confirmar', '¿Eliminar esta sucursal?', [
+                          { text: 'Cancelar', style: 'cancel' },
+                          { text: 'Eliminar', style: 'destructive', onPress: () => handleDeleteSucursal(item.id) }
+                        ]);
+                      }
+                    }}>
+                      <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Resumen de Cliente (Super Premium UI) */}
+      <Modal visible={summaryModalVisible} animationType="fade" transparent={true}>
+        <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)' }]}>
+          <View style={[styles.modalContent, { 
+            backgroundColor: themeColors.background, 
+            width: '90%', 
+            maxWidth: 420,
+            padding: 0,
+            borderRadius: 24,
+            overflow: 'hidden',
+            shadowColor: '#000', 
+            shadowOffset: {width: 0, height: 20}, 
+            shadowOpacity: 0.4, 
+            shadowRadius: 30, 
+            elevation: 20
+          }]}>
+            <LinearGradient
+              colors={['#1e3c72', '#2a5298']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{ padding: Spacing.five, alignItems: 'center', position: 'relative' }}
+            >
+              <TouchableOpacity 
+                onPress={() => setSummaryModalVisible(false)} 
+                style={{ position: 'absolute', top: 16, right: 16, padding: 8, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20 }}
+              >
+                <Ionicons name="close" size={20} color="#fff" />
+              </TouchableOpacity>
+              <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.three, borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' }}>
+                <Ionicons name="business" size={36} color="#fff" />
+              </View>
+              <Text style={{ color: '#fff', fontSize: 24, fontWeight: '900', textAlign: 'center', letterSpacing: 0.5 }}>
+                {selectedClientForSummary?.nombre}
+              </Text>
+              <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, marginTop: 8 }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 }}>
+                  Resumen de Actividad Global
+                </Text>
+              </View>
+            </LinearGradient>
+
+            <View style={{ padding: Spacing.five, backgroundColor: themeColors.background }}>
+              {isLoadingSummary ? (
+                <View style={{ paddingVertical: Spacing.five }}>
+                  <ActivityIndicator size="large" color="#2a5298" />
+                  <Text style={{ textAlign: 'center', color: themeColors.textSecondary, marginTop: Spacing.three, fontWeight: '500' }}>Calculando inteligencia financiera...</Text>
+                </View>
+              ) : (
+                <View style={{ gap: Spacing.four }}>
+                  
+                  {/* Tarjeta de Ventas */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: themeColors.backgroundElement, padding: Spacing.three, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(40,167,69,0.2)' }}>
+                    <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(40,167,69,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: Spacing.three }}>
+                      <Ionicons name="trending-up" size={28} color={themeColors.success || '#28a745'} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '700' }}>Ventas Facturadas ({clientStats.totalVentas})</Text>
+                      <Text style={{ color: themeColors.text, fontSize: 24, fontWeight: '900', marginTop: 2 }}>
+                        ${clientStats.montoVentas.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Tarjeta de Gastos */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: themeColors.backgroundElement, padding: Spacing.three, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)' }}>
+                    <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(239,68,68,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: Spacing.three }}>
+                      <Ionicons name="trending-down" size={28} color={themeColors.danger || '#ef4444'} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '700' }}>Gastos Registrados ({clientStats.totalGastos})</Text>
+                      <Text style={{ color: themeColors.text, fontSize: 24, fontWeight: '900', marginTop: 2 }}>
+                        ${clientStats.montoGastos.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Divisor */}
+                  <View style={{ height: 1, backgroundColor: themeColors.border, marginVertical: Spacing.one }} />
+
+                  {/* Rentabilidad */}
+                  <View style={{ backgroundColor: clientStats.rentabilidad >= 0 ? 'rgba(40,167,69,0.05)' : 'rgba(239,68,68,0.05)', padding: Spacing.four, borderRadius: 16, borderWidth: 1, borderColor: clientStats.rentabilidad >= 0 ? 'rgba(40,167,69,0.2)' : 'rgba(239,68,68,0.2)' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 14, fontWeight: '700', textTransform: 'uppercase' }}>Rentabilidad</Text>
+                      <View style={{ backgroundColor: clientStats.rentabilidad >= 0 ? '#28a745' : '#ef4444', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
+                          {clientStats.rentabilidad >= 0 ? '+' : ''}{(clientStats.margen || 0).toFixed(1)}% Margen
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={{ color: clientStats.rentabilidad >= 0 ? '#28a745' : '#ef4444', fontSize: 32, fontWeight: '900', marginTop: 8 }}>
+                      ${clientStats.rentabilidad.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Text>
+                  </View>
+
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }

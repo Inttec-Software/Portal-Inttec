@@ -16,13 +16,14 @@ import {
   Modal,
   Pressable,
   Linking,
+  Keyboard,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, Venta, VentaPartida, recalculateVentaTotals } from '@/services/supabase';
+import { supabase, AuthService, Usuario, Venta, VentaPartida, recalculateVentaTotals, ClienteItem, SucursalCliente } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
@@ -86,6 +87,7 @@ export default function VentasScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
   const [cliente, setCliente] = useState('');
+  const [sucursal, setSucursal] = useState('');
   const [facturaReferencia, setFacturaReferencia] = useState('');
   const [tipoProyecto, setTipoProyecto] = useState('');
   const [proveedor, setProveedor] = useState('');
@@ -116,6 +118,8 @@ export default function VentasScreen() {
   const [clientes, setClientes] = useState<any[]>([]);
   const [clienteSearch, setClienteSearch] = useState('');
   const [showCliDropdown, setShowCliDropdown] = useState(false);
+  const [sucursalesCliente, setSucursalesCliente] = useState<SucursalCliente[]>([]);
+  const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
 
   // === Auth Check ===
   useEffect(() => {
@@ -127,12 +131,16 @@ export default function VentasScreen() {
       }
       setCurrentUser(user);
 
-      // Cargar catálogo de clientes
+      // Cargar catálogo de clientes y sucursales
       try {
-        const { data: cliData } = await supabase.from('clientes').select('*').order('nombre');
-        if (cliData) setClientes(cliData);
+        const [cliRes, sucRes] = await Promise.all([
+          supabase.from('clientes').select('*').order('nombre'),
+          supabase.from('sucursales_cliente').select('*').order('nombre')
+        ]);
+        if (cliRes.data) setClientes(cliRes.data);
+        if (sucRes.data) setSucursalesCliente(sucRes.data);
       } catch (err) {
-        console.error('Error loading clients:', err);
+        console.error('Error loading catalogs:', err);
       }
     };
     init();
@@ -333,12 +341,15 @@ export default function VentasScreen() {
       if (data && data.length > 0) {
         const newCli = data[0];
         setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-        setCliente(newCli.nombre);
+        if (newCli) {
+          setCliente(newCli.nombre);
+          setProveedor('');
+        }
       } else {
-        const { data: allCli } = await supabase.from('clientes').select('*').order('nombre');
-        if (allCli) {
-          setClientes(allCli);
+        // Fallback optimista si no retornó
+        if (!clientes.some(c => c.nombre === nombre.trim())) {
           setCliente(nombre.trim());
+          setProveedor('');
         }
       }
       setClienteSearch('');
@@ -672,8 +683,9 @@ export default function VentasScreen() {
       // Payload común
       const ventaPayload = {
         registrado_por: currentUser.id,
-        fecha: fecha.trim(),
-        cliente: cliente.trim(),
+        fecha: fecha,
+        cliente: cliente,
+        sucursal: sucursal || null,
         factura_referencia: facturaReferencia.trim() || null,
         tipo_proyecto: tipoProyecto || null,
         proveedor: proveedor.trim() || null,
@@ -770,6 +782,7 @@ export default function VentasScreen() {
     setScanSuccess(false);
     setFecha('');
     setCliente('');
+    setSucursal('');
     setFacturaReferencia('');
     setDescripcion('');
     setAgregarIva(false);
@@ -1089,67 +1102,97 @@ export default function VentasScreen() {
       </>
 
       {/* Selector de Cliente Desplegable */}
-      <View style={[styles.customDropdownContainer, { zIndex: 100 }]}>
-        <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado</Text>
-        <TouchableOpacity
-          style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-          onPress={() => {
-            setShowCliDropdown(!showCliDropdown);
-            setShowTipoDropdown(false);
-          }}
-        >
-          <Text style={{ color: cliente ? themeColors.text : themeColors.textSecondary }}>
-            {cliente || 'Selecciona un cliente'}
-          </Text>
-          <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-        </TouchableOpacity>
-        {showCliDropdown && (
-          <Pressable onPress={(e: any) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
-            <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, position: 'relative', width: '100%', zIndex: 1000 }]}>
-              <CustomInput
-                placeholder="Buscar o agregar cliente..."
-                value={clienteSearch}
-                onChangeText={setClienteSearch}
-                iconName="search-outline"
-                style={{ margin: Spacing.one, height: 40 }}
-              />
-              <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
-                  <TouchableOpacity
-                    style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
-                    onPress={() => handleAddNewCliente(clienteSearch)}
-                  >
-                    <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
-                    <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 14 }}>
-                      {`Agregar "${clienteSearch.trim()}"`}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-                {clientes
-                  .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
-                  .map((cli, idx, arr) => (
-                    <TouchableOpacity
-                      key={cli.id}
-                      style={[
-                        styles.dropdownItem,
-                        idx === arr.length - 1 && { borderBottomWidth: 0 },
-                        { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                      ]}
-                      onPress={() => {
-                        setCliente(cli.nombre);
-                        setClienteSearch('');
-                        setShowCliDropdown(false);
-                      }}
-                    >
-                      <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
-                      <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
-                    </TouchableOpacity>
-                  ))}
-              </ScrollView>
+      {(() => {
+        const id = clientes.find(c => c.nombre === cliente)?.id;
+        const sucursales = sucursalesCliente.filter(s => s.cliente_id === id);
+
+        return (
+          <View key="cliente-selector" style={{ zIndex: 3000 }}>
+            <Text style={[styles.label, { color: themeColors.textSecondary }]}>
+              Cliente <Text style={{ color: themeColors.danger }}>*</Text>
+            </Text>
+            <View style={{ zIndex: 3000 }}>
+              <TouchableOpacity
+                onPress={() => setShowCliDropdown(!showCliDropdown)}
+                style={[styles.dropdownHeader, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+              >
+                <Text style={{ color: cliente ? themeColors.text : themeColors.textSecondary }}>
+                  {cliente || 'Selecciona un Cliente'}
+                </Text>
+                <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={20} color={themeColors.textSecondary} />
+              </TouchableOpacity>
+              
+              {showCliDropdown && (
+                <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <TextInput
+                    style={[styles.dropdownSearch, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+                    placeholder="Buscar cliente..."
+                    placeholderTextColor={themeColors.textSecondary}
+                    value={clienteSearch}
+                    onChangeText={setClienteSearch}
+                  />
+                  <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
+                    {clientes
+                      .filter(c => c.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                      .map(c => (
+                        <TouchableOpacity
+                          key={c.id}
+                          style={[styles.dropdownItem, { borderBottomColor: themeColors.border }]}
+                          onPress={() => {
+                            setCliente(c.nombre);
+                            setSucursal('');
+                            setShowCliDropdown(false);
+                            setClienteSearch('');
+                          }}
+                        >
+                          <Text style={{ color: themeColors.text }}>{c.nombre}</Text>
+                        </TouchableOpacity>
+                      ))}
+                  </ScrollView>
+                </View>
+              )}
             </View>
-          </Pressable>
-        )}
-      </View>
+
+            {sucursales.length > 0 && (
+              <View style={{ zIndex: 2000, marginTop: Spacing.two }}>
+                <Text style={[styles.label, { color: themeColors.textSecondary }]}>
+                  Sucursal <Text style={{ color: themeColors.danger }}>*</Text>
+                </Text>
+                <View style={{ zIndex: 2000 }}>
+                  <TouchableOpacity
+                    onPress={() => setShowSucursalDropdown(!showSucursalDropdown)}
+                    style={[styles.dropdownHeader, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                  >
+                    <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
+                      {sucursal || 'Selecciona una Sucursal'}
+                    </Text>
+                    <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={20} color={themeColors.textSecondary} />
+                  </TouchableOpacity>
+                  
+                  {showSucursalDropdown && (
+                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, maxHeight: 200 }]}>
+                      <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
+                        {sucursales.map(s => (
+                          <TouchableOpacity
+                            key={s.id}
+                            style={[styles.dropdownItem, { borderBottomColor: themeColors.border }]}
+                            onPress={() => {
+                              setSucursal(s.nombre);
+                              setShowSucursalDropdown(false);
+                            }}
+                          >
+                            <Text style={{ color: themeColors.text }}>{s.nombre}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+          </View>
+        );
+      })()}
 
       <CustomInput
         label="PO / Referencia"
@@ -1222,13 +1265,6 @@ export default function VentasScreen() {
           </View>
         )}
       </View>
-
-      <CustomInput
-        label="Sucursal"
-        value={proveedor}
-        onChangeText={setProveedor}
-        placeholder="Ej. Centro, Norte o sucursal relacionada"
-      />
 
       <CustomInput
         label="Notas adicionales"
@@ -1363,10 +1399,10 @@ export default function VentasScreen() {
               <Text style={[styles.summaryValue, { color: themeColors.text }]}>{tipoProyecto}</Text>
             </View>
           ) : null}
-          {proveedor ? (
+          {sucursal ? (
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>Sucursal:</Text>
-              <Text style={[styles.summaryValue, { color: themeColors.text }]}>{proveedor}</Text>
+              <Text style={[styles.summaryValue, { color: themeColors.text }]}>{sucursal}</Text>
             </View>
           ) : null}
           <View style={styles.summaryRow}>
@@ -1639,8 +1675,8 @@ export default function VentasScreen() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Ionicons name="bar-chart-sharp" size={16} color={themeColors.primary} />
-                    <Text style={[styles.historialCliente, { color: themeColors.text }]} numberOfLines={1}>
-                      {item.cliente}
+                    <Text style={[styles.cardTitle, { color: themeColors.text }]} numberOfLines={1}>
+                      {item.cliente} {item.sucursal ? `(${item.sucursal})` : ''}
                     </Text>
                   </View>
                   <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }]}>
@@ -1776,9 +1812,14 @@ export default function VentasScreen() {
       ) : (
         <>
           {/* Step Indicator */}
-          <StepIndicator
-            steps={['Factura Compra', 'Costos y Precios', 'Resumen']}
-            currentStep={currentStep}
+          <StepIndicator 
+            currentStep={currentStep} 
+            steps={['Factura Compra', 'Costos y Precios', 'Resumen']} 
+            onStepPress={(step) => {
+              if (step < currentStep || true) {
+                setCurrentStep(step);
+              }
+            }}
           />
 
           <KeyboardAvoidingView
@@ -1871,9 +1912,16 @@ export default function VentasScreen() {
                     </View>
                   ) : null}
 
-                  {selectedVenta.proveedor ? (
+                  {selectedVenta.sucursal ? (
                     <View style={styles.modalRow}>
                       <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>Sucursal:</Text>
+                      <Text style={[styles.modalValue, { color: themeColors.text }]}>{selectedVenta.sucursal}</Text>
+                    </View>
+                  ) : null}
+
+                  {selectedVenta.proveedor ? (
+                    <View style={styles.modalRow}>
+                      <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>Proveedor:</Text>
                       <Text style={[styles.modalValue, { color: themeColors.text }]}>{selectedVenta.proveedor}</Text>
                     </View>
                   ) : null}
