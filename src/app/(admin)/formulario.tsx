@@ -689,11 +689,7 @@ export default function GastoForm() {
     }
 
     // 9. Validar Cliente / Proyecto (si no está dividido)
-    if (!isSplit && !selectedCliente.trim()) {
-      showAlert('Validación', 'Por favor selecciona o ingresa el cliente o proyecto asignado.');
-      setCurrentStep(3);
-      return;
-    }
+    // (validación completa al final del bloque)
 
     // 10. Validar Vehículos / Gasolina
     const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
@@ -738,7 +734,7 @@ export default function GastoForm() {
     }
 
     if (!isSplit) {
-      if (!clienteRelacionado) {
+      if (!selectedCliente || !selectedCliente.trim()) {
         showAlert('Validación', 'Por favor selecciona el cliente relacionado al gasto.');
         setCurrentStep(3);
         return;

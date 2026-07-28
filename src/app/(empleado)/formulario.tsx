@@ -748,7 +748,7 @@ export default function GastoForm() {
     }
 
     if (!isSplit) {
-      if (!clienteRelacionado) {
+      if (!selectedCliente || !selectedCliente.trim()) {
         showAlert('Validación', 'Por favor selecciona el cliente relacionado al gasto.');
         setCurrentStep(3);
         return;
