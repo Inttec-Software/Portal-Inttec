@@ -458,7 +458,7 @@ export default function GastoForm() {
       
       if (result.monto) setMonto(result.monto.toString());
       if (result.proveedor) setProveedor(result.proveedor);
-      if (result.sucursal) setSucursal(result.sucursal);
+      // Nota: la sucursal NO se llena con IA, el usuario la elige manualmente del dropdown
       
       // Actualizar fecha si la extrae
       if (result.fecha) {
@@ -1631,6 +1631,56 @@ export default function GastoForm() {
                     </Pressable>
                   )}
                 </View>
+                <View style={{ zIndex: 2000, marginBottom: Spacing.three }}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del cliente *</Text>
+                  <TouchableOpacity
+                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, opacity: !selectedCliente ? 0.5 : 1 }]}
+                    disabled={!selectedCliente}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setShowSucursalDropdown(!showSucursalDropdown);
+                      setShowEstDropdown(false);
+                      setShowCatDropdown(false);
+                      setShowSubDropdown(false);
+                      setShowCliDropdown(false);
+                    }}
+                  >
+                    <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
+                      {sucursal || (selectedCliente ? 'Selecciona una sucursal' : 'Selecciona un cliente primero')}
+                    </Text>
+                    <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                  </TouchableOpacity>
+                  {showSucursalDropdown && (
+                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        {(() => {
+                           const currentCliente = clientes.find(c => c.nombre === selectedCliente);
+                           const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id) : [];
+                           if (filteredSucursales.length === 0) {
+                             return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas para este cliente.</Text>;
+                           }
+                           return filteredSucursales.map((suc, index, array) => (
+                              <TouchableOpacity
+                                key={suc.id}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
+                                onPress={() => {
+                                  setSucursal(suc.nombre);
+                                  setShowSucursalDropdown(false);
+                                }}
+                              >
+                                <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                              </TouchableOpacity>
+                           ));
+                        })()}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
               ) : (
                 <View style={{ marginBottom: Spacing.three }}>
                   <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Divisiones del Gasto</Text>
@@ -1664,58 +1714,6 @@ export default function GastoForm() {
                   </TouchableOpacity>
                 </View>
               )}
-              <View style={styles.customDropdownContainer}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del cliente *</Text>
-                <TouchableOpacity
-                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, opacity: !selectedCliente ? 0.5 : 1 }]}
-                  disabled={!selectedCliente}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setShowSucursalDropdown(!showSucursalDropdown);
-                    setShowEstDropdown(false);
-                    setShowCatDropdown(false);
-                    setShowSubDropdown(false);
-                    setShowCliDropdown(false);
-                  }}
-                >
-                  <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
-                    {sucursal || (selectedCliente ? 'Selecciona una sucursal' : 'Selecciona un cliente primero')}
-                  </Text>
-                  <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-                </TouchableOpacity>
-                {showSucursalDropdown && (
-                  <View style={{ width: '100%', zIndex: 1000 }}>
-                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                        {(() => {
-                           const currentCliente = clientes.find(c => c.nombre === selectedCliente);
-                           const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id) : [];
-                           if (filteredSucursales.length === 0) {
-                             return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>;
-                           }
-                           return filteredSucursales.map((suc, index, array) => (
-                              <TouchableOpacity
-                                key={suc.id}
-                                style={[
-                                  styles.dropdownItem,
-                                  index === array.length - 1 && { borderBottomWidth: 0 },
-                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                                ]}
-                                onPress={() => {
-                                  setSucursal(suc.nombre);
-                                  setShowSucursalDropdown(false);
-                                }}
-                              >
-                                <Ionicons name="business-outline" size={24} color={themeColors.primary} />
-                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
-                              </TouchableOpacity>
-                           ));
-                        })()}
-                      </ScrollView>
-                    </View>
-                  </View>
-                )}
-              </View>
               {/* Selector de Estado de la República */}
               <View style={styles.customDropdownContainer}>
                 <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Estado de la República *</Text>
