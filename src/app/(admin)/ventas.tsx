@@ -645,6 +645,10 @@ export default function VentasScreen() {
       showAlert('Validación', 'Por favor ingresa el nombre del cliente.');
       return;
     }
+    if (!sucursal || !sucursal.trim()) {
+      showAlert('Validación', 'Por favor selecciona la sucursal del cliente.');
+      return;
+    }
     if (partidas.length === 0) {
       showAlert('Validación', 'Agrega al menos una partida o producto.');
       return;
@@ -1103,93 +1107,123 @@ export default function VentasScreen() {
 
       {/* Selector de Cliente Desplegable */}
       {(() => {
-        const id = clientes.find(c => c.nombre === cliente)?.id;
-        const sucursales = sucursalesCliente.filter(s => s.cliente_id === id);
+        const currentCliente = clientes.find(c => c.nombre === cliente);
+        const sucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id) : [];
 
         return (
-          <View key="cliente-selector" style={{ zIndex: 3000 }}>
-            <Text style={[styles.label, { color: themeColors.textSecondary }]}>
-              Cliente <Text style={{ color: themeColors.danger }}>*</Text>
-            </Text>
-            <View style={{ zIndex: 3000 }}>
+          <View key="cliente-selector" style={{ zIndex: 3000, width: '100%' }}>
+            <View style={{ marginBottom: Spacing.three }}>
+              <Text style={[styles.label, { color: themeColors.textSecondary }]}>
+                Cliente <Text style={{ color: themeColors.danger }}>*</Text>
+              </Text>
               <TouchableOpacity
-                onPress={() => setShowCliDropdown(!showCliDropdown)}
-                style={[styles.dropdownHeader, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                style={[styles.customDropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setShowCliDropdown(!showCliDropdown);
+                }}
               >
                 <Text style={{ color: cliente ? themeColors.text : themeColors.textSecondary }}>
-                  {cliente || 'Selecciona un Cliente'}
+                  {cliente || 'Selecciona un cliente'}
                 </Text>
-                <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={20} color={themeColors.textSecondary} />
+                <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.textSecondary} />
               </TouchableOpacity>
-              
               {showCliDropdown && (
-                <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                  <TextInput
-                    style={[styles.dropdownSearch, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background }]}
-                    placeholder="Buscar cliente..."
-                    placeholderTextColor={themeColors.textSecondary}
-                    value={clienteSearch}
-                    onChangeText={setClienteSearch}
-                  />
-                  <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
-                    {clientes
-                      .filter(c => c.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
-                      .map(c => (
+                <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                  <View style={[styles.customDropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                    <CustomInput
+                      placeholder="Buscar o agregar cliente..."
+                      value={clienteSearch}
+                      onChangeText={setClienteSearch}
+                      iconName="search-outline"
+                      style={{ margin: Spacing.one, height: 40 }}
+                    />
+                    <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
                         <TouchableOpacity
-                          key={c.id}
-                          style={[styles.dropdownItem, { borderBottomColor: themeColors.border }]}
-                          onPress={() => {
-                            setCliente(c.nombre);
-                            setSucursal('');
-                            setShowCliDropdown(false);
-                            setClienteSearch('');
-                          }}
+                          style={[styles.customDropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                          onPress={() => handleAddNewCliente(clienteSearch)}
                         >
-                          <Text style={{ color: themeColors.text }}>{c.nombre}</Text>
+                          <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                          <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 14 }}>
+                            {`Agregar "${clienteSearch.trim()}"`}
+                          </Text>
                         </TouchableOpacity>
-                      ))}
-                  </ScrollView>
-                </View>
+                      )}
+                      {clientes
+                        .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                        .map((cli, index, array) => (
+                          <TouchableOpacity
+                            key={cli.id}
+                            style={[
+                              styles.customDropdownItem,
+                              index === array.length - 1 && { borderBottomWidth: 0 },
+                              { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                            ]}
+                            onPress={() => {
+                              setCliente(cli.nombre);
+                              setSucursal('');
+                              setClienteSearch('');
+                              setShowCliDropdown(false);
+                            }}
+                          >
+                            <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
+                            <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
+                          </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                  </View>
+                </Pressable>
               )}
             </View>
 
-            {sucursales.length > 0 && (
-              <View style={{ zIndex: 2000, marginTop: Spacing.two }}>
-                <Text style={[styles.label, { color: themeColors.textSecondary }]}>
-                  Sucursal <Text style={{ color: themeColors.danger }}>*</Text>
+            <View style={{ zIndex: 2000, marginBottom: Spacing.three }}>
+              <Text style={[styles.label, { color: themeColors.textSecondary }]}>
+                Sucursal <Text style={{ color: themeColors.danger }}>*</Text>
+              </Text>
+              <TouchableOpacity
+                style={[styles.customDropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, opacity: !cliente ? 0.5 : 1 }]}
+                disabled={!cliente}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setShowSucursalDropdown(!showSucursalDropdown);
+                }}
+              >
+                <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
+                  {sucursal || (cliente ? 'Selecciona una sucursal' : 'Selecciona un cliente primero')}
                 </Text>
-                <View style={{ zIndex: 2000 }}>
-                  <TouchableOpacity
-                    onPress={() => setShowSucursalDropdown(!showSucursalDropdown)}
-                    style={[styles.dropdownHeader, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                  >
-                    <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
-                      {sucursal || 'Selecciona una Sucursal'}
-                    </Text>
-                    <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={20} color={themeColors.textSecondary} />
-                  </TouchableOpacity>
-                  
-                  {showSucursalDropdown && (
-                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, maxHeight: 200 }]}>
-                      <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
-                        {sucursales.map(s => (
+                <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.textSecondary} />
+              </TouchableOpacity>
+              {showSucursalDropdown && (
+                <View style={{ width: '100%', zIndex: 1000 }}>
+                  <View style={[styles.customDropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                    <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      {sucursales.length === 0 ? (
+                        <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>
+                      ) : (
+                        sucursales.map((suc, index, array) => (
                           <TouchableOpacity
-                            key={s.id}
-                            style={[styles.dropdownItem, { borderBottomColor: themeColors.border }]}
+                            key={suc.id}
+                            style={[
+                              styles.customDropdownItem,
+                              index === array.length - 1 && { borderBottomWidth: 0 },
+                              { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                            ]}
                             onPress={() => {
-                              setSucursal(s.nombre);
+                              setSucursal(suc.nombre);
                               setShowSucursalDropdown(false);
                             }}
                           >
-                            <Text style={{ color: themeColors.text }}>{s.nombre}</Text>
+                            <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                            <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
                           </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )}
+                        ))
+                      )}
+                    </ScrollView>
+                  </View>
                 </View>
-              </View>
-            )}
+              )}
+            </View>
           </View>
         );
       })()}
@@ -2213,6 +2247,10 @@ export default function VentasScreen() {
 }
 
 const styles = StyleSheet.create({
+  customDropdownTrigger: { height: 50, borderRadius: 12, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, },
+  customDropdownList: { position: 'relative', marginTop: 8, borderRadius: 16, borderWidth: 1, maxHeight: 250, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4, },
+  customDropdownItem: { padding: 16, borderBottomWidth: 0.5, borderBottomColor: '#e0e0e0', },
+
   safeArea: {
     flex: 1,
   },

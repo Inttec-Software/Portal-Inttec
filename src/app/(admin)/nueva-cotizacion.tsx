@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, ScrollView, TouchableOpacity, Alert, StyleSheet, useWindowDimensions, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, ScrollView, TouchableOpacity, Alert, StyleSheet, useWindowDimensions, TextInput, KeyboardAvoidingView, Platform, Keyboard, Pressable } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -42,6 +42,7 @@ export default function NuevaCotizacionScreen() {
 
   const [clientSearchResults, setClientSearchResults] = useState<any[]>([]);
   const [showClientResults, setShowClientResults] = useState(false);
+  const [clienteSearch, setClienteSearch] = useState('');
   const [sucursales, setSucursales] = useState<any[]>([]);
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
   
@@ -481,49 +482,101 @@ export default function NuevaCotizacionScreen() {
           
           <View style={[styles.grid, isMobile && styles.gridMobile]}>
             <View style={[styles.column, isMobile && styles.columnMobile, { zIndex: 10 }]}>
-              <ThemedText style={{ fontSize: 13, fontWeight: '700', color: themeColors.textSecondary, marginBottom: Spacing.one }}>DATOS DEL CLIENTE</ThemedText>
-              <View style={{ zIndex: 10 }}>
-                <CustomInput 
-                  label="Nombre" 
-                  value={cotizacion.clienteNombre} 
-                  onChangeText={searchClients} 
-                  placeholder="Escribe para buscar o registrar..." 
-                />
-                {showClientResults && clientSearchResults.length > 0 && (
-                  <View style={{ 
-                    position: 'absolute', top: 65, left: 0, right: 0, 
-                    backgroundColor: themeColors.backgroundElement, 
-                    borderWidth: 1, borderColor: themeColors.border, 
-                    borderRadius: 4, zIndex: 100,
-                    shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 4
+              {/* Selector de Cliente - Estilo premium */}
+              <View style={{ zIndex: 3000, marginBottom: Spacing.two }}>
+                <ThemedText style={{ fontSize: 13, fontWeight: '700', color: themeColors.textSecondary, marginBottom: Spacing.one }}>CLIENTE</ThemedText>
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                    backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border,
+                    borderRadius: 12, padding: 14, height: 50,
+                  }}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowClientResults(!showClientResults);
+                    setShowSucursalDropdown(false);
+                  }}
+                >
+                  <ThemedText style={{ color: cotizacion.clienteNombre ? themeColors.text : themeColors.textSecondary }}>
+                    {cotizacion.clienteNombre || 'Selecciona un cliente'}
+                  </ThemedText>
+                  <Ionicons name={showClientResults ? 'chevron-up' : 'chevron-down'} size={20} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+
+                {showClientResults && (
+                  <View style={{
+                    backgroundColor: themeColors.backgroundElement,
+                    borderWidth: 1, borderColor: themeColors.border,
+                    borderRadius: 16, marginTop: 6,
+                    shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, elevation: 5,
                   }}>
-                    {clientSearchResults.map(client => (
-                      <TouchableOpacity 
-                        key={client.id} 
-                        onPress={() => handleSelectClient(client)}
-                        style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: themeColors.border }}
-                      >
-                        <ThemedText style={{ fontWeight: 'bold', color: themeColors.text }}>{client.nombre}</ThemedText>
-                        {(client.rfc || client.correo_electronico) && (
-                          <ThemedText style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                            {client.rfc} {client.correo_electronico ? `• ${client.correo_electronico}` : ''}
-                          </ThemedText>
-                        )}
-                      </TouchableOpacity>
-                    ))}
+                    <CustomInput
+                      placeholder="Buscar o agregar cliente..."
+                      value={clienteSearch}
+                      onChangeText={(text) => {
+                        setClienteSearch(text);
+                        searchClients(text);
+                      }}
+                      iconName="search-outline"
+                      style={{ margin: Spacing.one, height: 40 }}
+                    />
+                    <ScrollView nestedScrollEnabled style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      {clientSearchResults.map((client, index, array) => (
+                        <TouchableOpacity
+                          key={client.id}
+                          onPress={() => {
+                            handleSelectClient(client);
+                            setClienteSearch('');
+                            setShowClientResults(false);
+                          }}
+                          style={[
+                            { padding: 12, borderBottomWidth: index === array.length - 1 ? 0 : 0.5, borderBottomColor: themeColors.border,
+                              flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                          ]}
+                        >
+                          <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
+                          <View style={{ flex: 1 }}>
+                            <ThemedText style={{ fontWeight: '600', color: themeColors.text }}>{client.nombre}</ThemedText>
+                            {(client.rfc || client.correo_electronico) && (
+                              <ThemedText style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                                {client.rfc}{client.correo_electronico ? ` • ${client.correo_electronico}` : ''}
+                              </ThemedText>
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                      {clienteSearch.trim().length > 0 && clientSearchResults.length === 0 && (
+                        <TouchableOpacity
+                          style={{ padding: 12, flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}
+                          onPress={() => {
+                            setCotizacion(prev => ({ ...prev, clienteNombre: clienteSearch.trim() }));
+                            setClienteSearch('');
+                            setShowClientResults(false);
+                          }}
+                        >
+                          <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                          <ThemedText style={{ color: themeColors.accent, fontWeight: '600' }}>Agregar "{clienteSearch.trim()}"</ThemedText>
+                        </TouchableOpacity>
+                      )}
+                    </ScrollView>
                   </View>
                 )}
               </View>
 
+              {/* Sucursal premium */}
               {sucursales.length > 0 && (
-                <View style={{ zIndex: 9, marginTop: Spacing.one }}>
+                <View style={{ zIndex: 2000, marginBottom: Spacing.two }}>
                   <ThemedText style={{ fontSize: 13, fontWeight: '700', color: themeColors.textSecondary, marginBottom: Spacing.one }}>SUCURSAL DEL CLIENTE</ThemedText>
                   <TouchableOpacity
-                    onPress={() => setShowSucursalDropdown(!showSucursalDropdown)}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setShowSucursalDropdown(!showSucursalDropdown);
+                      setShowClientResults(false);
+                    }}
                     style={{
                       flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
                       backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border,
-                      borderRadius: 8, padding: 12, height: 48
+                      borderRadius: 12, padding: 14, height: 50,
                     }}
                   >
                     <ThemedText style={{ color: cotizacion.sucursal ? themeColors.text : themeColors.textSecondary }}>
@@ -532,24 +585,25 @@ export default function NuevaCotizacionScreen() {
                     <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={20} color={themeColors.textSecondary} />
                   </TouchableOpacity>
                   {showSucursalDropdown && (
-                    <View style={{ 
-                      position: 'absolute', top: 75, left: 0, right: 0, 
-                      backgroundColor: themeColors.backgroundElement, 
-                      borderWidth: 1, borderColor: themeColors.border, 
-                      borderRadius: 4, zIndex: 100,
-                      shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 4
+                    <View style={{
+                      backgroundColor: themeColors.backgroundElement,
+                      borderWidth: 1, borderColor: themeColors.border,
+                      borderRadius: 16, marginTop: 6,
+                      shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, elevation: 5,
                     }}>
-                      <ScrollView style={{ maxHeight: 150 }} nestedScrollEnabled>
-                        {sucursales.map(suc => (
-                          <TouchableOpacity 
-                            key={suc.id} 
+                      <ScrollView style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                        {sucursales.map((suc, index, array) => (
+                          <TouchableOpacity
+                            key={suc.id}
                             onPress={() => {
                               setCotizacion(prev => ({...prev, sucursal: suc.nombre}));
                               setShowSucursalDropdown(false);
                             }}
-                            style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: themeColors.border }}
+                            style={{ padding: 12, borderBottomWidth: index === array.length - 1 ? 0 : 0.5, borderBottomColor: themeColors.border,
+                              flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}
                           >
-                            <ThemedText style={{ fontWeight: 'bold', color: themeColors.text }}>{suc.nombre}</ThemedText>
+                            <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                            <ThemedText style={{ fontWeight: '600', color: themeColors.text }}>{suc.nombre}</ThemedText>
                           </TouchableOpacity>
                         ))}
                       </ScrollView>

@@ -707,6 +707,11 @@ export default function EditarGastoForm() {
       return;
     }
 
+    if (!sucursal || !sucursal.trim()) {
+      showAlert('Validación', 'Por favor selecciona la sucursal del cliente.');
+      return;
+    }
+
     if (!tipoServicioProyecto) {
       showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto, Venta u Operativo.');
       return;
@@ -1378,6 +1383,66 @@ export default function EditarGastoForm() {
                 iconName="briefcase-outline"
               />
 
+              {/* Selector de Cliente */}
+              <View style={styles.customDropdownContainer}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                  onPress={() => {
+                    setShowCliDropdown(!showCliDropdown);
+                    setShowCatDropdown(false);
+                    setShowSubDropdown(false);
+                    setShowEstDropdown(false);
+                  }}
+                >
+                  <Text style={{ color: selectedCliente ? themeColors.text : themeColors.textSecondary }}>
+                    {selectedCliente || 'Selecciona un cliente'}
+                  </Text>
+                  <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                </TouchableOpacity>
+                {showCliDropdown && (
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%' }}>
+                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <CustomInput
+                        placeholder="Buscar o agregar cliente..."
+                        value={clienteSearch}
+                        onChangeText={setClienteSearch}
+                        iconName="search-outline"
+                        style={{ margin: Spacing.one, height: 40 }}
+                      />
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
+                        {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
+                          <TouchableOpacity
+                            style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15' }]}
+                            onPress={() => handleAddNewCliente(clienteSearch)}
+                          >
+                            <Text style={{ color: themeColors.accent, fontWeight: '600' }}>
+                              {`➕ Agregar "${clienteSearch.trim()}"`}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                        {clientes
+                          .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                          .map((cli) => (
+                            <TouchableOpacity
+                              key={cli.id}
+                              style={styles.dropdownItem}
+                              onPress={() => {
+                                  setSelectedCliente(cli.nombre);
+                                  setSucursal('');
+                                  setClienteSearch('');
+                                  setShowCliDropdown(false);
+                                }}
+                            >
+                              <Text style={{ color: themeColors.text }}>{cli.nombre}</Text>
+                            </TouchableOpacity>
+                          ))}
+                      </ScrollView>
+                    </View>
+                  </Pressable>
+                )}
+              </View>
+
               <View style={styles.customDropdownContainer}>
                 <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del cliente *</Text>
                 <TouchableOpacity
@@ -1811,65 +1876,6 @@ export default function EditarGastoForm() {
                 </View>
               )}
 
-              {/* Selector de Cliente */}
-              <View style={styles.customDropdownContainer}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
-                <TouchableOpacity
-                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                  onPress={() => {
-                    setShowCliDropdown(!showCliDropdown);
-                    setShowCatDropdown(false);
-                    setShowSubDropdown(false);
-                    setShowEstDropdown(false);
-                  }}
-                >
-                  <Text style={{ color: selectedCliente ? themeColors.text : themeColors.textSecondary }}>
-                    {selectedCliente || 'Selecciona un cliente'}
-                  </Text>
-                  <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-                </TouchableOpacity>
-                {showCliDropdown && (
-                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%' }}>
-                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <CustomInput
-                        placeholder="Buscar o agregar cliente..."
-                        value={clienteSearch}
-                        onChangeText={setClienteSearch}
-                        iconName="search-outline"
-                        style={{ margin: Spacing.one, height: 40 }}
-                      />
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
-                        {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
-                          <TouchableOpacity
-                            style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15' }]}
-                            onPress={() => handleAddNewCliente(clienteSearch)}
-                          >
-                            <Text style={{ color: themeColors.accent, fontWeight: '600' }}>
-                              {`➕ Agregar "${clienteSearch.trim()}"`}
-                            </Text>
-                          </TouchableOpacity>
-                        )}
-                        {clientes
-                          .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
-                          .map((cli) => (
-                            <TouchableOpacity
-                              key={cli.id}
-                              style={styles.dropdownItem}
-                              onPress={() => {
-                                  setSelectedCliente(cli.nombre);
-                                  setSucursal('');
-                                  setClienteSearch('');
-                                  setShowCliDropdown(false);
-                                }}
-                            >
-                              <Text style={{ color: themeColors.text }}>{cli.nombre}</Text>
-                            </TouchableOpacity>
-                          ))}
-                      </ScrollView>
-                    </View>
-                  </Pressable>
-                )}
-              </View>
 
               <CustomInput
                 label="Justificación del Gasto *"

@@ -845,6 +845,10 @@ export default function AdminDashboard() {
       showAlert('Validación', 'Por favor ingresa el nombre del cliente.');
       return;
     }
+    if (!quickSaleSucursal || !quickSaleSucursal.trim()) {
+      showAlert('Validación', 'Por favor selecciona la sucursal del cliente.');
+      return;
+    }
     if (quickSalePartidas.length === 0) {
       showAlert('Validación', 'Agrega al menos una partida.');
       return;
@@ -3376,6 +3380,11 @@ export default function AdminDashboard() {
                             <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 14 }}>
                               {item.cliente}
                             </Text>
+                            {item.sucursal ? (
+                              <Text style={{ color: themeColors.primary, fontSize: 12, marginTop: 2, fontWeight: '600' }}>
+                                Sucursal: {item.sucursal}
+                              </Text>
+                            ) : null}
                             <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 2 }}>
                               {item.fecha} {item.tipo_proyecto ? `| ${item.tipo_proyecto}` : ''}
                             </Text>
@@ -3427,75 +3436,116 @@ export default function AdminDashboard() {
                   />
 
                   {/* Input Cliente con Autocompletado */}
-                  <View style={{ zIndex: 10, position: 'relative', marginBottom: Spacing.two }}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>Cliente *</Text>
-                    <CustomInput
-                      placeholder="Nombre del cliente..."
-                      value={quickSaleCliente}
-                      onChangeText={(val) => {
-                        setQuickSaleCliente(val);
-                        setQuickSaleCliSearch(val);
-                        setShowQuickSaleCliDropdown(true);
-                      }}
-                      onFocus={() => setShowQuickSaleCliDropdown(true)}
-                    />
-                    {showQuickSaleCliDropdown && filteredClientsForQuickSale.length > 0 && (
-                      <View style={[styles.quickDropdown, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <ScrollView style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
-                          {filteredClientsForQuickSale.map((c) => (
-                            <TouchableOpacity
-                              key={c.id}
-                              onPress={() => {
-                                setQuickSaleCliente(c.nombre);
-                                setShowQuickSaleCliDropdown(false);
-                              }}
-                              style={[styles.quickDropdownItem, { borderBottomColor: themeColors.border }]}
-                            >
-                              <Text style={{ color: themeColors.text }}>{c.nombre}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      </View>
-                    )}
-                  </View>
-
-                  {/* Sucursal Dropdown */}
+                  {/* Selector de Cliente y Sucursal (Estilo Formulario) */}
                   {(() => {
                     const currentClient = clientesCatalog.find(c => c.nombre === quickSaleCliente);
-                    if (!currentClient) return null;
-                    const sucs = sucursalesCatalog.filter(s => s.cliente_id === currentClient.id);
-                    if (sucs.length === 0) return null;
-                    
+                    const sucs = currentClient ? sucursalesCatalog.filter(s => s.cliente_id === currentClient.id) : [];
+
                     return (
-                      <View style={{ zIndex: 9, position: 'relative', marginBottom: Spacing.two }}>
-                        <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>Sucursal del cliente</Text>
-                        <TouchableOpacity
-                          onPress={() => setShowQuickSaleSucursalDropdown(!showQuickSaleSucursalDropdown)}
-                          style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                        >
-                          <Text style={{ color: quickSaleSucursal ? themeColors.text : themeColors.textSecondary }}>
-                            {quickSaleSucursal || 'Selecciona una sucursal...'}
+                      <View style={{ width: '100%' }}>
+                        <View style={{ zIndex: 3000, marginBottom: Spacing.two }}>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>
+                            Cliente <Text style={{ color: themeColors.danger }}>*</Text>
                           </Text>
-                          <Ionicons name="chevron-down" size={18} color={themeColors.textSecondary} />
-                        </TouchableOpacity>
-                        {showQuickSaleSucursalDropdown && (
-                          <View style={[styles.quickDropdown, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                            <ScrollView nestedScrollEnabled style={{ maxHeight: 150 }}>
-                              {sucs.map(s => (
-                                <TouchableOpacity
-                                  key={s.id}
-                                  onPress={() => {
-                                    setQuickSaleSucursal(s.nombre);
-                                    setShowQuickSaleSucursalDropdown(false);
-                                  }}
-                                  style={[styles.quickDropdownItem, { borderBottomColor: themeColors.border }]}
-                                >
-                                  <Text style={{ color: themeColors.text }}>{s.nombre}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </ScrollView>
-                          </View>
-                        )}
+                          <TouchableOpacity
+                            style={[styles.customDropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                            onPress={() => {
+                              Keyboard.dismiss();
+                              setShowQuickSaleCliDropdown(!showQuickSaleCliDropdown);
+                            }}
+                          >
+                            <Text style={{ color: quickSaleCliente ? themeColors.text : themeColors.textSecondary }}>
+                              {quickSaleCliente || 'Selecciona un cliente'}
+                            </Text>
+                            <Ionicons name={showQuickSaleCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.textSecondary} />
+                          </TouchableOpacity>
+                          
+                          {showQuickSaleCliDropdown && (
+                            <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                              <View style={[styles.customDropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                                <CustomInput
+                                  placeholder="Buscar cliente..."
+                                  value={quickSaleCliSearch}
+                                  onChangeText={setQuickSaleCliSearch}
+                                  iconName="search-outline"
+                                  style={{ margin: Spacing.one, height: 40 }}
+                                />
+                                <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                                  {filteredClientsForQuickSale.map((c, index, array) => (
+                                    <TouchableOpacity
+                                      key={c.id}
+                                      onPress={() => {
+                                        setQuickSaleCliente(c.nombre);
+                                        setQuickSaleSucursal('');
+                                        setShowQuickSaleCliDropdown(false);
+                                      }}
+                                      style={[
+                                        styles.customDropdownListItem,
+                                        index === array.length - 1 && { borderBottomWidth: 0 },
+                                        { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, borderBottomColor: themeColors.border }
+                                      ]}
+                                    >
+                                      <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
+                                      <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{c.nombre}</Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                  {filteredClientsForQuickSale.length === 0 && (
+                                    <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay clientes que coincidan.</Text>
+                                  )}
+                                </ScrollView>
+                              </View>
+                            </Pressable>
+                          )}
+                        </View>
+
+                        <View style={{ zIndex: 2000, marginBottom: Spacing.two }}>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>
+                            Sucursal del cliente <Text style={{ color: themeColors.danger }}>*</Text>
+                          </Text>
+                          <TouchableOpacity
+                            style={[styles.customDropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, opacity: !quickSaleCliente ? 0.5 : 1 }]}
+                            disabled={!quickSaleCliente}
+                            onPress={() => {
+                              Keyboard.dismiss();
+                              setShowQuickSaleSucursalDropdown(!showQuickSaleSucursalDropdown);
+                            }}
+                          >
+                            <Text style={{ color: quickSaleSucursal ? themeColors.text : themeColors.textSecondary }}>
+                              {quickSaleSucursal || (quickSaleCliente ? 'Selecciona una sucursal' : 'Selecciona un cliente primero')}
+                            </Text>
+                            <Ionicons name={showQuickSaleSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.textSecondary} />
+                          </TouchableOpacity>
+                          
+                          {showQuickSaleSucursalDropdown && (
+                            <View style={{ width: '100%', zIndex: 1000 }}>
+                              <View style={[styles.customDropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                                <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                                  {sucs.length === 0 ? (
+                                    <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>
+                                  ) : (
+                                    sucs.map((s, index, array) => (
+                                      <TouchableOpacity
+                                        key={s.id}
+                                        onPress={() => {
+                                          setQuickSaleSucursal(s.nombre);
+                                          setShowQuickSaleSucursalDropdown(false);
+                                        }}
+                                        style={[
+                                          styles.customDropdownListItem,
+                                          index === array.length - 1 && { borderBottomWidth: 0 },
+                                          { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, borderBottomColor: themeColors.border }
+                                        ]}
+                                      >
+                                        <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                                        <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{s.nombre}</Text>
+                                      </TouchableOpacity>
+                                    ))
+                                  )}
+                                </ScrollView>
+                              </View>
+                            </View>
+                          )}
+                        </View>
                       </View>
                     );
                   })()}
@@ -3514,7 +3564,7 @@ export default function AdminDashboard() {
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>Tipo de Proyecto</Text>
                     <TouchableOpacity
                       onPress={() => setShowQuickSaleTipoDropdown(!showQuickSaleTipoDropdown)}
-                      style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                      style={[styles.customDropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                     >
                       <Text style={{ color: quickSaleTipoProyecto ? themeColors.text : themeColors.textSecondary }}>
                         {quickSaleTipoProyecto || 'Selecciona un tipo...'}
@@ -3522,7 +3572,7 @@ export default function AdminDashboard() {
                       <Ionicons name="chevron-down" size={18} color={themeColors.textSecondary} />
                     </TouchableOpacity>
                     {showQuickSaleTipoDropdown && (
-                      <View style={[styles.quickDropdown, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <View style={[styles.customDropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                         {TIPOS_PROYECTO.map((tipo) => (
                           <TouchableOpacity
                             key={tipo}
@@ -3530,7 +3580,7 @@ export default function AdminDashboard() {
                               setQuickSaleTipoProyecto(tipo);
                               setShowQuickSaleTipoDropdown(false);
                             }}
-                            style={[styles.quickDropdownItem, { borderBottomColor: themeColors.border }]}
+                            style={[styles.customDropdownListItem, { borderBottomColor: themeColors.border }]}
                           >
                             <Text style={{ color: themeColors.text }}>{tipo}</Text>
                           </TouchableOpacity>
@@ -4210,6 +4260,10 @@ export default function AdminDashboard() {
 }
 
 const styles = StyleSheet.create({
+  customDropdownTrigger: { height: 50, borderRadius: 12, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, },
+  customDropdownList: { position: 'relative', marginTop: 8, borderRadius: 16, borderWidth: 1, maxHeight: 250, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4, },
+  customDropdownItem: { padding: 16, borderBottomWidth: 0.5, borderBottomColor: '#e0e0e0', },
+
   scanFeedbackSuccess: {
     color: '#059669',
   },

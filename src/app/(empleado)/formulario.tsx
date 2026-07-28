@@ -747,6 +747,19 @@ export default function GastoForm() {
       return;
     }
 
+    if (!isSplit) {
+      if (!clienteRelacionado) {
+        showAlert('Validación', 'Por favor selecciona el cliente relacionado al gasto.');
+        setCurrentStep(3);
+        return;
+      }
+      if (!sucursal || !sucursal.trim()) {
+        showAlert('Validación', 'Por favor selecciona la sucursal del cliente.');
+        setCurrentStep(3);
+        return;
+      }
+    }
+
     const totalGasto = Number(monto) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
 
     if (isSplit) {
@@ -1553,6 +1566,104 @@ export default function GastoForm() {
                 iconName="briefcase-outline"
               />
 
+              {/* Opción Dividir Gasto */}
+              <View style={[styles.customDropdownContainer, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.two }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text, marginBottom: 0 }]}>¿Dividir ticket en varios clientes?</Text>
+                <Switch
+                  value={isSplit}
+                  onValueChange={setIsSplit}
+                  trackColor={{ false: themeColors.border, true: themeColors.primary + '80' }}
+                  thumbColor={isSplit ? themeColors.primary : themeColors.textSecondary}
+                />
+              </View>
+
+              {!isSplit ? (
+                <View style={styles.customDropdownContainer}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
+                  <TouchableOpacity
+                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setShowCliDropdown(!showCliDropdown);
+                      setShowCatDropdown(false);
+                      setShowSubDropdown(false);
+                    }}
+                  >
+                    <Text style={{ color: selectedCliente ? themeColors.text : themeColors.textSecondary }}>
+                      {selectedCliente || 'Selecciona un cliente'}
+                    </Text>
+                    <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                  </TouchableOpacity>
+                  {showCliDropdown && (
+                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                      <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                        <CustomInput
+                          placeholder="Buscar cliente..."
+                          value={clienteSearch}
+                          onChangeText={setClienteSearch}
+                          iconName="search-outline"
+                          style={{ margin: Spacing.one, height: 40 }}
+                        />
+                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                          {clientes
+                            .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                            .map((cli, index, array) => (
+                              <TouchableOpacity
+                                key={cli.id}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
+                                onPress={() => {
+                                  setSelectedCliente(cli.nombre);
+                                  setSucursal('');
+                                  setClienteSearch('');
+                                  setShowCliDropdown(false);
+                                }}
+                              >
+                                <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
+                              </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                      </View>
+                    </Pressable>
+                  )}
+                </View>
+              ) : (
+                <View style={{ marginBottom: Spacing.three }}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Divisiones del Gasto</Text>
+                  {splits.filter(s => s.clienteId).map((split) => (
+                    <View key={split.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: themeColors.backgroundElement, padding: Spacing.two, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, marginBottom: Spacing.one }}>
+                      <Text style={{ color: themeColors.text, flex: 1, fontSize: 13 }} numberOfLines={1}>
+                        {split.clienteId} <Text style={{ fontWeight: '700' }}>(${Number(split.monto).toFixed(2)})</Text>
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          const newSplits = splits.filter(s => s.id !== split.id);
+                          setSplits(newSplits);
+                        }}
+                        style={{ padding: Spacing.half }}
+                      >
+                        <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    onPress={() => {
+                      setNewSplitClienteId('');
+                      setNewSplitMonto('');
+                      setClienteSearch('');
+                      setShowSplitModal(true);
+                    }}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: themeColors.primary + '15', padding: Spacing.two, borderRadius: BorderRadius.small, marginTop: Spacing.one }}
+                  >
+                    <Ionicons name="add-circle-outline" size={20} color={themeColors.primary} style={{ marginRight: Spacing.half }} />
+                    <Text style={{ color: themeColors.primary, fontWeight: '600' }}>Agregar División de Gasto</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
               <View style={styles.customDropdownContainer}>
                 <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del cliente *</Text>
                 <TouchableOpacity
@@ -2092,104 +2203,6 @@ export default function GastoForm() {
                 </View>
               )}
 
-              {/* Opción Dividir Gasto */}
-              <View style={[styles.customDropdownContainer, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.two }]}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text, marginBottom: 0 }]}>¿Dividir ticket en varios clientes?</Text>
-                <Switch
-                  value={isSplit}
-                  onValueChange={setIsSplit}
-                  trackColor={{ false: themeColors.border, true: themeColors.primary + '80' }}
-                  thumbColor={isSplit ? themeColors.primary : themeColors.textSecondary}
-                />
-              </View>
-
-              {!isSplit ? (
-                <View style={styles.customDropdownContainer}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
-                  <TouchableOpacity
-                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                    onPress={() => {
-                      Keyboard.dismiss();
-                      setShowCliDropdown(!showCliDropdown);
-                      setShowCatDropdown(false);
-                      setShowSubDropdown(false);
-                    }}
-                  >
-                    <Text style={{ color: selectedCliente ? themeColors.text : themeColors.textSecondary }}>
-                      {selectedCliente || 'Selecciona un cliente'}
-                    </Text>
-                    <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-                  </TouchableOpacity>
-                  {showCliDropdown && (
-                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
-                      <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <CustomInput
-                          placeholder="Buscar cliente..."
-                          value={clienteSearch}
-                          onChangeText={setClienteSearch}
-                          iconName="search-outline"
-                          style={{ margin: Spacing.one, height: 40 }}
-                        />
-                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                          {clientes
-                            .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
-                            .map((cli, index, array) => (
-                              <TouchableOpacity
-                                key={cli.id}
-                                style={[
-                                  styles.dropdownItem,
-                                  index === array.length - 1 && { borderBottomWidth: 0 },
-                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                                ]}
-                                onPress={() => {
-                                  setSelectedCliente(cli.nombre);
-                                  setSucursal('');
-                                  setClienteSearch('');
-                                  setShowCliDropdown(false);
-                                }}
-                              >
-                                <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
-                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
-                              </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                      </View>
-                    </Pressable>
-                  )}
-                </View>
-              ) : (
-                <View style={{ marginBottom: Spacing.three }}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Divisiones del Gasto</Text>
-                  {splits.filter(s => s.clienteId).map((split) => (
-                    <View key={split.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: themeColors.backgroundElement, padding: Spacing.two, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, marginBottom: Spacing.one }}>
-                      <Text style={{ color: themeColors.text, flex: 1, fontSize: 13 }} numberOfLines={1}>
-                        {split.clienteId} <Text style={{ fontWeight: '700' }}>(${Number(split.monto).toFixed(2)})</Text>
-                      </Text>
-                      <TouchableOpacity
-                        onPress={() => {
-                          const newSplits = splits.filter(s => s.id !== split.id);
-                          setSplits(newSplits);
-                        }}
-                        style={{ padding: Spacing.half }}
-                      >
-                        <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                  <TouchableOpacity
-                    onPress={() => {
-                      setNewSplitClienteId('');
-                      setNewSplitMonto('');
-                      setClienteSearch('');
-                      setShowSplitModal(true);
-                    }}
-                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: themeColors.primary + '15', padding: Spacing.two, borderRadius: BorderRadius.small, marginTop: Spacing.one }}
-                  >
-                    <Ionicons name="add-circle-outline" size={20} color={themeColors.primary} style={{ marginRight: Spacing.half }} />
-                    <Text style={{ color: themeColors.primary, fontWeight: '600' }}>Agregar División de Gasto</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
 
               <CustomInput
                 label="Comentarios *"

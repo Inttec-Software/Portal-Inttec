@@ -680,6 +680,11 @@ export default function EditarGastoForm() {
       showAlert('Validación', 'Por favor selecciona o ingresa el cliente o proyecto asignado.');
       return;
     }
+    
+    if (!sucursal || !sucursal.trim()) {
+      showAlert('Validación', 'Por favor selecciona la sucursal del cliente.');
+      return;
+    }
 
     if (!tipoServicioProyecto) {
       showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto, Venta u Operativo.');
@@ -912,9 +917,14 @@ export default function EditarGastoForm() {
             style={{ flex: 1 }}
           >
             <StepIndicator
-            currentStep={currentStep}
-            steps={['Evidencia', 'Detalles', 'Categoría']}
-          />
+                currentStep={currentStep}
+                steps={['Evidencia', 'Detalles', 'Categoría']}
+                onStepPress={(step) => {
+                  if (step < currentStep) {
+                    setCurrentStep(step);
+                  }
+                }}
+              />
 
           {/* PASO 1: Evidencia e IA */}
           {currentStep === 1 && (
