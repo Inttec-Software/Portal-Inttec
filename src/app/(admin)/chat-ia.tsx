@@ -35,7 +35,7 @@ export default function AdminChatIA() {
   const [isTyping, setIsTyping] = useState(false);
   const [dbContext, setDbContext] = useState<any>(null);
   const [isLoadingContext, setIsLoadingContext] = useState(true);
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<FlatList<ChatMessage> | null>(null);
 
   // Cargar contexto de la DB al montar (Inttec + Daravisa)
   useEffect(() => {
@@ -180,7 +180,7 @@ export default function AdminChatIA() {
     setIsTyping(true);
     
     // Auto-scroll al final
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    setTimeout(() => (flatListRef.current as any)?.scrollToEnd?.({ animated: true }), 100);
 
     try {
       if (!dbContext) {
@@ -206,7 +206,7 @@ export default function AdminChatIA() {
       }]);
     } finally {
       setIsTyping(false);
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+      setTimeout(() => (flatListRef.current as any)?.scrollToEnd?.({ animated: true }), 100);
     }
   };
 
@@ -250,7 +250,7 @@ export default function AdminChatIA() {
           data={messages}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.chatContainer}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          onContentSizeChange={() => (flatListRef.current as any)?.scrollToEnd?.({ animated: true })}
           renderItem={({ item }) => (
             <View style={[
               styles.messageWrapper,

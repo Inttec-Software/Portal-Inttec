@@ -72,7 +72,7 @@ export default function CatalogosManager() {
   // Summary Modal
   const [summaryModalVisible, setSummaryModalVisible] = useState(false);
   const [selectedClientForSummary, setSelectedClientForSummary] = useState<ClienteItem | null>(null);
-  const [clientStats, setClientStats] = useState({ totalGastos: 0, montoGastos: 0, totalVentas: 0, montoVentas: 0 });
+  const [clientStats, setClientStats] = useState({ totalGastos: 0, montoGastos: 0, totalVentas: 0, montoVentas: 0, rentabilidad: 0, margen: 0 });
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
 
   useEffect(() => {
