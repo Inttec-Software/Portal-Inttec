@@ -1,55 +1,6 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 
-CREATE TABLE public.perfiles (
-  id uuid NOT NULL,
-  nombre text NOT NULL,
-  email text NOT NULL UNIQUE,
-  rol text CHECK (rol = ANY (ARRAY['ADMIN'::text, 'EMPLEADO'::text])),
-  telefono text,
-  created_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT perfiles_pkey PRIMARY KEY (id)
-);
-CREATE TABLE public.gastos (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  empleado_id uuid NOT NULL,
-  empleado_nombre text,
-  monto numeric NOT NULL,
-  categoria text,
-  subcategoria text,
-  metodo_pago text CHECK (metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text])),
-  justificacion text,
-  foto_url text,
-  status text DEFAULT 'PENDING'::text CHECK (status = ANY (ARRAY['PENDING'::text, 'APPROVED'::text, 'REJECTED'::text, 'ACTION_REQUIRED'::text])),
-  rejection_feedback text,
-  created_at timestamp with time zone DEFAULT now(),
-  approved_at timestamp with time zone,
-  fecha_comprobante date,
-  proveedor text,
-  cliente text,
-  sucursal text,
-  tipo_tarjeta character varying,
-  ubicacion_registro character varying,
-  estado text,
-  facturado boolean DEFAULT false,
-  factura_url text,
-  motivo_sin_factura text,
-  tipo_servicio_proyecto text,
-  detalle_servicio_proyecto text,
-  venta_id uuid,
-  CONSTRAINT gastos_pkey PRIMARY KEY (id),
-  CONSTRAINT gastos_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id),
-  CONSTRAINT gastos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id)
-);
-CREATE TABLE public.audit_logs (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  timestamp timestamp with time zone DEFAULT now(),
-  action text CHECK (action = ANY (ARRAY['CREATE'::text, 'APPROVE'::text, 'REJECT'::text, 'UPDATE'::text])),
-  actor_id uuid,
-  target_id text NOT NULL,
-  details text,
-  CONSTRAINT audit_logs_pkey PRIMARY KEY (id)
-);
 CREATE TABLE public.usuarios (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   nombre text NOT NULL,
@@ -60,6 +11,15 @@ CREATE TABLE public.usuarios (
   expo_push_token text,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT usuarios_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.perfiles (
+  id uuid NOT NULL,
+  nombre text NOT NULL,
+  email text NOT NULL UNIQUE,
+  rol text CHECK (rol = ANY (ARRAY['ADMIN'::text, 'EMPLEADO'::text])),
+  telefono text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT perfiles_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.clientes (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -85,19 +45,50 @@ CREATE TABLE public.subcategorias (
   CONSTRAINT subcategorias_pkey PRIMARY KEY (id),
   CONSTRAINT subcat_cat_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias(id)
 );
+CREATE TABLE public.gastos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  empleado_id uuid NOT NULL,
+  empleado_nombre text,
+  monto numeric NOT NULL,
+  categoria text,
+  subcategoria text,
+  metodo_pago text CHECK (metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text])),
+  justificacion text,
+  foto_url text,
+  status text DEFAULT 'PENDING'::text CHECK (status = ANY (ARRAY['PENDING'::text, 'APPROVED'::text, 'REJECTED'::text, 'ACTION_REQUIRED'::text])),
+  rejection_feedback text,
+  created_at timestamp with time zone DEFAULT now(),
+  approved_at timestamp with time zone,
+  fecha_comprobante date,
+  proveedor text,
+  cliente text,
+  sucursal text,
+  tipo_tarjeta character varying,
+  ubicacion_registro character varying,
+  estado text,
+  facturado boolean DEFAULT false,
+  factura_url text,
+  motivo_sin_factura text,
+  venta_id uuid,
+  tipo_servicio_proyecto text,
+  detalle_servicio_proyecto text,
+  CONSTRAINT gastos_pkey PRIMARY KEY (id),
+  CONSTRAINT gastos_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id),
+  CONSTRAINT gastos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id)
+);
 CREATE TABLE public.evidencias (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   empleado_id uuid NOT NULL,
   empleado_nombre text,
   cliente text NOT NULL,
   descripcion_trabajo text NOT NULL,
+  materiales_usados text,
   observaciones text,
   foto_antes_url text,
   foto_despues_url text,
+  fotos_adicionales_urls ARRAY,
   resumen_ia text,
   created_at timestamp with time zone DEFAULT now(),
-  materiales_usados text,
-  fotos_adicionales_urls ARRAY,
   CONSTRAINT evidencias_pkey PRIMARY KEY (id),
   CONSTRAINT evidencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
 );
@@ -109,15 +100,95 @@ CREATE TABLE public.asistencias (
   foto_entrada_url text,
   latitud_entrada numeric,
   longitud_entrada numeric,
+  direccion_entrada text,
   hora_salida time with time zone,
   foto_salida_url text,
   latitud_salida numeric,
   longitud_salida numeric,
-  creado_en timestamp with time zone DEFAULT now(),
-  direccion_entrada text,
   direccion_salida text,
+  creado_en timestamp with time zone DEFAULT now(),
   CONSTRAINT asistencias_pkey PRIMARY KEY (id),
   CONSTRAINT asistencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.cotizaciones (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  folio text NOT NULL UNIQUE,
+  cliente_nombre text,
+  vendedor text,
+  moneda text,
+  fecha_creacion text,
+  subtotal numeric,
+  iva numeric,
+  total numeric,
+  lineas jsonb,
+  terminos_condiciones text,
+  estado text DEFAULT 'Borrador'::text,
+  creado_en timestamp with time zone DEFAULT now(),
+  CONSTRAINT cotizaciones_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.audit_logs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  timestamp timestamp with time zone DEFAULT now(),
+  action text CHECK (action = ANY (ARRAY['CREATE'::text, 'APPROVE'::text, 'REJECT'::text, 'UPDATE'::text])),
+  actor_id uuid,
+  target_id text NOT NULL,
+  details text,
+  CONSTRAINT audit_logs_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.vehiculos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  marca text NOT NULL,
+  modelo text NOT NULL,
+  anio integer NOT NULL,
+  placas text NOT NULL UNIQUE,
+  numero_economico text,
+  activo boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT vehiculos_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.registro_gasolina (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  gasto_id uuid,
+  vehiculo_id uuid NOT NULL,
+  empleado_id uuid NOT NULL,
+  fecha date NOT NULL DEFAULT CURRENT_DATE,
+  kilometraje_actual integer NOT NULL,
+  litros numeric NOT NULL,
+  costo_total numeric NOT NULL,
+  ticket_foto_url text,
+  observaciones text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT registro_gasolina_pkey PRIMARY KEY (id),
+  CONSTRAINT registro_gasolina_gasto_id_fkey FOREIGN KEY (gasto_id) REFERENCES public.gastos(id),
+  CONSTRAINT registro_gasolina_vehiculo_id_fkey FOREIGN KEY (vehiculo_id) REFERENCES public.vehiculos(id),
+  CONSTRAINT registro_gasolina_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.ventas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  registrado_por uuid,
+  fecha date NOT NULL DEFAULT CURRENT_DATE,
+  cliente text NOT NULL DEFAULT ''::text,
+  factura_referencia text,
+  tipo_proyecto text,
+  proveedor text,
+  precio_total_facturado numeric DEFAULT 0,
+  costo_total numeric DEFAULT 0,
+  utilidad_bruta numeric DEFAULT 0,
+  margen_porcentual numeric DEFAULT 0,
+  factura_url text,
+  notas text,
+  created_at timestamp with time zone DEFAULT now(),
+  descripcion text,
+  agregar_iva boolean DEFAULT false,
+  cfdi_uuid uuid UNIQUE,
+  cfdi_pdf_url text,
+  cfdi_xml_url text,
+  cfdi_estado text DEFAULT 'PENDIENTE',
+  cfdi_facturapi_id character varying(50),
+  cotizacion_id uuid,
+  CONSTRAINT ventas_pkey PRIMARY KEY (id),
+  CONSTRAINT ventas_cotizacion_id_fkey FOREIGN KEY (cotizacion_id) REFERENCES public.cotizaciones(id),
+  CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
 );
 CREATE TABLE public.categorias_productos (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -160,7 +231,7 @@ CREATE TABLE public.alias_proveedor_producto (
 CREATE TABLE public.movimientos_inventario (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   producto_id uuid NOT NULL,
-  tipo character varying NOT NULL CHECK (tipo::text = ANY (ARRAY['ENTRADA'::character varying, 'SALIDA'::character varying]::text[])),
+  tipo character varying NOT NULL CHECK (tipo::text = ANY (ARRAY['ENTRADA'::character varying::text, 'SALIDA'::character varying::text])),
   cantidad integer NOT NULL CHECK (cantidad > 0),
   fecha timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   folio_factura character varying,
@@ -170,33 +241,6 @@ CREATE TABLE public.movimientos_inventario (
   CONSTRAINT movimientos_inventario_producto_id_fkey FOREIGN KEY (producto_id) REFERENCES public.productos(id),
   CONSTRAINT movimientos_inventario_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id),
   CONSTRAINT movimientos_inventario_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id)
-);
-CREATE TABLE public.ventas (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  registrado_por uuid,
-  fecha date NOT NULL,
-  cliente text NOT NULL,
-  factura_referencia text,
-  tipo_proyecto text,
-  proveedor text,
-  precio_total_facturado numeric DEFAULT 0,
-  costo_total numeric DEFAULT 0,
-  utilidad_bruta numeric DEFAULT 0,
-  margen_porcentual numeric DEFAULT 0,
-  factura_url text,
-  notas text,
-  created_at timestamp with time zone DEFAULT now(),
-  descripcion text,
-  agregar_iva boolean DEFAULT false,
-  cfdi_uuid uuid UNIQUE,
-  cfdi_pdf_url text,
-  cfdi_xml_url text,
-  cfdi_estado text DEFAULT 'PENDIENTE',
-  cfdi_facturapi_id character varying(50),
-  cotizacion_id uuid,
-  CONSTRAINT ventas_pkey PRIMARY KEY (id),
-  CONSTRAINT ventas_cotizacion_id_fkey FOREIGN KEY (cotizacion_id) REFERENCES public.cotizaciones(id),
-  CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
 );
 CREATE TABLE public.ventas_partidas (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -210,50 +254,6 @@ CREATE TABLE public.ventas_partidas (
   costo_total_proveedor numeric DEFAULT 0,
   CONSTRAINT ventas_partidas_pkey PRIMARY KEY (id),
   CONSTRAINT ventas_partidas_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id)
-);
-CREATE TABLE public.cotizaciones (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  folio text NOT NULL UNIQUE,
-  cliente_nombre text,
-  vendedor text,
-  moneda text,
-  fecha_creacion text,
-  subtotal numeric,
-  iva numeric,
-  total numeric,
-  lineas jsonb,
-  terminos_condiciones text,
-  estado text DEFAULT 'Borrador'::text,
-  creado_en timestamp with time zone DEFAULT now(),
-  CONSTRAINT cotizaciones_pkey PRIMARY KEY (id)
-);
-CREATE TABLE public.vehiculos (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  marca text NOT NULL,
-  modelo text NOT NULL,
-  anio integer NOT NULL,
-  placas text NOT NULL UNIQUE,
-  numero_economico text,
-  activo boolean DEFAULT true,
-  created_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT vehiculos_pkey PRIMARY KEY (id)
-);
-CREATE TABLE public.registro_gasolina (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  gasto_id uuid,
-  vehiculo_id uuid NOT NULL,
-  empleado_id uuid NOT NULL,
-  fecha date NOT NULL DEFAULT CURRENT_DATE,
-  kilometraje_actual integer NOT NULL,
-  litros numeric NOT NULL,
-  costo_total numeric NOT NULL,
-  ticket_foto_url text,
-  observaciones text,
-  created_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT registro_gasolina_pkey PRIMARY KEY (id),
-  CONSTRAINT registro_gasolina_gasto_id_fkey FOREIGN KEY (gasto_id) REFERENCES public.gastos(id),
-  CONSTRAINT registro_gasolina_vehiculo_id_fkey FOREIGN KEY (vehiculo_id) REFERENCES public.vehiculos(id),
-  CONSTRAINT registro_gasolina_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id)
 );
 CREATE TABLE public.auditorias_tarjeta (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -286,5 +286,6 @@ CREATE TABLE IF NOT EXISTS public.sucursales_cliente (
     created_at timestamp with time zone DEFAULT now()
 );
 
-\ n - -   U p d a t e   2 6   J u l \ n A L T E R   T A B L E   v e n t a s   A D D   C O L U M N   s u c u r s a l   t e x t ; \ n A L T E R   T A B L E   c o t i z a c i o n e s   A D D   C O L U M N   s u c u r s a l   t e x t ; \ n  
- 
+-- Update 26 Jul
+ALTER TABLE ventas ADD COLUMN sucursal text;
+ALTER TABLE cotizaciones ADD COLUMN sucursal text;

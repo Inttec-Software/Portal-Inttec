@@ -1971,6 +1971,10 @@ export default function AdminDashboard() {
             ) : (
               <FlatList
                 data={pendingGastos}
+                initialNumToRender={8}
+                maxToRenderPerBatch={8}
+                windowSize={5}
+                removeClippedSubviews={true}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.listContent}
                 renderItem={({ item }) => (
@@ -2116,6 +2120,10 @@ export default function AdminDashboard() {
               ) : (
                 <FlatList
                   data={historyGastos}
+                  initialNumToRender={8}
+                  maxToRenderPerBatch={8}
+                  windowSize={5}
+                  removeClippedSubviews={true}
                   keyExtractor={(item) => item.id}
                   contentContainerStyle={styles.listContent}
                   renderItem={({ item }) => (
@@ -2729,16 +2737,16 @@ export default function AdminDashboard() {
                   )}
 
                   <View style={styles.detailItem}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Proveedor / Sucursal</Text>
+                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Proveedor</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedGasto.proveedor || 'N/A'} {selectedGasto.sucursal ? `(Sucursal: ${selectedGasto.sucursal})` : ''}
+                      {selectedGasto.proveedor || 'N/A'}
                     </Text>
                   </View>
 
                   <View style={styles.detailItem}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Cliente Relacionado</Text>
+                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Cliente / Sucursal</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedGasto.cliente || 'No especificado'}
+                      {selectedGasto.cliente || 'No especificado'} {selectedGasto.sucursal ? `- Sucursal: ${selectedGasto.sucursal}` : ''}
                     </Text>
                   </View>
 
@@ -3361,6 +3369,10 @@ export default function AdminDashboard() {
                   ) : (
                     <FlatList
                       data={filteredSalesForLinking}
+                      initialNumToRender={5}
+                      maxToRenderPerBatch={5}
+                      windowSize={5}
+                      removeClippedSubviews={true}
                       keyExtractor={(item) => item.id}
                       showsVerticalScrollIndicator={false}
                       contentContainerStyle={{ gap: Spacing.two }}
@@ -4081,6 +4093,10 @@ export default function AdminDashboard() {
             ) : (
               <FlatList
                 data={asistencias}
+                initialNumToRender={8}
+                maxToRenderPerBatch={8}
+                windowSize={5}
+                removeClippedSubviews={true}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={{ paddingBottom: Spacing.seven }}
                 renderItem={({ item }) => (

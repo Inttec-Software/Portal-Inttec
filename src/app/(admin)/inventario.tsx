@@ -1057,6 +1057,10 @@ export default function InventarioDashboard() {
           ) : (
             <FlatList
               data={filteredProducts}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              removeClippedSubviews={true}
               keyExtractor={item => item.id}
               contentContainerStyle={styles.listContent}
               renderItem={({ item }) => {
@@ -1664,6 +1668,10 @@ export default function InventarioDashboard() {
 
             <FlatList
               data={filteredSelectorOptions}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              removeClippedSubviews={true}
               keyExtractor={item => item.id}
               contentContainerStyle={{ paddingBottom: Spacing.four }}
               renderItem={({ item }) => (

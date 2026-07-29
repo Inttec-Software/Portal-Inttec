@@ -1706,6 +1706,10 @@ export default function VentasScreen() {
       ) : (
         <FlatList
           data={ventasFiltradas}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={true}
           keyExtractor={item => item.id}
           contentContainerStyle={{ padding: Spacing.three, gap: Spacing.two }}
           renderItem={({ item }) => {

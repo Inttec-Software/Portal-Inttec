@@ -278,3 +278,14 @@ CREATE TABLE public.app_settings (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT app_settings_pkey PRIMARY KEY (id)
 );
+
+CREATE TABLE IF NOT EXISTS public.sucursales_cliente (
+    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+    cliente_id uuid NOT NULL REFERENCES public.clientes(id) ON DELETE CASCADE,
+    nombre text NOT NULL,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+-- Update 26 Jul
+ALTER TABLE ventas ADD COLUMN sucursal text;
+ALTER TABLE cotizaciones ADD COLUMN sucursal text;

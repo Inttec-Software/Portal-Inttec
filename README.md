@@ -54,3 +54,8 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+## Daravisa Setup Notes
+- The Daravisa database uses the exact same schema as Inttec (BaseDatos.sql).
+- To ensure proper functionality, Row Level Security (RLS) MUST BE DISABLED on all main tables (gastos, evidencias, registro_gasolina, etc.) in the Daravisa Supabase project.
+- Ensure the 'tickets' bucket is created in Storage with public access and policies that allow ALL operations (SELECT, INSERT, UPDATE, DELETE) for authenticated users.

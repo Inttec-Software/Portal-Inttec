@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, Linking, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, Linking, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import Constants from 'expo-constants';
