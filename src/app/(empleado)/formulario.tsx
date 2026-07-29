@@ -174,6 +174,7 @@ export default function GastoForm() {
   const [justificacion, setJustificacion] = useState('');
   const [sucursalesCliente, setSucursalesCliente] = useState<SucursalCliente[]>([]);
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
+  const [sucursalSearch, setSucursalSearch] = useState('');
 
   // Vehículos y Gasolina
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
@@ -820,6 +821,7 @@ export default function GastoForm() {
       tipo_tarjeta: tipoTarjeta,
       ubicacion_registro: 'Móvil',
       estado: selectedEstado || null,
+      facturado,
       motivo_sin_factura: facturado === true
         ? null
         : (facturaStatus === 'PENDIENTE')
@@ -1654,10 +1656,17 @@ export default function GastoForm() {
                     </TouchableOpacity>
                     {showSucursalDropdown && (
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                        <CustomInput
+                          placeholder="Buscar sucursal..."
+                          value={sucursalSearch}
+                          onChangeText={setSucursalSearch}
+                          iconName="search-outline"
+                          style={{ margin: Spacing.one, height: 40 }}
+                        />
                         <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                           {(() => {
                              const currentCliente = clientes.find(c => c.nombre === selectedCliente);
-                             const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id) : [];
+                             const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())) : [];
                              if (filteredSucursales.length === 0) {
                                return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas para este cliente.</Text>;
                              }

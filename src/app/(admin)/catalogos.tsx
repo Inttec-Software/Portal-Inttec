@@ -271,7 +271,7 @@ export default function CatalogosManager() {
     setSelectedClientForSummary(cliente);
     setSummaryModalVisible(true);
     setIsLoadingSummary(true);
-    setClientStats({ totalGastos: 0, montoGastos: 0, totalVentas: 0, montoVentas: 0 });
+    setClientStats({ totalGastos: 0, montoGastos: 0, totalVentas: 0, montoVentas: 0, rentabilidad: 0, margen: 0 });
 
     try {
       const [gastosRes, ventasRes] = await Promise.all([

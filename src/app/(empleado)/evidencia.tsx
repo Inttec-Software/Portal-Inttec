@@ -15,7 +15,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase } from '@/services/supabase';
+import { supabase, Usuario, AuthService } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { GeminiService } from '@/services/gemini';
 import { optimizeImage } from '@/utils/imageOptimizer';
@@ -168,7 +168,11 @@ export default function EvidenciaForm() {
           const optimizedPhotos = await Promise.all(
             result.assets.map((asset) => optimizeImage(asset.uri))
           );
-          setFotosAdicionales((prev) => [...prev, ...optimizedPhotos]);
+          const mappedPhotos = optimizedPhotos.map(opt => ({
+            uri: opt.uri,
+            base64: opt.base64 || null
+          }));
+          setFotosAdicionales((prev) => [...prev, ...mappedPhotos]);
         }
       }
     } catch (err) {

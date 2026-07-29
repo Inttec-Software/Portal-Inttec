@@ -189,6 +189,7 @@ export default function EditarGastoForm() {
   const [justificacion, setJustificacion] = useState('');
   const [sucursalesCliente, setSucursalesCliente] = useState<SucursalCliente[]>([]);
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
+  const [sucursalSearch, setSucursalSearch] = useState('');
 
   // Dropdown list visibility toggles (Mock pickers since RN Picker is external)
   const [showCatDropdown, setShowCatDropdown] = useState(false);
@@ -1465,10 +1466,17 @@ export default function EditarGastoForm() {
                 {showSucursalDropdown && (
                   <View style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <CustomInput
+                        placeholder="Buscar sucursal..."
+                        value={sucursalSearch}
+                        onChangeText={setSucursalSearch}
+                        iconName="search-outline"
+                        style={{ margin: Spacing.one, height: 40 }}
+                      />
                       <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                         {(() => {
                            const currentCliente = clientes.find(c => c.nombre === selectedCliente);
-                           const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id) : [];
+                           const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())) : [];
                            if (filteredSucursales.length === 0) {
                              return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>;
                            }

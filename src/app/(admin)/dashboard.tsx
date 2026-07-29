@@ -15,6 +15,7 @@ import {
   Linking,
   useWindowDimensions,
   Pressable,
+  Keyboard,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -182,6 +183,7 @@ export default function AdminDashboard() {
   
   const [quickSaleSucursal, setQuickSaleSucursal] = useState('');
   const [showQuickSaleSucursalDropdown, setShowQuickSaleSucursalDropdown] = useState(false);
+  const [quickSaleSucursalSearch, setQuickSaleSucursalSearch] = useState('');
   const [sucursalesCatalog, setSucursalesCatalog] = useState<any[]>([]);
 
   const quickSaleTotals = useMemo(() => {
@@ -3480,7 +3482,7 @@ export default function AdminDashboard() {
                                         setShowQuickSaleCliDropdown(false);
                                       }}
                                       style={[
-                                        styles.customDropdownListItem,
+                                        styles.customDropdownItem,
                                         index === array.length - 1 && { borderBottomWidth: 0 },
                                         { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, borderBottomColor: themeColors.border }
                                       ]}
@@ -3519,11 +3521,20 @@ export default function AdminDashboard() {
                           {showQuickSaleSucursalDropdown && (
                             <View style={{ width: '100%', zIndex: 1000 }}>
                               <View style={[styles.customDropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                                <CustomInput
+                                  placeholder="Buscar sucursal..."
+                                  value={quickSaleSucursalSearch}
+                                  onChangeText={setQuickSaleSucursalSearch}
+                                  iconName="search-outline"
+                                  style={{ margin: Spacing.one, height: 40 }}
+                                />
                                 <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                                  {sucs.length === 0 ? (
-                                    <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>
-                                  ) : (
-                                    sucs.map((s, index, array) => (
+                                  {(() => {
+                                    const filteredSucs = sucs.filter(s => s.nombre.toLowerCase().includes(quickSaleSucursalSearch.toLowerCase()));
+                                    if (filteredSucs.length === 0) {
+                                      return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>;
+                                    }
+                                    return filteredSucs.map((s, index, array) => (
                                       <TouchableOpacity
                                         key={s.id}
                                         onPress={() => {
@@ -3531,7 +3542,7 @@ export default function AdminDashboard() {
                                           setShowQuickSaleSucursalDropdown(false);
                                         }}
                                         style={[
-                                          styles.customDropdownListItem,
+                                          styles.customDropdownItem,
                                           index === array.length - 1 && { borderBottomWidth: 0 },
                                           { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, borderBottomColor: themeColors.border }
                                         ]}
@@ -3540,7 +3551,7 @@ export default function AdminDashboard() {
                                         <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{s.nombre}</Text>
                                       </TouchableOpacity>
                                     ))
-                                  )}
+                                  })()}
                                 </ScrollView>
                               </View>
                             </View>
@@ -3580,7 +3591,7 @@ export default function AdminDashboard() {
                               setQuickSaleTipoProyecto(tipo);
                               setShowQuickSaleTipoDropdown(false);
                             }}
-                            style={[styles.customDropdownListItem, { borderBottomColor: themeColors.border }]}
+                            style={[styles.customDropdownItem, { borderBottomColor: themeColors.border }]}
                           >
                             <Text style={{ color: themeColors.text }}>{tipo}</Text>
                           </TouchableOpacity>

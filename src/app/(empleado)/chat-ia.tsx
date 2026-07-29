@@ -50,7 +50,7 @@ export default function EmployeeChatIA() {
       try {
         setIsLoadingData(true);
 
-        const safeQuery = async (queryPromise: Promise<any>) => {
+        const safeQuery = async (queryPromise: any) => {
           try {
             const { data, error } = await queryPromise;
             if (error) return [];
@@ -195,7 +195,7 @@ export default function EmployeeChatIA() {
               ]}>
                 {item.isBot ? (
                   <View>
-                    {item.text.split('\n').map((line, i) => {
+                    {item.text.split('\n').map((line: string, i: number) => {
                       const isBullet = line.trim().startsWith('- ') || line.trim().startsWith('* ');
                       const cleanedLine = isBullet ? line.trim().substring(2) : line;
                       const parts = cleanedLine.split(/(\*\*.*?\*\*)/g);
@@ -204,7 +204,7 @@ export default function EmployeeChatIA() {
                         <View key={i} style={isBullet ? { flexDirection: 'row', alignItems: 'flex-start', marginTop: 2 } : { marginTop: 2 }}>
                           {isBullet && <Text style={[styles.messageText, { color: themeColors.text, marginRight: 6 }]}>•</Text>}
                           <Text style={[styles.messageText, { color: themeColors.text }, isBullet && { flex: 1 }]}>
-                            {parts.map((part, j) => {
+                            {parts.map((part: string, j: number) => {
                               if (part.startsWith('**') && part.endsWith('**')) {
                                 return <Text key={j} style={{ fontWeight: 'bold' }}>{part.slice(2, -2)}</Text>;
                               }

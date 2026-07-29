@@ -45,6 +45,7 @@ export default function NuevaCotizacionScreen() {
   const [clienteSearch, setClienteSearch] = useState('');
   const [sucursales, setSucursales] = useState<any[]>([]);
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
+  const [sucursalSearch, setSucursalSearch] = useState('');
   
   const [formMessage, setFormMessage] = useState<{type: 'error'|'success', text: string} | null>(null);
 
@@ -591,8 +592,20 @@ export default function NuevaCotizacionScreen() {
                       borderRadius: 16, marginTop: 6,
                       shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, elevation: 5,
                     }}>
+                      <CustomInput
+                        placeholder="Buscar sucursal..."
+                        value={sucursalSearch}
+                        onChangeText={setSucursalSearch}
+                        iconName="search-outline"
+                        style={{ margin: Spacing.one, height: 40 }}
+                      />
                       <ScrollView style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                        {sucursales.map((suc, index, array) => (
+                        {(() => {
+                          const filteredSucursales = sucursales.filter(s => s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase()));
+                          if (filteredSucursales.length === 0) {
+                            return <ThemedText style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales.</ThemedText>;
+                          }
+                          return filteredSucursales.map((suc, index, array) => (
                           <TouchableOpacity
                             key={suc.id}
                             onPress={() => {
@@ -605,7 +618,7 @@ export default function NuevaCotizacionScreen() {
                             <Ionicons name="business-outline" size={24} color={themeColors.primary} />
                             <ThemedText style={{ fontWeight: '600', color: themeColors.text }}>{suc.nombre}</ThemedText>
                           </TouchableOpacity>
-                        ))}
+                        ))})()}
                       </ScrollView>
                     </View>
                   )}

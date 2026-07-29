@@ -120,6 +120,7 @@ export default function VentasScreen() {
   const [showCliDropdown, setShowCliDropdown] = useState(false);
   const [sucursalesCliente, setSucursalesCliente] = useState<SucursalCliente[]>([]);
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
+  const [sucursalSearch, setSucursalSearch] = useState('');
 
   // === Auth Check ===
   useEffect(() => {
@@ -1197,11 +1198,20 @@ export default function VentasScreen() {
               {showSucursalDropdown && (
                 <View style={{ width: '100%', zIndex: 1000 }}>
                   <View style={[styles.customDropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                    <CustomInput
+                      placeholder="Buscar sucursal..."
+                      value={sucursalSearch}
+                      onChangeText={setSucursalSearch}
+                      iconName="search-outline"
+                      style={{ margin: Spacing.one, height: 40 }}
+                    />
                     <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                      {sucursales.length === 0 ? (
-                        <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>
-                      ) : (
-                        sucursales.map((suc, index, array) => (
+                      {(() => {
+                        const filteredSucursales = sucursales.filter(s => s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase()));
+                        if (filteredSucursales.length === 0) {
+                          return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>;
+                        }
+                        return filteredSucursales.map((suc, index, array) => (
                           <TouchableOpacity
                             key={suc.id}
                             style={[
@@ -1218,7 +1228,7 @@ export default function VentasScreen() {
                             <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
                           </TouchableOpacity>
                         ))
-                      )}
+                      })()}
                     </ScrollView>
                   </View>
                 </View>
@@ -2856,5 +2866,14 @@ const styles = StyleSheet.create({
   },
   tableCell: {
     fontSize: 13,
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

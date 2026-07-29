@@ -2381,13 +2381,13 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
 
 
 
-export async function exportarFacturaOdooPDF(venta, facturaData, action = 'view') {
+export async function exportarFacturaOdooPDF(venta: any, facturaData: any, action: any = 'view') {
   const branding = await getCompanyBranding();
   const title = `Factura - ${facturaData.folio_number || facturaData.uuid}`;
   
   // Formatters
-  const formatMoney = (val) => `$ ${Number(val || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-  const formatDate = (dateString) => {
+  const formatMoney = (val: any) => `$ ${Number(val || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+  const formatDate = (dateString: any) => {
     if (!dateString) return '';
     const d = new Date(dateString);
     return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth()+1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
@@ -2505,7 +2505,7 @@ export async function exportarFacturaOdooPDF(venta, facturaData, action = 'view'
                   </tr>
               </thead>
               <tbody>
-                  ${(facturaData.items || []).map((item) => `
+                  ${(facturaData.items || []).map((item: any) => `
                       <tr>
                           <td class="text-center">${item.product?.product_key || ''}<br/><span style="font-size: 8px;">(${item.product?.unit_key || ''})</span></td>
                           <td>${item.product?.description || ''}</td>
