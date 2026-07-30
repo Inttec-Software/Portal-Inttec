@@ -22,7 +22,7 @@ const getCompanyBranding = async () => {
   return {
     logo: LOGO_BASE64,
     name: 'INTTEC',
-    tagline: 'INTEGRACIÃ“N DE TECNOLOGÃAS',
+    tagline: 'INTEGRACION DE TECNOLOGIAS',
   };
 };
 
@@ -103,13 +103,14 @@ export const ReportGenerator = {
         // Fondo rojo suave y texto rojo oscuro para resaltar alertas
         rowStyle = `style="background-color: #ffebee; color: #b71c1c;"`;
         alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">âš ï¸ ALERTA: ${reason}</div>`;
+        alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">âš ï¸  ALERTA: ${reason}</div>`;
       }
 
       tableRows += `
         <tr ${rowStyle}>
           <td>${fecha}</td>
           <td>${g.empleado_nombre || 'Desconocido'}</td>
-          <td>${g.proveedor || 'N/A'}</td>
+          <td>${g.proveedor || 'N/A'} <br/><small style="color: #666;">${g.sucursal || 'Sin Sucursal'}</small></td>
           <td>
             ${g.categoria || 'N/A'} - ${g.subcategoria || ''}
             ${alertLabel}
@@ -321,7 +322,7 @@ export const ReportGenerator = {
             <tr>
               <th style="width: 12%">Fecha</th>
               <th style="width: 20%">Empleado</th>
-              <th style="width: 18%">Proveedor</th>
+              <th style="width: 18%">Proveedor / Sucursal</th>
               <th style="width: 20%">CategorÃ­a</th>
               <th style="width: 12%">Pago</th>
               <th style="width: 8%">Estado</th>
@@ -1765,6 +1766,7 @@ export const ReportGenerator = {
             ${v.factura_referencia ? `<span style="font-size: 9px; color: #777;">Ref: ${v.factura_referencia}</span>` : ''}
           </td>
           <td>${v.tipo_proyecto || 'N/A'}</td>
+          <td>${v.sucursal || 'N/A'}</td>
           <td>${v.proveedor || 'N/A'}</td>
           <td style="text-align: right; color: #0d1b2a; font-weight: bold;">${facturadoFormatted}</td>
           <td style="text-align: right; color: #f44336;">${costoFormatted}</td>
@@ -1904,14 +1906,15 @@ export const ReportGenerator = {
         <table>
           <thead>
             <tr>
-              <th style="width: 12%">Fecha</th>
-              <th style="width: 25%">Cliente / Ref</th>
-              <th style="width: 13%">Tipo</th>
-              <th style="width: 15%">Sucursal</th>
-              <th style="width: 13%; text-align: right;">Venta</th>
-              <th style="width: 10%; text-align: right;">Costo</th>
-              <th style="width: 12%; text-align: right;">Utilidad</th>
-              <th style="width: 10%; text-align: right;">Margen</th>
+              <th style="width: 10%">Fecha</th>
+              <th style="width: 18%">Cliente / Ref</th>
+              <th style="width: 12%">Tipo</th>
+              <th style="width: 12%">Sucursal</th>
+              <th style="width: 13%">Proveedor</th>
+              <th style="width: 10%; text-align: right;">Venta</th>
+              <th style="width: 9%; text-align: right;">Costo</th>
+              <th style="width: 9%; text-align: right;">Utilidad</th>
+              <th style="width: 7%; text-align: right;">Margen</th>
             </tr>
           </thead>
           <tbody>
@@ -2007,7 +2010,7 @@ export const ReportGenerator = {
         escape(v.cliente),
         escape(v.factura_referencia),
         escape(v.tipo_proyecto),
-        escape(v.proveedor),
+        escape(v.sucursal),
         Number(v.precio_total_facturado || 0).toFixed(2),
         Number(v.costo_total || 0).toFixed(2),
         Number(v.utilidad_bruta || 0).toFixed(2),

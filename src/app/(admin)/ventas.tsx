@@ -594,12 +594,29 @@ export default function VentasScreen() {
         costo_unitario_proveedor: String(p.costo_unitario_proveedor || 0),
       }));
 
+      // Validar factura duplicada
+      let warningMsg = '';
+      if (result.informacion_general.factura_o_referencia) {
+        try {
+          const { data: existing } = await supabase
+            .from('ventas')
+            .select('id')
+            .ilike('factura_referencia', result.informacion_general.factura_o_referencia.trim())
+            .maybeSingle();
+          if (existing) {
+            warningMsg = `\n\n⚠️ ADVERTENCIA: La orden/factura "${result.informacion_general.factura_o_referencia}" ya existe registrada en el sistema. Verifica que no la estés duplicando.`;
+          }
+        } catch (e) {
+          console.warn('Error checking duplicate reference:', e);
+        }
+      }
+
       setPartidas(partidasUI);
       setScanSuccess(true);
       setCurrentStep(2);
       showAlert(
-        'Costos Extraídos',
-        `La IA extrajo ${partidasUI.length} partida(s) con sus costos de compra. Ahora ingresa los precios de venta para calcular márgenes.`
+        warningMsg ? '⚠️ Posible Duplicado' : 'Costos Extraídos',
+        `La IA extrajo ${partidasUI.length} partida(s) con sus costos de compra. Ahora ingresa los precios de venta para calcular márgenes.${warningMsg}`
       );
     } catch (err: any) {
       showAlert('Error de IA', err.message || 'No se pudo procesar la factura.');
