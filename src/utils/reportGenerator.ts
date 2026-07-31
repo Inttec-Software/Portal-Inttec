@@ -273,7 +273,7 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${branding.logo}" style="max-height: 60px; max-width: 250px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" />
                   </td>
                 </tr>
               </table>
@@ -549,7 +549,7 @@ export const ReportGenerator = {
       </head>
       <body>
         <div class="header">
-          <img class="logo-img" src="${branding.logo}" style="max-height: 60px; max-width: 250px; object-fit: contain;" />
+          <img class="logo-img" src="${branding.logo}" />
           <div style="margin-left:auto; text-align:right">
             <h1>${title}</h1>
             <div class="subtitle">Generado: ${new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
@@ -874,7 +874,7 @@ export const ReportGenerator = {
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${branding.logo}" style="max-height: 60px; max-width: 250px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" />
                   </td>
                 </tr>
               </table>
@@ -1865,7 +1865,7 @@ export const ReportGenerator = {
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
-              <img src="${branding.logo}" style="width: 60px; height: 60px; object-fit: contain;" />
+              <img src="${branding.logo}" style="width: 300px; height: 100px; object-fit: contain;" />
             </td>
           </tr>
         </table>
