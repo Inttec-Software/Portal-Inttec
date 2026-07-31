@@ -112,8 +112,6 @@ export default function MiTrabajoScreen() {
     try {
       await EvidenceReportGenerator.exportToPDF(
         ev,
-        ev.foto_antes_url || null,
-        ev.foto_despues_url || null,
         ev.empleado_nombre || currentUser?.nombre || 'Técnico Autorizado',
         ev.fotos_adicionales_urls || []
       );
@@ -334,7 +332,7 @@ export default function MiTrabajoScreen() {
                   </View>
 
                   <View style={styles.detailItem}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Descripción del Trabajo</Text>
+                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Situación encontrada</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
                       {selectedEvidencia.descripcion_trabajo}
                     </Text>

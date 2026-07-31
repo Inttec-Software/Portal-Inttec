@@ -17,7 +17,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Usuario, AuthService } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
-import { GeminiService } from '@/services/gemini';
 import { optimizeImage } from '@/utils/imageOptimizer';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import StepIndicator from '@/components/StepIndicator';
@@ -34,24 +33,30 @@ export default function EvidenciaForm() {
 
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Paso 1: Evidencia Fotográfica
-  const [imageUriAntes, setImageUriAntes] = useState<string | null>(null);
-  const [imageBase64Antes, setImageBase64Antes] = useState<string | null>(null);
-  const [imageUriDespues, setImageUriDespues] = useState<string | null>(null);
-  const [imageBase64Despues, setImageBase64Despues] = useState<string | null>(null);
+  // Paso 1: Información y Fotos por Trabajo
   const [fotosAdicionales, setFotosAdicionales] = useState<{ uri: string; base64: string | null }[]>([]);
 
   // Paso 2: Detalles del Trabajo
-  const [cliente, setCliente] = useState('');
-  const [trabajos, setTrabajos] = useState<{ descripcion: string; materiales: string; solucion: string }[]>([
-    { descripcion: '', materiales: '', solucion: '' }
+
+  // Catálogos
+  const [clientes, setClientes] = useState<any[]>([]);
+  const [sucursalesCliente, setSucursalesCliente] = useState<any[]>([]);
+  
+  const [selectedCliente, setSelectedCliente] = useState<string>('');
+  const [clienteSearch, setClienteSearch] = useState('');
+  const [showCliDropdown, setShowCliDropdown] = useState(false);
+  
+  const [selectedSucursal, setSelectedSucursal] = useState<string>('');
+  const [sucursalSearch, setSucursalSearch] = useState('');
+  const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
+
+  const [trabajos, setTrabajos] = useState<{ descripcion: string; materiales: string; solucion: string; antesImg?: { uri: string; base64: string | null }; despuesImg?: { uri: string; base64: string | null }; fotosAdicionales?: { uri: string; base64: string | null }[] }[]>([
+    { descripcion: '', materiales: '', solucion: '', fotosAdicionales: [] }
   ]);
 
-  // Paso 3: Reporte IA y Exportación
-  const [resumenIA, setResumenIA] = useState<string | null>(null);
+  // Paso 3: Exportación
 
   // Modal de imagen a pantalla completa
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
@@ -64,6 +69,20 @@ export default function EvidenciaForm() {
     }
   };
 
+
+  const loadCatalogos = async () => {
+    try {
+      const [cliRes, sucRes] = await Promise.all([
+        supabase.from('clientes').select('*').order('nombre'),
+        supabase.from('sucursales_cliente').select('*').order('nombre'),
+      ]);
+      if (cliRes.data) setClientes(cliRes.data);
+      if (sucRes.data) setSucursalesCliente(sucRes.data);
+    } catch (err) {
+      console.error('Error loading catalogs:', err);
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
       const user = await AuthService.getCurrentUser();
@@ -72,6 +91,7 @@ export default function EvidenciaForm() {
         return;
       }
       setCurrentUser(user);
+      await loadCatalogos();
     };
     init();
   }, [router]);
@@ -104,7 +124,7 @@ export default function EvidenciaForm() {
     return true;
   };
 
-  const handleCapturePhoto = async (type: 'antes' | 'despues' | 'adicional') => {
+  const handleCapturePhoto = async (type: 'antes' | 'despues' | 'adicional', jobIndex?: number) => {
     const hasPermission = await requestCameraPermission();
     if (!hasPermission) return;
 
@@ -118,30 +138,35 @@ export default function EvidenciaForm() {
 
       if (!result.canceled && result.assets?.[0]) {
         const optimized = await optimizeImage(result.assets[0].uri);
-        if (type === 'antes') {
-          setImageUriAntes(optimized.uri);
-          setImageBase64Antes(optimized.base64 || null);
-        } else if (type === 'despues') {
-          setImageUriDespues(optimized.uri);
-          setImageBase64Despues(optimized.base64 || null);
+        if (type === 'antes' && jobIndex !== undefined) {
+          setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: optimized.uri, base64: optimized.base64 || null } } : t));
+        } else if (type === 'despues' && jobIndex !== undefined) {
+          setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: optimized.uri, base64: optimized.base64 || null } } : t));
         } else if (type === 'adicional') {
-          setFotosAdicionales((prev) => [
-            ...prev,
-            { uri: optimized.uri, base64: optimized.base64 || null },
-          ]);
+          if (jobIndex !== undefined) {
+            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { 
+              ...t, 
+              fotosAdicionales: [...(t.fotosAdicionales || []), { uri: optimized.uri, base64: optimized.base64 || null }] 
+            } : t));
+          } else {
+            setFotosAdicionales((prev) => [
+              ...prev,
+              { uri: optimized.uri, base64: optimized.base64 || null },
+            ]);
+          }
         }
       }
     } catch (err) {
       console.error('Camera capture error:', err);
       if (Platform.OS === 'web') {
-        await handleSelectGallery(type);
+        await handleSelectGallery(type, jobIndex);
       } else {
         Alert.alert('Error', 'No se pudo abrir la cámara.');
       }
     }
   };
 
-  const handleSelectGallery = async (type: 'antes' | 'despues' | 'adicional') => {
+  const handleSelectGallery = async (type: 'antes' | 'despues' | 'adicional', jobIndex?: number) => {
     const hasPermission = await requestLibraryPermission();
     if (!hasPermission) return;
 
@@ -155,16 +180,13 @@ export default function EvidenciaForm() {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        if (type === 'antes') {
+        if (type === 'antes' && jobIndex !== undefined) {
           const opt = await optimizeImage(result.assets[0].uri);
-          setImageUriAntes(opt.uri);
-          setImageBase64Antes(opt.base64 || null);
-        } else if (type === 'despues') {
+          setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: opt.uri, base64: opt.base64 || null } } : t));
+        } else if (type === 'despues' && jobIndex !== undefined) {
           const opt = await optimizeImage(result.assets[0].uri);
-          setImageUriDespues(opt.uri);
-          setImageBase64Despues(opt.base64 || null);
+          setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: opt.uri, base64: opt.base64 || null } } : t));
         } else if (type === 'adicional') {
-          // Promise.all to optimize all simultaneously
           const optimizedPhotos = await Promise.all(
             result.assets.map((asset) => optimizeImage(asset.uri))
           );
@@ -172,7 +194,15 @@ export default function EvidenciaForm() {
             uri: opt.uri,
             base64: opt.base64 || null
           }));
-          setFotosAdicionales((prev) => [...prev, ...mappedPhotos]);
+          
+          if (jobIndex !== undefined) {
+            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? {
+              ...t,
+              fotosAdicionales: [...(t.fotosAdicionales || []), ...mappedPhotos]
+            } : t));
+          } else {
+            setFotosAdicionales((prev) => [...prev, ...mappedPhotos]);
+          }
         }
       }
     } catch (err) {
@@ -181,44 +211,17 @@ export default function EvidenciaForm() {
     }
   };
 
-  const generateAIAnalysis = async () => {
-    if (!cliente.trim()) {
+  const handleExportPDF = async () => {
+    console.log("handleExportPDF called");
+    if (!selectedCliente) {
       Alert.alert('Validación', 'Por favor llena el nombre del cliente.');
       return;
     }
-
-    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim());
+    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim() || !t.materiales.trim());
     if (hasEmptyFields) {
-      Alert.alert('Validación', 'Por favor llena la descripción y la solución para todos los trabajos.');
+      Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
       return;
     }
-
-    setIsAnalyzing(true);
-    try {
-      const responseText = await GeminiService.generateTechnicalSummary(
-        imageBase64Antes,
-        imageBase64Despues,
-        {
-          cliente: cliente.trim(),
-          descripcion_trabajo: '',
-          trabajos: trabajos.map(t => ({
-            descripcion: t.descripcion.trim(),
-            materiales: t.materiales.trim() || null,
-            solucion: t.solucion.trim() || null,
-          }))
-        }
-      );
-      setResumenIA(responseText);
-      setCurrentStep(3);
-    } catch (err: any) {
-      Alert.alert('Error de IA', err.message || 'No se pudo generar el análisis formal.');
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  const handleExportPDF = async () => {
-    if (!resumenIA) return;
     try {
       const allMateriales = trabajos
         .map(t => t.materiales.trim())
@@ -230,25 +233,29 @@ export default function EvidenciaForm() {
         .filter(Boolean)
         .join('\n');
 
+      const clienteObj = clientes.find(c => c.id === selectedCliente);
+      const sucObj = sucursalesCliente.find(s => s.id === selectedSucursal);
+      const clienteStr = clienteObj ? (clienteObj.nombre + (sucObj ? ' - ' + sucObj.nombre : '')) : '';
+
       const evData = {
         empleado_id: currentUser?.id || '',
-        cliente: cliente.trim(),
+        cliente: clienteStr,
         descripcion_trabajo: JSON.stringify(trabajos.map(t => ({
           descripcion: t.descripcion.trim(),
           materiales: t.materiales.trim() || null,
           solucion: t.solucion.trim() || null,
+          antesImg: t.antesImg?.base64 || t.antesImg?.uri || null,
+          despuesImg: t.despuesImg?.base64 || t.despuesImg?.uri || null,
+          fotosAdicionales: t.fotosAdicionales?.map(f => f.base64 || f.uri) || []
         }))),
         materiales_usados: allMateriales || null,
         observaciones: allSoluciones || null,
-        resumen_ia: resumenIA,
       };
 
       const extraPhotos = fotosAdicionales.map((f) => f.base64 || f.uri);
 
       await EvidenceReportGenerator.exportToPDF(
         evData,
-        imageBase64Antes,
-        imageBase64Despues,
         currentUser?.nombre || 'Técnico Autorizado',
         extraPhotos
       );
@@ -258,7 +265,19 @@ export default function EvidenciaForm() {
   };
 
   const handleSaveToDatabase = async () => {
+    console.log("handleSaveToDatabase called");
     if (!currentUser) return;
+    
+    if (!selectedCliente) {
+      Alert.alert('Validación', 'Por favor llena el nombre del cliente.');
+      return;
+    }
+    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim() || !t.materiales.trim());
+    if (hasEmptyFields) {
+      Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -313,12 +332,7 @@ export default function EvidenciaForm() {
         return urlData.publicUrl;
       };
 
-      if (imageBase64Antes) {
-        fotoAntesUrl = await uploadPhoto(imageBase64Antes, 'antes');
-      }
-      if (imageBase64Despues) {
-        fotoDespuesUrl = await uploadPhoto(imageBase64Despues, 'despues');
-      }
+      // El upload de fotos por trabajo se hace al armar el array (ver más abajo)
 
       // Subir fotos adicionales
       const fotosAdicionalesUrls: string[] = [];
@@ -342,11 +356,16 @@ export default function EvidenciaForm() {
         .filter(Boolean)
         .join('\n');
 
+      const clienteObj = clientes.find(c => c.id === selectedCliente);
+      const sucObj = sucursalesCliente.find(s => s.id === selectedSucursal);
+      const clienteStr = clienteObj ? (clienteObj.nombre + (sucObj ? ' - ' + sucObj.nombre : '')) : '';
+
       const { error: dbError } = await supabase.from('evidencias').insert([
         {
           empleado_id: currentUser.id,
           empleado_nombre: currentUser.nombre,
-          cliente: cliente.trim(),
+          // cliente: clienteStr (already added above for export, wait handleSaveToDatabase needs it)
+          cliente: clienteStr,
           descripcion_trabajo: JSON.stringify(trabajos.map(t => ({
             descripcion: t.descripcion.trim(),
             materiales: t.materiales.trim() || null,
@@ -357,7 +376,6 @@ export default function EvidenciaForm() {
           foto_antes_url: fotoAntesUrl,
           foto_despues_url: fotoDespuesUrl,
           fotos_adicionales_urls: fotosAdicionalesUrls.length > 0 ? fotosAdicionalesUrls : null,
-          resumen_ia: resumenIA,
         },
       ]);
 
@@ -384,8 +402,13 @@ export default function EvidenciaForm() {
 
   const nextStep = () => {
     if (currentStep === 1) {
-      if (!imageUriAntes && !imageUriDespues) {
-        Alert.alert('Evidencia requerida', 'Por favor proporciona al menos una foto (antes o después).');
+      if (!selectedCliente) {
+        Alert.alert('Validación', 'Por favor selecciona el cliente.');
+        return;
+      }
+      const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim() || !t.materiales.trim());
+      if (hasEmptyFields) {
+        Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
         return;
       }
       setCurrentStep(2);
@@ -414,114 +437,20 @@ export default function EvidenciaForm() {
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <StepIndicator
             currentStep={currentStep}
-            steps={['Fotos', 'Información', 'Reporte IA']}
+            steps={['Información y Evidencias', 'Fotos Adicionales y Finalizar']}
           />
 
-          {/* PASO 1: Captura de Fotos */}
-          {currentStep === 1 && (
+          {/* PASO 2: Fotos Adicionales y Finalizar */}
+          {currentStep === 2 && (
             <View style={styles.stepContainer}>
               <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
-                1. Captura de Fotografías
+                2. Fotografías Adicionales y Exportar
               </Text>
               <Text style={[styles.subtitleText, { color: themeColors.textSecondary }]}>
-                Sube una foto del estado inicial (antes) y otra del estado final (después).
+                Sube fotos adicionales (opcionales) y finaliza el reporte.
               </Text>
 
-              {/* Foto Antes */}
-              <Text style={[styles.photoLabel, { color: themeColors.text }]}>Estado Inicial (Antes)</Text>
-              <View style={[styles.imageCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                {imageUriAntes ? (
-                  <View style={styles.previewContainer}>
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      onPress={() => handleOpenPhoto(imageUriAntes)}
-                      style={{ flex: 1 }}
-                    >
-                      <Image source={{ uri: imageUriAntes }} style={styles.previewImage} resizeMode="contain" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.removeImageBtn}
-                      onPress={() => {
-                        setImageUriAntes(null);
-                        setImageBase64Antes(null);
-                      }}
-                    >
-                      <Ionicons name="trash" size={20} color="#ffffff" />
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <View style={styles.uploadPlaceholder}>
-                    <Ionicons name="camera-outline" size={48} color={themeColors.textSecondary} />
-                    <Text style={[styles.placeholderText, { color: themeColors.textSecondary }]}>
-                      Sin foto del antes
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.actionGrid}>
-                <TouchableOpacity
-                  onPress={() => handleCapturePhoto('antes')}
-                  style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                >
-                  <Ionicons name="camera" size={20} color={themeColors.accent} />
-                  <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Cámara</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => handleSelectGallery('antes')}
-                  style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                >
-                  <Ionicons name="images" size={20} color={themeColors.accent} />
-                  <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Galería</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Foto Después */}
-              <Text style={[styles.photoLabel, { color: themeColors.text, marginTop: Spacing.four }]}>Estado Final (Después)</Text>
-              <View style={[styles.imageCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                {imageUriDespues ? (
-                  <View style={styles.previewContainer}>
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      onPress={() => handleOpenPhoto(imageUriDespues)}
-                      style={{ flex: 1 }}
-                    >
-                      <Image source={{ uri: imageUriDespues }} style={styles.previewImage} resizeMode="contain" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.removeImageBtn}
-                      onPress={() => {
-                        setImageUriDespues(null);
-                        setImageBase64Despues(null);
-                      }}
-                    >
-                      <Ionicons name="trash" size={20} color="#ffffff" />
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <View style={styles.uploadPlaceholder}>
-                    <Ionicons name="checkmark-circle-outline" size={48} color={themeColors.textSecondary} />
-                    <Text style={[styles.placeholderText, { color: themeColors.textSecondary }]}>
-                      Sin foto del después
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.actionGrid}>
-                <TouchableOpacity
-                  onPress={() => handleCapturePhoto('despues')}
-                  style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                >
-                  <Ionicons name="camera" size={20} color={themeColors.success} />
-                  <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Cámara</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => handleSelectGallery('despues')}
-                  style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                >
-                  <Ionicons name="images" size={20} color={themeColors.success} />
-                  <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Galería</Text>
-                </TouchableOpacity>
-              </View>
+              {/* Antes y despues UI has been moved inside trabajos */}
 
               {/* Fotos Adicionales */}
               <Text style={[styles.photoLabel, { color: themeColors.text, marginTop: Spacing.four }]}>
@@ -569,30 +498,155 @@ export default function EvidenciaForm() {
                 </TouchableOpacity>
               </View>
 
+              <View style={styles.actionColumn}>
+                <CustomButton
+                  title="EXPORTAR REPORTE A PDF"
+                  onPress={handleExportPDF}
+                  variant="primary"
+                  icon={<Ionicons name="document-text-outline" size={20} color="#ffffff" style={{ marginRight: 8 }} />}
+                />
+
+                <CustomButton
+                  title="GUARDAR EN EL SERVIDOR"
+                  onPress={handleSaveToDatabase}
+                  loading={isSubmitting}
+                  variant="success"
+                  style={{ marginTop: Spacing.two }}
+                  icon={<Ionicons name="cloud-upload-outline" size={20} color="#ffffff" style={{ marginRight: 8 }} />}
+                />
+              </View>
+
               <View style={styles.footerNav}>
+                <CustomButton title="Atrás" onPress={prevStep} variant="secondary" style={styles.navBtn} />
                 <View style={{ flex: 1 }} />
-                <CustomButton title="Siguiente" onPress={nextStep} style={styles.navBtn} />
               </View>
             </View>
           )}
 
-          {/* PASO 2: Información del Servicio */}
-          {currentStep === 2 && (
+          {/* PASO 1: Información del Servicio */}
+          {currentStep === 1 && (
             <View style={styles.stepContainer}>
               <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
-                2. Detalles de la Intervención
+                1. Detalles de la Intervención
               </Text>
               <Text style={[styles.subtitleText, { color: themeColors.textSecondary }]}>
-                Proporciona los datos del cliente y describe los trabajos o arreglos que realizaste.
+                Proporciona los datos del cliente, describe los trabajos o arreglos que realizaste y añade las evidencias de cada uno.
               </Text>
 
-              <CustomInput
-                label="Cliente / Ubicación *"
-                placeholder="Nombre del cliente o sucursal"
-                value={cliente}
-                onChangeText={setCliente}
-                iconName="business-outline"
-              />
+              
+              {/* Selector de Cliente */}
+              <View style={[styles.customDropdownContainer, { marginBottom: Spacing.four, zIndex: 100 }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, padding: 12, borderRadius: 8, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                  onPress={() => {
+                    setShowCliDropdown(!showCliDropdown);
+                    setShowSucursalDropdown(false);
+                  }}
+                >
+                  <Text style={{ color: selectedCliente ? themeColors.text : themeColors.textSecondary }}>
+                    {clientes.find(c => c.id === selectedCliente)?.nombre || selectedCliente || 'Selecciona un cliente'}
+                  </Text>
+                  <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                </TouchableOpacity>
+                {showCliDropdown && (
+                  <View style={{ width: '100%', zIndex: 100 }}>
+                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, borderWidth: 1, borderRadius: 8, marginTop: 4 }]}>
+                      <CustomInput
+                        placeholder="Buscar cliente..."
+                        value={clienteSearch}
+                        onChangeText={setClienteSearch}
+                        iconName="search-outline"
+                        style={{ margin: Spacing.one, height: 40 }}
+                      />
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        {clientes
+                          .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                          .map((cli, index, array) => (
+                            <TouchableOpacity
+                              key={cli.id}
+                              style={[
+                                styles.dropdownItem,
+                                index === array.length - 1 && { borderBottomWidth: 0 },
+                                { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: themeColors.border }
+                              ]}
+                              onPress={() => {
+                                setSelectedCliente(cli.id);
+                                setSelectedSucursal(''); // reset
+                                setShowCliDropdown(false);
+                                setClienteSearch('');
+                              }}
+                            >
+                              <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                              <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
+                            </TouchableOpacity>
+                          ))}
+                      </ScrollView>
+                    </View>
+                  </View>
+                )}
+              </View>
+
+              {/* Selector de Sucursal */}
+              {selectedCliente && (
+                <View style={[styles.customDropdownContainer, { marginBottom: Spacing.four, zIndex: 90 }]}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal</Text>
+                  <TouchableOpacity
+                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, padding: 12, borderRadius: 8, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                    onPress={() => {
+                      setShowSucursalDropdown(!showSucursalDropdown);
+                      setShowCliDropdown(false);
+                    }}
+                  >
+                    <Text style={{ color: selectedSucursal ? themeColors.text : themeColors.textSecondary }}>
+                      {sucursalesCliente.find(s => s.id === selectedSucursal)?.nombre || selectedSucursal || 'Selecciona una sucursal'}
+                    </Text>
+                    <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                  </TouchableOpacity>
+                  {showSucursalDropdown && (
+                    <View style={{ width: '100%', zIndex: 90 }}>
+                      <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, borderWidth: 1, borderRadius: 8, marginTop: 4 }]}>
+                        <CustomInput
+                          placeholder="Buscar sucursal..."
+                          value={sucursalSearch}
+                          onChangeText={setSucursalSearch}
+                          iconName="search-outline"
+                          style={{ margin: Spacing.one, height: 40 }}
+                        />
+                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                          {sucursalesCliente
+                            .filter(suc => suc.cliente_id === selectedCliente)
+                            .filter(suc => suc.nombre && suc.nombre.toLowerCase().includes(sucursalSearch.toLowerCase()))
+                            .map((suc, index, array) => (
+                              <TouchableOpacity
+                                key={suc.id}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: themeColors.border }
+                                ]}
+                                onPress={() => {
+                                  setSelectedSucursal(suc.id);
+                                  setShowSucursalDropdown(false);
+                                  setSucursalSearch('');
+                                }}
+                              >
+                                <Ionicons name="storefront-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          {sucursalesCliente.filter(suc => suc.cliente_id === selectedCliente).length === 0 && (
+                            <Text style={{ padding: Spacing.two, color: themeColors.textSecondary, textAlign: 'center' }}>
+                              No hay sucursales registradas para este cliente.
+                            </Text>
+                          )}
+                        </ScrollView>
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
+
 
               {trabajos.map((trabajo, index) => (
                 <View key={index} style={{ marginBottom: Spacing.four, borderLeftWidth: 3, borderLeftColor: themeColors.accent, paddingLeft: Spacing.two }}>
@@ -611,7 +665,7 @@ export default function EvidenciaForm() {
                   </View>
 
                   <CustomInput
-                    label="Descripción del Trabajo *"
+                    label="Situación encontrada (Descripción del problema) *"
                     placeholder="Ej. Cambio de cableado eléctrico, mantenimiento de bomba, etc."
                     value={trabajo.descripcion}
                     onChangeText={(val) => {
@@ -619,20 +673,25 @@ export default function EvidenciaForm() {
                     }}
                     multiline
                     numberOfLines={3}
-                    style={{ height: 70 }}
+                    style={{ minHeight: 70 }}
                     iconName="construct-outline"
                   />
 
                   <CustomInput
-                    label="Materiales Utilizados"
-                    placeholder="Ej. 2 metros cable UTP, 4 conectores RJ45..."
+                    label="Materiales Utilizados *"
+                    placeholder="Ej. ৹ 2 metros cable UTP&#10;৹ 4 conectores RJ45..."
                     value={trabajo.materiales}
                     onChangeText={(val) => {
-                      setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, materiales: val } : t));
+                      let formatted = val;
+                      if (formatted.length > 0 && !formatted.startsWith('৹ ') && !formatted.startsWith('৹')) {
+                        formatted = '৹ ' + formatted;
+                      }
+                      formatted = formatted.replace(/\n([^৹\n])/g, '\n৹ $1');
+                      setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, materiales: formatted } : t));
                     }}
                     multiline
                     numberOfLines={2}
-                    style={{ height: 50 }}
+                    style={{ minHeight: 60 }}
                     iconName="build-outline"
                   />
 
@@ -645,9 +704,138 @@ export default function EvidenciaForm() {
                     }}
                     multiline
                     numberOfLines={2}
-                    style={{ height: 50 }}
+                    style={{ minHeight: 60 }}
                     iconName="checkmark-circle-outline"
                   />
+
+                  {/* Evidencias Fotográficas de este Trabajo */}
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.text, marginTop: Spacing.three, marginBottom: Spacing.two }}>
+                    Evidencia Fotográfica
+                  </Text>
+                  
+                  <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.two }}>
+                    {/* Foto Antes */}
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.photoLabel, { fontSize: 12, color: themeColors.textSecondary }]}>Antes</Text>
+                      <View style={[styles.imageCard, { height: 120, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                        {trabajo.antesImg?.uri ? (
+                          <View style={styles.previewContainer}>
+                            <TouchableOpacity
+                              activeOpacity={0.9}
+                              onPress={() => handleOpenPhoto(trabajo.antesImg?.uri || null)}
+                              style={{ flex: 1 }}
+                            >
+                              <Image source={{ uri: trabajo.antesImg.uri }} style={styles.previewImage} resizeMode="contain" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.removeImageBtn, { width: 28, height: 28, top: 4, right: 4 }]}
+                              onPress={() => {
+                                setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, antesImg: undefined } : t));
+                              }}
+                            >
+                              <Ionicons name="trash" size={16} color="#ffffff" />
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <View style={styles.uploadPlaceholder}>
+                            <Ionicons name="camera-outline" size={24} color={themeColors.textSecondary} />
+                            <Text style={[styles.placeholderText, { color: themeColors.textSecondary, fontSize: 11 }]}>Sin foto</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 4, marginTop: 4 }}>
+                        <TouchableOpacity onPress={() => handleCapturePhoto('antes', index)} style={[styles.actionBtn, { flex: 1, paddingVertical: 4, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                          <Ionicons name="camera" size={14} color={themeColors.accent} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleSelectGallery('antes', index)} style={[styles.actionBtn, { flex: 1, paddingVertical: 4, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                          <Ionicons name="images" size={14} color={themeColors.accent} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    {/* Foto Después */}
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.photoLabel, { fontSize: 12, color: themeColors.textSecondary }]}>Después</Text>
+                      <View style={[styles.imageCard, { height: 120, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                        {trabajo.despuesImg?.uri ? (
+                          <View style={styles.previewContainer}>
+                            <TouchableOpacity
+                              activeOpacity={0.9}
+                              onPress={() => handleOpenPhoto(trabajo.despuesImg?.uri || null)}
+                              style={{ flex: 1 }}
+                            >
+                              <Image source={{ uri: trabajo.despuesImg.uri }} style={styles.previewImage} resizeMode="contain" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.removeImageBtn, { width: 28, height: 28, top: 4, right: 4 }]}
+                              onPress={() => {
+                                setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, despuesImg: undefined } : t));
+                              }}
+                            >
+                              <Ionicons name="trash" size={16} color="#ffffff" />
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <View style={styles.uploadPlaceholder}>
+                            <Ionicons name="checkmark-circle-outline" size={24} color={themeColors.textSecondary} />
+                            <Text style={[styles.placeholderText, { color: themeColors.textSecondary, fontSize: 11 }]}>Sin foto</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 4, marginTop: 4 }}>
+                        <TouchableOpacity onPress={() => handleCapturePhoto('despues', index)} style={[styles.actionBtn, { flex: 1, paddingVertical: 4, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                          <Ionicons name="camera" size={14} color={themeColors.success} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleSelectGallery('despues', index)} style={[styles.actionBtn, { flex: 1, paddingVertical: 4, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                          <Ionicons name="images" size={14} color={themeColors.success} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Fotos Adicionales del Trabajo */}
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text, marginTop: Spacing.two, marginBottom: Spacing.two }}>
+                    Fotografías Adicionales (Específicas de este trabajo)
+                  </Text>
+                  
+                  {trabajo.fotosAdicionales && trabajo.fotosAdicionales.length > 0 && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: Spacing.two }}>
+                      {trabajo.fotosAdicionales.map((item, photoIndex) => (
+                        <View key={photoIndex} style={[styles.adicionalCard, { borderColor: themeColors.border, width: 80, height: 80 }]}>
+                          <TouchableOpacity
+                            activeOpacity={0.9}
+                            onPress={() => handleOpenPhoto(item.uri)}
+                            style={{ width: '100%', height: '100%' }}
+                          >
+                            <Image source={{ uri: item.uri }} style={styles.adicionalImage} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.removeAdicionalBtn, { width: 22, height: 22, top: 2, right: 2 }]}
+                            onPress={() => {
+                              setTrabajos(prev => prev.map((t, i) => i === index ? {
+                                ...t,
+                                fotosAdicionales: t.fotosAdicionales?.filter((_, pI) => pI !== photoIndex)
+                              } : t));
+                            }}
+                          >
+                            <Ionicons name="trash" size={12} color="#ffffff" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  )}
+                  
+                  <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.four }}>
+                    <TouchableOpacity onPress={() => handleCapturePhoto('adicional', index)} style={[styles.actionBtn, { flex: 1, paddingVertical: 6, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <Ionicons name="camera" size={14} color={themeColors.accent} />
+                      <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 11 }]}>Tomar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleSelectGallery('adicional', index)} style={[styles.actionBtn, { flex: 1, paddingVertical: 6, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <Ionicons name="images" size={14} color={themeColors.accent} />
+                      <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 11 }]}>Galería</Text>
+                    </TouchableOpacity>
+                  </View>
+
                 </View>
               ))}
 
@@ -672,68 +860,9 @@ export default function EvidenciaForm() {
                 <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 14 }}>Agregar Otro Trabajo</Text>
               </TouchableOpacity>
 
-              {isAnalyzing ? (
-                <View style={styles.analyzingContainer}>
-                  <ActivityIndicator size="small" color={themeColors.accent} />
-                  <Text style={[styles.analyzingText, { color: themeColors.text }]}>
-                    Gemini AI analizando fotos y redactando reporte...
-                  </Text>
-                </View>
-              ) : (
-                <CustomButton
-                  title="GENERAR REPORTE CON IA"
-                  onPress={generateAIAnalysis}
-                  variant="success"
-                  style={{ marginTop: Spacing.four }}
-                />
-              )}
-
               <View style={styles.footerNav}>
-                <CustomButton title="Atrás" onPress={prevStep} variant="secondary" style={styles.navBtn} />
                 <View style={{ flex: 1 }} />
-              </View>
-            </View>
-          )}
-
-          {/* PASO 3: Visualización del Reporte y Exportar */}
-          {currentStep === 3 && (
-            <View style={styles.stepContainer}>
-              <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
-                3. Reporte Técnico de la IA
-              </Text>
-              <Text style={[styles.subtitleText, { color: themeColors.textSecondary }]}>
-                Este reporte formal fue redactado por Gemini AI analizando las fotos del antes/después y los detalles.
-              </Text>
-
-              <View style={[styles.reportPreviewCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                <ScrollView nestedScrollEnabled style={{ maxHeight: 300 }}>
-                  <Text style={[styles.reportPreviewText, { color: themeColors.text }]}>
-                    {resumenIA}
-                  </Text>
-                </ScrollView>
-              </View>
-
-              <View style={styles.actionColumn}>
-                <CustomButton
-                  title="EXPORTAR REPORTE A PDF"
-                  onPress={handleExportPDF}
-                  variant="primary"
-                  icon={<Ionicons name="document-text-outline" size={20} color="#ffffff" style={{ marginRight: 8 }} />}
-                />
-
-                <CustomButton
-                  title="GUARDAR EN EL SERVIDOR"
-                  onPress={handleSaveToDatabase}
-                  loading={isSubmitting}
-                  variant="success"
-                  style={{ marginTop: Spacing.two }}
-                  icon={<Ionicons name="cloud-upload-outline" size={20} color="#ffffff" style={{ marginRight: 8 }} />}
-                />
-              </View>
-
-              <View style={styles.footerNav}>
-                <CustomButton title="Atrás" onPress={prevStep} variant="secondary" style={styles.navBtn} />
-                <View style={{ flex: 1 }} />
+                <CustomButton title="Siguiente" onPress={nextStep} style={styles.navBtn} />
               </View>
             </View>
           )}
@@ -909,5 +1038,22 @@ const styles = StyleSheet.create({
   actionColumn: {
     marginTop: Spacing.two,
     marginBottom: Spacing.two,
+  },
+  customDropdownContainer: {
+    width: '100%',
+  },
+  dropdownLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: Spacing.one,
+  },
+  dropdownTrigger: {
+    // inline styled mostly
+  },
+  dropdownList: {
+    // inline styled mostly
+  },
+  dropdownItem: {
+    // inline styled mostly
   },
 });

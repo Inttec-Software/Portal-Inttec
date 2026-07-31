@@ -133,8 +133,6 @@ export default function AdminEvidenciasScreen() {
     try {
       await EvidenceReportGenerator.exportToPDF(
         ev,
-        ev.foto_antes_url || null,
-        ev.foto_despues_url || null,
         ev.empleado_nombre || 'Técnico Autorizado',
         ev.fotos_adicionales_urls || []
       );
@@ -481,7 +479,7 @@ export default function AdminEvidenciasScreen() {
                                 Trabajo #{index + 1}
                               </Text>
                               <Text style={{ fontSize: 13, color: themeColors.text, marginBottom: 2 }}>
-                                <Text style={{ fontWeight: '600' }}>Descripción: </Text>{t.descripcion}
+                                <Text style={{ fontWeight: '600' }}>Situación encontrada: </Text>{t.descripcion}
                               </Text>
                               {t.materiales && (
                                 <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginBottom: 2 }}>
@@ -502,7 +500,7 @@ export default function AdminEvidenciasScreen() {
                     return (
                       <>
                         <View style={styles.detailItem}>
-                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Descripción del Trabajo</Text>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Situación encontrada</Text>
                           <Text style={[styles.detailValue, { color: themeColors.text }]}>
                             {selectedEvidencia.descripcion_trabajo}
                           </Text>

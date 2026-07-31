@@ -53,6 +53,7 @@ const CustomInput = React.forwardRef<TextInput, CustomInputProps>(({
               : themeColors.border,
             borderWidth: isFocused || error ? 1.5 : 1,
             height: containerHeight,
+            minHeight: flattenedStyle?.minHeight,
             alignItems: isMultiline ? 'flex-start' : 'center',
             paddingVertical: isMultiline ? Spacing.two : 0,
           },
@@ -72,7 +73,7 @@ const CustomInput = React.forwardRef<TextInput, CustomInputProps>(({
           style={[
             styles.input,
             { color: themeColors.text },
-            isMultiline && { textAlignVertical: 'top', paddingTop: 0, paddingBottom: 0 },
+            isMultiline && { textAlignVertical: 'top', paddingTop: 0, paddingBottom: 0, height: undefined },
             inputStyle,
           ]}
           placeholderTextColor={themeColors.textSecondary}

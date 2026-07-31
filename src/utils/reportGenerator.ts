@@ -41,21 +41,21 @@ export interface ReportCategoria {
 }
 
 /**
- * Detecta si un gasto tiene alguna alerta de polÃ­tica (como alcohol, tabaco o montos sospechosos)
+ * Detecta si un gasto tiene alguna alerta de política (como alcohol, tabaco o montos sospechosos)
  */
 const hasPolicyAlert = (g: Gasto): { alert: boolean; reason: string } => {
   const just = g.justificacion || '';
   
-  // 1. Detectar si el formulario guardÃ³ una alerta estructurada de la IA
+  // 1. Detectar si el formulario guardó una alerta estructurada de la IA
   const match = just.match(/^\[ALERTA IA:\s*([\s\S]*?)\]/);
   if (match) {
     return { alert: true, reason: match[1].trim() };
   }
   
-  // 2. BÃºsqueda complementaria de palabras clave en la justificaciÃ³n, categorÃ­a, subcategorÃ­a o proveedor
+  // 2. Búsqueda complementaria de palabras clave en la justificación, categoría, subcategoría o proveedor
   const textToSearch = `${just} ${g.categoria || ''} ${g.subcategoria || ''} ${g.proveedor || ''}`.toLowerCase();
   
-  if (textToSearch.includes('alcohol') || textToSearch.includes('cerveza') || textToSearch.includes('vino') || textToSearch.includes('licor') || textToSearch.includes('bebida alcohÃ³lica')) {
+  if (textToSearch.includes('alcohol') || textToSearch.includes('cerveza') || textToSearch.includes('vino') || textToSearch.includes('licor') || textToSearch.includes('bebida alcohólica')) {
     return { alert: true, reason: 'Posible compra de alcohol' };
   }
   if (textToSearch.includes('cigarro') || textToSearch.includes('cigarrillo') || textToSearch.includes('tabaco') || textToSearch.includes('cajetilla')) {
@@ -102,8 +102,8 @@ export const ReportGenerator = {
       if (alert) {
         // Fondo rojo suave y texto rojo oscuro para resaltar alertas
         rowStyle = `style="background-color: #ffebee; color: #b71c1c;"`;
-        alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">âš ï¸ ALERTA: ${reason}</div>`;
-        alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">âš ï¸  ALERTA: ${reason}</div>`;
+        alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">⚠️ ALERTA: ${reason}</div>`;
+        alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">⚠️  ALERTA: ${reason}</div>`;
       }
 
       tableRows += `
@@ -169,7 +169,7 @@ export const ReportGenerator = {
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             font-weight: 900;
             font-style: italic;
-            font-size: 22px;
+            font-size: 38px;
             color: #0d1b2a;
             line-height: 1;
             letter-spacing: 0.5px;
@@ -184,8 +184,8 @@ export const ReportGenerator = {
             text-transform: uppercase;
           }
           .logo-img {
-            width: 32px;
-            height: 32px;
+            width: 300px;
+            height: 100px;
             object-fit: contain;
           }
           .title {
@@ -272,12 +272,8 @@ export const ReportGenerator = {
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
-                  <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">${branding.name}</span><br/>
-                    <span class="logo-tagline">${branding.tagline}</span>
-                  </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${branding.logo}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" style="max-height: 60px; max-width: 250px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -323,7 +319,7 @@ export const ReportGenerator = {
               <th style="width: 12%">Fecha</th>
               <th style="width: 20%">Empleado</th>
               <th style="width: 18%">Proveedor / Sucursal</th>
-              <th style="width: 20%">CategorÃ­a</th>
+              <th style="width: 20%">Categoría</th>
               <th style="width: 12%">Pago</th>
               <th style="width: 8%">Estado</th>
               <th style="width: 10%; text-align: right;">Monto</th>
@@ -335,7 +331,7 @@ export const ReportGenerator = {
         </table>
 
         <div class="footer">
-          Documento Confidencial - Control de Gastos INTTEC - Sistema Automatizado
+          Documento Confidencial - Control de Gastos - Sistema Automatizado
         </div>
       </body>
       </html>
@@ -389,7 +385,7 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible en este dispositivo.');
+        throw new Error('La función de compartir no está disponible en este dispositivo.');
       }
     } catch (error: any) {
       logger.error('Error generating PDF report:', error);
@@ -477,7 +473,7 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible en este dispositivo.');
+        throw new Error('La función de compartir no está disponible en este dispositivo.');
       }
     } catch (error: any) {
       logger.error('Error generating CSV report:', error);
@@ -529,8 +525,12 @@ export const ReportGenerator = {
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #222; background: #fff; padding: 24px; }
           .header { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid #0ea5e9; padding-bottom: 16px; margin-bottom: 20px; }
-          .logo-img { width: 52px; height: 52px; object-fit: contain; }
-          .logo-brand { font-size: 22px; font-weight: 900; color: #0ea5e9; letter-spacing: 2px; }
+          .logo-img {
+            width: 300px;
+            height: 100px;
+            object-fit: contain;
+          }
+          .logo-brand { font-size: 38px; font-weight: 900; color: #0ea5e9; letter-spacing: 2px; }
           .logo-tagline { font-size: 10px; color: #64748b; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
           h1 { font-size: 17px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
           .subtitle { font-size: 11px; color: #64748b; margin-bottom: 20px; }
@@ -549,11 +549,7 @@ export const ReportGenerator = {
       </head>
       <body>
         <div class="header">
-          <img class="logo-img" src="${branding.logo}" />
-          <div>
-            <div class="logo-brand">${branding.name}</div>
-            <div class="logo-tagline">${branding.tagline}</div>
-          </div>
+          <img class="logo-img" src="${branding.logo}" style="max-height: 60px; max-width: 250px; object-fit: contain;" />
           <div style="margin-left:auto; text-align:right">
             <h1>${title}</h1>
             <div class="subtitle">Generado: ${new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
@@ -584,9 +580,9 @@ export const ReportGenerator = {
             <tr>
               <th>Fecha</th>
               <th>Conductor</th>
-              <th>VehÃ­culo</th>
+              <th>Vehículo</th>
               <th>Litros</th>
-              <th>OdÃ³metro</th>
+              <th>Odómetro</th>
               <th style="text-align:right">Costo</th>
               <th>Observaciones</th>
             </tr>
@@ -638,7 +634,7 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible en este dispositivo.');
+        throw new Error('La función de compartir no está disponible en este dispositivo.');
       }
     } catch (error: any) {
       logger.error('Error generating gasolina PDF:', error);
@@ -709,7 +705,7 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible en este dispositivo.');
+        throw new Error('La función de compartir no está disponible en este dispositivo.');
       }
     } catch (error: any) {
       logger.error('Error generating gasolina CSV:', error);
@@ -721,7 +717,7 @@ export const ReportGenerator = {
   async exportAsistenciasToPDF(
     asistencias: Asistencia[],
     personal: Usuario[],
-    title: string = 'Reporte de Asistencia INTTEC'
+    title: string = 'Reporte de Asistencia'
   ): Promise<void> {
     if (asistencias.length === 0) {
       throw new Error('No hay registros de asistencia para exportar.');
@@ -847,7 +843,7 @@ export const ReportGenerator = {
           .logo-brand {
             font-weight: 900;
             font-style: italic;
-            font-size: 22px;
+            font-size: 38px;
             color: #0d1b2a;
             line-height: 1;
             letter-spacing: 0.5px;
@@ -861,8 +857,8 @@ export const ReportGenerator = {
             text-transform: uppercase;
           }
           .logo-img {
-            width: 32px;
-            height: 32px;
+            width: 300px;
+            height: 100px;
             object-fit: contain;
           }
         </style>
@@ -877,12 +873,8 @@ export const ReportGenerator = {
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
-                  <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">${branding.name}</span><br/>
-                    <span class="logo-tagline">${branding.tagline}</span>
-                  </td>
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${branding.logo}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" style="max-height: 60px; max-width: 250px; object-fit: contain;" />
                   </td>
                 </tr>
               </table>
@@ -919,9 +911,9 @@ export const ReportGenerator = {
               <th style="width: 12%">Fecha</th>
               <th style="width: 18%">Empleado</th>
               <th style="width: 10%">Entrada</th>
-              <th style="width: 30%">UbicaciÃ³n Entrada</th>
+              <th style="width: 30%">Ubicación Entrada</th>
               <th style="width: 10%">Salida</th>
-              <th style="width: 30%">UbicaciÃ³n Salida</th>
+              <th style="width: 30%">Ubicación Salida</th>
             </tr>
           </thead>
           <tbody>
@@ -930,7 +922,7 @@ export const ReportGenerator = {
         </table>
 
         <div class="footer">
-          Documento Confidencial - Control de Asistencias INTTEC - Sistema Automatizado
+          Documento Confidencial - Control de Asistencias - Sistema Automatizado
         </div>
       </body>
       </html>
@@ -979,7 +971,7 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
+        throw new Error('La función de compartir no está disponible.');
       }
     } catch (error: any) {
       logger.error('Error generating attendance PDF:', error);
@@ -1002,7 +994,7 @@ export const ReportGenerator = {
     const empleadosMap = new Map(personal.map((p) => [p.id, p.nombre]));
 
     let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Registro,Fecha,Empleado,Hora Entrada,UbicaciÃ³n Entrada,Hora Salida,UbicaciÃ³n Salida\n';
+    csvContent += 'ID Registro,Fecha,Empleado,Hora Entrada,Ubicación Entrada,Hora Salida,Ubicación Salida\n';
 
     asistencias.forEach((a) => {
       const empleadoNombre = empleadosMap.get(a.empleado_id) || 'Desconocido';
@@ -1050,7 +1042,7 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
+        throw new Error('La función de compartir no está disponible.');
       }
     } catch (error: any) {
       logger.error('Error generating attendance CSV:', error);
@@ -1064,7 +1056,7 @@ export const ReportGenerator = {
   async exportInventarioToPDF(
     productos: ReportProducto[],
     categorias: ReportCategoria[],
-    title: string = 'Reporte de Inventario INTTEC'
+    title: string = 'Reporte de Inventario'
   ): Promise<void> {
     if (productos.length === 0) {
       throw new Error('No hay productos en el inventario para exportar.');
@@ -1187,7 +1179,7 @@ export const ReportGenerator = {
           .logo-brand {
             font-weight: 900;
             font-style: italic;
-            font-size: 22px;
+            font-size: 38px;
             color: #0d1b2a;
             line-height: 1;
             letter-spacing: 0.5px;
@@ -1201,8 +1193,8 @@ export const ReportGenerator = {
             text-transform: uppercase;
           }
           .logo-img {
-            width: 32px;
-            height: 32px;
+            width: 300px;
+            height: 100px;
             object-fit: contain;
           }
         </style>
@@ -1217,12 +1209,9 @@ export const ReportGenerator = {
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
-                  <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">${branding.name}</span><br/>
-                    <span class="logo-tagline">${branding.tagline}</span>
-                  </td>
+                  
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${branding.logo}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" />
                   </td>
                 </tr>
               </table>
@@ -1234,7 +1223,7 @@ export const ReportGenerator = {
           <tr>
             <td style="width: 33%; padding-right: 10px; border: none;">
               <div class="summary-card">
-                <div class="label">Total ArtÃ­culos CatÃ¡logo</div>
+                <div class="label">Total Artículos Catálogo</div>
                 <div class="value">${productos.length}</div>
               </div>
             </td>
@@ -1258,7 +1247,7 @@ export const ReportGenerator = {
             <tr>
               <th style="width: 15%">SKU Interno</th>
               <th style="width: 40%">Nombre Oficial</th>
-              <th style="width: 20%">CategorÃ­a</th>
+              <th style="width: 20%">Categoría</th>
               <th style="width: 15%; text-align: right;">Existencias</th>
               <th style="width: 10%">Estado</th>
             </tr>
@@ -1269,7 +1258,7 @@ export const ReportGenerator = {
         </table>
 
         <div class="footer">
-          Documento Confidencial - Control de Inventario INTTEC - Sistema Automatizado
+          Documento Confidencial - Control de Inventario - Sistema Automatizado
         </div>
       </body>
       </html>
@@ -1318,7 +1307,7 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
+        throw new Error('La función de compartir no está disponible.');
       }
     } catch (error: any) {
       logger.error('Error generating inventory PDF:', error);
@@ -1341,7 +1330,7 @@ export const ReportGenerator = {
     const categoriasMap = new Map(categorias.map((c) => [c.id, c.nombre]));
 
     let csvContent = '\uFEFF'; // BOM
-    csvContent += 'SKU Interno,Nombre Oficial,CategorÃ­a,Stock Actual,Estado (Activo)\n';
+    csvContent += 'SKU Interno,Nombre Oficial,Categoría,Stock Actual,Estado (Activo)\n';
 
     productos.forEach((p) => {
       const categoriaNombre = categoriasMap.get(p.categoria_id) || 'N/A';
@@ -1387,7 +1376,7 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
+        throw new Error('La función de compartir no está disponible.');
       }
     } catch (error: any) {
       logger.error('Error generating inventory CSV:', error);
@@ -1520,7 +1509,7 @@ export const ReportGenerator = {
           .logo-brand {
             font-weight: 900;
             font-style: italic;
-            font-size: 22px;
+            font-size: 38px;
             color: #0d1b2a;
             line-height: 1;
             letter-spacing: 0.5px;
@@ -1534,8 +1523,8 @@ export const ReportGenerator = {
             text-transform: uppercase;
           }
           .logo-img {
-            width: 32px;
-            height: 32px;
+            width: 300px;
+            height: 100px;
             object-fit: contain;
           }
         </style>
@@ -1550,12 +1539,9 @@ export const ReportGenerator = {
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               <table style="display: inline-table; border-collapse: collapse; border: none;">
                 <tr>
-                  <td style="text-align: right; vertical-align: middle; padding-right: 10px; border: none;">
-                    <span class="logo-brand">${branding.name}</span><br/>
-                    <span class="logo-tagline">${branding.tagline}</span>
-                  </td>
+                  
                   <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${branding.logo}" style="width: 32px; height: 32px; object-fit: contain;" />
+                    <img class="logo-img" src="${branding.logo}" />
                   </td>
                 </tr>
               </table>
@@ -1595,7 +1581,7 @@ export const ReportGenerator = {
         </table>
 
         <div class="footer">
-          Documento Confidencial - Historial de Consumos INTTEC - Sistema Automatizado
+          Documento Confidencial - Historial de Consumos - Sistema Automatizado
         </div>
       </body>
       </html>
@@ -1644,7 +1630,7 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
+        throw new Error('La función de compartir no está disponible.');
       }
     } catch (error: any) {
       logger.error('Error generating consumptions PDF:', error);
@@ -1711,7 +1697,7 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
+        throw new Error('La función de compartir no está disponible.');
       }
     } catch (error: any) {
       logger.error('Error generating consumptions CSV:', error);
@@ -1724,7 +1710,7 @@ export const ReportGenerator = {
    */
   async exportVentasToPDF(
     ventas: any[],
-    title: string = 'Reporte de Ventas INTTEC'
+    title: string = 'Reporte de Ventas'
   ): Promise<void> {
     if (ventas.length === 0) {
       throw new Error('No hay registros de ventas para exportar.');
@@ -1923,7 +1909,7 @@ export const ReportGenerator = {
         </table>
 
         <div class="footer">
-          Documento Confidencial - Control de Ventas e Ingresos INTTEC - Sistema Automatizado
+          Documento Confidencial - Control de Ventas e Ingresos - Sistema Automatizado
         </div>
       </body>
       </html>
@@ -1972,7 +1958,7 @@ export const ReportGenerator = {
           UTI: 'com.adobe.pdf',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
+        throw new Error('La función de compartir no está disponible.');
       }
     } catch (error: any) {
       logger.error('Error generating sales PDF:', error);
@@ -2045,7 +2031,7 @@ export const ReportGenerator = {
           UTI: 'public.comma-separated-values-text',
         });
       } else {
-        throw new Error('La funciÃ³n de compartir no estÃ¡ disponible.');
+        throw new Error('La función de compartir no está disponible.');
       }
     } catch (error: any) {
       logger.error('Error generating sales CSV:', error);
@@ -2199,7 +2185,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
             <div>${branding.name}</div>
             <div>Ozorno 811</div>
             <div>31107 Chihuahua, CHH</div>
-            <div>MÃ©xico</div>
+            <div>México</div>
           </div>
         </div>
 
@@ -2208,7 +2194,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
               <div class="col-6">
               </div>
               <div class="col-6 text-end">
-                  <h1 class="inttec-red fw-bold" style="font-size: 26px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">COTIZACIÃ“N</h1>
+                  <h1 class="inttec-red fw-bold" style="font-size: 26px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">COTIZACIÓN</h1>
                   <h2 class="text-muted" style="font-size: 20px; font-weight: normal; margin-top: 0;">${cotizacion.numeroCotizacion}</h2>
               </div>
           </div>
@@ -2245,7 +2231,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
           <table class="table table-red mt-4">
               <thead>
                   <tr>
-                      <th width="40%" style="text-align: left;">DESCRIPCIÃ“N</th>
+                      <th width="40%" style="text-align: left;">DESCRIPCIÓN</th>
                       <th width="15%" class="text-center">ENTREGA</th>
                       <th class="text-center">CANT</th>
                       <th class="text-end">PRECIO UNIT</th>
@@ -2280,7 +2266,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
                   <div class="info-text mt-2">
                       <div class="section-header">Informacion Adicional</div>
                       <div style="padding-top: 4px;">
-                        TÃ©rminos y condiciones: <a href="${cotizacion.terminosCondiciones}" style="color: #0000ee; text-decoration: none;">${cotizacion.terminosCondiciones}</a>
+                        Términos y condiciones: <a href="${cotizacion.terminosCondiciones}" style="color: #0000ee; text-decoration: none;">${cotizacion.terminosCondiciones}</a>
                       </div>
                   </div>
               </div>
@@ -2312,7 +2298,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
             CUENTAHABIENTE: Rafael Alonso Fernandez Tinajero
           </div>
           <div style="width: 15%; text-align: right; color: #666; display: flex; align-items: flex-end; justify-content: flex-end;">
-            PÃ¡gina 1 / 1
+            Página 1 / 1
           </div>
         </div>
       </div>
@@ -2338,13 +2324,20 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
           iframeDoc.write(htmlContent);
           iframeDoc.close();
 
-          iframe.onload = () => {
+          setTimeout(() => {
+            const originalTitle = document.title;
+            document.title = title;
             iframe.contentWindow?.focus();
             iframe.contentWindow?.print();
+            
+            setTimeout(() => {
+              document.title = originalTitle;
+            }, 1000);
+
             setTimeout(() => {
               document.body.removeChild(iframe);
             }, 1000);
-          };
+          }, 500);
         }
       } else {
         const newWindow = window.open('', '_blank');
@@ -2357,10 +2350,10 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
       }
     } else {
       if (action === 'view') {
-        // En mÃ³viles, para "solo ver", usamos printAsync que abre el visor de impresiÃ³n nativo (muy bueno para visualizar)
+        // En móviles, para "solo ver", usamos printAsync que abre el visor de impresión nativo (muy bueno para visualizar)
         await Print.printAsync({ html: htmlContent });
       } else {
-        // Para "descargar", generamos el archivo fÃ­sico y abrimos el menÃº de compartir/guardar
+        // Para "descargar", generamos el archivo físico y abrimos el menú de compartir/guardar
         const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
         
         const customNameUri = `${cacheDirectory}Cotizacion - ${cotizacion.numeroCotizacion}.pdf`;
@@ -2368,7 +2361,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
           encoding: EncodingType.Base64,
         });
 
-        await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: 'Compartir CotizaciÃ³n' });
+        await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: 'Compartir Cotización' });
       }
     }
   } catch (error: any) {

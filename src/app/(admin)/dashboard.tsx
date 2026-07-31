@@ -1244,7 +1244,7 @@ export default function AdminDashboard() {
   // Exportar reportes
   const handleExportPDF = async () => {
     try {
-      await ReportGenerator.exportToPDF(gastos, `Historial General de Gastos ${company === 'daravisa' ? 'DARAVISA' : 'INTTEC'}`);
+      await ReportGenerator.exportToPDF(gastos, `Historial General de Gastos`);
     } catch (err: any) {
       Alert.alert('Error PDF', err.message);
     }
