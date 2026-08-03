@@ -45,10 +45,20 @@ export default function AdminChatIA() {
 
         const safeFetch = async (client: any, table: string) => {
           try {
-            const { data, error } = await client.from(table).select('*').limit(200);
+            let query = client.from(table).select('*');
+            if (['gastos', 'ventas', 'asistencias', 'registro_gasolina'].includes(table)) {
+              query = query.order('created_at', { ascending: false }).limit(1000);
+            } else {
+              query = query.limit(500);
+            }
+            const { data, error } = await query;
             if (error) {
-              logger.warn(`[ChatIA] Error en tabla ${table}:`, error.message);
-              return [];
+              const fallback = await client.from(table).select('*').limit(500);
+              if (fallback.error) {
+                logger.warn(`[ChatIA] Error en tabla ${table}:`, fallback.error.message);
+                return [];
+              }
+              return fallback.data || [];
             }
             return data || [];
           } catch (e: any) {
@@ -68,7 +78,8 @@ export default function AdminChatIA() {
               vehiculosData,
               gasolinaData,
               auditoriasData,
-              clientesData
+              clientesData,
+              sucursalesData
             ] = await Promise.all([
               safeFetch(client, 'gastos'),
               safeFetch(client, 'ventas'),
@@ -78,7 +89,8 @@ export default function AdminChatIA() {
               safeFetch(client, 'vehiculos'),
               safeFetch(client, 'registro_gasolina'),
               safeFetch(client, 'auditorias_tarjeta'),
-              safeFetch(client, 'clientes')
+              safeFetch(client, 'clientes'),
+              safeFetch(client, 'sucursales_cliente')
             ]);
 
             const userMap: Record<string, string> = {};
@@ -118,7 +130,8 @@ export default function AdminChatIA() {
               vehiculos: vehiculosData.map((v: any) => ({ ...v, empresa: companyName })),
               registro_gasolina: gasolina,
               auditorias_tarjeta: auditoriasData.map((aud: any) => ({ ...aud, empresa: companyName })),
-              clientes: clientesData
+              clientes: clientesData,
+              sucursales_cliente: sucursalesData
             };
           } catch (e) {
             logger.error(`Error fetching data for ${companyName}:`, e);

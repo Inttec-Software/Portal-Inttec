@@ -150,6 +150,12 @@ export default function ExpenseCard({
             {gasto.cliente}
           </Text>
         )}
+        {gasto.sucursal ? (
+          <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
+            <Text style={{fontWeight: '600', color: themeColors.text}}>Sucursal: </Text>
+            {gasto.sucursal}
+          </Text>
+        ) : null}
       </View>
 
       {/* Footer: Fecha & Monto */}

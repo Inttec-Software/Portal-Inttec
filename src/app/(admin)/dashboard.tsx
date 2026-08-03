@@ -1398,6 +1398,7 @@ export default function AdminDashboard() {
         const query = searchQuery.toLowerCase().trim();
         const empName = (g.empleado_nombre || '').toLowerCase();
         const clientName = (g.cliente || '').toLowerCase();
+        const branchName = (g.sucursal || '').toLowerCase();
         const catName = (g.categoria || '').toLowerCase();
         const subCatName = (g.subcategoria || '').toLowerCase();
         const provName = (g.proveedor || '').toLowerCase();
@@ -1405,6 +1406,7 @@ export default function AdminDashboard() {
 
         const matches = empName.includes(query) ||
                         clientName.includes(query) ||
+                        branchName.includes(query) ||
                         catName.includes(query) ||
                         subCatName.includes(query) ||
                         provName.includes(query) ||
@@ -1792,7 +1794,7 @@ export default function AdminDashboard() {
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, paddingHorizontal: Spacing.two, height: 42 }}>
             <Ionicons name="search-outline" size={18} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
             <TextInput
-              placeholder="Buscar empleado, cliente, categoría, proveedor..."
+              placeholder="Buscar empleado, cliente, sucursal, categoría, proveedor..."
               placeholderTextColor={themeColors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -1882,12 +1884,13 @@ export default function AdminDashboard() {
               <ScrollView style={{ flex: 1 }}>
                 <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
                   <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Categoría</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Empleado</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '20%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Fecha</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Estado</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Categoría</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Empleado</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '18%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Sucursal</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Fecha</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Estado</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
                     <View style={{ width: '10%', alignItems: 'center' }}>
                       <Ionicons name="settings-outline" size={14} color={themeColors.text} />
                     </View>
@@ -1928,18 +1931,19 @@ export default function AdminDashboard() {
                               hovered && { backgroundColor: themeColors.backgroundSelected }
                             ] as any}
                           >
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%', fontWeight: '600' }]} numberOfLines={1}>{item.categoria}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
-                            <Text style={[styles.tableCell, { width: '20%', color: themeColors.textSecondary }]} numberOfLines={1}>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{item.categoria}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
+                            <Text style={[styles.tableCell, { width: '18%', color: themeColors.textSecondary }]} numberOfLines={1}>
                               {item.proveedor} {item.proveedor && item.cliente ? ' | ' : ''} {item.cliente}
                             </Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]}>{fecha}</Text>
-                            <View style={{ width: '10%' }}>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '12%' }]} numberOfLines={1}>{item.sucursal || '-'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '11%' }]}>{fecha}</Text>
+                            <View style={{ width: '9%' }}>
                                <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                                  <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColor }}>{statusText}</Text>
                                </View>
                             </View>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%', fontWeight: '700', textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '14%', fontWeight: '700', textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
                             <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
                               <TouchableOpacity
                                 onPress={(e) => {
@@ -2034,12 +2038,13 @@ export default function AdminDashboard() {
                 <ScrollView style={{ flex: 1 }}>
                   <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
                     <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Categoría</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Empleado</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '20%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Fecha</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Estado</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Categoría</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Empleado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '18%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Sucursal</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Fecha</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Estado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
                       <View style={{ width: '10%', alignItems: 'center' }}>
                         <Ionicons name="settings-outline" size={14} color={themeColors.text} />
                       </View>
@@ -2077,18 +2082,19 @@ export default function AdminDashboard() {
                               hovered && { backgroundColor: themeColors.backgroundSelected }
                             ] as any}
                           >
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%', fontWeight: '600' }]} numberOfLines={1}>{item.categoria}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
-                            <Text style={[styles.tableCell, { width: '20%', color: themeColors.textSecondary }]} numberOfLines={1}>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{item.categoria}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
+                            <Text style={[styles.tableCell, { width: '18%', color: themeColors.textSecondary }]} numberOfLines={1}>
                               {item.proveedor} {item.proveedor && item.cliente ? ' | ' : ''} {item.cliente}
                             </Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]}>{fecha}</Text>
-                            <View style={{ width: '10%' }}>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '12%' }]} numberOfLines={1}>{item.sucursal || '-'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '11%' }]}>{fecha}</Text>
+                            <View style={{ width: '9%' }}>
                                <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                                  <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColor }}>{statusText}</Text>
                                </View>
                             </View>
-                            <Text style={[styles.tableCell, { width: '15%', fontWeight: '700', color: themeColors.text, textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
+                            <Text style={[styles.tableCell, { width: '14%', fontWeight: '700', color: themeColors.text, textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
                             <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
                               <TouchableOpacity
                                 onPress={(e) => {

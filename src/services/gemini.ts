@@ -720,64 +720,162 @@ Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin mark
     chatHistory: { role: 'user' | 'model'; text: string }[]
   ): Promise<string> {
     const systemPrompt = `Eres el Gerente de Operaciones Virtual y Analista Financiero de Portal Inttec y Daravisa.
-TU OBJETIVO ES RESPONDER CON EXACTITUD A LAS CONSULTAS DEL ADMINISTRADOR. NO TIENES LA BASE DE DATOS EN TU PROMPT, DEBES USAR TUS HERRAMIENTAS (Function Calling) PARA BUSCAR DATOS ESPECÍFICOS CUANDO SE TE PREGUNTE.
+TU OBJETIVO ES RESPONDER CON MÁXIMA EXACTITUD Y CERO ERRORES A LAS CONSULTAS DEL ADMINISTRADOR.
+NO TIENES LA BASE DE DATOS COMPLETA EN TU PROMPT; DEBES UTILIZAR OBLIGATORIAMENTE TUS HERRAMIENTAS (Function Calling) PARA EXTRAER Y CALCULAR DATOS.
 
-Herramientas disponibles que puedes usar si es necesario:
-- obtener_resumen_financiero: Muestra el total de registros.
-- buscar_gastos: Filtra gastos (por empleado, categoría, empresa).
-- buscar_ventas: Busca proyectos y ventas.
-- buscar_asistencias: Busca entradas/salidas en el checador.
-
-REGLAS DE RESPUESTA:
-- Sé analítico, preciso y profesional.
-- Usa Markdown (negritas para totales/nombres y viñetas) para facilitar la lectura.
-- Muestra siempre montos en MXN ($).
-- Responde de manera clara y amigable.
+REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
+1. NUNCA inventes cifras ni sumes montos manualmente. Utiliza SIEMPRE los valores numéricos exactos devueltos en "totales_calculados_exactos", "gran_total_gastos_mxn" o "ranking_sucursales" por las herramientas.
+2. Si te preguntan por gastos de una sucursal en específico (ej. "cuánto se gastó en la sucursal Centro?", "gastos de sucursal X"):
+   - Llama a "buscar_gastos" con el parámetro "sucursal" o a "resumen_gastos_por_sucursal".
+   - Reporta el total exacto obtenido y la lista de gastos o categorías principales.
+3. Si te preguntan por múltiples sucursales, resumen general de sucursales o comparar sucursales:
+   - Llama a la herramienta "resumen_gastos_por_sucursal".
+   - Presenta una tabla o lista ordenada con: Nombre de Sucursal, Cliente, Total Gastado ($ MXN) y Cantidad de Gastos.
+4. Si un gasto no tiene sucursal especificada, aparecerá clasificado como "Sin sucursal asignada".
+5. Si buscas por cliente, categoría, proveedor o empleado, usa los filtros correspondientes en "buscar_gastos".
+6. Formato de presentación:
+   - Usa Markdown estructurado (tablas o viñetas en negrita).
+   - Formatea todas las cantidades como moneda MXN con separador de miles y dos decimales (ejemplo: $24,580.50 MXN).
+   - Sé claro, profesional, conciso y directo al grano.
 `;
+
+    // Normalizador de texto para búsquedas insensibles a mayúsculas y acentos
+    const normStr = (str: any) =>
+      String(str || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
 
     // Herramientas de Gemini
     const geminiTools = [{
       functionDeclarations: [
         {
           name: "obtener_resumen_financiero",
-          description: "Obtiene información general sobre cuántos datos hay cargados y datos consolidados",
+          description: "Obtiene información general sobre cuántos datos hay cargados y el conteo consolidado de gastos, ventas y empleados",
+        },
+        {
+          name: "resumen_gastos_por_sucursal",
+          description: "Calcula y desglosa el total exacto de gastos agrupados por sucursal y por cliente. Permite filtrar por empresa, cliente, sucursal, categoría o fechas. Devuelve sumas numéricas exactas ya calculadas y un ranking de sucursales.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              empresa: { type: "STRING", description: "Filtra por empresa ('Inttec', 'Daravisa' o vacío para la activa)" },
+              cliente: { type: "STRING", description: "Filtra por nombre del cliente (ej. 'FEMSA', 'Walmart')" },
+              sucursal: { type: "STRING", description: "Filtra por nombre o término de sucursal (ej. 'Matriz', 'Norte', 'Monterrey')" },
+              categoria: { type: "STRING", description: "Filtra por categoría de gasto" },
+              fecha_inicio: { type: "STRING", description: "Fecha inicial de filtro (YYYY-MM-DD)" },
+              fecha_fin: { type: "STRING", description: "Fecha final de filtro (YYYY-MM-DD)" },
+              status: { type: "STRING", description: "Filtra por status ('APPROVED', 'PENDING', 'REJECTED')" }
+            }
+          }
         },
         {
           name: "buscar_gastos",
-          description: "Busca gastos en la base de datos de Inttec o Daravisa según los filtros proporcionados",
+          description: "Busca gastos con filtros avanzados (sucursal, cliente, empleado, categoría, proveedor, fechas, status). Devuelve totales matemáticos exactos calculados y la lista detallada de gastos.",
           parameters: {
             type: "OBJECT",
             properties: {
               empresa: { type: "STRING", description: "Filtra por empresa (Inttec, Daravisa)" },
-              empleado_nombre: { type: "STRING", description: "Filtra por el nombre del empleado (ej. 'Carlos')" },
-              categoria: { type: "STRING", description: "Filtra por categoría del gasto" },
-              status: { type: "STRING", description: "Filtra por status (PENDING, APPROVED, REJECTED)" }
+              sucursal: { type: "STRING", description: "Filtra por nombre de la sucursal del cliente (ej. 'Sucursal Norte', 'Matriz', 'Chihuahua')" },
+              cliente: { type: "STRING", description: "Filtra por cliente (ej. 'FEMSA', 'Oxxo', etc.)" },
+              empleado_nombre: { type: "STRING", description: "Filtra por el nombre del empleado (ej. 'Carlos', 'Juan')" },
+              categoria: { type: "STRING", description: "Filtra por categoría del gasto (ej. 'Alimentos', 'Materiales y Herramientas', 'Hospedaje', 'Vehículos')" },
+              proveedor: { type: "STRING", description: "Filtra por proveedor o comercio" },
+              status: { type: "STRING", description: "Filtra por status (PENDING, APPROVED, REJECTED)" },
+              fecha_inicio: { type: "STRING", description: "Fecha inicial (YYYY-MM-DD)" },
+              fecha_fin: { type: "STRING", description: "Fecha final (YYYY-MM-DD)" },
+              texto_busqueda: { type: "STRING", description: "Texto libre para buscar coincidencias en sucursal, cliente, justificación, detalle o proveedor" }
             }
           }
         },
         {
           name: "buscar_ventas",
-          description: "Busca ventas o proyectos",
+          description: "Busca ventas o proyectos facturados",
           parameters: {
             type: "OBJECT",
             properties: {
               empresa: { type: "STRING", description: "Filtra por empresa" },
-              cliente: { type: "STRING", description: "Filtra por nombre del cliente" }
+              cliente: { type: "STRING", description: "Filtra por nombre del cliente" },
+              proyecto: { type: "STRING", description: "Filtra por nombre o tipo de proyecto" }
             }
           }
         },
         {
           name: "buscar_asistencias",
-          description: "Busca los registros del checador (asistencias)",
+          description: "Busca los registros del checador (asistencias de empleados)",
           parameters: {
             type: "OBJECT",
             properties: {
               empleado_nombre: { type: "STRING", description: "Filtra por nombre de empleado" },
+              fecha: { type: "STRING", description: "Fecha específica (YYYY-MM-DD)" }
             }
           }
         }
       ]
     }];
+
+    const getGastosArray = (empresa?: string): any[] => {
+      if (empresa && normStr(empresa).includes('daravisa') && contextData.datos_empresa_daravisa?.gastos) {
+        return contextData.datos_empresa_daravisa.gastos;
+      }
+      if (empresa && normStr(empresa).includes('inttec') && contextData.datos_empresa_inttec?.gastos) {
+        return contextData.datos_empresa_inttec.gastos;
+      }
+      return contextData.datos_empresa_actual_autenticada?.gastos || [];
+    };
+
+    const filterGastos = (gastos: any[], args: any) => {
+      let result = [...gastos];
+      if (args.sucursal) {
+        const sTarget = normStr(args.sucursal);
+        result = result.filter(g => normStr(g.sucursal).includes(sTarget));
+      }
+      if (args.cliente) {
+        const cTarget = normStr(args.cliente);
+        result = result.filter(g => normStr(g.cliente).includes(cTarget));
+      }
+      if (args.empleado_nombre) {
+        const eTarget = normStr(args.empleado_nombre);
+        result = result.filter(g => normStr(g.empleado_nombre).includes(eTarget));
+      }
+      if (args.categoria) {
+        const catTarget = normStr(args.categoria);
+        result = result.filter(g => normStr(g.categoria).includes(catTarget));
+      }
+      if (args.proveedor) {
+        const provTarget = normStr(args.proveedor);
+        result = result.filter(g => normStr(g.proveedor).includes(provTarget));
+      }
+      if (args.status) {
+        result = result.filter(g => String(g.status).toUpperCase() === String(args.status).toUpperCase());
+      }
+      if (args.fecha_inicio) {
+        result = result.filter(g => {
+          const f = g.fecha_comprobante || g.created_at;
+          return f ? f >= args.fecha_inicio : true;
+        });
+      }
+      if (args.fecha_fin) {
+        result = result.filter(g => {
+          const f = g.fecha_comprobante || g.created_at;
+          return f ? f <= args.fecha_fin : true;
+        });
+      }
+      if (args.texto_busqueda) {
+        const q = normStr(args.texto_busqueda);
+        result = result.filter(g =>
+          normStr(g.sucursal).includes(q) ||
+          normStr(g.cliente).includes(q) ||
+          normStr(g.proveedor).includes(q) ||
+          normStr(g.justificacion).includes(q) ||
+          normStr(g.detalle_servicio_proyecto).includes(q) ||
+          normStr(g.categoria).includes(q) ||
+          normStr(g.empleado_nombre).includes(q)
+        );
+      }
+      return result;
+    };
 
     // Implementación local de las herramientas
     const localTools: Record<string, Function> = {
@@ -797,31 +895,163 @@ REGLAS DE RESPUESTA:
           }
         };
       },
-      buscar_gastos: (args: any) => {
-        let gastos: any[] = [];
-        if (args.empresa?.toLowerCase() === 'daravisa' && contextData.datos_empresa_daravisa) gastos = contextData.datos_empresa_daravisa.gastos;
-        else if (args.empresa?.toLowerCase() === 'inttec' && contextData.datos_empresa_inttec) gastos = contextData.datos_empresa_inttec.gastos;
-        else gastos = contextData.datos_empresa_actual_autenticada?.gastos || [];
 
-        if (args.empleado_nombre) gastos = gastos.filter(g => g.empleado_nombre?.toLowerCase().includes(args.empleado_nombre.toLowerCase()));
-        if (args.categoria) gastos = gastos.filter(g => g.categoria?.toLowerCase().includes(args.categoria.toLowerCase()));
-        if (args.status) gastos = gastos.filter(g => g.status === args.status);
-        
-        return minifyData(gastos).slice(0, 50); // Límite para proteger los tokens
+      resumen_gastos_por_sucursal: (args: any) => {
+        const rawGastos = getGastosArray(args.empresa);
+        const filtered = filterGastos(rawGastos, args);
+
+        const sucursalesMap: Record<string, {
+          sucursal: string;
+          cliente: string;
+          total_monto: number;
+          cantidad_gastos: number;
+          categorias: Record<string, number>;
+          empleados: Record<string, number>;
+        }> = {};
+
+        let granTotal = 0;
+
+        filtered.forEach(g => {
+          const monto = Number(g.monto) || 0;
+          granTotal += monto;
+          const sucName = (g.sucursal && String(g.sucursal).trim()) ? String(g.sucursal).trim() : 'Sin sucursal asignada';
+          const cliName = (g.cliente && String(g.cliente).trim()) ? String(g.cliente).trim() : 'Sin cliente especificado';
+          const key = `${sucName}___${cliName}`;
+
+          if (!sucursalesMap[key]) {
+            sucursalesMap[key] = {
+              sucursal: sucName,
+              cliente: cliName,
+              total_monto: 0,
+              cantidad_gastos: 0,
+              categorias: {},
+              empleados: {}
+            };
+          }
+
+          sucursalesMap[key].total_monto += monto;
+          sucursalesMap[key].cantidad_gastos += 1;
+
+          const cat = g.categoria || 'Otros';
+          sucursalesMap[key].categorias[cat] = (sucursalesMap[key].categorias[cat] || 0) + monto;
+
+          const emp = g.empleado_nombre || 'Desconocido';
+          sucursalesMap[key].empleados[emp] = (sucursalesMap[key].empleados[emp] || 0) + monto;
+        });
+
+        const ranking = Object.values(sucursalesMap)
+          .map(item => ({
+            sucursal: item.sucursal,
+            cliente: item.cliente,
+            total_gastado_mxn: Math.round(item.total_monto * 100) / 100,
+            cantidad_gastos: item.cantidad_gastos,
+            promedio_por_gasto: Math.round((item.total_monto / (item.cantidad_gastos || 1)) * 100) / 100,
+            desglose_categorias: Object.fromEntries(
+              Object.entries(item.categorias).map(([k, v]) => [k, Math.round(v * 100) / 100])
+            ),
+            desglose_empleados: Object.fromEntries(
+              Object.entries(item.empleados).map(([k, v]) => [k, Math.round(v * 100) / 100])
+            )
+          }))
+          .sort((a, b) => b.total_gastado_mxn - a.total_gastado_mxn);
+
+        return {
+          gran_total_gastos_mxn: Math.round(granTotal * 100) / 100,
+          total_registros_analizados: filtered.length,
+          total_sucursales_distintas: ranking.length,
+          ranking_sucursales: ranking
+        };
       },
+
+      buscar_gastos: (args: any) => {
+        const rawGastos = getGastosArray(args.empresa);
+        const filtered = filterGastos(rawGastos, args);
+
+        const totalMonto = filtered.reduce((acc, g) => acc + (Number(g.monto) || 0), 0);
+
+        const porSucursal: Record<string, { total_mxn: number; conteo: number; cliente?: string }> = {};
+        const porCategoria: Record<string, { total_mxn: number; conteo: number }> = {};
+        const porCliente: Record<string, { total_mxn: number; conteo: number }> = {};
+        const porEmpleado: Record<string, { total_mxn: number; conteo: number }> = {};
+
+        filtered.forEach(g => {
+          const m = Number(g.monto) || 0;
+          const suc = (g.sucursal && String(g.sucursal).trim()) ? String(g.sucursal).trim() : 'Sin sucursal asignada';
+          const cat = g.categoria || 'Sin categoría';
+          const cli = g.cliente || 'Sin cliente';
+          const emp = g.empleado_nombre || 'Desconocido';
+
+          if (!porSucursal[suc]) porSucursal[suc] = { total_mxn: 0, conteo: 0, cliente: g.cliente };
+          porSucursal[suc].total_mxn = Math.round((porSucursal[suc].total_mxn + m) * 100) / 100;
+          porSucursal[suc].conteo += 1;
+
+          if (!porCategoria[cat]) porCategoria[cat] = { total_mxn: 0, conteo: 0 };
+          porCategoria[cat].total_mxn = Math.round((porCategoria[cat].total_mxn + m) * 100) / 100;
+          porCategoria[cat].conteo += 1;
+
+          if (!porCliente[cli]) porCliente[cli] = { total_mxn: 0, conteo: 0 };
+          porCliente[cli].total_mxn = Math.round((porCliente[cli].total_mxn + m) * 100) / 100;
+          porCliente[cli].conteo += 1;
+
+          if (!porEmpleado[emp]) porEmpleado[emp] = { total_mxn: 0, conteo: 0 };
+          porEmpleado[emp].total_mxn = Math.round((porEmpleado[emp].total_mxn + m) * 100) / 100;
+          porEmpleado[emp].conteo += 1;
+        });
+
+        return {
+          totales_calculados_exactos: {
+            total_monto_mxn: Math.round(totalMonto * 100) / 100,
+            conteo_gastos: filtered.length,
+            desglose_por_sucursal: porSucursal,
+            desglose_por_cliente: porCliente,
+            desglose_por_categoria: porCategoria,
+            desglose_por_empleado: porEmpleado
+          },
+          gastos_detalle: minifyData(filtered).slice(0, 50)
+        };
+      },
+
       buscar_ventas: (args: any) => {
         let ventas: any[] = [];
-        if (args.empresa?.toLowerCase() === 'daravisa' && contextData.datos_empresa_daravisa) ventas = contextData.datos_empresa_daravisa.ventas;
-        else if (args.empresa?.toLowerCase() === 'inttec' && contextData.datos_empresa_inttec) ventas = contextData.datos_empresa_inttec.ventas;
-        else ventas = contextData.datos_empresa_actual_autenticada?.ventas || [];
+        if (args.empresa && normStr(args.empresa).includes('daravisa') && contextData.datos_empresa_daravisa?.ventas) {
+          ventas = contextData.datos_empresa_daravisa.ventas;
+        } else if (args.empresa && normStr(args.empresa).includes('inttec') && contextData.datos_empresa_inttec?.ventas) {
+          ventas = contextData.datos_empresa_inttec.ventas;
+        } else {
+          ventas = contextData.datos_empresa_actual_autenticada?.ventas || [];
+        }
 
-        if (args.cliente) ventas = ventas.filter(v => v.cliente?.toLowerCase().includes(args.cliente.toLowerCase()));
-        return minifyData(ventas).slice(0, 30);
+        if (args.cliente) {
+          const c = normStr(args.cliente);
+          ventas = ventas.filter(v => normStr(v.cliente).includes(c));
+        }
+        if (args.proyecto) {
+          const p = normStr(args.proyecto);
+          ventas = ventas.filter(v => normStr(v.tipo_proyecto || v.descripcion).includes(p));
+        }
+
+        const totalVenta = ventas.reduce((acc, v) => acc + (Number(v.precio_total_venta || v.monto) || 0), 0);
+
+        return {
+          total_ventas_mxn: Math.round(totalVenta * 100) / 100,
+          conteo: ventas.length,
+          ventas_detalle: minifyData(ventas).slice(0, 30)
+        };
       },
+
       buscar_asistencias: (args: any) => {
         let asist: any[] = contextData.datos_empresa_actual_autenticada?.asistencias || [];
-        if (args.empleado_nombre) asist = asist.filter(a => a.empleado_nombre?.toLowerCase().includes(args.empleado_nombre.toLowerCase()));
-        return minifyData(asist).slice(0, 30);
+        if (args.empleado_nombre) {
+          const emp = normStr(args.empleado_nombre);
+          asist = asist.filter(a => normStr(a.empleado_nombre).includes(emp));
+        }
+        if (args.fecha) {
+          asist = asist.filter(a => String(a.fecha).startsWith(args.fecha));
+        }
+        return {
+          total_registros: asist.length,
+          asistencias_detalle: minifyData(asist).slice(0, 30)
+        };
       }
     };
 
@@ -846,7 +1076,7 @@ REGLAS DE RESPUESTA:
           systemInstruction: { parts: [{ text: systemPrompt }] },
           contents: formattedContents,
           tools: geminiTools,
-          generationConfig: { temperature: 0.2 }
+          generationConfig: { temperature: 0.1 }
         };
 
         const res = await callGeminiRaw(requestBody);
@@ -895,13 +1125,15 @@ REGLAS DE RESPUESTA:
     chatHistory: { role: 'user' | 'model'; text: string }[]
   ): Promise<string> {
     const systemPrompt = `Eres el Asistente Técnico y Guía Operativo de Portal Inttec.
-Tu función es ayudar al empleado a responder dudas sobre SUS PROPIOS GASTOS registrados y guiarlo paso a paso con los CHECKLISTS Y LISTAS DE MATERIALES / HERRAMIENTAS OFICIALES de la empresa para trabajos técnicos.
+Tu función es ayudar al empleado a responder dudas sobre SUS PROPIOS GASTOS registrados (incluyendo cliente, sucursal, categoría, fechas y montos) y guiarlo paso a paso con los CHECKLISTS Y LISTAS DE MATERIALES / HERRAMIENTAS OFICIALES de la empresa para trabajos técnicos.
 
 REGLAS DE SEGURIDAD Y PRIVACIDAD:
 1. El empleado ÚNICAMENTE puede consultar información sobre sus propios gastos y registros personales provistos en tu contexto inicial o mediante herramientas.
 2. Si el empleado pregunta por finanzas generales de la empresa, ventas de la empresa o datos de otros empleados, responde educadamente que no tienes acceso a esa información por políticas de privacidad.
-3. Responde siempre con amabilidad, claridad y precisión usando Markdown (listas con viñetas y negritas).
-4. NO tienes los manuales de instalación técnicos en tu memoria inmediata. Para responder sobre instalación de minisplits o paneles solares, DEBES usar obligatoriamente la herramienta "consultar_manual_tecnico".
+3. Al consultar gastos por sucursal o cliente, analiza detalladamente los registros en 'mis_gastos_registrados' identificando el campo 'sucursal', 'cliente', 'categoria' y 'monto'.
+4. Calcula los totales con exactitud matemática y muestra los montos en formato moneda $ MXN.
+5. Responde siempre con amabilidad, claridad y precisión usando Markdown (listas con viñetas y negritas).
+6. NO tienes los manuales de instalación técnicos en tu memoria inmediata. Para responder sobre instalación de minisplits o paneles solares, DEBES usar obligatoriamente la herramienta "consultar_manual_tecnico".
 
 --- REGISTROS PERSONALES DEL EMPLEADO ---
 ${JSON.stringify(minifyData(employeeData))}

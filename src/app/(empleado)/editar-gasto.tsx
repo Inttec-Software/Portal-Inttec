@@ -1475,10 +1475,10 @@ export default function EditarGastoForm() {
                       />
                       <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                         {(() => {
-                           const currentCliente = clientes.find(c => c.nombre === selectedCliente);
+                           const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === selectedCliente?.trim().toLowerCase() || c.id === selectedCliente);
                            const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())) : [];
                            if (filteredSucursales.length === 0) {
-                             return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>;
+                             return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas para este cliente.</Text>;
                            }
                            return filteredSucursales.map((suc, index, array) => (
                               <TouchableOpacity
