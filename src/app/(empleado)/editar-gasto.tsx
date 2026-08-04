@@ -703,6 +703,11 @@ export default function EditarGastoForm() {
       return;
     }
 
+    if (!selectedSubcategoria) {
+      showAlert('Validación', 'Por favor selecciona una subcategoría.');
+      return;
+    }
+
     if (!selectedCliente.trim()) {
       showAlert('Validación', 'Por favor selecciona o ingresa el cliente o proyecto asignado.');
       return;
@@ -1840,7 +1845,7 @@ export default function EditarGastoForm() {
               {/* Selector de Subcategorías (Filtrado dependiente) */}
               {selectedCategoria && (
                 <View style={styles.customDropdownContainer}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Subcategoría</Text>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Subcategoría *</Text>
                   <TouchableOpacity
                     style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                     onPress={() => {

@@ -2058,7 +2058,7 @@ export default function GastoForm() {
               {/* Selector de Subcategorías (Filtrado dependiente) */}
               {selectedCategoria && (
                 <View style={styles.customDropdownContainer}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Subcategoría</Text>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Subcategoría *</Text>
                   <TouchableOpacity
                     style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                     onPress={() => {
