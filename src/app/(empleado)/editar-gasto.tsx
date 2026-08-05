@@ -19,7 +19,17 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, recalculateVentaTotals, ClienteItem, SucursalCliente } from '@/services/supabase';
+import {
+  supabase,
+  CatalogoItem,
+  SubcategoriaItem,
+  ClienteItem,
+  ProveedorItem,
+  Usuario,
+  AuthService,
+  SucursalCliente,
+  recalculateVentaTotals,
+} from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { PushNotificationService } from '@/services/pushNotifications';
 import { getComentariosPlaceholder } from '@/utils/helpers';
@@ -98,6 +108,9 @@ export default function EditarGastoForm() {
   const [categorias, setCategorias] = useState<CatalogoItem[]>([]);
   const [subcategorias, setSubcategorias] = useState<SubcategoriaItem[]>([]);
   const [clientes, setClientes] = useState<ClienteItem[]>([]);
+  const [proveedores, setProveedores] = useState<ProveedorItem[]>([]);
+  const [proveedorSearch, setProveedorSearch] = useState('');
+  const [showProvDropdown, setShowProvDropdown] = useState(false);
 
   // Paso 1: Evidencia
   const [imageUri, setImageUri] = useState<string | null>(null);
@@ -224,12 +237,13 @@ export default function EditarGastoForm() {
 
   const loadCatalogos = async () => {
     try {
-      const [catRes, subRes, cliRes, usrRes, sucRes] = await Promise.all([
+      const [catRes, subRes, cliRes, usrRes, sucRes, provRes] = await Promise.all([
         supabase.from('categorias').select('*').order('nombre'),
         supabase.from('subcategorias').select('*').order('nombre'),
         supabase.from('clientes').select('*').order('nombre'),
         supabase.from('usuarios').select('*').order('nombre'),
         supabase.from('sucursales_cliente').select('*').order('nombre'),
+        supabase.from('proveedores').select('*').order('nombre'),
       ]);
 
       if (catRes.data) setCategorias(catRes.data);
@@ -237,6 +251,7 @@ export default function EditarGastoForm() {
       if (cliRes.data) setClientes(cliRes.data);
       if (usrRes.data) setAllUsers(usrRes.data);
       if (sucRes.data) setSucursalesCliente(sucRes.data);
+      if (provRes.data) setProveedores(provRes.data);
     } catch (err) {
       console.error('Error loading catalogs:', err);
     }
@@ -816,6 +831,7 @@ export default function EditarGastoForm() {
               setShowCatDropdown(false);
               setShowSubDropdown(false);
               setShowCliDropdown(false);
+              setShowProvDropdown(false);
             }}
             style={{ flex: 1 }}
           >
@@ -1178,13 +1194,165 @@ export default function EditarGastoForm() {
                 </>
               )}
 
-              <CustomInput
-                label="Proveedor / Comercio"
-                placeholder="Nombre del comercio"
-                value={proveedor}
-                onChangeText={setProveedor}
-                iconName="business-outline"
-              />
+              {/* Mensaje Informativo de Proveedor */}
+              <View style={{ marginBottom: Spacing.half, marginTop: Spacing.one }}>
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  backgroundColor: themeColors.primary + '15',
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: BorderRadius.medium,
+                  borderWidth: 1,
+                  borderColor: themeColors.primary + '30',
+                }}>
+                  <Ionicons name="information-circle-outline" size={20} color={themeColors.primary} />
+                  <Text style={{ fontSize: 13, color: themeColors.text, fontWeight: '500', flex: 1 }}>
+                    Si no se encuentra tu proveedor déjalo en blanco
+                  </Text>
+                </View>
+              </View>
+
+              {/* Selector de Proveedores con Buscador */}
+              <View style={[styles.customDropdownContainer, { zIndex: 1000 }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor / Comercio (Opcional)</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.dropdownTrigger,
+                    {
+                      backgroundColor: themeColors.backgroundElement,
+                      borderColor: themeColors.border,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }
+                  ]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowProvDropdown(!showProvDropdown);
+                    setShowEstDropdown(false);
+                    setShowEmpList(false);
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Ionicons name="business-outline" size={18} color={themeColors.textSecondary} />
+                    <Text
+                      style={{
+                        color: proveedor ? themeColors.text : themeColors.textSecondary,
+                        fontSize: 14,
+                        flex: 1,
+                      }}
+                      numberOfLines={1}
+                    >
+                      {proveedor || 'Seleccionar proveedor (opcional)'}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {!!proveedor && (
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          setProveedor('');
+                        }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    <Ionicons name={showProvDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                  </View>
+                </TouchableOpacity>
+
+                {showProvDropdown && (
+                  <View style={{ width: '100%', zIndex: 1000, marginTop: 4 }}>
+                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <CustomInput
+                        placeholder="Buscar proveedor por nombre o RFC..."
+                        value={proveedorSearch}
+                        onChangeText={setProveedorSearch}
+                        iconName="search-outline"
+                        style={{ margin: Spacing.one, height: 40 }}
+                      />
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 220, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        {/* Opción Dejar en Blanco */}
+                        <TouchableOpacity
+                          style={[
+                            styles.dropdownItem,
+                            {
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: Spacing.one,
+                              borderBottomWidth: 1,
+                              borderBottomColor: themeColors.border,
+                              backgroundColor: themeColors.backgroundElement,
+                            }
+                          ]}
+                          onPress={() => {
+                            setProveedor('');
+                            setProveedorSearch('');
+                            setShowProvDropdown(false);
+                          }}
+                        >
+                          <Ionicons name="remove-circle-outline" size={20} color={themeColors.textSecondary} />
+                          <Text style={{ color: themeColors.textSecondary, fontStyle: 'italic', fontSize: 13 }}>
+                            Dejar en blanco (Sin proveedor)
+                          </Text>
+                        </TouchableOpacity>
+
+                        {proveedores
+                          .filter(p => 
+                            p.nombre && (
+                              p.nombre.toLowerCase().includes(proveedorSearch.toLowerCase()) ||
+                              (p.rfc && p.rfc.toLowerCase().includes(proveedorSearch.toLowerCase()))
+                            )
+                          )
+                          .map((prov, index, array) => (
+                            <TouchableOpacity
+                              key={prov.id}
+                              style={[
+                                styles.dropdownItem,
+                                index === array.length - 1 && { borderBottomWidth: 0 },
+                                { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, justifyContent: 'space-between' }
+                              ]}
+                              onPress={() => {
+                                setProveedor(prov.nombre);
+                                setProveedorSearch('');
+                                setShowProvDropdown(false);
+                              }}
+                            >
+                              <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}>
+                                <Ionicons name="business-outline" size={20} color={themeColors.primary} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{prov.nombre}</Text>
+                                  {prov.rfc ? (
+                                    <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>RFC: {prov.rfc}</Text>
+                                  ) : null}
+                                </View>
+                              </View>
+                              {proveedor === prov.nombre && (
+                                <Ionicons name="checkmark" size={18} color={themeColors.primary} />
+                              )}
+                            </TouchableOpacity>
+                          ))}
+
+                        {proveedores.filter(p => 
+                          p.nombre && (
+                            p.nombre.toLowerCase().includes(proveedorSearch.toLowerCase()) ||
+                            (p.rfc && p.rfc.toLowerCase().includes(proveedorSearch.toLowerCase()))
+                          )
+                        ).length === 0 && (
+                          <View style={{ padding: Spacing.two, alignItems: 'center' }}>
+                            <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center' }}>
+                              No se encontraron proveedores. Puedes dejarlo en blanco.
+                            </Text>
+                          </View>
+                        )}
+                      </ScrollView>
+                    </View>
+                  </View>
+                )}
+              </View>
 
               {/* Selector de Tipo: Servicio / Proyecto / Venta / Operativo */}
               <View style={{ marginBottom: Spacing.two }}>

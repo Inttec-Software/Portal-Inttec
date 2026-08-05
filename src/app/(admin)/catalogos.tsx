@@ -17,7 +17,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, CatalogoItem, SubcategoriaItem, ClienteItem } from '@/services/supabase';
+import { supabase, CatalogoItem, SubcategoriaItem, ClienteItem, ProveedorItem } from '@/services/supabase';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,8 +34,9 @@ export default function CatalogosManager() {
   const [categorias, setCategorias] = useState<CatalogoItem[]>([]);
   const [subcategorias, setSubcategorias] = useState<SubcategoriaItem[]>([]);
   const [clientes, setClientes] = useState<ClienteItem[]>([]);
+  const [proveedores, setProveedores] = useState<ProveedorItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeCatalog, setActiveCatalog] = useState<'categorias' | 'subcategorias' | 'clientes'>('categorias');
+  const [activeCatalog, setActiveCatalog] = useState<'categorias' | 'subcategorias' | 'clientes' | 'proveedores'>('categorias');
 
   // Modales de Inserción
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -46,6 +47,7 @@ export default function CatalogosManager() {
   const [newClientCorreo, setNewClientCorreo] = useState('');
   const [newClientDireccion, setNewClientDireccion] = useState('');
   const [newClientCp, setNewClientCp] = useState('');
+  const [newProveedorRfc, setNewProveedorRfc] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   // Modales de Edición
@@ -58,10 +60,14 @@ export default function CatalogosManager() {
   const [editClientCorreo, setEditClientCorreo] = useState('');
   const [editClientDireccion, setEditClientDireccion] = useState('');
   const [editClientCp, setEditClientCp] = useState('');
+  const [editProveedorRfc, setEditProveedorRfc] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
 
   // Search and Sucursales
   const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [proveedorSearchQuery, setProveedorSearchQuery] = useState('');
+  const [subcatSearchQuery, setSubcatSearchQuery] = useState('');
+  const [subcatFilterParentCatId, setSubcatFilterParentCatId] = useState('');
   const [sucursalesModalVisible, setSucursalesModalVisible] = useState(false);
   const [selectedClientForSucursales, setSelectedClientForSucursales] = useState<ClienteItem | null>(null);
   const [clientSucursales, setClientSucursales] = useState<any[]>([]);
@@ -82,19 +88,22 @@ export default function CatalogosManager() {
   async function loadData() {
     setIsLoading(true);
     try {
-      const [catRes, subRes, cliRes] = await Promise.all([
+      const [catRes, subRes, cliRes, provRes] = await Promise.all([
         supabase.from('categorias').select('*').order('nombre'),
         supabase.from('subcategorias').select('*').order('nombre'),
         supabase.from('clientes').select('*').order('nombre'),
+        supabase.from('proveedores').select('*').order('nombre'),
       ]);
 
       if (catRes.error) throw catRes.error;
       if (subRes.error) throw subRes.error;
       if (cliRes.error) throw cliRes.error;
+      if (provRes.error) throw provRes.error;
 
       setCategorias(catRes.data || []);
       setSubcategorias(subRes.data || []);
       setClientes(cliRes.data || []);
+      setProveedores(provRes.data || []);
     } catch (err: any) {
       console.error('Error loading catalogs data:', err);
       Alert.alert('Error', err.message || 'No se pudieron recuperar los catálogos.');
@@ -130,6 +139,14 @@ export default function CatalogosManager() {
           },
         ]);
         if (error) throw error;
+      } else if (activeCatalog === 'proveedores') {
+        const { error } = await supabase.from('proveedores').insert([
+          {
+            nombre: newItemName.trim(),
+            rfc: newProveedorRfc.trim().toUpperCase() || null,
+          },
+        ]);
+        if (error) throw error;
       } else if (activeCatalog === 'subcategorias') {
         const { error } = await supabase.from('subcategorias').insert([
           {
@@ -149,6 +166,7 @@ export default function CatalogosManager() {
       setNewClientCorreo('');
       setNewClientDireccion('');
       setNewClientCp('');
+      setNewProveedorRfc('');
       await loadData();
     } catch (err: any) {
       Alert.alert('Error', err.message || 'No se pudo guardar el nuevo elemento.');
@@ -157,7 +175,7 @@ export default function CatalogosManager() {
     }
   };
 
-  const ejecutarEliminacionItem = async (id: string, table: 'categorias' | 'subcategorias' | 'clientes') => {
+  const ejecutarEliminacionItem = async (id: string, table: 'categorias' | 'subcategorias' | 'clientes' | 'proveedores') => {
     setIsLoading(true);
     try {
       const { error } = await supabase.from(table).delete().eq('id', id);
@@ -171,7 +189,7 @@ export default function CatalogosManager() {
     }
   };
 
-  const handleDeleteItem = async (id: string, table: 'categorias' | 'subcategorias' | 'clientes') => {
+  const handleDeleteItem = async (id: string, table: 'categorias' | 'subcategorias' | 'clientes' | 'proveedores') => {
     if (Platform.OS === 'web') {
       const confirmed = window.confirm('¿Estás seguro de que deseas eliminar este elemento? Esto podría afectar a los gastos ya registrados.');
       if (confirmed) {
@@ -203,6 +221,8 @@ export default function CatalogosManager() {
       setEditClientCorreo(item.correo_electronico || '');
       setEditClientDireccion(item.direccion || '');
       setEditClientCp(item.codigo_postal || '');
+    } else if (activeCatalog === 'proveedores') {
+      setEditProveedorRfc(item.rfc || '');
     } else {
       setEditParentCatId('');
     }
@@ -242,6 +262,15 @@ export default function CatalogosManager() {
           })
           .eq('id', editingItem.id);
         if (error) throw error;
+      } else if (activeCatalog === 'proveedores') {
+        const { error } = await supabase
+          .from('proveedores')
+          .update({
+            nombre: editItemName.trim(),
+            rfc: editProveedorRfc.trim().toUpperCase() || null,
+          })
+          .eq('id', editingItem.id);
+        if (error) throw error;
       } else if (activeCatalog === 'subcategorias') {
         const { error } = await supabase
           .from('subcategorias')
@@ -258,6 +287,7 @@ export default function CatalogosManager() {
       setEditingItem(null);
       setEditItemName('');
       setEditParentCatId('');
+      setEditProveedorRfc('');
       setShowEditParentCatDropdown(false);
       await loadData();
     } catch (err: any) {
@@ -372,7 +402,12 @@ export default function CatalogosManager() {
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: themeColors.text }]}>Catálogos de Empresa</Text>
           <TouchableOpacity
-            onPress={() => setAddModalVisible(true)}
+            onPress={() => {
+              if (activeCatalog === 'subcategorias' && subcatFilterParentCatId) {
+                setSelectedParentCatId(subcatFilterParentCatId);
+              }
+              setAddModalVisible(true);
+            }}
             style={{
               paddingHorizontal: 12,
               paddingVertical: 6,
@@ -429,6 +464,19 @@ export default function CatalogosManager() {
             Clientes
           </Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setActiveCatalog('proveedores')}
+          style={[
+            styles.selectorBtn,
+            activeCatalog === 'proveedores'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+          ]}
+        >
+          <Text style={[styles.selectorText, { color: activeCatalog === 'proveedores' ? '#ffffff' : themeColors.textSecondary }]}>
+            Proveedores
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Search Clientes */}
@@ -440,6 +488,95 @@ export default function CatalogosManager() {
             onChangeText={setClientSearchQuery}
             iconName="search-outline"
           />
+        </View>
+      )}
+
+      {/* Search Proveedores */}
+      {activeCatalog === 'proveedores' && (
+        <View style={{ paddingHorizontal: Spacing.four, paddingBottom: Spacing.two }}>
+          <CustomInput
+            placeholder="Buscar proveedor por nombre o RFC..."
+            value={proveedorSearchQuery}
+            onChangeText={setProveedorSearchQuery}
+            iconName="search-outline"
+          />
+        </View>
+      )}
+
+      {/* Filter and Search for Subcategorías */}
+      {activeCatalog === 'subcategorias' && (
+        <View style={{ gap: Spacing.one, paddingBottom: Spacing.two }}>
+          {/* Buscador de subcategorías */}
+          <View style={{ paddingHorizontal: Spacing.four }}>
+            <CustomInput
+              placeholder="Buscar subcategoría por nombre..."
+              value={subcatSearchQuery}
+              onChangeText={setSubcatSearchQuery}
+              iconName="search-outline"
+            />
+          </View>
+
+          {/* Filtro de Categoría Padre (Chips horizontales) */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: Spacing.four, gap: Spacing.one, alignItems: 'center', paddingVertical: 4 }}
+          >
+            <TouchableOpacity
+              onPress={() => setSubcatFilterParentCatId('')}
+              style={[
+                styles.filterChip,
+                !subcatFilterParentCatId
+                  ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+                  : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+              ]}
+            >
+              <Ionicons
+                name="layers-outline"
+                size={14}
+                color={!subcatFilterParentCatId ? '#ffffff' : themeColors.textSecondary}
+              />
+              <Text
+                style={[
+                  styles.filterChipText,
+                  { color: !subcatFilterParentCatId ? '#ffffff' : themeColors.text },
+                ]}
+              >
+                Todas ({subcategorias.length})
+              </Text>
+            </TouchableOpacity>
+
+            {categorias.map((cat) => {
+              const count = subcategorias.filter((s) => s.categoria_id === cat.id).length;
+              const isSelected = subcatFilterParentCatId === cat.id;
+              return (
+                <TouchableOpacity
+                  key={cat.id}
+                  onPress={() => setSubcatFilterParentCatId(isSelected ? '' : cat.id)}
+                  style={[
+                    styles.filterChip,
+                    isSelected
+                      ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+                      : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+                  ]}
+                >
+                  <Ionicons
+                    name="folder-outline"
+                    size={14}
+                    color={isSelected ? '#ffffff' : themeColors.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.filterChipText,
+                      { color: isSelected ? '#ffffff' : themeColors.text },
+                    ]}
+                  >
+                    {cat.nombre} ({count})
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
       )}
 
@@ -456,15 +593,26 @@ export default function CatalogosManager() {
               ? categorias
               : activeCatalog === 'clientes'
               ? clientes.filter(c => c.nombre.toLowerCase().includes(clientSearchQuery.toLowerCase()))
-              : (subcategorias as any[])
+              : activeCatalog === 'proveedores'
+              ? proveedores.filter(p => 
+                  p.nombre.toLowerCase().includes(proveedorSearchQuery.toLowerCase()) || 
+                  (p.rfc && p.rfc.toLowerCase().includes(proveedorSearchQuery.toLowerCase()))
+                )
+              : subcategorias.filter(s => {
+                  const matchesCat = !subcatFilterParentCatId || s.categoria_id === subcatFilterParentCatId;
+                  const matchesSearch = !subcatSearchQuery.trim() || s.nombre.toLowerCase().includes(subcatSearchQuery.toLowerCase());
+                  return matchesCat && matchesSearch;
+                })
           }
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             let subtext = '';
+            let catObj: CatalogoItem | undefined;
             if (activeCatalog === 'subcategorias') {
-              const cat = categorias.find((c) => c.id === item.categoria_id);
-              subtext = cat ? `Categoría: ${cat.nombre}` : 'Categoría huérfana';
+              const subItem = item as SubcategoriaItem;
+              catObj = categorias.find((c) => c.id === subItem.categoria_id);
+              subtext = catObj ? catObj.nombre : 'Categoría huérfana';
             } else if (activeCatalog === 'clientes') {
               const cli = item as ClienteItem;
               const parts: string[] = [];
@@ -473,13 +621,25 @@ export default function CatalogosManager() {
               if (cli.direccion) parts.push(`Dir: ${cli.direccion}`);
               if (cli.codigo_postal) parts.push(`CP: ${cli.codigo_postal}`);
               subtext = parts.join(' • ');
+            } else if (activeCatalog === 'proveedores') {
+              const prov = item as ProveedorItem;
+              subtext = prov.rfc ? `RFC: ${prov.rfc}` : 'Sin RFC';
             }
 
             return (
               <View style={[styles.listItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.itemText, { color: themeColors.text }]}>{item.nombre}</Text>
-                  {subtext ? <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>{subtext}</Text> : null}
+                  {activeCatalog === 'subcategorias' ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <Ionicons name="folder-outline" size={13} color={themeColors.accent} />
+                      <Text style={[styles.itemSubtext, { color: themeColors.textSecondary, marginTop: 0 }]}>
+                        {subtext}
+                      </Text>
+                    </View>
+                  ) : subtext ? (
+                    <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>{subtext}</Text>
+                  ) : null}
                 </View>
                 <View style={{ flexDirection: 'row', gap: Spacing.three, alignItems: 'center' }}>
                   {activeCatalog === 'clientes' && (
@@ -519,7 +679,12 @@ export default function CatalogosManager() {
       {!isDesktop && (
         <TouchableOpacity
           activeOpacity={0.8}
-          onPress={() => setAddModalVisible(true)}
+          onPress={() => {
+            if (activeCatalog === 'subcategorias' && subcatFilterParentCatId) {
+              setSelectedParentCatId(subcatFilterParentCatId);
+            }
+            setAddModalVisible(true);
+          }}
           style={[styles.fab, { backgroundColor: themeColors.accent }]}
         >
           <Ionicons name="add" size={28} color="#ffffff" />
@@ -539,7 +704,7 @@ export default function CatalogosManager() {
           <View style={[styles.modalContent, { backgroundColor: themeColors.background }, isDesktop ? { width: 480, borderRadius: BorderRadius.large, height: 'auto', maxHeight: '90%', padding: Spacing.four } : { height: '50%' }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: themeColors.text }]}>
-                Agregar a {activeCatalog === 'categorias' ? 'Categorías' : activeCatalog === 'clientes' ? 'Clientes' : 'Subcategorías'}
+                Agregar a {activeCatalog === 'categorias' ? 'Categorías' : activeCatalog === 'clientes' ? 'Clientes' : activeCatalog === 'proveedores' ? 'Proveedores' : 'Subcategorías'}
               </Text>
               <TouchableOpacity
                 onPress={() => {
@@ -547,6 +712,11 @@ export default function CatalogosManager() {
                   setNewItemName('');
                   setSelectedParentCatId('');
                   setShowParentCatDropdown(false);
+                  setNewClientRfc('');
+                  setNewClientCorreo('');
+                  setNewClientDireccion('');
+                  setNewClientCp('');
+                  setNewProveedorRfc('');
                 }}
               >
                 <Ionicons name="close" size={24} color={themeColors.text} />
@@ -559,12 +729,23 @@ export default function CatalogosManager() {
                 style={{ flex: 1, gap: Spacing.three }}
               >
                 <CustomInput
-                  label={activeCatalog === 'clientes' ? "Nombre / Razón Social *" : "Nombre del Elemento *"}
-                  placeholder={activeCatalog === 'clientes' ? "Ej. Empresa S.A. de C.V." : "Ej. Papelería, Walmart, etc."}
+                  label={activeCatalog === 'clientes' ? "Nombre / Razón Social *" : activeCatalog === 'proveedores' ? "Nombre del Proveedor *" : "Nombre del Elemento *"}
+                  placeholder={activeCatalog === 'clientes' ? "Ej. Empresa S.A. de C.V." : activeCatalog === 'proveedores' ? "Ej. Papelería Lumen, OXXO, etc." : "Ej. Papelería, Walmart, etc."}
                   value={newItemName}
                   onChangeText={setNewItemName}
-                  iconName="bookmark-outline"
+                  iconName={activeCatalog === 'proveedores' ? "business-outline" : "bookmark-outline"}
                 />
+
+                {activeCatalog === 'proveedores' && (
+                  <CustomInput
+                    label="RFC (Opcional)"
+                    placeholder="Ej. LUM951010AB1"
+                    value={newProveedorRfc}
+                    onChangeText={setNewProveedorRfc}
+                    autoCapitalize="characters"
+                    iconName="card-outline"
+                  />
+                )}
 
                 {activeCatalog === 'clientes' && (
                   <>
@@ -676,7 +857,7 @@ export default function CatalogosManager() {
           <View style={[styles.modalContent, { backgroundColor: themeColors.background }, isDesktop ? { width: 480, borderRadius: BorderRadius.large, height: 'auto', maxHeight: '90%', padding: Spacing.four } : { height: '50%' }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: themeColors.text }]}>
-                Editar en {activeCatalog === 'categorias' ? 'Categorías' : activeCatalog === 'clientes' ? 'Clientes' : 'Subcategorías'}
+                Editar en {activeCatalog === 'categorias' ? 'Categorías' : activeCatalog === 'clientes' ? 'Clientes' : activeCatalog === 'proveedores' ? 'Proveedores' : 'Subcategorías'}
               </Text>
               <TouchableOpacity
                 onPress={() => {
@@ -684,6 +865,7 @@ export default function CatalogosManager() {
                   setEditingItem(null);
                   setEditItemName('');
                   setEditParentCatId('');
+                  setEditProveedorRfc('');
                   setShowEditParentCatDropdown(false);
                 }}
               >
@@ -697,12 +879,23 @@ export default function CatalogosManager() {
                 style={{ flex: 1, gap: Spacing.three }}
               >
                 <CustomInput
-                  label={activeCatalog === 'clientes' ? "Nombre / Razón Social *" : "Nombre del Elemento *"}
-                  placeholder={activeCatalog === 'clientes' ? "Ej. Empresa S.A. de C.V." : "Ej. Papelería, Walmart, etc."}
+                  label={activeCatalog === 'clientes' ? "Nombre / Razón Social *" : activeCatalog === 'proveedores' ? "Nombre del Proveedor *" : "Nombre del Elemento *"}
+                  placeholder={activeCatalog === 'clientes' ? "Ej. Empresa S.A. de C.V." : activeCatalog === 'proveedores' ? "Ej. Papelería Lumen, OXXO, etc." : "Ej. Papelería, Walmart, etc."}
                   value={editItemName}
                   onChangeText={setEditItemName}
-                  iconName="bookmark-outline"
+                  iconName={activeCatalog === 'proveedores' ? "business-outline" : "bookmark-outline"}
                 />
+
+                {activeCatalog === 'proveedores' && (
+                  <CustomInput
+                    label="RFC (Opcional)"
+                    placeholder="Ej. LUM951010AB1"
+                    value={editProveedorRfc}
+                    onChangeText={setEditProveedorRfc}
+                    autoCapitalize="characters"
+                    iconName="card-outline"
+                  />
+                )}
 
                 {activeCatalog === 'clientes' && (
                   <>
@@ -1135,5 +1328,18 @@ const styles = StyleSheet.create({
     padding: Spacing.two,
     borderBottomWidth: 0.5,
     borderBottomColor: '#eee',
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

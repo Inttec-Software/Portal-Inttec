@@ -374,6 +374,14 @@ export default function AdminDashboard() {
   const handleUpdateStatus = async (status: 'APPROVED' | 'REJECTED' | 'ACTION_REQUIRED' | 'PENDING') => {
     if (!selectedGasto || !adminUser) return;
     
+    if (status === 'APPROVED' && (!selectedGasto.proveedor || !selectedGasto.proveedor.trim())) {
+      showAlert(
+        'Indicar Proveedor',
+        'No se puede aprobar este gasto porque el proveedor se encuentra en blanco.\n\nPor favor, edita el gasto y asigna un proveedor antes de aprobarlo.'
+      );
+      return;
+    }
+
     if (status === 'ACTION_REQUIRED' && !rejectionFeedback.trim()) {
       showAlert('Observación requerida', 'Por favor escribe una duda o comentario para devolver el gasto.');
       return;
@@ -464,6 +472,13 @@ export default function AdminDashboard() {
 
   const handleApproveClick = () => {
     if (!selectedGasto) return;
+    if (!selectedGasto.proveedor || !selectedGasto.proveedor.trim()) {
+      showAlert(
+        'Indicar Proveedor',
+        'No se puede aprobar este gasto porque el proveedor se encuentra en blanco.\n\nPor favor, edita el gasto y asigna un proveedor antes de aprobarlo.'
+      );
+      return;
+    }
     setLinkSaleSearch('');
     setIsQuickSaleFormVisible(false);
     setIsLinkSaleModalVisible(true);
@@ -472,6 +487,13 @@ export default function AdminDashboard() {
 
   const executeApproveGasto = async (ventaId: string | null) => {
     if (!selectedGasto || !adminUser) return;
+    if (!selectedGasto.proveedor || !selectedGasto.proveedor.trim()) {
+      showAlert(
+        'Indicar Proveedor',
+        'No se puede aprobar este gasto porque el proveedor se encuentra en blanco. Por favor edita el gasto para indicar el proveedor.'
+      );
+      return;
+    }
 
     setIsProcessingAction(true);
     try {
@@ -2744,10 +2766,22 @@ export default function AdminDashboard() {
 
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Proveedor</Text>
-                    <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedGasto.proveedor || 'N/A'}
+                    <Text style={[styles.detailValue, { color: selectedGasto.proveedor ? themeColors.text : themeColors.danger, fontWeight: selectedGasto.proveedor ? 'normal' : '700' }]}>
+                      {selectedGasto.proveedor || '⚠️ En blanco (Requiere indicar proveedor para aprobar)'}
                     </Text>
                   </View>
+
+                  {(!selectedGasto.proveedor || !selectedGasto.proveedor.trim()) && (
+                    <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '18', borderColor: themeColors.warning, marginVertical: Spacing.half, padding: Spacing.two, borderRadius: BorderRadius.medium, borderWidth: 1, flexDirection: 'row', gap: Spacing.one }]}>
+                      <Ionicons name="alert-circle-outline" size={22} color={themeColors.warning} style={{ marginTop: 2 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.alertTitle, { color: themeColors.warning, fontSize: 14, fontWeight: '700', marginBottom: 2 }]}>Proveedor Pendiente</Text>
+                        <Text style={[styles.alertText, { color: themeColors.text, fontSize: 13 }]}>
+                          El empleado dejó el proveedor en blanco. Para aprobar este gasto, primero haz clic en "Editar Gasto" y asigna el proveedor.
+                        </Text>
+                      </View>
+                    </View>
+                  )}
 
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Cliente / Sucursal</Text>

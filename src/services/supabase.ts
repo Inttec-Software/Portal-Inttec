@@ -180,6 +180,13 @@ export interface SucursalCliente {
   nombre: string;
 }
 
+export interface ProveedorItem {
+  id: string;
+  nombre: string;
+  rfc?: string | null;
+  created_at?: string;
+}
+
 /**
  * Servicio de Autenticación
  */
