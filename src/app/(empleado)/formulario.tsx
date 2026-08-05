@@ -1245,9 +1245,9 @@ export default function GastoForm() {
                           <CustomInput
                             label="¿Cuánto se dejó de propina? ($ MXN) *"
                             placeholder="0.00"
-                            keyboardType="numeric"
+                            keyboardType="decimal-pad"
                             value={montoPropina}
-                            onChangeText={setMontoPropina}
+                            onChangeText={(val) => setMontoPropina(val.replace(',', '.'))}
                             iconName="logo-usd"
                           />
                         </View>
@@ -1286,9 +1286,9 @@ export default function GastoForm() {
               <CustomInput
                 label="Monto ($ MXN) *"
                 placeholder="0.00"
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 value={monto}
-                onChangeText={setMonto}
+                onChangeText={(val) => setMonto(val.replace(',', '.'))}
                 iconName="logo-usd"
               />
 
@@ -1384,7 +1384,7 @@ export default function GastoForm() {
 
               {/* Selector de Proveedores con Buscador */}
               <View style={[styles.customDropdownContainer, { zIndex: 1000 }]}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor / Comercio (Opcional)</Text>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor / Comercio</Text>
                 <TouchableOpacity
                   style={[
                     styles.dropdownTrigger,
@@ -1413,7 +1413,7 @@ export default function GastoForm() {
                       }}
                       numberOfLines={1}
                     >
-                      {proveedor || 'Seleccionar proveedor (opcional)'}
+                      {proveedor || 'Seleccionar proveedor'}
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -2251,8 +2251,8 @@ export default function GastoForm() {
                     label="Litros Cargados *"
                     placeholder="Ej. 45.5"
                     value={litrosGasolina}
-                    onChangeText={setLitrosGasolina}
-                    keyboardType="numeric"
+                    onChangeText={(val) => setLitrosGasolina(val.replace(',', '.'))}
+                    keyboardType="decimal-pad"
                   />
                 </View>
               )}
@@ -2368,9 +2368,9 @@ export default function GastoForm() {
                 <CustomInput
                   label="Monto Asignado"
                   placeholder="Ej. 150.00"
-                  keyboardType="numeric"
+                  keyboardType="decimal-pad"
                   value={newSplitMonto}
-                  onChangeText={setNewSplitMonto}
+                  onChangeText={(val) => setNewSplitMonto(val.replace(',', '.'))}
                   iconName="cash-outline"
                   onFocus={() => setShowNewSplitCliDropdown(false)}
                 />

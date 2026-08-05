@@ -1103,9 +1103,9 @@ export default function EditarGastoForm() {
                           <CustomInput
                             label="¿Cuánto se dejó de propina? ($ MXN) *"
                             placeholder="Monto de la propina"
-                            keyboardType="numeric"
+                            keyboardType="decimal-pad"
                             value={montoPropina}
-                            onChangeText={setMontoPropina}
+                            onChangeText={(val) => setMontoPropina(val.replace(',', '.'))}
                             iconName="cash-outline"
                           />
                         </View>
@@ -1148,9 +1148,9 @@ export default function EditarGastoForm() {
               <CustomInput
                 label="Monto ($ MXN) *"
                 placeholder="0.00"
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
                 value={monto}
-                onChangeText={setMonto}
+                onChangeText={(val) => setMonto(val.replace(',', '.'))}
                 iconName="logo-usd"
               />
 
@@ -1246,7 +1246,7 @@ export default function EditarGastoForm() {
 
               {/* Selector de Proveedores con Buscador */}
               <View style={[styles.customDropdownContainer, { zIndex: 1000 }]}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor / Comercio (Opcional)</Text>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor / Comercio</Text>
                 <TouchableOpacity
                   style={[
                     styles.dropdownTrigger,
@@ -1275,7 +1275,7 @@ export default function EditarGastoForm() {
                       }}
                       numberOfLines={1}
                     >
-                      {proveedor || 'Seleccionar proveedor (opcional)'}
+                      {proveedor || 'Seleccionar proveedor'}
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
