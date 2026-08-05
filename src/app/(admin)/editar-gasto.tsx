@@ -381,7 +381,6 @@ export default function EditarGastoForm() {
         const optimized = await optimizeImage(result.assets[0].uri);
         setImageUri(optimized.uri);
         setImageBase64(optimized.base64 || null);
-        setScanSuccess(false); // Resetear bandera de escaneo anterior
         setAlertaPolitica(null);
       }
     } catch (err) {
@@ -412,7 +411,6 @@ export default function EditarGastoForm() {
         setImageUri(optimized.uri);
         setImageBase64(optimized.base64 || null);
         setImageExt('jpg');
-        setScanSuccess(false);
         setAlertaPolitica(null);
       }
     } catch (err) {
@@ -453,8 +451,6 @@ export default function EditarGastoForm() {
            });
         }
         setImageBase64(base64Str);
-        
-        setScanSuccess(false);
         setAlertaPolitica(null);
       }
     } catch (err) {
