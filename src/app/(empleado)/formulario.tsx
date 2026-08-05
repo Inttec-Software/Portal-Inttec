@@ -24,7 +24,6 @@ import NetInfo from '@react-native-community/netinfo';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, CatalogoItem, SubcategoriaItem, Vehiculo, VehiculoService, ClienteItem, SucursalCliente } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
-import { GeminiService } from '@/services/gemini';
 import { PushNotificationService } from '@/services/pushNotifications';
 import { getComentariosPlaceholder } from '@/utils/helpers';
 import { optimizeImage } from '@/utils/imageOptimizer';
@@ -91,8 +90,6 @@ export default function GastoForm() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageExt, setImageExt] = useState<string>('jpg');
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanSuccess, setScanSuccess] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
 
   // Estados para compartir consumo con otros empleados
@@ -314,7 +311,6 @@ export default function GastoForm() {
         const optimized = await optimizeImage(result.assets[0].uri);
         setImageUri(optimized.uri);
         setImageBase64(optimized.base64 || null);
-        setScanSuccess(false); // Resetear bandera de escaneo anterior
         setAlertaPolitica(null);
       }
     } catch (err) {
@@ -345,7 +341,6 @@ export default function GastoForm() {
         setImageUri(optimized.uri);
         setImageBase64(optimized.base64 || null);
         setImageExt('jpg');
-        setScanSuccess(false);
         setAlertaPolitica(null);
       }
     } catch (err) {
@@ -386,8 +381,6 @@ export default function GastoForm() {
            });
         }
         setImageBase64(base64Str);
-        
-        setScanSuccess(false);
         setAlertaPolitica(null);
       }
     } catch (err) {
@@ -450,129 +443,6 @@ export default function GastoForm() {
   };
 
 
-  // Escanear con IA (Gemini OCR)
-  const handleScanWithIA = async () => {
-    if (!imageBase64) return;
-    setIsScanning(true);
-    try {
-      const result = await GeminiService.scanTicket(imageBase64, 1 + selectedEmpleados.length, imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg');
-      
-      if (result.monto) setMonto(result.monto.toString());
-      if (result.proveedor) setProveedor(result.proveedor);
-      // Nota: la sucursal NO se llena con IA, el usuario la elige manualmente del dropdown
-      
-      // Actualizar fecha si la extrae
-      if (result.fecha) {
-        setFechaComprobante(result.fecha);
-        // Intentar parsear a objeto Date para el picker
-        const parts = result.fecha.split('/');
-        if (parts.length === 3) {
-          const day = parseInt(parts[0], 10);
-          const month = parseInt(parts[1], 10) - 1;
-          const year = parseInt(parts[2], 10);
-          const parsedDate = new Date(year, month, day);
-          if (!isNaN(parsedDate.getTime())) {
-            setDateValue(parsedDate);
-          }
-        }
-      }
-
-      // Actualizar método de pago si lo detecta
-      if (result.metodo_pago) {
-        setMetodoPago(result.metodo_pago);
-      }
-
-      // Sugerir justificación
-      if (result.justificacion_sugerida) {
-        setJustificacion(result.justificacion_sugerida);
-      }
-      
-      // Intentar pre-seleccionar categoría si coincide con una existente
-      if (result.categoria) {
-        const catSugerida = result.categoria.toLowerCase().trim();
-        
-        // Mapa de sinónimos para categorías conocidas
-        const categorySynonyms: { [key: string]: string[] } = {
-          'Alimentos': ['alimentos', 'comida', 'restaurante', 'desayuno', 'almuerzo', 'cena', 'bebida', 'consumo', 'alimentacion', 'cafeteria', 'oxxo', 'supermercado', 'comidas', 'restaurant', 'alimento'],
-          'Hospedaje': ['hospedaje', 'hotel', 'motel', 'airbnb', 'alojamiento', 'estancia', 'hospedajes', 'hotels'],
-          'Traslado': ['traslado', 'transporte', 'taxi', 'uber', 'didi', 'gasolina', 'combustible', 'peaje', 'caseta', 'estacionamiento', 'renta de auto', 'autobus', 'metro', 'casetas', 'peajes', 'traslados', 'viaticos'],
-          'Vuelos': ['vuelos', 'avion', 'aerolinea', 'boleto de avion', 'pasaje aereo', 'aeropuerto', 'vuelo', 'pasajes'],
-          'Equipo': ['equipo', 'computadora', 'laptop', 'celular', 'herramientas', 'oficina', 'papeleria', 'ferreteria', 'hardware', 'software', 'licencia', 'equipos', 'papelería', 'materiales']
-        };
-
-        // 1. Buscar coincidencia exacta o por subcadena
-        let matchedCat = categorias.find(
-          (c) => c.nombre.toLowerCase().includes(catSugerida) ||
-                 catSugerida.includes(c.nombre.toLowerCase())
-        );
-
-        // 2. Si no coincide, buscar por sinónimos
-        if (!matchedCat) {
-          for (const [key, synonyms] of Object.entries(categorySynonyms)) {
-            // Si el texto sugerido coincide con algún sinónimo
-            const hasSynonym = synonyms.some(syn => catSugerida.includes(syn) || syn.includes(catSugerida));
-            if (hasSynonym) {
-              // Buscar si la categoría de la DB existe para esa llave
-              const found = categorias.find(c => c.nombre.toLowerCase() === key.toLowerCase());
-              if (found) {
-                matchedCat = found;
-                break;
-              }
-            }
-          }
-        }
-
-        if (matchedCat) {
-          setSelectedCategoria(matchedCat.nombre);
-          
-          // Intentar pre-seleccionar subcategoría también si coincide
-          if (result.subcategoria) {
-            const subcatSugerida = result.subcategoria.toLowerCase().trim();
-            const subcatsOfCat = subcategorias.filter((s) => s.categoria_id === matchedCat!.id);
-            const matchedSub = subcatsOfCat.find(
-              (s) => s.nombre.toLowerCase().includes(subcatSugerida) ||
-                     subcatSugerida.includes(s.nombre.toLowerCase())
-            );
-            if (matchedSub) {
-              setSelectedSubcategoria(matchedSub.nombre);
-            }
-          }
-        }
-      }
-
-      // Actualizar Estado si se detecta
-      if (result.estado) {
-        // Encontrar coincidencia insensible a mayúsculas/minúsculas y acentos
-        const estadoNormalizado = result.estado.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const matchedEst = ESTADOS_MEXICO.find(est => {
-          const estNorm = est.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-          return estNorm === estadoNormalizado;
-        });
-        if (matchedEst) {
-          setSelectedEstado(matchedEst);
-        }
-      }
-
-      // Alerta de política
-      if (result.alerta_politica) {
-        setAlertaPolitica(result.alerta_politica);
-      } else {
-        setAlertaPolitica(null);
-      }
-      
-      setScanSuccess(true);
-      showAlert(
-        'Datos Extraídos',
-        'La Inteligencia Artificial extrajo el monto, proveedor, fecha, método de pago, el Estado y sugirió comentarios.'
-      );
-      // Ir automáticamente al paso 2
-      setCurrentStep(2);
-    } catch (err: any) {
-      showAlert('Escáner IA', err.message || 'No se pudo procesar el ticket automáticamente.');
-    } finally {
-      setIsScanning(false);
-    }
-  };
   // Filtrar subcategorías según la categoría seleccionada
   const activeCategoriaId = categorias.find((c) => c.nombre === selectedCategoria)?.id;
   const filteredSubcategorias = subcategorias.filter(
@@ -1142,7 +1012,6 @@ export default function GastoForm() {
                       onPress={() => {
                         setImageUri(null);
                         setImageBase64(null);
-                        setScanSuccess(false);
                         setAlertaPolitica(null);
                         setIncluyePropina(null);
                         setMontoPropina('');
@@ -1361,28 +1230,6 @@ export default function GastoForm() {
                     </View>
                   )}
 
-                  <View style={styles.scanWrapper}>
-                    {isScanning ? (
-                      <View style={styles.scanLoader}>
-                        <ActivityIndicator size="small" color={themeColors.accent} />
-                        <Text style={[styles.scanText, { color: themeColors.text }]}>
-                          Gemini AI leyendo ticket...
-                        </Text>
-                      </View>
-                    ) : (
-                      <CustomButton
-                        title="ESCANEAR CON IA"
-                        onPress={handleScanWithIA}
-                        variant="success"
-                        style={styles.scanBtn}
-                      />
-                    )}
-                    {scanSuccess && (
-                      <Text style={[styles.scanSuccessText, { color: themeColors.success }]}>
-                        ✓ Ticket escaneado con Gemini
-                      </Text>
-                    )}
-                  </View>
                 </>
               )}
 
