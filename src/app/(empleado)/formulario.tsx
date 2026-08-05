@@ -114,6 +114,7 @@ export default function GastoForm() {
   // Paso 2: Detalles
   const [monto, setMonto] = useState('');
   const [proveedor, setProveedor] = useState('');
+  const [comentarioProveedor, setComentarioProveedor] = useState('');
   const [facturado, setFacturado] = useState<boolean | null>(null);
   const [facturaStatus, setFacturaStatus] = useState<'SI' | 'PENDIENTE' | 'NO' | null>(null);
   const [comentarioPendiente, setComentarioPendiente] = useState('');
@@ -526,6 +527,13 @@ export default function GastoForm() {
       return;
     }
 
+    // 4. Validar Proveedor a agregar si no se seleccionó proveedor
+    if (!proveedor.trim() && !comentarioProveedor.trim()) {
+      showAlert('Validación', 'Por favor indica en el campo "Proveedor a agregar" el nombre del proveedor para que el administrador pueda registrarlo.');
+      setCurrentStep(2);
+      return;
+    }
+
     // 5. Validar Sucursal
     if (!sucursal.trim()) {
       showAlert('Validación', 'Por favor ingresa la sucursal o ubicación del comercio.');
@@ -670,6 +678,9 @@ export default function GastoForm() {
     const dbFecha = formatFriendlyToDb(fechaComprobante);
     
     let finalJustificacion = justificacion.trim();
+    if (!proveedor.trim() && comentarioProveedor.trim()) {
+      finalJustificacion = `[Proveedor a agregar: ${comentarioProveedor.trim()}]\n\n${finalJustificacion}`;
+    }
     if (esComida && selectedEmpleados.length > 0) {
       const nombresShared = selectedEmpleados.map(e => e.nombre).join(', ');
       finalJustificacion = `${finalJustificacion}\n\n[Consumo compartido con: ${nombresShared} (Total: ${1 + selectedEmpleados.length} personas)]`;
@@ -935,6 +946,10 @@ export default function GastoForm() {
       }
       if (facturado === false && facturaStatus === 'NO' && !motivoSinFactura.trim()) {
         showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
+        return;
+      }
+      if (!proveedor.trim() && !comentarioProveedor.trim()) {
+        showAlert('Validación', 'Por favor indica en el campo "Proveedor a agregar" el nombre del proveedor para que el administrador pueda registrarlo.');
         return;
       }
     }
@@ -1506,6 +1521,26 @@ export default function GastoForm() {
                   </View>
                 )}
               </View>
+
+              {/* Campo obligatorio de Proveedor a agregar si no se seleccionó proveedor */}
+              {!proveedor && (
+                <View style={{ marginBottom: Spacing.two }}>
+                  <CustomInput
+                    label="Proveedor a agregar *"
+                    placeholder="Escribe el nombre del proveedor que no encontraste..."
+                    value={comentarioProveedor}
+                    onChangeText={setComentarioProveedor}
+                    iconName="create-outline"
+                    multiline
+                    numberOfLines={2}
+                    style={{ height: 60 }}
+                  />
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontStyle: 'italic', marginTop: 2, paddingLeft: 4 }}>
+                    Indica el nombre del proveedor para que el administrador lo registre y pueda aprobar el gasto.
+                  </Text>
+                </View>
+              )}
+
               {/* Selector de Tipo: Servicio / Proyecto / Venta / Operativo */}
               <View style={{ marginBottom: Spacing.two }}>
                 <Text style={{ color: themeColors.text, marginBottom: Spacing.half, fontWeight: '500', fontSize: 14, paddingLeft: Spacing.half }}>Tipo de Gasto *</Text>

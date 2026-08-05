@@ -142,13 +142,28 @@ export default function ExpenseCard({
             {gasto.empleado_nombre}
           </Text>
         )}
-        {(gasto.proveedor || gasto.cliente) && (
+        {gasto.proveedor ? (
           <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
             <Text style={{fontWeight: '600', color: themeColors.text}}>Detalle: </Text>
             {gasto.proveedor}
-            {gasto.proveedor && gasto.cliente ? ' | ' : ''}
-            {gasto.cliente}
+            {gasto.cliente ? ` | ${gasto.cliente}` : ''}
           </Text>
+        ) : (
+          (() => {
+            const match = gasto.justificacion?.match(/\[Proveedor a agregar:\s*([^\]]+)\]/);
+            const provSugerido = match ? match[1].trim() : null;
+            return (
+              <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
+                <Text style={{fontWeight: '600', color: themeColors.text}}>Detalle: </Text>
+                {provSugerido ? (
+                  <Text style={{ color: themeColors.warning, fontWeight: '500' }}>[Pendiente: {provSugerido}]</Text>
+                ) : (
+                  <Text style={{ color: themeColors.danger, fontStyle: 'italic' }}>Sin proveedor</Text>
+                )}
+                {gasto.cliente ? ` | ${gasto.cliente}` : ''}
+              </Text>
+            );
+          })()
         )}
         {gasto.sucursal ? (
           <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>

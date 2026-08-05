@@ -91,6 +91,8 @@ const cleanJustificacion = (text: string | null | undefined): string => {
   cleaned = cleaned.replace(/\n\n\[Propina incluida en ticket:[^\]]*\]/g, '');
   // Strip Monto de propina dejado aparte
   cleaned = cleaned.replace(/\n\n\[Monto de propina dejado aparte:[^\]]*\]/g, '');
+  // Strip Proveedor a agregar
+  cleaned = cleaned.replace(/\[Proveedor a agregar:[^\]]*\]\n\n?/g, '');
   return cleaned.trim();
 };
 
@@ -126,6 +128,7 @@ export default function EditarGastoForm() {
   // Paso 2: Detalles
   const [monto, setMonto] = useState('');
   const [proveedor, setProveedor] = useState('');
+  const [comentarioProveedor, setComentarioProveedor] = useState('');
   const [facturado, setFacturado] = useState<boolean | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [facturaUri, setFacturaUri] = useState<string | null>(null);
@@ -297,6 +300,12 @@ export default function EditarGastoForm() {
             }
 
             setProveedor(data.proveedor || '');
+            if (!data.proveedor && data.justificacion) {
+              const provMatch = data.justificacion.match(/\[Proveedor a agregar:\s*([^\]]+)\]/);
+              if (provMatch) {
+                setComentarioProveedor(provMatch[1].trim());
+              }
+            }
             setTipoServicioProyecto(data.tipo_servicio_proyecto as any || null);
             setDetalleServicioProyecto(data.detalle_servicio_proyecto || '');
             setSucursal(data.sucursal || '');
@@ -581,6 +590,12 @@ export default function EditarGastoForm() {
       return;
     }
 
+    if (!proveedor.trim() && !comentarioProveedor.trim()) {
+      showAlert('Validación', 'Por favor indica en el campo "Proveedor a agregar" el nombre del proveedor para que el administrador pueda registrarlo.');
+      setCurrentStep(2);
+      return;
+    }
+
     if (!selectedCategoria) {
       showAlert('Validación', 'Por favor selecciona una categoría.');
       return;
@@ -640,6 +655,9 @@ export default function EditarGastoForm() {
     const totalGasto = Number(monto) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
     
     let finalJustificacion = justificacion.trim();
+    if (!proveedor.trim() && comentarioProveedor.trim()) {
+      finalJustificacion = `[Proveedor a agregar: ${comentarioProveedor.trim()}]\n\n${finalJustificacion}`;
+    }
     if (esComida && selectedEmpleados.length > 0) {
       const nombresShared = selectedEmpleados.map(e => e.nombre).join(', ');
       finalJustificacion = `${finalJustificacion}\n\n[Consumo compartido con: ${nombresShared} (Total: ${1 + selectedEmpleados.length} personas)]`;
@@ -792,6 +810,10 @@ export default function EditarGastoForm() {
       }
       if (facturado === false && facturaStatus === 'NO' && (!motivoSinFactura || !motivoSinFactura.trim())) {
         showAlert('Validación', 'Por favor explica el motivo por el cual no se cuenta con factura.');
+        return;
+      }
+      if (!proveedor.trim() && !comentarioProveedor.trim()) {
+        showAlert('Validación', 'Por favor indica en el campo "Proveedor a agregar" el nombre del proveedor para que el administrador pueda registrarlo.');
         return;
       }
     }
@@ -1353,6 +1375,25 @@ export default function EditarGastoForm() {
                   </View>
                 )}
               </View>
+
+              {/* Campo obligatorio de Proveedor a agregar si no se seleccionó proveedor */}
+              {!proveedor && (
+                <View style={{ marginBottom: Spacing.two }}>
+                  <CustomInput
+                    label="Proveedor a agregar *"
+                    placeholder="Escribe el nombre del proveedor que no encontraste..."
+                    value={comentarioProveedor}
+                    onChangeText={setComentarioProveedor}
+                    iconName="create-outline"
+                    multiline
+                    numberOfLines={2}
+                    style={{ height: 60 }}
+                  />
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontStyle: 'italic', marginTop: 2, paddingLeft: 4 }}>
+                    Indica el nombre del proveedor para que el administrador lo registre y pueda aprobar el gasto.
+                  </Text>
+                </View>
+              )}
 
               {/* Selector de Tipo: Servicio / Proyecto / Venta / Operativo */}
               <View style={{ marginBottom: Spacing.two }}>

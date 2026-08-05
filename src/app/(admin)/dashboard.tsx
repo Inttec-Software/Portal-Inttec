@@ -1487,15 +1487,24 @@ export default function AdminDashboard() {
   };
 
   const parseJustificacion = (just: string | null | undefined) => {
-    if (!just) return { alerta: null, justificacion: '' };
-    const match = just.match(/^\[ALERTA IA:\s*([\s\S]*?)\]\s*\n\s*([\s\S]*)$/);
-    if (match) {
-      return {
-        alerta: match[1],
-        justificacion: match[2],
-      };
+    if (!just) return { alerta: null, proveedorSugerido: null, justificacion: '' };
+    let remaining = just;
+    let alerta: string | null = null;
+    let proveedorSugerido: string | null = null;
+
+    const alertaMatch = remaining.match(/^\[ALERTA IA:\s*([\s\S]*?)\]\s*\n\s*/);
+    if (alertaMatch) {
+      alerta = alertaMatch[1];
+      remaining = remaining.replace(alertaMatch[0], '');
     }
-    return { alerta: null, justificacion: just };
+
+    const provMatch = remaining.match(/\[Proveedor a agregar:\s*([^\]]+)\]\s*\n?/);
+    if (provMatch) {
+      proveedorSugerido = provMatch[1].trim();
+      remaining = remaining.replace(provMatch[0], '');
+    }
+
+    return { alerta, proveedorSugerido, justificacion: remaining.trim() };
   };
 
   return (
@@ -2775,10 +2784,26 @@ export default function AdminDashboard() {
                     <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '18', borderColor: themeColors.warning, marginVertical: Spacing.half, padding: Spacing.two, borderRadius: BorderRadius.medium, borderWidth: 1, flexDirection: 'row', gap: Spacing.one }]}>
                       <Ionicons name="alert-circle-outline" size={22} color={themeColors.warning} style={{ marginTop: 2 }} />
                       <View style={{ flex: 1 }}>
-                        <Text style={[styles.alertTitle, { color: themeColors.warning, fontSize: 14, fontWeight: '700', marginBottom: 2 }]}>Proveedor Pendiente</Text>
+                        <Text style={[styles.alertTitle, { color: themeColors.warning, fontSize: 14, fontWeight: '700', marginBottom: 2 }]}>Proveedor Pendiente de Asignar</Text>
                         <Text style={[styles.alertText, { color: themeColors.text, fontSize: 13 }]}>
                           El empleado dejó el proveedor en blanco. Para aprobar este gasto, primero haz clic en "Editar Gasto" y asigna el proveedor.
                         </Text>
+                        {(() => {
+                          const parsed = parseJustificacion(selectedGasto.justificacion);
+                          if (parsed.proveedorSugerido) {
+                            return (
+                              <View style={{ marginTop: 8, padding: 8, backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border }}>
+                                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>
+                                  📝 Proveedor a agregar indicado por el empleado:
+                                </Text>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.primary, marginTop: 2 }}>
+                                  {parsed.proveedorSugerido}
+                                </Text>
+                              </View>
+                            );
+                          }
+                          return null;
+                        })()}
                       </View>
                     </View>
                   )}
