@@ -1118,7 +1118,7 @@ export default function GastoForm() {
                   </TouchableOpacity>
 
                   {showEmpList && (
-                    <View style={{ width: '100%', zIndex: 1000 }}>
+                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                         <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                           {allUsers
@@ -1155,7 +1155,7 @@ export default function GastoForm() {
                             })}
                         </ScrollView>
                       </View>
-                    </View>
+                    </Pressable>
                   )}
                 </View>
               )}
@@ -1403,7 +1403,7 @@ export default function GastoForm() {
                 </TouchableOpacity>
 
                 {showProvDropdown && (
-                  <View style={{ width: '100%', zIndex: 1000, marginTop: 4 }}>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000, marginTop: 4 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <CustomInput
                         placeholder="Buscar proveedor por nombre o RFC..."
@@ -1488,7 +1488,7 @@ export default function GastoForm() {
                         )}
                       </ScrollView>
                     </View>
-                  </View>
+                  </Pressable>
                 )}
               </View>
 
@@ -1681,41 +1681,43 @@ export default function GastoForm() {
                       <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                     </TouchableOpacity>
                     {showSucursalDropdown && (
-                      <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <CustomInput
-                          placeholder="Buscar sucursal..."
-                          value={sucursalSearch}
-                          onChangeText={setSucursalSearch}
-                          iconName="search-outline"
-                          style={{ margin: Spacing.one, height: 40 }}
-                        />
-                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                          {(() => {
-                             const currentCliente = clientes.find(c => c.nombre === selectedCliente);
-                             const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())) : [];
-                             if (filteredSucursales.length === 0) {
-                               return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas para este cliente.</Text>;
-                             }
-                             return filteredSucursales.map((suc, index, array) => (
-                                <TouchableOpacity
-                                  key={suc.id}
-                                  style={[
-                                    styles.dropdownItem,
-                                    index === array.length - 1 && { borderBottomWidth: 0 },
-                                    { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                                  ]}
-                                  onPress={() => {
-                                    setSucursal(suc.nombre);
-                                    setShowSucursalDropdown(false);
-                                  }}
-                                >
-                                  <Ionicons name="business-outline" size={24} color={themeColors.primary} />
-                                  <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
-                                </TouchableOpacity>
-                             ));
-                          })()}
-                        </ScrollView>
-                      </View>
+                      <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                        <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                          <CustomInput
+                            placeholder="Buscar sucursal..."
+                            value={sucursalSearch}
+                            onChangeText={setSucursalSearch}
+                            iconName="search-outline"
+                            style={{ margin: Spacing.one, height: 40 }}
+                          />
+                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                            {(() => {
+                               const currentCliente = clientes.find(c => c.nombre === selectedCliente);
+                               const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())) : [];
+                               if (filteredSucursales.length === 0) {
+                                 return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas para este cliente.</Text>;
+                               }
+                               return filteredSucursales.map((suc, index, array) => (
+                                  <TouchableOpacity
+                                    key={suc.id}
+                                    style={[
+                                      styles.dropdownItem,
+                                      index === array.length - 1 && { borderBottomWidth: 0 },
+                                      { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                    ]}
+                                    onPress={() => {
+                                      setSucursal(suc.nombre);
+                                      setShowSucursalDropdown(false);
+                                    }}
+                                  >
+                                    <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                                    <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                                  </TouchableOpacity>
+                               ));
+                            })()}
+                          </ScrollView>
+                        </View>
+                      </Pressable>
                     )}
                   </View>
                 </>
@@ -1769,7 +1771,7 @@ export default function GastoForm() {
                   <Ionicons name={showEstDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showEstDropdown && (
-                  <View style={{ width: '100%', zIndex: 1000 }}>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                         {ESTADOS_MEXICO.map((est, index, array) => (
@@ -1791,7 +1793,7 @@ export default function GastoForm() {
                         ))}
                       </ScrollView>
                     </View>
-                  </View>
+                  </Pressable>
                 )}
               </View>
 
@@ -2072,7 +2074,7 @@ export default function GastoForm() {
                   <Ionicons name={showCatDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showCatDropdown && (
-                  <View style={{ width: '100%', zIndex: 1000 }}>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                         {categorias.map((cat, index, array) => (
@@ -2095,7 +2097,7 @@ export default function GastoForm() {
                         ))}
                       </ScrollView>
                     </View>
-                  </View>
+                  </Pressable>
                 )}
               </View>
 
@@ -2119,7 +2121,7 @@ export default function GastoForm() {
                     <Ionicons name={showSubDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                   </TouchableOpacity>
                   {showSubDropdown && (
-                    <View style={{ width: '100%', zIndex: 1000 }}>
+                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                         <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                           {filteredSubcategorias.length > 0 ? (
@@ -2147,7 +2149,7 @@ export default function GastoForm() {
                           )}
                         </ScrollView>
                       </View>
-                    </View>
+                    </Pressable>
                   )}
                 </View>
               )}
@@ -2188,7 +2190,7 @@ export default function GastoForm() {
                       <Ionicons name={showVehiculoDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                     </TouchableOpacity>
                     {showVehiculoDropdown && (
-                      <View style={{ width: '100%', zIndex: 1001 }}>
+                      <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1001 }}>
                         <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                           <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
                             {vehiculos.map((veh, index, array) => (
@@ -2217,7 +2219,7 @@ export default function GastoForm() {
                             )}
                           </ScrollView>
                         </View>
-                      </View>
+                      </Pressable>
                     )}
                   </View>
 

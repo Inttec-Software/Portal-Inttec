@@ -1009,7 +1009,7 @@ export default function EditarGastoForm() {
                     </TouchableOpacity>
 
                     {showEmpList && (
-                      <Pressable onPress={() => {}} style={{ width: '100%' }}>
+                      <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                         <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, maxHeight: 200 }]}>
                           <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled">
                             {allUsers
@@ -1295,7 +1295,7 @@ export default function EditarGastoForm() {
                 </TouchableOpacity>
 
                 {showProvDropdown && (
-                  <View style={{ width: '100%', zIndex: 1000, marginTop: 4 }}>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000, marginTop: 4 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <CustomInput
                         placeholder="Buscar proveedor por nombre o RFC..."
@@ -1380,7 +1380,7 @@ export default function EditarGastoForm() {
                         )}
                       </ScrollView>
                     </View>
-                  </View>
+                  </Pressable>
                 )}
               </View>
 
@@ -1563,7 +1563,7 @@ export default function EditarGastoForm() {
                   <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showSucursalDropdown && (
-                  <View style={{ width: '100%', zIndex: 1000 }}>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <CustomInput
                         placeholder="Buscar sucursal..."
@@ -1599,7 +1599,7 @@ export default function EditarGastoForm() {
                         })()}
                       </ScrollView>
                     </View>
-                  </View>
+                  </Pressable>
                 )}
               </View>
               {/* Selector de Estado de la República */}
@@ -1618,7 +1618,7 @@ export default function EditarGastoForm() {
                   <Ionicons name={showEstDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showEstDropdown && (
-                  <Pressable onPress={() => {}} style={{ width: '100%' }}>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
                         {ESTADOS_MEXICO.map((est) => (
@@ -1917,7 +1917,7 @@ export default function EditarGastoForm() {
                   <Ionicons name={showCatDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showCatDropdown && (
-                  <Pressable onPress={() => {}} style={{ width: '100%' }}>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
                         {categorias.map((cat) => (
@@ -1958,7 +1958,7 @@ export default function EditarGastoForm() {
                     <Ionicons name={showSubDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                   </TouchableOpacity>
                   {showSubDropdown && (
-                    <Pressable onPress={() => {}} style={{ width: '100%' }}>
+                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                         <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
                           {filteredSubcategorias.length > 0 ? (
