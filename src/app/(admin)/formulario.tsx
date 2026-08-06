@@ -63,6 +63,10 @@ export default function GastoForm() {
   const [proveedores, setProveedores] = useState<ProveedorItem[]>([]);
   const [proveedorSearch, setProveedorSearch] = useState('');
   const [showProvDropdown, setShowProvDropdown] = useState(false);
+  const [modalNuevoProveedorVisible, setModalNuevoProveedorVisible] = useState(false);
+  const [nuevoProvNombre, setNuevoProvNombre] = useState('');
+  const [nuevoProvRfc, setNuevoProvRfc] = useState('');
+  const [isSavingProv, setIsSavingProv] = useState(false);
 
   // Paso 1: Evidencia
   const [imageUri, setImageUri] = useState<string | null>(null);
@@ -446,6 +450,49 @@ export default function GastoForm() {
       setShowCliDropdown(false);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo agregar el cliente.');
+    }
+  };
+
+  const handleCrearNuevoProveedor = async () => {
+    if (!nuevoProvNombre.trim()) {
+      showAlert('Validación', 'El nombre o razón social del proveedor es obligatorio.');
+      return;
+    }
+
+    const cleanRfc = nuevoProvRfc.trim().toUpperCase();
+    if (cleanRfc && cleanRfc.length !== 12 && cleanRfc.length !== 13) {
+      showAlert('Validación', 'El RFC debe tener exactamente 12 o 13 caracteres.');
+      return;
+    }
+
+    setIsSavingProv(true);
+    try {
+      const { data, error } = await supabase
+        .from('proveedores')
+        .insert([
+          {
+            nombre: nuevoProvNombre.trim(),
+            rfc: cleanRfc || null,
+          },
+        ])
+        .select();
+
+      if (error) throw error;
+
+      const created = data && data[0] ? data[0] : { id: Date.now().toString(), nombre: nuevoProvNombre.trim(), rfc: cleanRfc || null };
+
+      setProveedores(prev => [...prev, created].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setProveedor(created.nombre);
+      setComentarioProveedor('');
+      setProveedorSearch('');
+      setNuevoProvNombre('');
+      setNuevoProvRfc('');
+      setModalNuevoProveedorVisible(false);
+      showAlert('Éxito', `Proveedor "${created.nombre}" agregado y seleccionado.`);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo registrar el proveedor.');
+    } finally {
+      setIsSavingProv(false);
     }
   };
 
@@ -1308,7 +1355,28 @@ export default function GastoForm() {
 
               {/* Selector de Proveedores con Buscador */}
               <View style={[styles.customDropdownContainer, { zIndex: 1000 }]}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor / Comercio</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.half }}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text, marginBottom: 0 }]}>Proveedor / Comercio</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setNuevoProvNombre(proveedorSearch.trim());
+                      setNuevoProvRfc('');
+                      setModalNuevoProveedorVisible(true);
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: themeColors.primary + '15',
+                      paddingHorizontal: Spacing.one,
+                      paddingVertical: 4,
+                      borderRadius: BorderRadius.medium,
+                    }}
+                  >
+                    <Ionicons name="add-circle" size={16} color={themeColors.primary} />
+                    <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 12 }}>+ Nuevo Proveedor</Text>
+                  </TouchableOpacity>
+                </View>
                 <TouchableOpacity
                   style={[
                     styles.dropdownTrigger,
@@ -1390,6 +1458,34 @@ export default function GastoForm() {
                             Dejar en blanco (Sin proveedor)
                           </Text>
                         </TouchableOpacity>
+
+                        {/* Opción rápida para agregar el proveedor si se buscó algo no existente */}
+                        {proveedorSearch.trim().length > 0 && !proveedores.some(p => p.nombre && p.nombre.toLowerCase() === proveedorSearch.trim().toLowerCase()) && (
+                          <TouchableOpacity
+                            style={[
+                              styles.dropdownItem,
+                              {
+                                backgroundColor: themeColors.primary + '15',
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: Spacing.one,
+                                borderBottomWidth: 1,
+                                borderBottomColor: themeColors.border,
+                              }
+                            ]}
+                            onPress={() => {
+                              setNuevoProvNombre(proveedorSearch.trim());
+                              setNuevoProvRfc('');
+                              setModalNuevoProveedorVisible(true);
+                              setShowProvDropdown(false);
+                            }}
+                          >
+                            <Ionicons name="add-circle-outline" size={20} color={themeColors.primary} />
+                            <Text style={{ color: themeColors.primary, fontWeight: '600', fontSize: 13 }}>
+                              {`➕ Agregar "${proveedorSearch.trim()}"`}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
 
                         {proveedores
                           .filter(p => 
@@ -2312,6 +2408,77 @@ export default function GastoForm() {
                   style={{ flex: 1 }}
                 />
               </View>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
+
+      {/* Modal Crear Proveedor (Admin Directo) */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalNuevoProveedorVisible}
+        onRequestClose={() => setModalNuevoProveedorVisible(false)}
+      >
+        <Pressable 
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: Spacing.four }}
+          onPress={() => setModalNuevoProveedorVisible(false)}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%', maxWidth: 480 }}>
+            <Pressable style={{ backgroundColor: themeColors.background, borderRadius: BorderRadius.large, padding: Spacing.four, width: '100%', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 }} onPress={(e) => e.stopPropagation()}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.three }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}>
+                  <Ionicons name="business" size={22} color={themeColors.primary} />
+                  <Text style={{ fontSize: 18, fontWeight: '700', color: themeColors.text }}>Nuevo Proveedor</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    setModalNuevoProveedorVisible(false);
+                    setNuevoProvNombre('');
+                    setNuevoProvRfc('');
+                  }}
+                >
+                  <Ionicons name="close" size={24} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView contentContainerStyle={{ gap: Spacing.two }} keyboardShouldPersistTaps="handled">
+                <CustomInput
+                  label="Nombre o Razón Social *"
+                  placeholder="Ej. Papelería Lumen, OXXO, etc."
+                  value={nuevoProvNombre}
+                  onChangeText={setNuevoProvNombre}
+                  iconName="business-outline"
+                />
+
+                <CustomInput
+                  label="RFC (Opcional)"
+                  placeholder="Ej. LUM951010AB1"
+                  value={nuevoProvRfc}
+                  onChangeText={setNuevoProvRfc}
+                  autoCapitalize="characters"
+                  iconName="card-outline"
+                />
+
+                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two }}>
+                  <CustomButton
+                    title="Cancelar"
+                    variant="secondary"
+                    onPress={() => {
+                      setModalNuevoProveedorVisible(false);
+                      setNuevoProvNombre('');
+                      setNuevoProvRfc('');
+                    }}
+                    style={{ flex: 1 }}
+                  />
+                  <CustomButton
+                    title={isSavingProv ? "Guardando..." : "Guardar"}
+                    onPress={handleCrearNuevoProveedor}
+                    loading={isSavingProv}
+                    style={{ flex: 1 }}
+                  />
+                </View>
+              </ScrollView>
             </Pressable>
           </KeyboardAvoidingView>
         </Pressable>
