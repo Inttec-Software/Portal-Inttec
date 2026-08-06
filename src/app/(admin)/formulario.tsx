@@ -697,22 +697,16 @@ export default function GastoForm() {
       empleado_id: currentUser.id,
       empleado_nombre: currentUser.nombre,
       monto: totalGasto,
-      categoria: selectedCategoria,
       categoria_id: activeCatObj?.id || null,
-      subcategoria: selectedSubcategoria || null,
       subcategoria_id: activeSubObj?.id || null,
       metodo_pago: metodoPago,
       justificacion: finalJustificacion,
       fecha_comprobante: dbFecha,
-      proveedor: proveedor.trim() || null,
       proveedor_id: activeProvObj?.id || null,
-      cliente: selectedCliente || null,
       cliente_id: activeCliObj?.id || null,
-      sucursal: sucursal.trim() || null,
       sucursal_id: activeSucObj?.id || null,
       tipo_tarjeta: tipoTarjeta,
       ubicacion_registro: 'Móvil',
-      estado: null,
       facturado: facturado,
       motivo_sin_factura: facturado === true 
         ? null 
@@ -769,7 +763,6 @@ export default function GastoForm() {
           return {
             ...gastoPayload,
             monto: Number(s.monto),
-            cliente: s.clienteId || null,
             cliente_id: splitCliObj?.id || null,
             justificacion: `[Gasto dividido del ticket total de $${totalGasto}] - División ${index + 1}/${splits.length}\n\n${gastoPayload.justificacion}`,
             foto_url: publicUrl || null,
@@ -793,7 +786,6 @@ export default function GastoForm() {
             payloadsToInsert.push({
               ...gastoPayload,
               monto: remainder,
-              cliente: selectedCliente || null,
               cliente_id: remainderCliObj?.id || null,
               justificacion: `[Gasto principal / Restante del ticket total de $${totalGasto}]\n\n${gastoPayload.justificacion}`,
               foto_url: publicUrl || null,

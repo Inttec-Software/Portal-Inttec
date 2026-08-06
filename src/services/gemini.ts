@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger';
+import { GastoHelper } from './supabase';
 
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 
@@ -829,11 +830,11 @@ REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
       let result = [...gastos];
       if (args.sucursal) {
         const sTarget = normStr(args.sucursal);
-        result = result.filter(g => normStr(g.sucursal).includes(sTarget));
+        result = result.filter(g => normStr(GastoHelper.getSucursal(g)).includes(sTarget));
       }
       if (args.cliente) {
         const cTarget = normStr(args.cliente);
-        result = result.filter(g => normStr(g.cliente).includes(cTarget));
+        result = result.filter(g => normStr(GastoHelper.getCliente(g)).includes(cTarget));
       }
       if (args.empleado_nombre) {
         const eTarget = normStr(args.empleado_nombre);
@@ -841,11 +842,11 @@ REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
       }
       if (args.categoria) {
         const catTarget = normStr(args.categoria);
-        result = result.filter(g => normStr(g.categoria).includes(catTarget));
+        result = result.filter(g => normStr(GastoHelper.getCategoria(g)).includes(catTarget));
       }
       if (args.proveedor) {
         const provTarget = normStr(args.proveedor);
-        result = result.filter(g => normStr(g.proveedor).includes(provTarget));
+        result = result.filter(g => normStr(GastoHelper.getProveedor(g)).includes(provTarget));
       }
       if (args.status) {
         result = result.filter(g => String(g.status).toUpperCase() === String(args.status).toUpperCase());
@@ -865,12 +866,12 @@ REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
       if (args.texto_busqueda) {
         const q = normStr(args.texto_busqueda);
         result = result.filter(g =>
-          normStr(g.sucursal).includes(q) ||
-          normStr(g.cliente).includes(q) ||
-          normStr(g.proveedor).includes(q) ||
+          normStr(GastoHelper.getSucursal(g)).includes(q) ||
+          normStr(GastoHelper.getCliente(g)).includes(q) ||
+          normStr(GastoHelper.getProveedor(g)).includes(q) ||
           normStr(g.justificacion).includes(q) ||
           normStr(g.detalle_servicio_proyecto).includes(q) ||
-          normStr(g.categoria).includes(q) ||
+          normStr(GastoHelper.getCategoria(g)).includes(q) ||
           normStr(g.empleado_nombre).includes(q)
         );
       }
@@ -914,8 +915,8 @@ REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
         filtered.forEach(g => {
           const monto = Number(g.monto) || 0;
           granTotal += monto;
-          const sucName = (g.sucursal && String(g.sucursal).trim()) ? String(g.sucursal).trim() : 'Sin sucursal asignada';
-          const cliName = (g.cliente && String(g.cliente).trim()) ? String(g.cliente).trim() : 'Sin cliente especificado';
+          const sucName = GastoHelper.getSucursal(g) || 'Sin sucursal asignada';
+          const cliName = GastoHelper.getCliente(g) || 'Sin cliente especificado';
           const key = `${sucName}___${cliName}`;
 
           if (!sucursalesMap[key]) {
@@ -932,7 +933,7 @@ REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
           sucursalesMap[key].total_monto += monto;
           sucursalesMap[key].cantidad_gastos += 1;
 
-          const cat = g.categoria || 'Otros';
+          const cat = GastoHelper.getCategoria(g) || 'Otros';
           sucursalesMap[key].categorias[cat] = (sucursalesMap[key].categorias[cat] || 0) + monto;
 
           const emp = g.empleado_nombre || 'Desconocido';
@@ -976,12 +977,12 @@ REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
 
         filtered.forEach(g => {
           const m = Number(g.monto) || 0;
-          const suc = (g.sucursal && String(g.sucursal).trim()) ? String(g.sucursal).trim() : 'Sin sucursal asignada';
-          const cat = g.categoria || 'Sin categoría';
-          const cli = g.cliente || 'Sin cliente';
+          const suc = GastoHelper.getSucursal(g) || 'Sin sucursal asignada';
+          const cat = GastoHelper.getCategoria(g) || 'Sin categoría';
+          const cli = GastoHelper.getCliente(g) || 'Sin cliente';
           const emp = g.empleado_nombre || 'Desconocido';
 
-          if (!porSucursal[suc]) porSucursal[suc] = { total_mxn: 0, conteo: 0, cliente: g.cliente };
+          if (!porSucursal[suc]) porSucursal[suc] = { total_mxn: 0, conteo: 0, cliente: cli };
           porSucursal[suc].total_mxn = Math.round((porSucursal[suc].total_mxn + m) * 100) / 100;
           porSucursal[suc].conteo += 1;
 

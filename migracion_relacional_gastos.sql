@@ -62,3 +62,14 @@ CREATE INDEX IF NOT EXISTS idx_gastos_subcategoria_id ON public.gastos(subcatego
 CREATE INDEX IF NOT EXISTS idx_gastos_proveedor_id ON public.gastos(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_gastos_cliente_id ON public.gastos(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_gastos_sucursal_id ON public.gastos(sucursal_id);
+
+-- 4. (Opcional / Paso Final) Eliminar las columnas de texto redundantes
+-- Ejecutar una vez que hayas verificado que los IDs se poblaron correctamente:
+ALTER TABLE public.gastos 
+  DROP COLUMN IF EXISTS categoria,
+  DROP COLUMN IF EXISTS subcategoria,
+  DROP COLUMN IF EXISTS proveedor,
+  DROP COLUMN IF EXISTS cliente,
+  DROP COLUMN IF EXISTS sucursal,
+  DROP COLUMN IF EXISTS estado;
+

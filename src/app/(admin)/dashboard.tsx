@@ -1426,11 +1426,11 @@ export default function AdminDashboard() {
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
         const empName = (g.empleado_nombre || '').toLowerCase();
-        const clientName = (g.cliente || '').toLowerCase();
-        const branchName = (g.sucursal || '').toLowerCase();
-        const catName = (g.categoria || '').toLowerCase();
-        const subCatName = (g.subcategoria || '').toLowerCase();
-        const provName = (g.proveedor || '').toLowerCase();
+        const clientName = (GastoHelper.getCliente(g) || '').toLowerCase();
+        const branchName = (GastoHelper.getSucursal(g) || '').toLowerCase();
+        const catName = (GastoHelper.getCategoria(g) || '').toLowerCase();
+        const subCatName = (GastoHelper.getSubcategoria(g) || '').toLowerCase();
+        const provName = (GastoHelper.getProveedor(g) || '').toLowerCase();
         const detailStr = (g.detalle_servicio_proyecto || '').toLowerCase();
 
         const matches = empName.includes(query) ||
@@ -1969,12 +1969,12 @@ export default function AdminDashboard() {
                               hovered && { backgroundColor: themeColors.backgroundSelected }
                             ] as any}
                           >
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{item.categoria}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
                             <Text style={[styles.tableCell, { color: themeColors.text, width: '13%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
                             <Text style={[styles.tableCell, { width: '18%', color: themeColors.textSecondary }]} numberOfLines={1}>
-                              {item.proveedor} {item.proveedor && item.cliente ? ' | ' : ''} {item.cliente}
+                              {GastoHelper.getProveedor(item)} {GastoHelper.getProveedor(item) && GastoHelper.getCliente(item) ? ' | ' : ''} {GastoHelper.getCliente(item)}
                             </Text>
-                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '12%' }]} numberOfLines={1}>{item.sucursal || '-'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '12%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
                             <Text style={[styles.tableCell, { color: themeColors.text, width: '11%' }]}>{fecha}</Text>
                             <View style={{ width: '9%' }}>
                                <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
@@ -2120,12 +2120,12 @@ export default function AdminDashboard() {
                               hovered && { backgroundColor: themeColors.backgroundSelected }
                             ] as any}
                           >
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{item.categoria}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
                             <Text style={[styles.tableCell, { color: themeColors.text, width: '13%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
                             <Text style={[styles.tableCell, { width: '18%', color: themeColors.textSecondary }]} numberOfLines={1}>
-                              {item.proveedor} {item.proveedor && item.cliente ? ' | ' : ''} {item.cliente}
+                              {GastoHelper.getProveedor(item)} {GastoHelper.getProveedor(item) && GastoHelper.getCliente(item) ? ' | ' : ''} {GastoHelper.getCliente(item)}
                             </Text>
-                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '12%' }]} numberOfLines={1}>{item.sucursal || '-'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '12%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
                             <Text style={[styles.tableCell, { color: themeColors.text, width: '11%' }]}>{fecha}</Text>
                             <View style={{ width: '9%' }}>
                                <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
