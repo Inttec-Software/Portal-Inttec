@@ -381,7 +381,8 @@ export default function AdminDashboard() {
   const handleUpdateStatus = async (status: 'APPROVED' | 'REJECTED' | 'ACTION_REQUIRED' | 'PENDING') => {
     if (!selectedGasto || !adminUser) return;
     
-    if (status === 'APPROVED' && (!selectedGasto.proveedor || !selectedGasto.proveedor.trim())) {
+    const provName = GastoHelper.getProveedor(selectedGasto);
+    if (status === 'APPROVED' && (!provName || !provName.trim())) {
       showAlert(
         'Indicar Proveedor',
         'No se puede aprobar este gasto porque el proveedor se encuentra en blanco.\n\nPor favor, edita el gasto y asigna un proveedor antes de aprobarlo.'
@@ -479,7 +480,8 @@ export default function AdminDashboard() {
 
   const handleApproveClick = () => {
     if (!selectedGasto) return;
-    if (!selectedGasto.proveedor || !selectedGasto.proveedor.trim()) {
+    const provName = GastoHelper.getProveedor(selectedGasto);
+    if (!provName || !provName.trim()) {
       showAlert(
         'Indicar Proveedor',
         'No se puede aprobar este gasto porque el proveedor se encuentra en blanco.\n\nPor favor, edita el gasto y asigna un proveedor antes de aprobarlo.'
@@ -494,7 +496,8 @@ export default function AdminDashboard() {
 
   const executeApproveGasto = async (ventaId: string | null) => {
     if (!selectedGasto || !adminUser) return;
-    if (!selectedGasto.proveedor || !selectedGasto.proveedor.trim()) {
+    const provName = GastoHelper.getProveedor(selectedGasto);
+    if (!provName || !provName.trim()) {
       showAlert(
         'Indicar Proveedor',
         'No se puede aprobar este gasto porque el proveedor se encuentra en blanco. Por favor edita el gasto para indicar el proveedor.'
@@ -828,11 +831,11 @@ export default function AdminDashboard() {
     if (!selectedGasto) return;
 
     setQuickSaleFecha(selectedGasto.fecha_comprobante || selectedGasto.created_at?.split('T')[0] || new Date().toISOString().split('T')[0]);
-    setQuickSaleCliente(selectedGasto.cliente || '');
-    setQuickSaleSucursal('');
+    setQuickSaleCliente(GastoHelper.getCliente(selectedGasto));
+    setQuickSaleSucursal(GastoHelper.getSucursal(selectedGasto));
     setQuickSaleFactura(selectedGasto.facturado ? 'Factura' : '');
     setQuickSaleTipoProyecto(selectedGasto.tipo_servicio_proyecto || 'Otro');
-    setQuickSaleProveedor(selectedGasto.sucursal || '');
+    setQuickSaleProveedor(GastoHelper.getProveedor(selectedGasto));
     setQuickSaleNotas(`Vinculado automáticamente al aprobar gasto de justificación: ${selectedGasto.justificacion || 'Sin justificación'}`);
 
     // No pre-cargar partidas, dejarlas en blanco

@@ -23,7 +23,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, Venta, VentaPartida, recalculateVentaTotals, ClienteItem, SucursalCliente } from '@/services/supabase';
+import { supabase, AuthService, Usuario, Venta, VentaPartida, recalculateVentaTotals, ClienteItem, SucursalCliente, GastoHelper } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
@@ -225,7 +225,7 @@ export default function VentasScreen() {
       // 2. Cargar gastos vinculados
       const { data: gastosData, error: gastosError } = await supabase
         .from('gastos')
-        .select('*')
+        .select(GastoHelper.GASTOS_SELECT_QUERY)
         .eq('venta_id', venta.id)
         .eq('status', 'APPROVED');
       if (gastosError) throw gastosError;

@@ -45,7 +45,17 @@ export default function AdminChatIA() {
 
         const safeFetch = async (client: any, table: string) => {
           try {
-            let query = client.from(table).select('*');
+            let query = table === 'gastos'
+              ? client.from('gastos').select(`
+                  *,
+                  categoria_rel:categorias(id, nombre),
+                  subcategoria_rel:subcategorias(id, nombre),
+                  proveedor_rel:proveedores(id, nombre),
+                  cliente_rel:clientes(id, nombre),
+                  sucursal_rel:sucursales_cliente(id, nombre)
+                `)
+              : client.from(table).select('*');
+
             if (['gastos', 'ventas', 'asistencias', 'registro_gasolina'].includes(table)) {
               query = query.order('created_at', { ascending: false }).limit(1000);
             } else {

@@ -305,7 +305,7 @@ export default function CatalogosManager() {
 
     try {
       const [gastosRes, ventasRes] = await Promise.all([
-        supabase.from('gastos').select('monto').or(`cliente_id.eq.${cliente.id},cliente.eq.${cliente.nombre}`).neq('status', 'REJECTED'),
+        supabase.from('gastos').select('monto').eq('cliente_id', cliente.id).neq('status', 'REJECTED'),
         supabase.from('ventas').select('precio_total_facturado, costo_total').eq('cliente', cliente.nombre)
       ]);
 

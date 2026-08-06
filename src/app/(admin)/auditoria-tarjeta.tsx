@@ -306,7 +306,7 @@ export default function AuditoriaTarjetaScreen() {
         String(m.transaction.monto).includes(q) ||
         m.matchedGastos.some(g =>
           g.justificacion?.toLowerCase().includes(q) ||
-          g.proveedor?.toLowerCase().includes(q) ||
+          GastoHelper.getProveedor(g)?.toLowerCase().includes(q) ||
           g.empleado_nombre?.toLowerCase().includes(q)
         )
       );
@@ -478,7 +478,7 @@ export default function AuditoriaTarjetaScreen() {
                 </tr>
                 ${m.matchedGastos.map(g => `
                   <tr class="sub-row">
-                    <td colspan="2">↳ <em>Gasto App:</em> ${g.empleado_nombre || 'Empleado'} - ${g.justificacion || g.proveedor || 'Sin detalles'}</td>
+                    <td colspan="2">↳ <em>Gasto App:</em> ${g.empleado_nombre || 'Empleado'} - ${g.justificacion || GastoHelper.getProveedor(g) || 'Sin detalles'}</td>
                     <td class="monto" style="color: #64748b; font-weight: normal;">${formatCurrency(Number(g.monto) || 0)}</td>
                   </tr>
                 `).join('')}
@@ -687,7 +687,7 @@ export default function AuditoriaTarjetaScreen() {
                 </tr>
                 ${m.matchedGastos.map((g: any) => `
                   <tr class="sub-row">
-                    <td colspan="2">↳ <em>Gasto App:</em> ${g.empleado_nombre || 'Empleado'} - ${g.justificacion || g.proveedor || 'Sin detalles'}</td>
+                    <td colspan="2">↳ <em>Gasto App:</em> ${g.empleado_nombre || 'Empleado'} - ${g.justificacion || GastoHelper.getProveedor(g) || 'Sin detalles'}</td>
                     <td class="monto" style="color: #64748b; font-weight: normal;">${formatCurrency(Number(g.monto) || 0)}</td>
                   </tr>
                 `).join('')}
@@ -1120,7 +1120,7 @@ export default function AuditoriaTarjetaScreen() {
             </View>
             {matchedGastos.map(g => (
               <Text key={g.id} style={[styles.matchedText, { color: themeColors.textSecondary }]} numberOfLines={1}>
-                • {formatCurrency(g.monto)} — {g.justificacion || g.proveedor || 'Gasto'} ({g.empleado_nombre})
+                • {formatCurrency(g.monto)} — {g.justificacion || GastoHelper.getProveedor(g) || 'Gasto'} ({g.empleado_nombre})
               </Text>
             ))}
           </View>
@@ -1777,7 +1777,7 @@ export default function AuditoriaTarjetaScreen() {
                             <View style={{ flex: 1 }}>
                               <Text style={{ color: themeColors.text, fontWeight: 'bold' }}>{formatCurrency(Number(gasto.monto) || 0)}</Text>
                               <Text style={{ color: themeColors.textSecondary, fontSize: 12 }} numberOfLines={1}>
-                                {gasto.fecha_comprobante} · {gasto.justificacion || gasto.proveedor || 'Sin descripción'}
+                                {gasto.fecha_comprobante} · {gasto.justificacion || GastoHelper.getProveedor(gasto) || 'Sin descripción'}
                               </Text>
                             </View>
                           </TouchableOpacity>
@@ -1929,7 +1929,7 @@ export default function AuditoriaTarjetaScreen() {
                         >
                           {m.matchedGastos.map((g: any, gIdx: number) => (
                             <Text key={gIdx} style={[styles.matchedText, { color: themeColors.textSecondary }]} numberOfLines={1}>
-                              • {formatCurrency(g.monto)} — {g.justificacion || g.proveedor || 'Gasto'} ({g.empleado_nombre})
+                              • {formatCurrency(g.monto)} — {g.justificacion || GastoHelper.getProveedor(g) || 'Gasto'} ({g.empleado_nombre})
                             </Text>
                           ))}
                         </View>
