@@ -259,19 +259,48 @@ export interface Asistencia {
  */
 export const AsistenciaService = {
   /**
-   * Obtiene el registro de asistencia de hoy para un empleado.
+   * Obtiene la fecha de la jornada laboral en formato YYYY-MM-DD en hora local.
+   * La jornada laboral se reinicia a las 6:00 AM de cada día:
+   * - A partir de las 06:00:00 AM: Jornada del día actual (siempre pide entrada).
+   * - Antes de las 06:00:00 AM (00:00 - 05:59): Jornada del día anterior (permite checar salida de turnos que terminan de madrugada).
+   */
+  getFechaJornada(date: Date = new Date()): string {
+    const d = new Date(date);
+    if (d.getHours() < 6) {
+      d.setDate(d.getDate() - 1);
+    }
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  },
+
+  /**
+   * Obtiene la hora local formateada en HH:MM:SS
+   */
+  getHoraLocal(date: Date = new Date()): string {
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${hours}:${minutes}:${seconds}`;
+  },
+
+  /**
+   * Obtiene el registro de asistencia de la jornada actual (iniciada a las 6:00 AM) para un empleado.
    */
   async getRegistroHoy(empleadoId: string): Promise<Asistencia | null> {
-    const hoy = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const fechaJornada = this.getFechaJornada();
     const { data, error } = await supabase
       .from('asistencias')
       .select('*')
       .eq('empleado_id', empleadoId)
-      .eq('fecha', hoy)
+      .eq('fecha', fechaJornada)
+      .order('creado_en', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (error) {
-      logger.error('Error al obtener registro de hoy:', error);
+      logger.error('Error al obtener registro de la jornada actual:', error);
       throw error;
     }
     return data as Asistencia | null;
@@ -288,12 +317,14 @@ export const AsistenciaService = {
     direccion: string
   ): Promise<Asistencia> {
     const ahora = new Date();
-    const horaStr = ahora.toTimeString().split(' ')[0]; // HH:MM:SS
+    const horaStr = this.getHoraLocal(ahora);
+    const fechaStr = this.getFechaJornada(ahora);
 
     const { data, error } = await supabase
       .from('asistencias')
       .insert([{
         empleado_id: empleadoId,
+        fecha: fechaStr,
         hora_entrada: horaStr,
         foto_entrada_url: fotoUrl,
         latitud_entrada: latitud,
@@ -308,7 +339,7 @@ export const AsistenciaService = {
   },
 
   /**
-   * Registra la salida del empleado (actualiza el registro existente de hoy).
+   * Registra la salida del empleado (actualiza el registro existente de la jornada).
    */
   async registrarSalida(
     asistenciaId: string,
@@ -318,7 +349,7 @@ export const AsistenciaService = {
     direccion: string
   ): Promise<Asistencia> {
     const ahora = new Date();
-    const horaStr = ahora.toTimeString().split(' ')[0];
+    const horaStr = this.getHoraLocal(ahora);
 
     const { data, error } = await supabase
       .from('asistencias')
@@ -360,7 +391,8 @@ export const AsistenciaService = {
     tipo: 'entrada' | 'salida'
   ): Promise<string> {
     logger.error('[Supabase Storage] Iniciando subirFotoAsistencia...');
-    const fileName = `asistencias/${empleadoId}/${new Date().toISOString().split('T')[0]}_${tipo}_${Date.now()}.jpg`;
+    const fechaStr = this.getFechaJornada();
+    const fileName = `asistencias/${empleadoId}/${fechaStr}_${tipo}_${Date.now()}.jpg`;
     logger.error('[Supabase Storage] Nombre de archivo generado:', fileName);
 
     let cleanBase64 = base64Data;
