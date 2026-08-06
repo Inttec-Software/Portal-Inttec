@@ -239,7 +239,14 @@ export default function EditarGastoForm() {
         try {
           const { data, error } = await supabase
             .from('gastos')
-            .select('*')
+            .select(`
+              *,
+              categoria_rel:categorias(id, nombre),
+              subcategoria_rel:subcategorias(id, nombre),
+              proveedor_rel:proveedores(id, nombre),
+              cliente_rel:clientes(id, nombre),
+              sucursal_rel:sucursales_cliente(id, nombre)
+            `)
             .eq('id', id)
             .single();
 
@@ -261,8 +268,9 @@ export default function EditarGastoForm() {
               }
             }
 
-            setProveedor(data.proveedor || '');
-            if (!data.proveedor && data.justificacion) {
+            const resolvedProveedor = data.proveedor_rel?.nombre || data.proveedor || '';
+            setProveedor(resolvedProveedor);
+            if (!resolvedProveedor && data.justificacion) {
               const provMatch = data.justificacion.match(/\[Proveedor a agregar:\s*([^\]]+)\]/);
               if (provMatch) {
                 setComentarioProveedor(provMatch[1].trim());
@@ -270,13 +278,13 @@ export default function EditarGastoForm() {
             }
             setTipoServicioProyecto(data.tipo_servicio_proyecto as any || null);
             setDetalleServicioProyecto(data.detalle_servicio_proyecto || '');
-            setSucursal(data.sucursal || '');
+            setSucursal(data.sucursal_rel?.nombre || data.sucursal || '');
             setMetodoPago(data.metodo_pago as any || 'efectivo');
             setTipoTarjeta(data.tipo_tarjeta as any || null);
             setJustificacion(cleanJustificacion(data.justificacion));
-            setSelectedCategoria(data.categoria || '');
-            setSelectedSubcategoria(data.subcategoria || '');
-            setSelectedCliente(data.cliente || '');
+            setSelectedCategoria(data.categoria_rel?.nombre || data.categoria || '');
+            setSelectedSubcategoria(data.subcategoria_rel?.nombre || data.subcategoria || '');
+            setSelectedCliente(data.cliente_rel?.nombre || data.cliente || '');
             if (data.motivo_sin_factura?.startsWith('PENDIENTE_ENTREGA')) {
               setFacturado(false);
               setFacturaStatus('PENDIENTE');
@@ -674,16 +682,27 @@ export default function EditarGastoForm() {
       finalJustificacion = `[ALERTA IA: ${combinedAlert}]\n\n${finalJustificacion}`;
     }
     
+    const activeCatObj = categorias.find(c => c.nombre && c.nombre.trim().toLowerCase() === selectedCategoria.trim().toLowerCase());
+    const activeSubObj = subcategorias.find(s => s.nombre && s.nombre.trim().toLowerCase() === selectedSubcategoria.trim().toLowerCase() && (!activeCatObj || s.categoria_id === activeCatObj.id));
+    const activeProvObj = proveedores.find(p => p.nombre && p.nombre.trim().toLowerCase() === proveedor.trim().toLowerCase());
+    const activeCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === selectedCliente.trim().toLowerCase());
+    const activeSucObj = sucursalesCliente.find(s => s.nombre && s.nombre.trim().toLowerCase() === sucursal.trim().toLowerCase() && (!activeCliObj || s.cliente_id === activeCliObj.id));
+
     const gastoPayload = {
       monto: totalGasto,
       categoria: selectedCategoria,
+      categoria_id: activeCatObj?.id || null,
       subcategoria: selectedSubcategoria || null,
+      subcategoria_id: activeSubObj?.id || null,
       metodo_pago: metodoPago,
       justificacion: finalJustificacion,
       fecha_comprobante: dbFecha,
       proveedor: proveedor.trim() || null,
+      proveedor_id: activeProvObj?.id || null,
       cliente: selectedCliente || null,
+      cliente_id: activeCliObj?.id || null,
       sucursal: sucursal.trim() || null,
+      sucursal_id: activeSucObj?.id || null,
       tipo_tarjeta: tipoTarjeta,
       ubicacion_registro: 'Móvil',
       estado: null,

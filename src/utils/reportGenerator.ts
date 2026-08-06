@@ -3,7 +3,7 @@ import { cacheDirectory, writeAsStringAsync, EncodingType } from 'expo-file-syst
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform, Alert } from 'react-native';
-import { Gasto, Asistencia, Usuario, CompanyService } from '../services/supabase';
+import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
 import { Cotizacion } from '@/types/ventas';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
@@ -53,7 +53,7 @@ const hasPolicyAlert = (g: Gasto): { alert: boolean; reason: string } => {
   }
   
   // 2. Búsqueda complementaria de palabras clave en la justificación, categoría, subcategoría o proveedor
-  const textToSearch = `${just} ${g.categoria || ''} ${g.subcategoria || ''} ${g.proveedor || ''}`.toLowerCase();
+  const textToSearch = `${just} ${GastoHelper.getCategoria(g)} ${GastoHelper.getSubcategoria(g)} ${GastoHelper.getProveedor(g)}`.toLowerCase();
   
   if (textToSearch.includes('alcohol') || textToSearch.includes('cerveza') || textToSearch.includes('vino') || textToSearch.includes('licor') || textToSearch.includes('bebida alcohólica')) {
     return { alert: true, reason: 'Posible compra de alcohol' };
@@ -106,13 +106,18 @@ export const ReportGenerator = {
         alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">⚠️  ALERTA: ${reason}</div>`;
       }
 
+      const provName = GastoHelper.getProveedor(g) || 'N/A';
+      const catName = GastoHelper.getCategoria(g) || 'N/A';
+      const subName = GastoHelper.getSubcategoria(g) || '';
+      const sucName = GastoHelper.getSucursal(g) || 'Sin Sucursal';
+
       tableRows += `
         <tr ${rowStyle}>
           <td>${fecha}</td>
           <td>${g.empleado_nombre || 'Desconocido'}</td>
-          <td>${g.proveedor || 'N/A'} <br/><small style="color: #666;">${g.sucursal || 'Sin Sucursal'}</small></td>
+          <td>${provName} <br/><small style="color: #666;">${sucName}</small></td>
           <td>
-            ${g.categoria || 'N/A'} - ${g.subcategoria || ''}
+            ${catName}${subName ? ` - ${subName}` : ''}
             ${alertLabel}
           </td>
           <td>${g.metodo_pago}${g.tipo_tarjeta ? ` (${g.tipo_tarjeta})` : ''}</td>
@@ -428,13 +433,13 @@ export const ReportGenerator = {
         fecha,
         escape(g.empleado_nombre),
         g.monto,
-        escape(g.categoria),
-        escape(g.subcategoria),
-        escape(g.proveedor),
-        escape(g.cliente),
+        escape(GastoHelper.getCategoria(g)),
+        escape(GastoHelper.getSubcategoria(g)),
+        escape(GastoHelper.getProveedor(g)),
+        escape(GastoHelper.getCliente(g)),
         escape(g.tipo_servicio_proyecto),
         escape(g.detalle_servicio_proyecto),
-        escape(g.sucursal),
+        escape(GastoHelper.getSucursal(g)),
         g.metodo_pago,
         escape(g.tipo_tarjeta),
         escape(estadoFactura),

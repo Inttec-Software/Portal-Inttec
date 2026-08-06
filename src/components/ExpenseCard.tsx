@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
-import { Gasto } from '../services/supabase';
+import { Gasto, GastoHelper } from '../services/supabase';
 import { Ionicons } from '@expo/vector-icons';
 
 interface ExpenseCardProps {
@@ -34,6 +34,12 @@ export default function ExpenseCard({
       fecha = `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
   }
+
+  const categoriaNombre = GastoHelper.getCategoria(gasto);
+  const subcategoriaNombre = GastoHelper.getSubcategoria(gasto);
+  const proveedorNombre = GastoHelper.getProveedor(gasto);
+  const clienteNombre = GastoHelper.getCliente(gasto);
+  const sucursalNombre = GastoHelper.getSucursal(gasto);
 
   // Configuración de estados
   let statusText = 'PENDIENTE';
@@ -76,11 +82,11 @@ export default function ExpenseCard({
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
           <Ionicons
             name={
-              gasto.categoria?.toLowerCase().includes('transporte')
+              categoriaNombre.toLowerCase().includes('transporte')
                 ? 'car-outline'
-                : gasto.categoria?.toLowerCase().includes('aliment')
+                : categoriaNombre.toLowerCase().includes('aliment')
                 ? 'restaurant-outline'
-                : gasto.categoria?.toLowerCase().includes('hosped')
+                : categoriaNombre.toLowerCase().includes('hosped')
                 ? 'bed-outline'
                 : 'receipt-outline'
             }
@@ -88,8 +94,8 @@ export default function ExpenseCard({
             color={themeColors.accent}
           />
           <Text style={[styles.category, { color: themeColors.text }]} numberOfLines={1}>
-            {gasto.categoria || 'Sin Categoría'}
-            {gasto.subcategoria ? ` - ${gasto.subcategoria}` : ''}
+            {categoriaNombre || 'Sin Categoría'}
+            {subcategoriaNombre ? ` - ${subcategoriaNombre}` : ''}
           </Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -142,11 +148,11 @@ export default function ExpenseCard({
             {gasto.empleado_nombre}
           </Text>
         )}
-        {gasto.proveedor ? (
+        {proveedorNombre ? (
           <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
             <Text style={{fontWeight: '600', color: themeColors.text}}>Detalle: </Text>
-            {gasto.proveedor}
-            {gasto.cliente ? ` | ${gasto.cliente}` : ''}
+            {proveedorNombre}
+            {clienteNombre ? ` | ${clienteNombre}` : ''}
           </Text>
         ) : (
           (() => {
@@ -160,15 +166,15 @@ export default function ExpenseCard({
                 ) : (
                   <Text style={{ color: themeColors.danger, fontStyle: 'italic' }}>Sin proveedor</Text>
                 )}
-                {gasto.cliente ? ` | ${gasto.cliente}` : ''}
+                {clienteNombre ? ` | ${clienteNombre}` : ''}
               </Text>
             );
           })()
         )}
-        {gasto.sucursal ? (
+        {sucursalNombre ? (
           <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
             <Text style={{fontWeight: '600', color: themeColors.text}}>Sucursal: </Text>
-            {gasto.sucursal}
+            {sucursalNombre}
           </Text>
         ) : null}
       </View>

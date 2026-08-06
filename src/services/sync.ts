@@ -10,15 +10,20 @@ export interface OfflineGastoItem {
   empleado_nombre?: string | null;
   monto: number;
   categoria?: string | null;
+  categoria_id?: string | null;
   subcategoria?: string | null;
+  subcategoria_id?: string | null;
   metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito';
   justificacion?: string | null;
   base64Foto?: string | null; // Foto en base64 para guardado offline
   fotoExt?: string | null;
   fecha_comprobante?: string | null;
   proveedor?: string | null;
+  proveedor_id?: string | null;
   cliente?: string | null;
+  cliente_id?: string | null;
   sucursal?: string | null;
+  sucursal_id?: string | null;
   tipo_tarjeta?: string | null;
   ubicacion_registro?: string | null;
   estado?: string | null;
@@ -194,15 +199,20 @@ export const SyncService = {
                 empleado_nombre: item.empleado_nombre,
                 monto: item.monto,
                 categoria: item.categoria,
+                categoria_id: item.categoria_id || null,
                 subcategoria: item.subcategoria,
+                subcategoria_id: item.subcategoria_id || null,
                 metodo_pago: item.metodo_pago,
                 justificacion: item.justificacion,
                 foto_url: publicUrl || null,
                 status: 'PENDING',
                 fecha_comprobante: item.fecha_comprobante || new Date().toISOString().split('T')[0],
                 proveedor: item.proveedor || null,
+                proveedor_id: item.proveedor_id || null,
                 cliente: item.cliente || null,
+                cliente_id: item.cliente_id || null,
                 sucursal: item.sucursal || null,
+                sucursal_id: item.sucursal_id || null,
                 tipo_tarjeta: item.tipo_tarjeta || null,
                 ubicacion_registro: item.ubicacion_registro || 'Móvil (Offline Sync)',
                 estado: item.estado || null,

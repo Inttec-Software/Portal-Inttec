@@ -113,7 +113,9 @@ export interface Gasto {
   empleado_nombre?: string | null;
   monto: number;
   categoria?: string | null;
+  categoria_id?: string | null;
   subcategoria?: string | null;
+  subcategoria_id?: string | null;
   metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito';
   justificacion?: string | null;
   foto_url?: string | null;
@@ -123,8 +125,11 @@ export interface Gasto {
   approved_at?: string | null;
   fecha_comprobante?: string | null;
   proveedor?: string | null;
+  proveedor_id?: string | null;
   cliente?: string | null;
+  cliente_id?: string | null;
   sucursal?: string | null;
+  sucursal_id?: string | null;
   tipo_tarjeta?: string | null;
   ubicacion_registro?: string | null;
   estado?: string | null;
@@ -134,7 +139,37 @@ export interface Gasto {
   tipo_servicio_proyecto?: string | null;
   detalle_servicio_proyecto?: string | null;
   venta_id?: string | null;
+  // Relaciones Joins
+  categoria_rel?: { id: string; nombre: string } | null;
+  subcategoria_rel?: { id: string; nombre: string } | null;
+  proveedor_rel?: { id: string; nombre: string } | null;
+  cliente_rel?: { id: string; nombre: string } | null;
+  sucursal_rel?: { id: string; nombre: string } | null;
 }
+
+export const GastoHelper = {
+  getCategoria: (g: Gasto | null | undefined): string => {
+    if (!g) return '';
+    return g.categoria_rel?.nombre || g.categoria || '';
+  },
+  getSubcategoria: (g: Gasto | null | undefined): string => {
+    if (!g) return '';
+    return g.subcategoria_rel?.nombre || g.subcategoria || '';
+  },
+  getProveedor: (g: Gasto | null | undefined): string => {
+    if (!g) return '';
+    return g.proveedor_rel?.nombre || g.proveedor || '';
+  },
+  getCliente: (g: Gasto | null | undefined): string => {
+    if (!g) return '';
+    return g.cliente_rel?.nombre || g.cliente || '';
+  },
+  getSucursal: (g: Gasto | null | undefined): string => {
+    if (!g) return '';
+    return g.sucursal_rel?.nombre || g.sucursal || '';
+  },
+  GASTOS_SELECT_QUERY: `*, categoria_rel:categorias(id, nombre), subcategoria_rel:subcategorias(id, nombre), proveedor_rel:proveedores(id, nombre), cliente_rel:clientes(id, nombre), sucursal_rel:sucursales_cliente(id, nombre)`
+};
 
 export interface Evidencia {
   id: string;

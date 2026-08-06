@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
+import { supabase, Gasto, GastoHelper, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
 import { SyncService, OfflineGastoItem } from '@/services/sync';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
@@ -388,7 +388,14 @@ export default function EmpleadoDashboard() {
       // 1. Obtener de Supabase
       const { data, error } = await supabase
         .from('gastos')
-        .select('*')
+        .select(`
+          *,
+          categoria_rel:categorias(id, nombre),
+          subcategoria_rel:subcategorias(id, nombre),
+          proveedor_rel:proveedores(id, nombre),
+          cliente_rel:clientes(id, nombre),
+          sucursal_rel:sucursales_cliente(id, nombre)
+        `)
         .eq('empleado_id', userId)
         .order('created_at', { ascending: false });
 
@@ -1051,7 +1058,7 @@ export default function EmpleadoDashboard() {
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Proveedor</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedGasto.proveedor || 'N/A'}
+                      {GastoHelper.getProveedor(selectedGasto) || 'N/A'}
                     </Text>
                   </View>
 
@@ -1065,7 +1072,7 @@ export default function EmpleadoDashboard() {
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Categoría / Subcategoría</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedGasto.categoria || 'Sin Categoría'} {selectedGasto.subcategoria ? ` > ${selectedGasto.subcategoria}` : ''}
+                      {GastoHelper.getCategoria(selectedGasto) || 'Sin Categoría'} {GastoHelper.getSubcategoria(selectedGasto) ? ` > ${GastoHelper.getSubcategoria(selectedGasto)}` : ''}
                     </Text>
                   </View>
 
@@ -1113,9 +1120,9 @@ export default function EmpleadoDashboard() {
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Sucursal / Cliente</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedGasto.sucursal ? `Sucursal: ${selectedGasto.sucursal}` : ''}
-                      {selectedGasto.cliente ? `${selectedGasto.sucursal ? ' | ' : ''}Cliente: ${selectedGasto.cliente}` : ''}
-                      {!selectedGasto.sucursal && !selectedGasto.cliente ? 'N/A' : ''}
+                      {GastoHelper.getSucursal(selectedGasto) ? `Sucursal: ${GastoHelper.getSucursal(selectedGasto)}` : ''}
+                      {GastoHelper.getCliente(selectedGasto) ? `${GastoHelper.getSucursal(selectedGasto) ? ' | ' : ''}Cliente: ${GastoHelper.getCliente(selectedGasto)}` : ''}
+                      {!GastoHelper.getSucursal(selectedGasto) && !GastoHelper.getCliente(selectedGasto) ? 'N/A' : ''}
                     </Text>
                   </View>
 

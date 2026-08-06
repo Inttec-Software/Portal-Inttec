@@ -655,18 +655,29 @@ export default function GastoForm() {
       finalJustificacion = `[ALERTA IA: ${combinedAlert}]\n\n${finalJustificacion}`;
     }
     
+    const activeCatObj = categorias.find(c => c.nombre && c.nombre.trim().toLowerCase() === selectedCategoria.trim().toLowerCase());
+    const activeSubObj = subcategorias.find(s => s.nombre && s.nombre.trim().toLowerCase() === selectedSubcategoria.trim().toLowerCase() && (!activeCatObj || s.categoria_id === activeCatObj.id));
+    const activeProvObj = proveedores.find(p => p.nombre && p.nombre.trim().toLowerCase() === proveedor.trim().toLowerCase());
+    const activeCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === selectedCliente.trim().toLowerCase());
+    const activeSucObj = sucursalesCliente.find(s => s.nombre && s.nombre.trim().toLowerCase() === sucursal.trim().toLowerCase() && (!activeCliObj || s.cliente_id === activeCliObj.id));
+
     const gastoPayload = {
       empleado_id: currentUser.id,
       empleado_nombre: currentUser.nombre,
       monto: totalGasto,
       categoria: selectedCategoria,
+      categoria_id: activeCatObj?.id || null,
       subcategoria: selectedSubcategoria || null,
+      subcategoria_id: activeSubObj?.id || null,
       metodo_pago: metodoPago,
       justificacion: finalJustificacion,
       fecha_comprobante: dbFecha,
       proveedor: proveedor.trim() || null,
+      proveedor_id: activeProvObj?.id || null,
       cliente: selectedCliente || null,
+      cliente_id: activeCliObj?.id || null,
       sucursal: sucursal.trim() || null,
+      sucursal_id: activeSucObj?.id || null,
       tipo_tarjeta: tipoTarjeta,
       ubicacion_registro: 'Móvil',
       estado: null,
@@ -721,15 +732,19 @@ export default function GastoForm() {
           publicInvoiceUrl = urlData.publicUrl;
         }
 
-        let payloadsToInsert = isSplit ? splits.map((s, index) => ({
-          ...gastoPayload,
-          monto: Number(s.monto),
-          cliente: s.clienteId || null,
-          justificacion: `[Gasto dividido del ticket total de $${totalGasto}] - División ${index + 1}/${splits.length}\n\n${gastoPayload.justificacion}`,
-          foto_url: publicUrl || null,
-          factura_url: publicInvoiceUrl || null,
-          status: 'PENDING',
-        })) : [
+        let payloadsToInsert = isSplit ? splits.map((s, index) => {
+          const splitCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (s.clienteId || '').trim().toLowerCase());
+          return {
+            ...gastoPayload,
+            monto: Number(s.monto),
+            cliente: s.clienteId || null,
+            cliente_id: splitCliObj?.id || null,
+            justificacion: `[Gasto dividido del ticket total de $${totalGasto}] - División ${index + 1}/${splits.length}\n\n${gastoPayload.justificacion}`,
+            foto_url: publicUrl || null,
+            factura_url: publicInvoiceUrl || null,
+            status: 'PENDING',
+          };
+        }) : [
           {
             ...gastoPayload,
             foto_url: publicUrl || null,
@@ -742,10 +757,12 @@ export default function GastoForm() {
           const sum = splits.reduce((acc, curr) => acc + Number(curr.monto), 0);
           const remainder = totalGasto - sum;
           if (remainder > 0.01) {
+            const remainderCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (selectedCliente || '').trim().toLowerCase());
             payloadsToInsert.push({
               ...gastoPayload,
               monto: remainder,
               cliente: selectedCliente || null,
+              cliente_id: remainderCliObj?.id || null,
               justificacion: `[Gasto principal / Restante del ticket total de $${totalGasto}]\n\n${gastoPayload.justificacion}`,
               foto_url: publicUrl || null,
               factura_url: publicInvoiceUrl || null,
@@ -764,13 +781,14 @@ export default function GastoForm() {
         // Notificar a los administradores del nuevo gasto
         const { data: admins } = await supabase.from('usuarios').select('id').eq('rol', 'ADMIN');
         if (admins && admins.length > 0) {
-          admins.forEach(admin => {
-            PushNotificationService.sendPushNotification(
-              admin.id,
-              'Nuevo Gasto Registrado',
-              `${currentUser.nombre} ha registrado un nuevo gasto por $${totalGasto.toFixed(2)}.`
-            );
-          });
+          const notifications = admins.map(admin => ({
+            usuario_id: admin.id,
+            titulo: 'Nuevo Gasto Registrado',
+            mensaje: `${currentUser.nombre} ha registrado un gasto de $${totalGasto.toFixed(2)} (${selectedCategoria})`,
+            tipo: 'GASTO_NUEVO',
+            referencia_id: insertedGastos?.[0]?.id,
+          }));
+          await supabase.from('notificaciones').insert(notifications);
         }
 
         // Si es combustible, guardar bitácora de gasolina vinculada y sincronizar kilometraje en ambas empresas
@@ -778,29 +796,20 @@ export default function GastoForm() {
         const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
         const esGasolina = esVehiculos && esSubGasolina;
         if (esGasolina && insertedGastos && insertedGastos.length > 0) {
-          const mainGastoId = insertedGastos[0].id;
-          const { error: gasError } = await supabase
-            .from('registro_gasolina')
-            .insert([
-              {
-                gasto_id: mainGastoId,
-                vehiculo_id: selectedVehiculoId,
-                empleado_id: currentUser.id,
-                fecha: dbFecha,
-                kilometraje_actual: Number(kilometrajeActual),
-                litros: Number(litrosGasolina),
-                costo_total: totalGasto,
-                ticket_foto_url: publicUrl || null,
-              },
-            ]);
-
-          if (gasError) {
-            console.error('Error insertando en registro_gasolina:', gasError.message);
-          } else {
-            const vehiculoObj = vehiculos.find((v) => v.id === selectedVehiculoId);
-            if (vehiculoObj?.placas) {
-              await VehiculoService.syncVehiculoKilometraje(vehiculoObj.placas, Number(kilometrajeActual));
-            }
+          try {
+            await VehiculoService.crearRegistroGasolina({
+              gasto_id: insertedGastos[0].id,
+              vehiculo_id: selectedVehiculoId,
+              empleado_id: currentUser.id,
+              fecha: dbFecha,
+              kilometraje_actual: Number(kilometrajeActual),
+              litros: Number(litrosGasolina),
+              costo_total: Number(totalGasto),
+              ticket_foto_url: publicUrl || undefined,
+              observaciones: `Registro automático desde formulario de gastos. Proveedor: ${proveedor || 'N/A'}`,
+            });
+          } catch (gasError) {
+            console.error('Error al registrar combustible:', gasError);
           }
         }
 
@@ -813,10 +822,12 @@ export default function GastoForm() {
         if (isSplit) {
           for (let i = 0; i < splits.length; i++) {
             const s = splits[i];
+            const splitCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (s.clienteId || '').trim().toLowerCase());
             await SyncService.enqueueGasto({
               ...gastoPayload,
               monto: Number(s.monto),
               cliente: s.clienteId || null,
+              cliente_id: splitCliObj?.id || null,
               justificacion: `[Gasto dividido del ticket total de $${totalGasto}] - División ${i + 1}/${splits.length}\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
               fotoExt: imageExt,
@@ -828,10 +839,12 @@ export default function GastoForm() {
           const sum = splits.reduce((acc, curr) => acc + Number(curr.monto), 0);
           const remainder = totalGasto - sum;
           if (remainder > 0.01) {
+            const remainderCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (selectedCliente || '').trim().toLowerCase());
             await SyncService.enqueueGasto({
               ...gastoPayload,
               monto: remainder,
               cliente: selectedCliente || null,
+              cliente_id: remainderCliObj?.id || null,
               justificacion: `[Gasto principal / Restante del ticket total de $${totalGasto}]\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
               fotoExt: imageExt,

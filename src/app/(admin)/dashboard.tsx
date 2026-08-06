@@ -22,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
+import { supabase, Gasto, GastoHelper, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
@@ -296,7 +296,14 @@ export default function AdminDashboard() {
     }
     try {
       const [gastosRes, usersRes, vehList, gasLogs] = await Promise.all([
-        supabase.from('gastos').select('*').order('created_at', { ascending: false }),
+        supabase.from('gastos').select(`
+          *,
+          categoria_rel:categorias(id, nombre),
+          subcategoria_rel:subcategorias(id, nombre),
+          proveedor_rel:proveedores(id, nombre),
+          cliente_rel:clientes(id, nombre),
+          sucursal_rel:sucursales_cliente(id, nombre)
+        `).order('created_at', { ascending: false }),
         supabase.from('usuarios').select('*').order('nombre'),
         VehiculoService.getVehiculos(false),
         VehiculoService.getRegistrosGasolina(),
@@ -2775,12 +2782,12 @@ export default function AdminDashboard() {
 
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Proveedor</Text>
-                    <Text style={[styles.detailValue, { color: selectedGasto.proveedor ? themeColors.text : themeColors.danger, fontWeight: selectedGasto.proveedor ? 'normal' : '700' }]}>
-                      {selectedGasto.proveedor || '⚠️ En blanco (Requiere indicar proveedor para aprobar)'}
+                    <Text style={[styles.detailValue, { color: GastoHelper.getProveedor(selectedGasto) ? themeColors.text : themeColors.danger, fontWeight: GastoHelper.getProveedor(selectedGasto) ? 'normal' : '700' }]}>
+                      {GastoHelper.getProveedor(selectedGasto) || '⚠️ En blanco (Requiere indicar proveedor para aprobar)'}
                     </Text>
                   </View>
 
-                  {(!selectedGasto.proveedor || !selectedGasto.proveedor.trim()) && (
+                  {(!GastoHelper.getProveedor(selectedGasto) || !GastoHelper.getProveedor(selectedGasto).trim()) && (
                     <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '18', borderColor: themeColors.warning, marginVertical: Spacing.half, padding: Spacing.two, borderRadius: BorderRadius.medium, borderWidth: 1, flexDirection: 'row', gap: Spacing.one }]}>
                       <Ionicons name="alert-circle-outline" size={22} color={themeColors.warning} style={{ marginTop: 2 }} />
                       <View style={{ flex: 1 }}>
@@ -2811,7 +2818,7 @@ export default function AdminDashboard() {
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Cliente / Sucursal</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedGasto.cliente || 'No especificado'} {selectedGasto.sucursal ? `- Sucursal: ${selectedGasto.sucursal}` : ''}
+                      {GastoHelper.getCliente(selectedGasto) || 'No especificado'} {GastoHelper.getSucursal(selectedGasto) ? `- Sucursal: ${GastoHelper.getSucursal(selectedGasto)}` : ''}
                     </Text>
                   </View>
 
@@ -2825,7 +2832,7 @@ export default function AdminDashboard() {
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Categoría / Subcategoría</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedGasto.categoria || 'Sin Categoría'} {selectedGasto.subcategoria ? `> ${selectedGasto.subcategoria}` : ''}
+                      {GastoHelper.getCategoria(selectedGasto) || 'Sin Categoría'} {GastoHelper.getSubcategoria(selectedGasto) ? `> ${GastoHelper.getSubcategoria(selectedGasto)}` : ''}
                     </Text>
                   </View>
 

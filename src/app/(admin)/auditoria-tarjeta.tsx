@@ -23,7 +23,7 @@ import * as Sharing from 'expo-sharing';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, AuditoriaService, AuditoriaTarjeta } from '@/services/supabase';
+import { supabase, Gasto, GastoHelper, AuditoriaService, AuditoriaTarjeta } from '@/services/supabase';
 import { GeminiService, CardTransaction, CardStatementResult } from '@/services/gemini';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import { useAuth } from '@/context/AuthContext';
@@ -227,7 +227,14 @@ export default function AuditoriaTarjetaScreen() {
       // 3. Fetch gastos filtered by SPECIFIC card AND payment method
       let query = supabase
         .from('gastos')
-        .select('*')
+        .select(`
+          *,
+          categoria_rel:categorias(id, nombre),
+          subcategoria_rel:subcategorias(id, nombre),
+          proveedor_rel:proveedores(id, nombre),
+          cliente_rel:clientes(id, nombre),
+          sucursal_rel:sucursales_cliente(id, nombre)
+        `)
         .eq('status', 'APPROVED')
         .eq('tipo_tarjeta', selectedTarjeta)
         .gte('fecha_comprobante', minDate)
@@ -1704,7 +1711,7 @@ export default function AuditoriaTarjetaScreen() {
 
                       <View style={styles.modalFieldList}>
                         <ModalField label="Empleado" value={gasto.empleado_nombre ?? '—'} themeColors={themeColors} />
-                        <ModalField label="Proveedor" value={gasto.proveedor ?? '—'} themeColors={themeColors} />
+                        <ModalField label="Proveedor" value={GastoHelper.getProveedor(gasto) || '—'} themeColors={themeColors} />
                         <ModalField label="Justificación" value={gasto.justificacion ?? '—'} themeColors={themeColors} />
                         <ModalField label="Fecha comprobante" value={gasto.fecha_comprobante ?? '—'} themeColors={themeColors} />
                         <ModalField
@@ -1715,8 +1722,8 @@ export default function AuditoriaTarjetaScreen() {
                           bold
                         />
                         <ModalField label="Método de pago" value={`${gasto.metodo_pago}${gasto.tipo_tarjeta ? ` (${gasto.tipo_tarjeta})` : ''}`} themeColors={themeColors} />
-                        {gasto.categoria ? (
-                          <ModalField label="Categoría" value={`${gasto.categoria}${gasto.subcategoria ? ` / ${gasto.subcategoria}` : ''}`} themeColors={themeColors} />
+                        {GastoHelper.getCategoria(gasto) ? (
+                          <ModalField label="Categoría" value={`${GastoHelper.getCategoria(gasto)}${GastoHelper.getSubcategoria(gasto) ? ` / ${GastoHelper.getSubcategoria(gasto)}` : ''}`} themeColors={themeColors} />
                         ) : null}
                       </View>
                     </View>

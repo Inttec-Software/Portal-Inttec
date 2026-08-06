@@ -61,7 +61,14 @@ export default function EmployeeChatIA() {
         };
 
         const [misGastos, misAsistencias, misGasolinas] = await Promise.all([
-          safeQuery(supabase.from('gastos').select('*').eq('empleado_id', user.id).order('created_at', { ascending: false }).limit(500)),
+          safeQuery(supabase.from('gastos').select(`
+            *,
+            categoria_rel:categorias(id, nombre),
+            subcategoria_rel:subcategorias(id, nombre),
+            proveedor_rel:proveedores(id, nombre),
+            cliente_rel:clientes(id, nombre),
+            sucursal_rel:sucursales_cliente(id, nombre)
+          `).eq('empleado_id', user.id).order('created_at', { ascending: false }).limit(500)),
           safeQuery(supabase.from('asistencias').select('*').eq('usuario_id', user.id).order('fecha', { ascending: false }).limit(100)),
           safeQuery(supabase.from('registro_gasolina').select('*').eq('empleado_id', user.id).order('fecha', { ascending: false }).limit(100))
         ]);
