@@ -46,41 +46,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import ImageViewerModal from '@/components/ImageViewerModal';
 
-const ESTADOS_MEXICO = [
-  'Aguascalientes',
-  'Baja California',
-  'Baja California Sur',
-  'Campeche',
-  'Chiapas',
-  'Chihuahua',
-  'Coahuila',
-  'Colima',
-  'Ciudad de México',
-  'Durango',
-  'Guanajuato',
-  'Guerrero',
-  'Hidalgo',
-  'Jalisco',
-  'Estado de México',
-  'Michoacán',
-  'Morelos',
-  'Nayarit',
-  'Nuevo León',
-  'Oaxaca',
-  'Puebla',
-  'Querétaro',
-  'Quintana Roo',
-  'San Luis Potosí',
-  'Sinaloa',
-  'Sonora',
-  'Tabasco',
-  'Tamaulipas',
-  'Tlaxcala',
-  'Veracruz',
-  'Yucatán',
-  'Zacatecas'
-];
-
 const showAlert = (title: string, message: string) => { if (Platform.OS === 'web') { window.alert(title + '\n\n' + message); } else { Alert.alert(title, message); } };
 
 export default function GastoForm() {
@@ -143,12 +108,6 @@ export default function GastoForm() {
   const [dateValue, setDateValue] = useState(new Date());
   const [alertaPolitica, setAlertaPolitica] = useState<string | null>(null);
   
-  // Estado de la República
-  const [selectedEstado, setSelectedEstado] = useState<string>('');
-  const [showEstDropdown, setShowEstDropdown] = useState(false);
-
-
-
   const [incluyePropina, setIncluyePropina] = useState<boolean | null>(null);
   const [montoPropina, setMontoPropina] = useState<string>('');
   const [esComida, setEsComida] = useState<boolean>(false);
@@ -710,7 +669,7 @@ export default function GastoForm() {
       sucursal: sucursal.trim() || null,
       tipo_tarjeta: tipoTarjeta,
       ubicacion_registro: 'Móvil',
-      estado: selectedEstado || null,
+      estado: null,
       facturado,
       motivo_sin_factura: facturado === true
         ? null
@@ -928,10 +887,7 @@ export default function GastoForm() {
         showAlert('Validación', 'Por favor ingresa la fecha en formato DD/MM/AAAA (ej. 09/06/2026).');
         return;
       }
-      if (!selectedEstado) {
-        showAlert('Validación', 'Por favor selecciona el Estado de la República.');
-        return;
-      }
+
       if (metodoPago !== 'efectivo' && !tipoTarjeta) {
         showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE).');
         return;
@@ -962,7 +918,7 @@ export default function GastoForm() {
 
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const isAnyDropdownOpen = !!(showEmpList || showEstDropdown || showCatDropdown || showSubDropdown || showCliDropdown);
+  const isAnyDropdownOpen = !!(showEmpList || showCatDropdown || showSubDropdown || showCliDropdown);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
@@ -986,7 +942,6 @@ export default function GastoForm() {
           <Pressable
             onPress={() => {
               setShowEmpList(false);
-              setShowEstDropdown(false);
               setShowCatDropdown(false);
               setShowSubDropdown(false);
               setShowCliDropdown(false);
@@ -1399,7 +1354,6 @@ export default function GastoForm() {
                   onPress={() => {
                     Keyboard.dismiss();
                     setShowProvDropdown(!showProvDropdown);
-                    setShowEstDropdown(false);
                     setShowEmpList(false);
                   }}
                 >
@@ -1687,7 +1641,6 @@ export default function GastoForm() {
                       onPress={() => {
                         Keyboard.dismiss();
                         setShowSucursalDropdown(!showSucursalDropdown);
-                        setShowEstDropdown(false);
                         setShowCatDropdown(false);
                         setShowSubDropdown(false);
                         setShowCliDropdown(false);
@@ -1772,48 +1725,7 @@ export default function GastoForm() {
                   </TouchableOpacity>
                 </View>
               )}
-              {/* Selector de Estado de la República */}
-              <View style={styles.customDropdownContainer}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Estado de la República *</Text>
-                <TouchableOpacity
-                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setShowEstDropdown(!showEstDropdown);
-                    setShowDatePicker(false);
-                  }}
-                >
-                  <Text style={{ color: selectedEstado ? themeColors.text : themeColors.textSecondary }}>
-                    {selectedEstado || 'Selecciona un Estado'}
-                  </Text>
-                  <Ionicons name={showEstDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-                </TouchableOpacity>
-                {showEstDropdown && (
-                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
-                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                        {ESTADOS_MEXICO.map((est, index, array) => (
-                          <TouchableOpacity
-                            key={est}
-                            style={[
-                              styles.dropdownItem,
-                              index === array.length - 1 && { borderBottomWidth: 0 },
-                              { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                            ]}
-                            onPress={() => {
-                              setSelectedEstado(est);
-                              setShowEstDropdown(false);
-                            }}
-                          >
-                            <Ionicons name="location-outline" size={24} color={themeColors.primary} />
-                            <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{est}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  </Pressable>
-                )}
-              </View>
+
 
               {/* Selector de Método de Pago */}
               <View style={styles.selectorGroup}>

@@ -42,42 +42,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import ImageViewerModal from '@/components/ImageViewerModal';
 
-const ESTADOS_MEXICO = [
-  'Aguascalientes',
-  'Baja California',
-  'Baja California Sur',
-  'Campeche',
-  'Chiapas',
-  'Chihuahua',
-  'Coahuila',
-  'Colima',
-  'Ciudad de México',
-  'Durango',
-  'Guanajuato',
-  'Guerrero',
-  'Hidalgo',
-  'Jalisco',
-  'Estado de México',
-  'Michoacán',
-  'Morelos',
-  'Nayarit',
-  'Nuevo León',
-  'Oaxaca',
-  'Puebla',
-  'Querétaro',
-  'Quintana Roo',
-  'San Luis Potosí',
-  'Sinaloa',
-  'Sonora',
-  'Tabasco',
-  'Tamaulipas',
-  'Tlaxcala',
-  'Veracruz',
-  'Yucatán',
-  'Zacatecas'
-];
-
-
 const showAlert = (title: string, message: string) => { if (Platform.OS === 'web') { window.alert(title + '\n\n' + message); } else { Alert.alert(title, message); } };
 
 const cleanJustificacion = (text: string | null | undefined): string => {
@@ -157,18 +121,9 @@ export default function EditarGastoForm() {
   const [facturaStatus, setFacturaStatus] = useState<'SI' | 'PENDIENTE' | 'NO' | null>(null);
   const [comentarioPendiente, setComentarioPendiente] = useState('');
   
-  // Estado de la República
-  const [selectedEstado, setSelectedEstado] = useState<string>('');
-  const [showEstDropdown, setShowEstDropdown] = useState(false);
-
-
-
   const [incluyePropina, setIncluyePropina] = useState<boolean | null>(null);
   const [montoPropina, setMontoPropina] = useState<string>('');
   const [esComida, setEsComida] = useState<boolean>(false);
-
-
-
 
   const formatFriendlyToDb = (friendlyStr: string) => {
     if (!friendlyStr) return '';
@@ -309,7 +264,6 @@ export default function EditarGastoForm() {
             setTipoServicioProyecto(data.tipo_servicio_proyecto as any || null);
             setDetalleServicioProyecto(data.detalle_servicio_proyecto || '');
             setSucursal(data.sucursal || '');
-            setSelectedEstado(data.estado || '');
             setMetodoPago(data.metodo_pago as any || 'efectivo');
             setTipoTarjeta(data.tipo_tarjeta as any || null);
             setJustificacion(cleanJustificacion(data.justificacion));
@@ -687,7 +641,7 @@ export default function EditarGastoForm() {
       sucursal: sucursal.trim() || null,
       tipo_tarjeta: tipoTarjeta,
       ubicacion_registro: 'Móvil',
-      estado: selectedEstado || null,
+      estado: null,
       facturado: facturado,
       motivo_sin_factura: facturado ? null : (facturaStatus === 'PENDIENTE' ? `PENDIENTE_ENTREGA: ${comentarioPendiente}` : motivoSinFactura.trim() || null),
       tipo_servicio_proyecto: tipoServicioProyecto,
@@ -792,10 +746,7 @@ export default function EditarGastoForm() {
         showAlert('Validación', 'Por favor ingresa la fecha en formato DD/MM/AAAA (ej. 09/06/2026).');
         return;
       }
-      if (!selectedEstado) {
-        showAlert('Validación', 'Por favor selecciona el Estado de la República.');
-        return;
-      }
+
       if (metodoPago !== 'efectivo' && !tipoTarjeta) {
         showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE).');
         return;
@@ -824,8 +775,8 @@ export default function EditarGastoForm() {
     setCurrentStep((prev) => prev - 1);
   };
 
-
-  const _isAnyDropdownOpen = !!(showEmpList || showEstDropdown || showCatDropdown || showSubDropdown || showCliDropdown);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _isAnyDropdownOpen = !!(showEmpList || showCatDropdown || showSubDropdown || showCliDropdown);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
@@ -834,7 +785,7 @@ export default function EditarGastoForm() {
         <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/dashboard')} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={themeColors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: themeColors.text }]}>Registrar Gasto</Text>
+        <Text style={[styles.headerTitle, { color: themeColors.text }]}>Editar Gasto</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -849,7 +800,6 @@ export default function EditarGastoForm() {
           <Pressable
             onPress={() => {
               setShowEmpList(false);
-              setShowEstDropdown(false);
               setShowCatDropdown(false);
               setShowSubDropdown(false);
               setShowCliDropdown(false);
@@ -1253,7 +1203,6 @@ export default function EditarGastoForm() {
                   onPress={() => {
                     Keyboard.dismiss();
                     setShowProvDropdown(!showProvDropdown);
-                    setShowEstDropdown(false);
                     setShowEmpList(false);
                   }}
                 >
@@ -1475,7 +1424,6 @@ export default function EditarGastoForm() {
                     setShowCliDropdown(!showCliDropdown);
                     setShowCatDropdown(false);
                     setShowSubDropdown(false);
-                    setShowEstDropdown(false);
                   }}
                 >
                   <Text style={{ color: selectedCliente ? themeColors.text : themeColors.textSecondary }}>
@@ -1534,7 +1482,6 @@ export default function EditarGastoForm() {
                   onPress={() => {
                     Keyboard.dismiss();
                     setShowSucursalDropdown(!showSucursalDropdown);
-                    setShowEstDropdown(false);
                     setShowCatDropdown(false);
                     setShowSubDropdown(false);
                     setShowCliDropdown(false);
@@ -1585,42 +1532,7 @@ export default function EditarGastoForm() {
                   </Pressable>
                 )}
               </View>
-              {/* Selector de Estado de la República */}
-              <View style={styles.customDropdownContainer}>
-                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Estado de la República *</Text>
-                <TouchableOpacity
-                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                  onPress={() => {
-                    setShowEstDropdown(!showEstDropdown);
-                    setShowDatePicker(false);
-                  }}
-                >
-                  <Text style={{ color: selectedEstado ? themeColors.text : themeColors.textSecondary }}>
-                    {selectedEstado || 'Selecciona un Estado'}
-                  </Text>
-                  <Ionicons name={showEstDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-                </TouchableOpacity>
-                {showEstDropdown && (
-                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
-                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
-                        {ESTADOS_MEXICO.map((est) => (
-                          <TouchableOpacity
-                            key={est}
-                            style={styles.dropdownItem}
-                            onPress={() => {
-                              setSelectedEstado(est);
-                              setShowEstDropdown(false);
-                            }}
-                          >
-                            <Text style={{ color: themeColors.text }}>{est}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  </Pressable>
-                )}
-              </View>
+
 
               {/* Selector de Método de Pago */}
               <View style={styles.selectorGroup}>
@@ -1888,7 +1800,6 @@ export default function EditarGastoForm() {
                     setShowCatDropdown(!showCatDropdown);
                   setShowSubDropdown(false);
                   setShowCliDropdown(false);
-                  setShowEstDropdown(false);
                   }}
                 >
                   <Text style={{ color: selectedCategoria ? themeColors.text : themeColors.textSecondary }}>
@@ -1929,7 +1840,6 @@ export default function EditarGastoForm() {
                       setShowSubDropdown(!showSubDropdown);
                       setShowCatDropdown(false);
                       setShowCliDropdown(false);
-                      setShowEstDropdown(false);
                     }}
                   >
                     <Text style={{ color: selectedSubcategoria ? themeColors.text : themeColors.textSecondary }}>
