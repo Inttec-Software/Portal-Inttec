@@ -34,6 +34,7 @@ import {
   SucursalCliente,
   AuthService,
 } from '@/services/supabase';
+import { CatalogService } from '@/services/catalogService';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { PushNotificationService } from '@/services/pushNotifications';
 import { getComentariosPlaceholder, isCombustibleExpense } from '@/utils/helpers';
@@ -432,31 +433,10 @@ export default function GastoForm() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleAddNewCliente = async (nombre: string) => {
     try {
-      const { data, error } = await supabase
-        .from('clientes')
-        .insert([{ nombre: nombre.trim() }])
-        .select();
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const newCli = data[0];
-        if (newCli) {
-          setSelectedCliente(newCli.nombre);
-          setSucursal('');
-        } else {
-          // Fallback optimista si no retornó
-          if (!clientes.some(c => c.nombre === nombre.trim())) {
-            setSelectedCliente(nombre.trim());
-            setSucursal('');
-          }
-        }
-        setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-      } else {
-        const { data: allCli } = await supabase.from('clientes').select('*').order('nombre');
-        if (allCli) {
-          setClientes(allCli);
-          setSelectedCliente(nombre.trim());
-        }
-      }
+      const newCli = await CatalogService.crearCliente({ nombre: nombre.trim() });
+      setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setSelectedCliente(newCli.nombre);
+      setSucursal('');
       setClienteSearch('');
       setShowCliDropdown(false);
     } catch (err: any) {
@@ -473,25 +453,15 @@ export default function GastoForm() {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('sucursales_cliente')
-        .insert([{ cliente_id: currentCliente.id, nombre: nombre.trim().toUpperCase() }])
-        .select();
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const newSuc = data[0];
-        setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-        setSucursal(newSuc.nombre);
-      } else {
-        const { data: allSuc } = await supabase.from('sucursales_cliente').select('*').order('nombre');
-        if (allSuc) {
-          setSucursalesCliente(allSuc);
-          setSucursal(nombre.trim().toUpperCase());
-        }
-      }
+      const newSuc = await CatalogService.crearSucursal({
+        cliente_id: currentCliente.id,
+        nombre: nombre.trim().toUpperCase(),
+      });
+      setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setSucursal(newSuc.nombre);
       setSucursalSearch('');
       setShowSucursalDropdown(false);
-      showAlert('Éxito', `Sucursal "${nombre.trim().toUpperCase()}" agregada y vinculada a ${currentCliente.nombre}.`);
+      showAlert('Éxito', `Sucursal "${newSuc.nombre}" agregada y vinculada a ${currentCliente.nombre}.`);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo agregar la sucursal.');
     }
@@ -499,24 +469,10 @@ export default function GastoForm() {
 
   const handleAddNewClienteForSplit = async (nombre: string) => {
     try {
-      const { data, error } = await supabase
-        .from('clientes')
-        .insert([{ nombre: nombre.trim() }])
-        .select();
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const newCli = data[0];
-        setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-        setNewSplitClienteId(newCli.nombre);
-        setNewSplitSucursalNombre('');
-      } else {
-        const { data: allCli } = await supabase.from('clientes').select('*').order('nombre');
-        if (allCli) {
-          setClientes(allCli);
-          setNewSplitClienteId(nombre.trim());
-          setNewSplitSucursalNombre('');
-        }
-      }
+      const newCli = await CatalogService.crearCliente({ nombre: nombre.trim() });
+      setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setNewSplitClienteId(newCli.nombre);
+      setNewSplitSucursalNombre('');
       setSplitClienteSearch('');
       setShowNewSplitCliDropdown(false);
       showAlert('Éxito', `Cliente "${nombre.trim()}" agregado correctamente.`);
@@ -534,25 +490,15 @@ export default function GastoForm() {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('sucursales_cliente')
-        .insert([{ cliente_id: currentCliente.id, nombre: nombre.trim().toUpperCase() }])
-        .select();
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const newSuc = data[0];
-        setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-        setNewSplitSucursalNombre(newSuc.nombre);
-      } else {
-        const { data: allSuc } = await supabase.from('sucursales_cliente').select('*').order('nombre');
-        if (allSuc) {
-          setSucursalesCliente(allSuc);
-          setNewSplitSucursalNombre(nombre.trim().toUpperCase());
-        }
-      }
+      const newSuc = await CatalogService.crearSucursal({
+        cliente_id: currentCliente.id,
+        nombre: nombre.trim().toUpperCase(),
+      });
+      setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setNewSplitSucursalNombre(newSuc.nombre);
       setSplitSucursalSearch('');
       setShowNewSplitSucDropdown(false);
-      showAlert('Éxito', `Sucursal "${nombre.trim().toUpperCase()}" agregada y vinculada a ${currentCliente.nombre}.`);
+      showAlert('Éxito', `Sucursal "${newSuc.nombre}" agregada y vinculada a ${currentCliente.nombre}.`);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo agregar la sucursal.');
     }

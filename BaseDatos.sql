@@ -359,7 +359,7 @@ BEGIN
   SELECT u.id, u.nombre, u.email, u.rol, u.telefono, u.created_at
   FROM public.usuarios u
   WHERE LOWER(TRIM(u.email)) = LOWER(TRIM(email_param))
-    AND u.password = password_param;
+    AND u.password = crypt(password_param, u.password);
 END;
 $$;
 

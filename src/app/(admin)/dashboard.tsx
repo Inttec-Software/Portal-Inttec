@@ -23,6 +23,7 @@ import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
+import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
@@ -343,7 +344,7 @@ export default function AdminDashboard() {
         if (emergency.data && emergency.data.length > 0) {
           setGastos(emergency.data);
         }
-      } catch (_) {}
+      } catch {}
       if (!silent) {
         Alert.alert('Error', err.message || 'No se pudieron recuperar los datos.');
       }
@@ -995,17 +996,11 @@ export default function AdminDashboard() {
         nombre: newUserName.trim(),
         email: newUserEmail.trim().toLowerCase(),
         password: newUserPassword,
-        rol: newUserRole,
+        rol: newUserRole as 'ADMIN' | 'EMPLEADO',
         telefono: newUserPhone.trim() || null,
       };
 
-      const { error: errorInttec } = await inttecClient.from('usuarios').insert([newUserObj]);
-      if (errorInttec) throw errorInttec;
-
-      const { error: errorDaravisa } = await daravisaClient.from('usuarios').insert([newUserObj]);
-      if (errorDaravisa) {
-        logger.error('Error insertando usuario en Daravisa:', errorDaravisa);
-      }
+      await CatalogService.crearUsuario(newUserObj);
 
       showAlert('Éxito', 'Personal registrado correctamente.');
       setAddUserModalVisible(false);
@@ -1055,21 +1050,7 @@ export default function AdminDashboard() {
         updatePayload.password = editUserPassword;
       }
 
-      const { error: errorInttec } = await inttecClient
-        .from('usuarios')
-        .update(updatePayload)
-        .eq('id', editingUser.id);
-
-      if (errorInttec) throw errorInttec;
-
-      const { error: errorDaravisa } = await daravisaClient
-        .from('usuarios')
-        .update(updatePayload)
-        .eq('id', editingUser.id);
-
-      if (errorDaravisa) {
-        logger.error('Error actualizando usuario en Daravisa:', errorDaravisa);
-      }
+      await CatalogService.actualizarUsuario(editingUser.id, updatePayload);
 
       showAlert('Éxito', 'Información de personal actualizada correctamente.');
       setEditUserModalVisible(false);
@@ -1086,25 +1067,15 @@ export default function AdminDashboard() {
   const handleDeleteUser = async (id: string, name: string) => {
     const performDelete = async () => {
       try {
-        const { error: errorInttec } = await inttecClient.from('usuarios').delete().eq('id', id);
-        if (errorInttec) {
-          if (errorInttec.code === '23503') {
-            throw new Error('No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
-          }
-          throw errorInttec;
-        }
-
-        const { error: errorDaravisa } = await daravisaClient.from('usuarios').delete().eq('id', id);
-        if (errorDaravisa) {
-          if (errorDaravisa.code === '23503') {
-            throw new Error('No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas en Daravisa. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
-          }
-          throw errorDaravisa;
-        }
+        await CatalogService.eliminarUsuario(id);
         showAlert('Éxito', 'Personal eliminado.');
         await refreshData();
       } catch (err: any) {
-        showAlert('Error al eliminar', err.message || 'No se pudo eliminar el usuario.');
+        if (err?.code === '23503' || err?.message?.includes('23503')) {
+          showAlert('Error al eliminar', 'No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
+        } else {
+          showAlert('Error al eliminar', err.message || 'No se pudo eliminar el usuario.');
+        }
       }
     };
 
@@ -1448,10 +1419,35 @@ export default function AdminDashboard() {
     }
   };
 
-  // Master Filter: Búsqueda (Empleado, Cliente, Categoría, Proveedor, Detalle) y Fechas (Día Único o Rango)
+  // Master Filter: Búsqueda (Empleado, Cliente, Categoría, Proveedor, Detalle, Monto) y Fechas (Día Único o Rango)
   const filteredGastos = useMemo(() => {
+    const normalizeAmountQuery = (value: string) => {
+      const cleaned = value.trim().replace(/\s/g, '').replace(/[$]/g, '');
+      if (!cleaned) return null;
+
+      let normalized = cleaned;
+      if (cleaned.includes(',') && cleaned.includes('.')) {
+        const lastComma = cleaned.lastIndexOf(',');
+        const lastDot = cleaned.lastIndexOf('.');
+        const decimalSeparator = lastComma > lastDot ? ',' : '.';
+        normalized = decimalSeparator === ','
+          ? cleaned.replace(/\./g, '').replace(/,/g, '.')
+          : cleaned.replace(/,/g, '');
+      } else if (cleaned.includes(',')) {
+        const parts = cleaned.split(',');
+        normalized = parts.length > 1 && parts[1].length <= 2
+          ? cleaned.replace(/,/g, '.')
+          : cleaned.replace(/,/g, '');
+      } else if (cleaned.includes('.')) {
+        normalized = cleaned.replace(/,/g, '');
+      }
+
+      const parsed = Number(normalized);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
     return gastos.filter((g) => {
-      // 1. Buscador de Texto (Empleado, Cliente, Categoría, Proveedor, Detalle)
+      // 1. Buscador de Texto (Empleado, Cliente, Categoría, Proveedor, Detalle) y Monto
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
         const empName = (g.empleado_nombre || '').toLowerCase();
@@ -1461,16 +1457,34 @@ export default function AdminDashboard() {
         const subCatName = (GastoHelper.getSubcategoria(g) || '').toLowerCase();
         const provName = (GastoHelper.getProveedor(g) || '').toLowerCase();
         const detailStr = (g.detalle_servicio_proyecto || '').toLowerCase();
+        const amountQuery = normalizeAmountQuery(searchQuery);
+        const amountValue = Number(g.monto) || 0;
 
-        const matches = empName.includes(query) ||
-                        clientName.includes(query) ||
-                        branchName.includes(query) ||
-                        catName.includes(query) ||
-                        subCatName.includes(query) ||
-                        provName.includes(query) ||
-                        detailStr.includes(query);
+        const matchesText = empName.includes(query) ||
+          clientName.includes(query) ||
+          branchName.includes(query) ||
+          catName.includes(query) ||
+          subCatName.includes(query) ||
+          provName.includes(query) ||
+          detailStr.includes(query);
 
-        if (!matches) return false;
+        // Check if query matches the amount either exactly or partially
+        const digitsQuery = query.replace(/[$,.\s]/g, '');
+        const isQueryNumeric = digitsQuery.length > 0 && /^\d+$/.test(digitsQuery);
+        let matchesAmount = false;
+
+        if (amountQuery !== null && amountValue === amountQuery) {
+          matchesAmount = true;
+        } else if (isQueryNumeric) {
+          const amountStr = amountValue.toString();
+          const amountFixed = amountValue.toFixed(2);
+          const amountDigits = amountFixed.replace(/\./g, '');
+          matchesAmount = amountStr.includes(digitsQuery) || 
+                          amountDigits.includes(digitsQuery) || 
+                          amountFixed.includes(query);
+        }
+
+        if (!matchesText && !matchesAmount) return false;
       }
 
       // 2. Filtro por Fecha de Comprobante / Creación (Día Único o Rango)
@@ -1861,7 +1875,7 @@ export default function AdminDashboard() {
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, paddingHorizontal: Spacing.two, height: 42 }}>
             <Ionicons name="search-outline" size={18} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
             <TextInput
-              placeholder="Buscar empleado, cliente, sucursal, categoría, proveedor..."
+              placeholder="Buscar empleado, cliente, sucursal, categoría, proveedor, detalle o monto..."
               placeholderTextColor={themeColors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -2822,7 +2836,7 @@ export default function AdminDashboard() {
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.alertTitle, { color: themeColors.warning, fontSize: 14, fontWeight: '700', marginBottom: 2 }]}>Proveedor Pendiente de Asignar</Text>
                         <Text style={[styles.alertText, { color: themeColors.text, fontSize: 13 }]}>
-                          El empleado dejó el proveedor en blanco. Para aprobar este gasto, primero haz clic en "Editar Gasto" y asigna el proveedor.
+                          El empleado dejó el proveedor en blanco. Para aprobar este gasto, primero haz clic en &quot;Editar Gasto&quot; y asigna el proveedor.
                         </Text>
                         {(() => {
                           const parsed = parseJustificacion(selectedGasto.justificacion);

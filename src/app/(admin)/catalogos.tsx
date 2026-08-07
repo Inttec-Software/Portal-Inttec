@@ -18,6 +18,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, CatalogoItem, SubcategoriaItem, ClienteItem, ProveedorItem } from '@/services/supabase';
+import { CatalogService } from '@/services/catalogService';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -126,35 +127,25 @@ export default function CatalogosManager() {
     setIsSaving(true);
     try {
       if (activeCatalog === 'categorias') {
-        const { error } = await supabase.from('categorias').insert([{ nombre: newItemName.trim() }]);
-        if (error) throw error;
+        await CatalogService.crearCategoria({ nombre: newItemName.trim() });
       } else if (activeCatalog === 'clientes') {
-        const { error } = await supabase.from('clientes').insert([
-          {
-            nombre: newItemName.trim(),
-            rfc: newClientRfc.trim().toUpperCase() || null,
-            correo_electronico: newClientCorreo.trim().toLowerCase() || null,
-            direccion: newClientDireccion.trim() || null,
-            codigo_postal: newClientCp.trim() || null,
-          },
-        ]);
-        if (error) throw error;
+        await CatalogService.crearCliente({
+          nombre: newItemName.trim(),
+          rfc: newClientRfc.trim().toUpperCase() || null,
+          correo_electronico: newClientCorreo.trim().toLowerCase() || null,
+          direccion: newClientDireccion.trim() || null,
+          codigo_postal: newClientCp.trim() || null,
+        });
       } else if (activeCatalog === 'proveedores') {
-        const { error } = await supabase.from('proveedores').insert([
-          {
-            nombre: newItemName.trim(),
-            rfc: newProveedorRfc.trim().toUpperCase() || null,
-          },
-        ]);
-        if (error) throw error;
+        await CatalogService.crearProveedor({
+          nombre: newItemName.trim(),
+          rfc: newProveedorRfc.trim().toUpperCase() || null,
+        });
       } else if (activeCatalog === 'subcategorias') {
-        const { error } = await supabase.from('subcategorias').insert([
-          {
-            nombre: newItemName.trim(),
-            categoria_id: selectedParentCatId,
-          },
-        ]);
-        if (error) throw error;
+        await CatalogService.crearSubcategoria({
+          nombre: newItemName.trim(),
+          categoria_id: selectedParentCatId,
+        });
       }
 
       Alert.alert('Éxito', 'Elemento añadido al catálogo correctamente.');
@@ -178,8 +169,10 @@ export default function CatalogosManager() {
   const ejecutarEliminacionItem = async (id: string, table: 'categorias' | 'subcategorias' | 'clientes' | 'proveedores') => {
     setIsLoading(true);
     try {
-      const { error } = await supabase.from(table).delete().eq('id', id);
-      if (error) throw error;
+      if (table === 'categorias') await CatalogService.eliminarCategoria(id);
+      else if (table === 'subcategorias') await CatalogService.eliminarSubcategoria(id);
+      else if (table === 'clientes') await CatalogService.eliminarCliente(id);
+      else if (table === 'proveedores') await CatalogService.eliminarProveedor(id);
       Alert.alert('Éxito', 'Elemento eliminado.');
       await loadData();
     } catch (err: any) {
@@ -245,41 +238,25 @@ export default function CatalogosManager() {
     setIsUpdating(true);
     try {
       if (activeCatalog === 'categorias') {
-        const { error } = await supabase
-          .from('categorias')
-          .update({ nombre: editItemName.trim() })
-          .eq('id', editingItem.id);
-        if (error) throw error;
+        await CatalogService.actualizarCategoria(editingItem.id, { nombre: editItemName.trim() });
       } else if (activeCatalog === 'clientes') {
-        const { error } = await supabase
-          .from('clientes')
-          .update({
-            nombre: editItemName.trim(),
-            rfc: editClientRfc.trim().toUpperCase() || null,
-            correo_electronico: editClientCorreo.trim().toLowerCase() || null,
-            direccion: editClientDireccion.trim() || null,
-            codigo_postal: editClientCp.trim() || null,
-          })
-          .eq('id', editingItem.id);
-        if (error) throw error;
+        await CatalogService.actualizarCliente(editingItem.id, {
+          nombre: editItemName.trim(),
+          rfc: editClientRfc.trim().toUpperCase() || null,
+          correo_electronico: editClientCorreo.trim().toLowerCase() || null,
+          direccion: editClientDireccion.trim() || null,
+          codigo_postal: editClientCp.trim() || null,
+        });
       } else if (activeCatalog === 'proveedores') {
-        const { error } = await supabase
-          .from('proveedores')
-          .update({
-            nombre: editItemName.trim(),
-            rfc: editProveedorRfc.trim().toUpperCase() || null,
-          })
-          .eq('id', editingItem.id);
-        if (error) throw error;
+        await CatalogService.actualizarProveedor(editingItem.id, {
+          nombre: editItemName.trim(),
+          rfc: editProveedorRfc.trim().toUpperCase() || null,
+        });
       } else if (activeCatalog === 'subcategorias') {
-        const { error } = await supabase
-          .from('subcategorias')
-          .update({
-            nombre: editItemName.trim(),
-            categoria_id: editParentCatId,
-          })
-          .eq('id', editingItem.id);
-        if (error) throw error;
+        await CatalogService.actualizarSubcategoria(editingItem.id, {
+          nombre: editItemName.trim(),
+          categoria_id: editParentCatId,
+        });
       }
 
       Alert.alert('Éxito', 'Elemento actualizado correctamente.');
@@ -364,10 +341,10 @@ export default function CatalogosManager() {
     if (!newSucursalName.trim() || !selectedClientForSucursales) return;
     setIsSavingSucursal(true);
     try {
-      const { error } = await supabase.from('sucursales_cliente').insert([
-        { cliente_id: selectedClientForSucursales.id, nombre: newSucursalName.trim() }
-      ]);
-      if (error) throw error;
+      await CatalogService.crearSucursal({
+        cliente_id: selectedClientForSucursales.id,
+        nombre: newSucursalName.trim(),
+      });
       setNewSucursalName('');
       await loadClientSucursales(selectedClientForSucursales.id);
     } catch (err: any) {
@@ -379,8 +356,7 @@ export default function CatalogosManager() {
 
   const handleDeleteSucursal = async (id: string) => {
     try {
-      const { error } = await supabase.from('sucursales_cliente').delete().eq('id', id);
-      if (error) throw error;
+      await CatalogService.eliminarSucursal(id);
       if (selectedClientForSucursales) {
         await loadClientSucursales(selectedClientForSucursales.id);
       }
