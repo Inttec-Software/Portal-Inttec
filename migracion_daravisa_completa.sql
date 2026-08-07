@@ -30,9 +30,10 @@ ALTER TABLE public.sucursales_cliente
 -- =========================================================================
 -- 2. AGREGAR COLUMNAS RELACIONALES Y FOREIGN KEYS EN 'GASTOS'
 -- =========================================================================
+-- Nota: 'gastos' se normaliza para almacenar únicamente 'subcategoria_id'.
+-- La categoría principal se resuelve automáticamente a través de la relación de la subcategoría.
 
 ALTER TABLE public.gastos 
-  ADD COLUMN IF NOT EXISTS categoria_id uuid REFERENCES public.categorias(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS subcategoria_id uuid REFERENCES public.subcategorias(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS proveedor_id uuid REFERENCES public.proveedores(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS cliente_id uuid REFERENCES public.clientes(id) ON DELETE SET NULL,
@@ -95,16 +96,6 @@ END $$;
 
 DO $$
 BEGIN
-  -- Categorías
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'gastos' AND column_name = 'categoria') THEN
-    UPDATE public.gastos g
-    SET categoria_id = c.id
-    FROM public.categorias c
-    WHERE g.categoria_id IS NULL 
-      AND g.categoria IS NOT NULL 
-      AND LOWER(TRIM(g.categoria)) = LOWER(TRIM(c.nombre));
-  END IF;
-
   -- Subcategorías
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'gastos' AND column_name = 'subcategoria') THEN
     UPDATE public.gastos g
@@ -151,7 +142,6 @@ END $$;
 -- 5. CREACIÓN DE ÍNDICES PARA CONSULTAS Y JOINS DE ALTO RENDIMIENTO
 -- =========================================================================
 
-CREATE INDEX IF NOT EXISTS idx_gastos_categoria_id ON public.gastos(categoria_id);
 CREATE INDEX IF NOT EXISTS idx_gastos_subcategoria_id ON public.gastos(subcategoria_id);
 CREATE INDEX IF NOT EXISTS idx_gastos_proveedor_id ON public.gastos(proveedor_id);
 CREATE INDEX IF NOT EXISTS idx_gastos_cliente_id ON public.gastos(cliente_id);

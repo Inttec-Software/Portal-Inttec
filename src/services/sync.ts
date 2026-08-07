@@ -198,7 +198,6 @@ export const SyncService = {
                 empleado_id: item.empleado_id,
                 empleado_nombre: item.empleado_nombre,
                 monto: item.monto,
-                categoria_id: item.categoria_id || null,
                 subcategoria_id: item.subcategoria_id || null,
                 metodo_pago: item.metodo_pago,
                 justificacion: item.justificacion,

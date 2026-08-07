@@ -22,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, GastoHelper, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
+import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
@@ -295,11 +295,10 @@ export default function AdminDashboard() {
       setRegistrosGasolina([]);
     }
     try {
-      const [gastosRes, usersRes, vehList, gasLogs] = await Promise.all([
+      const [gastosRes, usersRes, vehList, gasLogs, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
         supabase.from('gastos').select(`
           *,
-          categoria_rel:categorias(id, nombre),
-          subcategoria_rel:subcategorias(id, nombre),
+          subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
           proveedor_rel:proveedores(id, nombre),
           cliente_rel:clientes(id, nombre),
           sucursal_rel:sucursales_cliente(id, nombre)
@@ -307,17 +306,44 @@ export default function AdminDashboard() {
         supabase.from('usuarios').select('*').order('nombre'),
         VehiculoService.getVehiculos(false),
         VehiculoService.getRegistrosGasolina(),
+        supabase.from('categorias').select('*'),
+        supabase.from('subcategorias').select('*'),
+        supabase.from('proveedores').select('*'),
+        supabase.from('clientes').select('*'),
+        supabase.from('sucursales_cliente').select('*'),
       ]);
 
-      if (gastosRes.error) throw gastosRes.error;
+      let rawGastos = gastosRes.data || [];
+      if (gastosRes.error) {
+        console.warn('Relational gastos query failed, attempting basic select:', gastosRes.error.message);
+        const fallbackRes = await supabase.from('gastos').select('*').order('created_at', { ascending: false });
+        rawGastos = fallbackRes.data || [];
+      }
+
+      const enrichedGastos = GastoService.enrichGastosWithCatalogs(
+        rawGastos,
+        catRes.data || [],
+        subRes.data || [],
+        provRes.data || [],
+        cliRes.data || [],
+        sucRes.data || []
+      );
+
       if (usersRes.error) throw usersRes.error;
 
-      setGastos(gastosRes.data || []);
+      setGastos(enrichedGastos);
       setPersonal(usersRes.data || []);
       setVehiculos(vehList);
       setRegistrosGasolina(gasLogs);
     } catch (err: any) {
       logger.error('Error loading admin data:', err);
+      // Emergency fallback
+      try {
+        const emergency = await supabase.from('gastos').select('*').order('created_at', { ascending: false });
+        if (emergency.data && emergency.data.length > 0) {
+          setGastos(emergency.data);
+        }
+      } catch (_) {}
       if (!silent) {
         Alert.alert('Error', err.message || 'No se pudieron recuperar los datos.');
       }

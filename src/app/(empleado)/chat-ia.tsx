@@ -63,8 +63,7 @@ export default function EmployeeChatIA() {
         const [misGastos, misAsistencias, misGasolinas] = await Promise.all([
           safeQuery(supabase.from('gastos').select(`
             *,
-            categoria_rel:categorias(id, nombre),
-            subcategoria_rel:subcategorias(id, nombre),
+            subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
             proveedor_rel:proveedores(id, nombre),
             cliente_rel:clientes(id, nombre),
             sucursal_rel:sucursales_cliente(id, nombre)

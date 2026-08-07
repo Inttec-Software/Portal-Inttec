@@ -62,7 +62,7 @@ export default function MiTrabajoScreen() {
         .from('evidencias')
         .select('*')
         .eq('empleado_id', userId)
-        .order('fecha_trabajo', { ascending: false });
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
       setEvidencias(data || []);
@@ -87,6 +87,27 @@ export default function MiTrabajoScreen() {
     };
     init();
   }, [router]);
+
+  const parseTrabajosList = (descStr: string) => {
+    if (!descStr) return [];
+    if (descStr.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(descStr);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // ignore
+      }
+    }
+    return [{ descripcion: descStr }];
+  };
+
+  const getCleanDescription = (descStr: string) => {
+    const list = parseTrabajosList(descStr);
+    if (list.length > 1) {
+      return list.map((t: any, i: number) => `#${i + 1}: ${t.descripcion}`).join(' • ');
+    }
+    return list[0]?.descripcion || descStr;
+  };
 
   const filteredEvidencias = useMemo(() => {
     if (!searchQuery.trim()) {
@@ -206,7 +227,7 @@ export default function MiTrabajoScreen() {
               </View>
 
               <Text style={[styles.cardDesc, { color: themeColors.textSecondary }]} numberOfLines={2}>
-                {item.descripcion_trabajo}
+                {getCleanDescription(item.descripcion_trabajo)}
               </Text>
 
               <View style={styles.cardFooter}>
@@ -331,30 +352,106 @@ export default function MiTrabajoScreen() {
                     </Text>
                   </View>
 
-                  <View style={styles.detailItem}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Situación encontrada</Text>
-                    <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedEvidencia.descripcion_trabajo}
-                    </Text>
-                  </View>
+                  {(() => {
+                    let listTrabajos: any[] = [];
+                    let isJson = false;
+                    try {
+                      if (selectedEvidencia.descripcion_trabajo && selectedEvidencia.descripcion_trabajo.trim().startsWith('[')) {
+                        listTrabajos = JSON.parse(selectedEvidencia.descripcion_trabajo);
+                        isJson = true;
+                      }
+                    } catch {}
 
-                  {selectedEvidencia.materiales_usados && (
-                    <View style={styles.detailItem}>
-                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Materiales Utilizados</Text>
-                      <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                        {selectedEvidencia.materiales_usados}
-                      </Text>
-                    </View>
-                  )}
+                    if (isJson && listTrabajos.length > 0) {
+                      return (
+                        <View style={{ marginTop: Spacing.two, marginBottom: Spacing.two }}>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: Spacing.one }]}>
+                            Trabajos Realizados ({listTrabajos.length})
+                          </Text>
+                          {listTrabajos.map((t: any, index: number) => (
+                            <View key={index} style={{
+                              marginBottom: Spacing.two,
+                              padding: Spacing.two,
+                              borderWidth: 1,
+                              borderColor: themeColors.border,
+                              borderRadius: BorderRadius.medium,
+                              backgroundColor: themeColors.backgroundElement
+                            }}>
+                              <Text style={{ fontWeight: '700', fontSize: 13, color: themeColors.accent, marginBottom: 4 }}>
+                                Trabajo #{index + 1}
+                              </Text>
+                              <Text style={{ fontSize: 13, color: themeColors.text, marginBottom: 2 }}>
+                                <Text style={{ fontWeight: '600' }}>Situación: </Text>{t.descripcion}
+                              </Text>
+                              {t.materiales && (
+                                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginBottom: 2 }}>
+                                  <Text style={{ fontWeight: '600' }}>Materiales: </Text>{t.materiales}
+                                </Text>
+                              )}
+                              {(t.solucion || t.observaciones) && (
+                                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginBottom: 4 }}>
+                                  <Text style={{ fontWeight: '600' }}>Solución: </Text>{t.solucion || t.observaciones}
+                                </Text>
+                              )}
 
-                  {selectedEvidencia.observaciones && (
-                    <View style={styles.detailItem}>
-                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Observaciones</Text>
-                      <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                        {selectedEvidencia.observaciones}
-                      </Text>
-                    </View>
-                  )}
+                              {/* Fotos antes / despues / adicionales de este trabajo si vienen en el json */}
+                              {(t.antesImg || t.despuesImg || (t.fotosAdicionales && t.fotosAdicionales.length > 0)) && (
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+                                  {t.antesImg && (
+                                    <TouchableOpacity activeOpacity={0.9} onPress={() => handleOpenPhoto(t.antesImg)} style={{ marginRight: 8, alignItems: 'center' }}>
+                                      <Image source={{ uri: t.antesImg }} style={{ width: 60, height: 60, borderRadius: 6 }} resizeMode="cover" />
+                                      <Text style={{ fontSize: 9, color: themeColors.danger, fontWeight: '700', marginTop: 2 }}>Antes</Text>
+                                    </TouchableOpacity>
+                                  )}
+                                  {t.despuesImg && (
+                                    <TouchableOpacity activeOpacity={0.9} onPress={() => handleOpenPhoto(t.despuesImg)} style={{ marginRight: 8, alignItems: 'center' }}>
+                                      <Image source={{ uri: t.despuesImg }} style={{ width: 60, height: 60, borderRadius: 6 }} resizeMode="cover" />
+                                      <Text style={{ fontSize: 9, color: themeColors.success, fontWeight: '700', marginTop: 2 }}>Después</Text>
+                                    </TouchableOpacity>
+                                  )}
+                                  {Array.isArray(t.fotosAdicionales) && t.fotosAdicionales.map((fUri: string, fIdx: number) => (
+                                    <TouchableOpacity key={fIdx} activeOpacity={0.9} onPress={() => handleOpenPhoto(fUri)} style={{ marginRight: 8, alignItems: 'center' }}>
+                                      <Image source={{ uri: fUri }} style={{ width: 60, height: 60, borderRadius: 6 }} resizeMode="cover" />
+                                      <Text style={{ fontSize: 9, color: themeColors.accent, fontWeight: '700', marginTop: 2 }}>#{fIdx + 1}</Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </ScrollView>
+                              )}
+                            </View>
+                          ))}
+                        </View>
+                      );
+                    }
+
+                    return (
+                      <>
+                        <View style={styles.detailItem}>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Situación encontrada</Text>
+                          <Text style={[styles.detailValue, { color: themeColors.text }]}>
+                            {selectedEvidencia.descripcion_trabajo}
+                          </Text>
+                        </View>
+
+                        {selectedEvidencia.materiales_usados && (
+                          <View style={styles.detailItem}>
+                            <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Materiales Utilizados</Text>
+                            <Text style={[styles.detailValue, { color: themeColors.text }]}>
+                              {selectedEvidencia.materiales_usados}
+                            </Text>
+                          </View>
+                        )}
+
+                        {selectedEvidencia.observaciones && (
+                          <View style={styles.detailItem}>
+                            <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Observaciones</Text>
+                            <Text style={[styles.detailValue, { color: themeColors.text }]}>
+                              {selectedEvidencia.observaciones}
+                            </Text>
+                          </View>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {selectedEvidencia.fotos_adicionales_urls && selectedEvidencia.fotos_adicionales_urls.length > 0 && (
                     <View style={styles.detailItem}>

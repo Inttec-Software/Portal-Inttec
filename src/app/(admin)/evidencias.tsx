@@ -128,6 +128,27 @@ export default function AdminEvidenciasScreen() {
     return result;
   }, [searchQuery, selectedEmployeeId, evidencias]);
 
+  const parseTrabajosList = (descStr: string) => {
+    if (!descStr) return [];
+    if (descStr.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(descStr);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // ignore
+      }
+    }
+    return [{ descripcion: descStr }];
+  };
+
+  const getCleanDescription = (descStr: string) => {
+    const list = parseTrabajosList(descStr);
+    if (list.length > 1) {
+      return list.map((t: any, i: number) => `#${i + 1}: ${t.descripcion}`).join(' • ');
+    }
+    return list[0]?.descripcion || descStr;
+  };
+
   const handleExportPDF = async (ev: Evidencia) => {
     setIsExporting(true);
     try {
@@ -324,7 +345,7 @@ export default function AdminEvidenciasScreen() {
               </Text>
 
               <Text style={[styles.cardDesc, { color: themeColors.textSecondary, marginTop: 4 }]} numberOfLines={2}>
-                {item.descripcion_trabajo}
+                {getCleanDescription(item.descripcion_trabajo)}
               </Text>
 
               <View style={styles.cardFooter}>

@@ -113,7 +113,7 @@ export interface Gasto {
   empleado_nombre?: string | null;
   monto: number;
   categoria?: string | null;
-  categoria_id?: string | null;
+  categoria_id?: string | null; // Deprecado: la categoría se obtiene a través de subcategoria_id
   subcategoria?: string | null;
   subcategoria_id?: string | null;
   metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito';
@@ -139,9 +139,14 @@ export interface Gasto {
   tipo_servicio_proyecto?: string | null;
   detalle_servicio_proyecto?: string | null;
   venta_id?: string | null;
-  // Relaciones Joins
+  // Relaciones Joins normalizadas
   categoria_rel?: { id: string; nombre: string } | null;
-  subcategoria_rel?: { id: string; nombre: string } | null;
+  subcategoria_rel?: { 
+    id: string; 
+    nombre: string; 
+    categoria_id?: string;
+    categoria_rel?: { id: string; nombre: string } | null;
+  } | null;
   proveedor_rel?: { id: string; nombre: string } | null;
   cliente_rel?: { id: string; nombre: string } | null;
   sucursal_rel?: { id: string; nombre: string } | null;
@@ -150,7 +155,13 @@ export interface Gasto {
 export const GastoHelper = {
   getCategoria: (g: Gasto | null | undefined): string => {
     if (!g) return '';
-    return g.categoria_rel?.nombre || g.categoria || '';
+    return (
+      (g.subcategoria_rel as any)?.categorias?.nombre ||
+      g.subcategoria_rel?.categoria_rel?.nombre ||
+      g.categoria_rel?.nombre ||
+      g.categoria ||
+      ''
+    );
   },
   getSubcategoria: (g: Gasto | null | undefined): string => {
     if (!g) return '';
@@ -168,7 +179,74 @@ export const GastoHelper = {
     if (!g) return '';
     return g.sucursal_rel?.nombre || g.sucursal || '';
   },
-  GASTOS_SELECT_QUERY: `*, categoria_rel:categorias(id, nombre), subcategoria_rel:subcategorias(id, nombre), proveedor_rel:proveedores(id, nombre), cliente_rel:clientes(id, nombre), sucursal_rel:sucursales_cliente(id, nombre)`
+  GASTOS_SELECT_QUERY: `*, subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)), proveedor_rel:proveedores(id, nombre), cliente_rel:clientes(id, nombre), sucursal_rel:sucursales_cliente(id, nombre)`
+};
+
+export const GastoService = {
+  enrichGastosWithCatalogs: (
+    gastos: any[],
+    categorias: { id: string; nombre: string }[] = [],
+    subcategorias: { id: string; nombre: string; categoria_id?: string }[] = [],
+    proveedores: { id: string; nombre: string }[] = [],
+    clientes: { id: string; nombre: string }[] = [],
+    sucursales: { id: string; nombre: string }[] = []
+  ): Gasto[] => {
+    const catMap = new Map(categorias.map(c => [c.id, c.nombre]));
+    const subMap = new Map(subcategorias.map(s => [s.id, s]));
+    const provMap = new Map(proveedores.map(p => [p.id, p.nombre]));
+    const cliMap = new Map(clientes.map(c => [c.id, c.nombre]));
+    const sucMap = new Map(sucursales.map(s => [s.id, s.nombre]));
+
+    return gastos.map(g => {
+      let subRel = g.subcategoria_rel;
+      let catRel = g.categoria_rel;
+      let provRel = g.proveedor_rel;
+      let cliRel = g.cliente_rel;
+      let sucRel = g.sucursal_rel;
+
+      if (!subRel && g.subcategoria_id) {
+        const foundSub = subMap.get(g.subcategoria_id);
+        if (foundSub) {
+          const parentCatName = foundSub.categoria_id ? catMap.get(foundSub.categoria_id) : undefined;
+          subRel = {
+            id: foundSub.id,
+            nombre: foundSub.nombre,
+            categoria_id: foundSub.categoria_id,
+            categoria_rel: parentCatName ? { id: foundSub.categoria_id!, nombre: parentCatName } : null,
+          };
+        }
+      } else if (subRel && !subRel.categoria_rel && subRel.categoria_id) {
+        const parentCatName = catMap.get(subRel.categoria_id);
+        if (parentCatName) {
+          subRel.categoria_rel = { id: subRel.categoria_id, nombre: parentCatName };
+        }
+      }
+
+      if (!provRel && g.proveedor_id) {
+        const pName = provMap.get(g.proveedor_id);
+        if (pName) provRel = { id: g.proveedor_id, nombre: pName };
+      }
+
+      if (!cliRel && g.cliente_id) {
+        const cName = cliMap.get(g.cliente_id);
+        if (cName) cliRel = { id: g.cliente_id, nombre: cName };
+      }
+
+      if (!sucRel && g.sucursal_id) {
+        const sName = sucMap.get(g.sucursal_id);
+        if (sName) sucRel = { id: g.sucursal_id, nombre: sName };
+      }
+
+      return {
+        ...g,
+        subcategoria_rel: subRel || null,
+        categoria_rel: catRel || null,
+        proveedor_rel: provRel || null,
+        cliente_rel: cliRel || null,
+        sucursal_rel: sucRel || null,
+      } as Gasto;
+    });
+  }
 };
 
 export interface Evidencia {

@@ -35,7 +35,7 @@ import {
   SucursalCliente,
 } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
-import { getComentariosPlaceholder } from '@/utils/helpers';
+import { getComentariosPlaceholder, isCombustibleExpense } from '@/utils/helpers';
 import { optimizeImage } from '@/utils/imageOptimizer';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
@@ -584,10 +584,8 @@ export default function GastoForm() {
     // 9. Validar Cliente / Proyecto (si no está dividido)
     // (validación completa al final del bloque)
 
-    // 10. Validar Vehículos / Gasolina
-    const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
-    const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
-    const esGasolina = esVehiculos && esSubGasolina;
+    // 10. Validar Vehículos / Gasolina / Combustible
+    const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
     if (esGasolina) {
       if (!selectedVehiculoId) {
         showAlert('Validación', 'Por favor selecciona el vehículo.');
@@ -697,7 +695,6 @@ export default function GastoForm() {
       empleado_id: currentUser.id,
       empleado_nombre: currentUser.nombre,
       monto: totalGasto,
-      categoria_id: activeCatObj?.id || null,
       subcategoria_id: activeSubObj?.id || null,
       metodo_pago: metodoPago,
       justificacion: finalJustificacion,
@@ -803,9 +800,7 @@ export default function GastoForm() {
         if (dbError) throw dbError;
 
         // Si es combustible, guardar bitácora de gasolina vinculada y sincronizar kilometraje en ambas empresas
-        const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
-        const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
-        const esGasolina = esVehiculos && esSubGasolina;
+        const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
         if (esGasolina && insertedGastos && insertedGastos.length > 0) {
           const mainGastoId = insertedGastos[0].id;
           const { error: gasError } = await supabase
@@ -836,9 +831,7 @@ export default function GastoForm() {
         showAlert('Éxito', 'Gasto registrado correctamente en el servidor.');
       } else {
         // Fuera de línea: Guardar localmente
-        const esVehiculos = selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos';
-        const esSubGasolina = selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina';
-        const esGasolina = esVehiculos && esSubGasolina;
+        const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
         if (isSplit) {
           for (let i = 0; i < splits.length; i++) {
             const s = splits[i];
@@ -2172,9 +2165,8 @@ export default function GastoForm() {
                 </View>
               )}
 
-              {/* Información de Gasolina (Solo si la categoría es Vehículos y subcategoría es Gasolina) */}
-              {(selectedCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'vehiculos' &&
-                selectedSubcategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'gasolina') && (
+              {/* Información de Gasolina / Combustible (Solo si es gasto de combustible) */}
+              {isCombustibleExpense(selectedCategoria, selectedSubcategoria) && (
                 <View style={{
                   padding: Spacing.three,
                   borderRadius: BorderRadius.medium,

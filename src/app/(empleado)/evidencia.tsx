@@ -10,6 +10,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -35,10 +36,12 @@ export default function EvidenciaForm() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Paso 1: Información y Fotos por Trabajo
-  const [fotosAdicionales, setFotosAdicionales] = useState<{ uri: string; base64: string | null }[]>([]);
-
-  // Paso 2: Detalles del Trabajo
+  // Estados de Ruedita de Carga / Progreso de Fotos
+  const [loadingModalVisible, setLoadingModalVisible] = useState(false);
+  const [loadingTitle, setLoadingTitle] = useState('Procesando imágenes');
+  const [loadingMessage, setLoadingMessage] = useState('');
+  const [loadingCurrent, setLoadingCurrent] = useState(0);
+  const [loadingTotal, setLoadingTotal] = useState(0);
 
   // Catálogos
   const [clientes, setClientes] = useState<any[]>([]);
@@ -52,11 +55,16 @@ export default function EvidenciaForm() {
   const [sucursalSearch, setSucursalSearch] = useState('');
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
 
-  const [trabajos, setTrabajos] = useState<{ descripcion: string; materiales: string; solucion: string; antesImg?: { uri: string; base64: string | null }; despuesImg?: { uri: string; base64: string | null }; fotosAdicionales?: { uri: string; base64: string | null }[] }[]>([
+  const [trabajos, setTrabajos] = useState<{
+    descripcion: string;
+    materiales: string;
+    solucion: string;
+    antesImg?: { uri: string; base64: string | null };
+    despuesImg?: { uri: string; base64: string | null };
+    fotosAdicionales?: { uri: string; base64: string | null }[];
+  }[]>([
     { descripcion: '', materiales: '', solucion: '', fotosAdicionales: [] }
   ]);
-
-  // Paso 3: Exportación
 
   // Modal de imagen a pantalla completa
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
@@ -124,9 +132,15 @@ export default function EvidenciaForm() {
     return true;
   };
 
-  const handleCapturePhoto = async (type: 'antes' | 'despues' | 'adicional', jobIndex?: number) => {
+  const handleCapturePhoto = async (type: 'antes' | 'despues' | 'adicional', jobIndex: number) => {
     const hasPermission = await requestCameraPermission();
     if (!hasPermission) return;
+
+    const currentExtras = trabajos[jobIndex]?.fotosAdicionales || [];
+    if (type === 'adicional' && currentExtras.length >= 250) {
+      Alert.alert('Límite alcanzado', 'Has alcanzado el límite máximo de 250 fotografías adicionales para este trabajo.');
+      return;
+    }
 
     try {
       const result = await ImagePicker.launchCameraAsync({
@@ -137,27 +151,34 @@ export default function EvidenciaForm() {
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        const optimized = await optimizeImage(result.assets[0].uri);
-        if (type === 'antes' && jobIndex !== undefined) {
-          setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: optimized.uri, base64: optimized.base64 || null } } : t));
-        } else if (type === 'despues' && jobIndex !== undefined) {
-          setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: optimized.uri, base64: optimized.base64 || null } } : t));
-        } else if (type === 'adicional') {
-          if (jobIndex !== undefined) {
-            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { 
-              ...t, 
-              fotosAdicionales: [...(t.fotosAdicionales || []), { uri: optimized.uri, base64: optimized.base64 || null }] 
-            } : t));
-          } else {
-            setFotosAdicionales((prev) => [
-              ...prev,
-              { uri: optimized.uri, base64: optimized.base64 || null },
-            ]);
+        setLoadingTitle('Procesando foto');
+        setLoadingMessage('Optimizando imagen...');
+        setLoadingCurrent(1);
+        setLoadingTotal(1);
+        setLoadingModalVisible(true);
+
+        try {
+          const optimized = await optimizeImage(result.assets[0].uri);
+          if (type === 'antes') {
+            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: optimized.uri, base64: optimized.base64 || null } } : t));
+          } else if (type === 'despues') {
+            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: optimized.uri, base64: optimized.base64 || null } } : t));
+          } else if (type === 'adicional') {
+            setTrabajos(prev => prev.map((t, i) => {
+              if (i === jobIndex) {
+                const updated = [...(t.fotosAdicionales || []), { uri: optimized.uri, base64: optimized.base64 || null }];
+                return { ...t, fotosAdicionales: updated.slice(0, 250) };
+              }
+              return t;
+            }));
           }
+        } finally {
+          setLoadingModalVisible(false);
         }
       }
     } catch (err) {
       console.error('Camera capture error:', err);
+      setLoadingModalVisible(false);
       if (Platform.OS === 'web') {
         await handleSelectGallery(type, jobIndex);
       } else {
@@ -166,48 +187,102 @@ export default function EvidenciaForm() {
     }
   };
 
-  const handleSelectGallery = async (type: 'antes' | 'despues' | 'adicional', jobIndex?: number) => {
+  const handleSelectGallery = async (type: 'antes' | 'despues' | 'adicional', jobIndex: number) => {
     const hasPermission = await requestLibraryPermission();
     if (!hasPermission) return;
+
+    const currentExtras = trabajos[jobIndex]?.fotosAdicionales || [];
+    if (type === 'adicional' && currentExtras.length >= 250) {
+      Alert.alert('Límite alcanzado', 'Has alcanzado el límite máximo de 250 fotografías adicionales para este trabajo.');
+      return;
+    }
+
+    const remainingSlots = type === 'adicional' 
+      ? Math.max(1, 250 - currentExtras.length)
+      : 1;
 
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsMultipleSelection: type === 'adicional',
         allowsEditing: type !== 'adicional',
+        selectionLimit: remainingSlots,
         quality: 0.4,
         base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        if (type === 'antes' && jobIndex !== undefined) {
-          const opt = await optimizeImage(result.assets[0].uri);
-          setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: opt.uri, base64: opt.base64 || null } } : t));
-        } else if (type === 'despues' && jobIndex !== undefined) {
-          const opt = await optimizeImage(result.assets[0].uri);
-          setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: opt.uri, base64: opt.base64 || null } } : t));
+        if (type === 'antes') {
+          setLoadingTitle('Optimizando foto');
+          setLoadingMessage('Comprimiendo imagen...');
+          setLoadingCurrent(1);
+          setLoadingTotal(1);
+          setLoadingModalVisible(true);
+          try {
+            const opt = await optimizeImage(result.assets[0].uri);
+            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: opt.uri, base64: opt.base64 || null } } : t));
+          } finally {
+            setLoadingModalVisible(false);
+          }
+        } else if (type === 'despues') {
+          setLoadingTitle('Optimizando foto');
+          setLoadingMessage('Comprimiendo imagen...');
+          setLoadingCurrent(1);
+          setLoadingTotal(1);
+          setLoadingModalVisible(true);
+          try {
+            const opt = await optimizeImage(result.assets[0].uri);
+            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: opt.uri, base64: opt.base64 || null } } : t));
+          } finally {
+            setLoadingModalVisible(false);
+          }
         } else if (type === 'adicional') {
-          const optimizedPhotos = await Promise.all(
-            result.assets.map((asset) => optimizeImage(asset.uri))
-          );
-          const mappedPhotos = optimizedPhotos.map(opt => ({
-            uri: opt.uri,
-            base64: opt.base64 || null
-          }));
-          
-          if (jobIndex !== undefined) {
-            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? {
-              ...t,
-              fotosAdicionales: [...(t.fotosAdicionales || []), ...mappedPhotos]
-            } : t));
-          } else {
-            setFotosAdicionales((prev) => [...prev, ...mappedPhotos]);
+          const totalToProcess = result.assets.length;
+          setLoadingTitle('Procesando fotografías');
+          setLoadingMessage(`Optimizando 0 de ${totalToProcess} fotos...`);
+          setLoadingCurrent(0);
+          setLoadingTotal(totalToProcess);
+          setLoadingModalVisible(true);
+
+          const mappedPhotos: { uri: string; base64: string | null }[] = [];
+          const BATCH_SIZE = 5;
+
+          try {
+            for (let i = 0; i < totalToProcess; i += BATCH_SIZE) {
+              const chunk = result.assets.slice(i, i + BATCH_SIZE);
+              const processedChunk = await Promise.all(
+                chunk.map(async (asset) => {
+                  try {
+                    const opt = await optimizeImage(asset.uri);
+                    return { uri: opt.uri, base64: opt.base64 || null };
+                  } catch (e) {
+                    console.warn('Error optimizing photo:', e);
+                    return { uri: asset.uri, base64: asset.base64 || null };
+                  }
+                })
+              );
+              mappedPhotos.push(...processedChunk);
+              const currentDone = Math.min(i + chunk.length, totalToProcess);
+              setLoadingCurrent(currentDone);
+              setLoadingMessage(`Optimizando ${currentDone} de ${totalToProcess} fotos (${Math.round((currentDone / totalToProcess) * 100)}%)...`);
+            }
+
+            setTrabajos(prev => prev.map((t, i) => {
+              if (i === jobIndex) {
+                const combined = [...(t.fotosAdicionales || []), ...mappedPhotos];
+                return { ...t, fotosAdicionales: combined.slice(0, 250) };
+              }
+              return t;
+            }));
+          } finally {
+            setLoadingModalVisible(false);
           }
         }
       }
     } catch (err) {
       console.error('Gallery select error:', err);
-      Alert.alert('Error', 'No se pudo abrir la galería.');
+      setLoadingModalVisible(false);
+      Alert.alert('Error', 'No se pudo abrir la galería o procesar las fotos.');
     }
   };
 
@@ -222,6 +297,15 @@ export default function EvidenciaForm() {
       Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
       return;
     }
+
+    const totalFotosAdicionales = trabajos.reduce((acc, t) => acc + (t.fotosAdicionales?.length || 0), 0);
+
+    setLoadingTitle('Generando reporte PDF');
+    setLoadingMessage('Compilando evidencias y anexos fotográficos...');
+    setLoadingCurrent(0);
+    setLoadingTotal(totalFotosAdicionales);
+    setLoadingModalVisible(true);
+
     try {
       const allMateriales = trabajos
         .map(t => t.materiales.trim())
@@ -244,23 +328,22 @@ export default function EvidenciaForm() {
           descripcion: t.descripcion.trim(),
           materiales: t.materiales.trim() || null,
           solucion: t.solucion.trim() || null,
-          antesImg: t.antesImg?.base64 || t.antesImg?.uri || null,
-          despuesImg: t.despuesImg?.base64 || t.despuesImg?.uri || null,
-          fotosAdicionales: t.fotosAdicionales?.map(f => f.base64 || f.uri) || []
+          antesImg: t.antesImg?.uri || (t.antesImg?.base64 ? `data:image/jpeg;base64,${t.antesImg.base64}` : null),
+          despuesImg: t.despuesImg?.uri || (t.despuesImg?.base64 ? `data:image/jpeg;base64,${t.despuesImg.base64}` : null),
+          fotosAdicionales: (t.fotosAdicionales || []).map(f => f.uri || (f.base64 ? `data:image/jpeg;base64,${f.base64}` : '')).filter(Boolean),
         }))),
         materiales_usados: allMateriales || null,
         observaciones: allSoluciones || null,
       };
 
-      const extraPhotos = fotosAdicionales.map((f) => f.base64 || f.uri);
-
       await EvidenceReportGenerator.exportToPDF(
         evData,
-        currentUser?.nombre || 'Técnico Autorizado',
-        extraPhotos
+        currentUser?.nombre || 'Técnico Autorizado'
       );
     } catch (err: any) {
       Alert.alert('Error', err.message || 'No se pudo exportar el PDF.');
+    } finally {
+      setLoadingModalVisible(false);
     }
   };
 
@@ -280,71 +363,98 @@ export default function EvidenciaForm() {
 
     setIsSubmitting(true);
 
+    // Contabilizar total de fotos a subir en todos los trabajos
+    let totalPhotosToUpload = 0;
+    trabajos.forEach(t => {
+      if (t.antesImg?.base64) totalPhotosToUpload++;
+      if (t.despuesImg?.base64) totalPhotosToUpload++;
+      (t.fotosAdicionales || []).forEach(extra => {
+        if (extra.base64) totalPhotosToUpload++;
+      });
+    });
+
+    setLoadingTitle('Guardando en el servidor');
+    setLoadingMessage('Iniciando subida de evidencias...');
+    setLoadingCurrent(0);
+    setLoadingTotal(totalPhotosToUpload);
+    setLoadingModalVisible(true);
+
     try {
-      let fotoAntesUrl = null;
-      let fotoDespuesUrl = null;
+      let uploadedCount = 0;
 
       // Helper to convert base64 to arraybuffer and upload
       const uploadPhoto = async (base64Data: string, prefix: string) => {
-        // Simple base64 decoding to array buffer
-        const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '').replace(/[^A-Za-z0-9+/=]/g, '');
-        
-        let bufferLength = cleanBase64.length * 0.75;
-        if (cleanBase64[cleanBase64.length - 1] === '=') {
-          bufferLength--;
-          if (cleanBase64[cleanBase64.length - 2] === '=') bufferLength--;
-        }
-        
-        const arrayBuffer = new ArrayBuffer(bufferLength);
-        const bytes = new Uint8Array(arrayBuffer);
-        
-        // Simple base64 lookup array
-        const charsList = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-        const lookupArray = new Uint8Array(256);
-        for (let i = 0; i < charsList.length; i++) {
-          lookupArray[charsList.charCodeAt(i)] = i;
-        }
-        
-        let p = 0;
-        for (let i = 0; i < cleanBase64.length; i += 4) {
-          const encoded1 = lookupArray[cleanBase64.charCodeAt(i)];
-          const encoded2 = lookupArray[cleanBase64.charCodeAt(i + 1)];
-          const encoded3 = lookupArray[cleanBase64.charCodeAt(i + 2)];
-          const encoded4 = lookupArray[cleanBase64.charCodeAt(i + 3)];
-          
-          bytes[p++] = (encoded1 << 2) | (encoded2 >> 4);
-          if (p < bufferLength) {
-            bytes[p++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
-          }
-          if (p < bufferLength) {
-            bytes[p++] = ((encoded3 & 3) << 6) | (encoded4 & 63);
-          }
-        }
-
-        const fileName = `${currentUser.id}/evidencia_${prefix}_${Date.now()}.jpg`;
+        const arrayBuffer = base64ToArrayBuffer(base64Data);
+        const randId = Math.random().toString(36).substring(2, 7);
+        const fileName = `${currentUser.id}/evidencia_${prefix}_${Date.now()}_${randId}.jpg`;
         const { error: uploadError } = await supabase.storage
-          .from('tickets') // Reutilizar el bucket de tickets existente para simplificar
+          .from('tickets')
           .upload(fileName, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
 
         if (uploadError) throw uploadError;
 
         const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+        uploadedCount++;
+        setLoadingCurrent(uploadedCount);
+        setLoadingMessage(`Subiendo foto ${uploadedCount} de ${totalPhotosToUpload} (${Math.round((uploadedCount / Math.max(1, totalPhotosToUpload)) * 100)}%)...`);
         return urlData.publicUrl;
       };
 
-      // El upload de fotos por trabajo se hace al armar el array (ver más abajo)
+      let fotoAntesUrl = null;
+      let fotoDespuesUrl = null;
+      const allFotosAdicionalesUrls: string[] = [];
 
-      // Subir fotos adicionales
-      const fotosAdicionalesUrls: string[] = [];
-      if (fotosAdicionales.length > 0) {
-        for (let i = 0; i < fotosAdicionales.length; i++) {
-          const extra = fotosAdicionales[i];
-          if (extra.base64) {
-            const url = await uploadPhoto(extra.base64, `extra_${i}`);
-            if (url) fotosAdicionalesUrls.push(url);
+      // Subir fotos de cada trabajo (antes, despues y fotos adicionales de cada trabajo)
+      const trabajosPayload = [];
+      for (let i = 0; i < trabajos.length; i++) {
+        const t = trabajos[i];
+        let antesUrl: string | null = null;
+        let despuesUrl: string | null = null;
+
+        if (t.antesImg?.base64) {
+          antesUrl = await uploadPhoto(t.antesImg.base64, `t${i}_antes`);
+          if (i === 0) fotoAntesUrl = antesUrl;
+        }
+        if (t.despuesImg?.base64) {
+          despuesUrl = await uploadPhoto(t.despuesImg.base64, `t${i}_despues`);
+          if (i === 0) fotoDespuesUrl = despuesUrl;
+        }
+
+        // Subir fotos adicionales de este trabajo con concurrencia de 4
+        const jobExtrasUrls: string[] = [];
+        const extras = t.fotosAdicionales || [];
+        if (extras.length > 0) {
+          const CONCURRENCY = 4;
+          for (let j = 0; j < extras.length; j += CONCURRENCY) {
+            const chunk = extras.slice(j, j + CONCURRENCY);
+            const urls = await Promise.all(
+              chunk.map(async (extra, chunkIdx) => {
+                if (extra.base64) {
+                  return await uploadPhoto(extra.base64, `t${i}_extra_${j + chunkIdx}`);
+                }
+                return extra.uri || null;
+              })
+            );
+            urls.forEach(u => {
+              if (u) {
+                jobExtrasUrls.push(u);
+                allFotosAdicionalesUrls.push(u);
+              }
+            });
           }
         }
+
+        trabajosPayload.push({
+          descripcion: t.descripcion.trim(),
+          materiales: t.materiales.trim() || null,
+          solucion: t.solucion.trim() || null,
+          antesImg: antesUrl || t.antesImg?.uri || null,
+          despuesImg: despuesUrl || t.despuesImg?.uri || null,
+          fotosAdicionales: jobExtrasUrls,
+        });
       }
+
+      setLoadingMessage('Registrando evidencia en la base de datos...');
 
       const allMateriales = trabajos
         .map(t => t.materiales.trim())
@@ -364,18 +474,13 @@ export default function EvidenciaForm() {
         {
           empleado_id: currentUser.id,
           empleado_nombre: currentUser.nombre,
-          // cliente: clienteStr (already added above for export, wait handleSaveToDatabase needs it)
           cliente: clienteStr,
-          descripcion_trabajo: JSON.stringify(trabajos.map(t => ({
-            descripcion: t.descripcion.trim(),
-            materiales: t.materiales.trim() || null,
-            solucion: t.solucion.trim() || null,
-          }))),
+          descripcion_trabajo: JSON.stringify(trabajosPayload),
           materiales_usados: allMateriales || null,
           observaciones: allSoluciones || null,
           foto_antes_url: fotoAntesUrl,
           foto_despues_url: fotoDespuesUrl,
-          fotos_adicionales_urls: fotosAdicionalesUrls.length > 0 ? fotosAdicionalesUrls : null,
+          fotos_adicionales_urls: allFotosAdicionalesUrls.length > 0 ? allFotosAdicionalesUrls : null,
         },
       ]);
 
@@ -387,16 +492,19 @@ export default function EvidenciaForm() {
         );
       }
 
+      setLoadingModalVisible(false);
       Alert.alert('Éxito', 'Evidencia y reporte guardados correctamente en el servidor.');
       router.replace('/(empleado)/dashboard');
     } catch (err: any) {
       console.error('Error saving evidence:', err);
+      setLoadingModalVisible(false);
       Alert.alert(
         'Guardado Parcial',
         `${err.message}\n\nEl reporte no se pudo guardar en el servidor, pero puedes exportar el PDF con el botón correspondiente.`
       );
     } finally {
       setIsSubmitting(false);
+      setLoadingModalVisible(false);
     }
   };
 
@@ -437,65 +545,68 @@ export default function EvidenciaForm() {
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <StepIndicator
             currentStep={currentStep}
-            steps={['Información y Evidencias', 'Fotos Adicionales y Finalizar']}
+            steps={['Información y Evidencias', 'Revisión y Finalizar']}
           />
 
-          {/* PASO 2: Fotos Adicionales y Finalizar */}
+          {/* PASO 2: Revisión y Finalizar */}
           {currentStep === 2 && (
             <View style={styles.stepContainer}>
               <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
-                2. Fotografías Adicionales y Exportar
+                2. Revisión y Finalizar Reporte
               </Text>
               <Text style={[styles.subtitleText, { color: themeColors.textSecondary }]}>
-                Sube fotos adicionales (opcionales) y finaliza el reporte.
+                Revisa los datos de la intervención antes de exportar el reporte o guardarlo en el servidor.
               </Text>
 
-              {/* Antes y despues UI has been moved inside trabajos */}
+              {/* Tarjeta de Resumen */}
+              <View style={{
+                backgroundColor: themeColors.backgroundElement,
+                borderColor: themeColors.border,
+                borderWidth: 1,
+                borderRadius: BorderRadius.medium,
+                padding: Spacing.three,
+                marginBottom: Spacing.four
+              }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: themeColors.text, marginBottom: Spacing.two }}>
+                  Resumen de la Evidencia
+                </Text>
 
-              {/* Fotos Adicionales */}
-              <Text style={[styles.photoLabel, { color: themeColors.text, marginTop: Spacing.four }]}>
-                Fotografías Adicionales (Opcionales)
-              </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.one }}>
+                  <Ionicons name="business-outline" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />
+                  <Text style={{ fontSize: 14, color: themeColors.text, fontWeight: '600' }}>
+                    Cliente: <Text style={{ fontWeight: '400', color: themeColors.textSecondary }}>{clientes.find(c => c.id === selectedCliente)?.nombre || 'No seleccionado'}</Text>
+                  </Text>
+                </View>
 
-              {fotosAdicionales.length > 0 && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adicionalesList}>
-                  {fotosAdicionales.map((item, index) => (
-                    <View key={index} style={[styles.adicionalCard, { borderColor: themeColors.border }]}>
-                      <TouchableOpacity
-                        activeOpacity={0.9}
-                        onPress={() => handleOpenPhoto(item.uri)}
-                        style={{ width: '100%', height: '100%' }}
-                      >
-                        <Image source={{ uri: item.uri }} style={styles.adicionalImage} />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.removeAdicionalBtn}
-                        onPress={() => {
-                          setFotosAdicionales((prev) => prev.filter((_, i) => i !== index));
-                        }}
-                      >
-                        <Ionicons name="trash" size={14} color="#ffffff" />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </ScrollView>
-              )}
+                {selectedSucursal ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.one }}>
+                    <Ionicons name="storefront-outline" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />
+                    <Text style={{ fontSize: 14, color: themeColors.text, fontWeight: '600' }}>
+                      Sucursal: <Text style={{ fontWeight: '400', color: themeColors.textSecondary }}>{sucursalesCliente.find(s => s.id === selectedSucursal)?.nombre || 'General'}</Text>
+                    </Text>
+                  </View>
+                ) : null}
 
-              <View style={styles.actionGrid}>
-                <TouchableOpacity
-                  onPress={() => handleCapturePhoto('adicional')}
-                  style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                >
-                  <Ionicons name="camera" size={20} color={themeColors.accent} />
-                  <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Tomar Foto</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => handleSelectGallery('adicional')}
-                  style={[styles.actionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                >
-                  <Ionicons name="images" size={20} color={themeColors.accent} />
-                  <Text style={[styles.actionBtnText, { color: themeColors.text }]}>Galería</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.one }}>
+                  <Ionicons name="construct-outline" size={18} color={themeColors.accent} style={{ marginRight: 8 }} />
+                  <Text style={{ fontSize: 14, color: themeColors.text, fontWeight: '600' }}>
+                    Trabajos Registrados: <Text style={{ fontWeight: '400', color: themeColors.textSecondary }}>{trabajos.length} {trabajos.length === 1 ? 'trabajo' : 'trabajos'}</Text>
+                  </Text>
+                </View>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.one }}>
+                  <Ionicons name="camera-outline" size={18} color={themeColors.success} style={{ marginRight: 8 }} />
+                  <Text style={{ fontSize: 14, color: themeColors.text, fontWeight: '600' }}>
+                    Evidencias Antes / Después: <Text style={{ fontWeight: '400', color: themeColors.textSecondary }}>{trabajos.filter(t => t.antesImg).length} Antes, {trabajos.filter(t => t.despuesImg).length} Después</Text>
+                  </Text>
+                </View>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="images-outline" size={18} color={themeColors.accent} style={{ marginRight: 8 }} />
+                  <Text style={{ fontSize: 14, color: themeColors.text, fontWeight: '600' }}>
+                    Fotos Adicionales: <Text style={{ fontWeight: '400', color: themeColors.textSecondary }}>{trabajos.reduce((acc, t) => acc + (t.fotosAdicionales?.length || 0), 0)} fotos en total</Text>
+                  </Text>
+                </View>
               </View>
 
               <View style={styles.actionColumn}>
@@ -530,7 +641,7 @@ export default function EvidenciaForm() {
                 1. Detalles de la Intervención
               </Text>
               <Text style={[styles.subtitleText, { color: themeColors.textSecondary }]}>
-                Proporciona los datos del cliente, describe los trabajos o arreglos que realizaste y añade las evidencias de cada uno.
+                Proporciona los datos del cliente, describe los trabajos realizados y añade las fotografías correspondientes.
               </Text>
 
               
@@ -793,55 +904,141 @@ export default function EvidenciaForm() {
                     </View>
                   </View>
 
-                  {/* Fotos Adicionales del Trabajo */}
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text, marginTop: Spacing.two, marginBottom: Spacing.two }}>
-                    Fotografías Adicionales (Específicas de este trabajo)
-                  </Text>
-                  
-                  {trabajo.fotosAdicionales && trabajo.fotosAdicionales.length > 0 && (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row', marginBottom: Spacing.two }}>
-                      {trabajo.fotosAdicionales.map((item, photoIndex) => (
-                        <View key={photoIndex} style={[styles.adicionalCard, { borderColor: themeColors.border, width: 80, height: 80 }]}>
+                  {/* Fotografías Adicionales de este Trabajo (Hasta 250 fotos) */}
+                  <View style={{
+                    marginTop: Spacing.three,
+                    backgroundColor: themeColors.background,
+                    borderColor: themeColors.border,
+                    borderWidth: 1,
+                    borderRadius: BorderRadius.medium,
+                    padding: Spacing.two,
+                  }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '700' }}>
+                        Fotos Adicionales (Trabajo #{index + 1})
+                      </Text>
+                      <View style={{ 
+                        paddingHorizontal: 6, 
+                        paddingVertical: 2, 
+                        borderRadius: 10, 
+                        backgroundColor: (trabajo.fotosAdicionales?.length || 0) >= 250 ? '#EF444420' : themeColors.primary + '20',
+                        borderWidth: 1,
+                        borderColor: (trabajo.fotosAdicionales?.length || 0) >= 250 ? '#EF4444' : themeColors.primary
+                      }}>
+                        <Text style={{ 
+                          fontSize: 11, 
+                          fontWeight: '700', 
+                          color: (trabajo.fotosAdicionales?.length || 0) >= 250 ? '#EF4444' : themeColors.primary 
+                        }}>
+                          {trabajo.fotosAdicionales?.length || 0} / 250 máx
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginBottom: Spacing.one }}>
+                      Adjunta fotos adicionales específicas de este trabajo (hasta 250 fotos).
+                    </Text>
+
+                    {(trabajo.fotosAdicionales && trabajo.fotosAdicionales.length > 0) ? (
+                      <View style={{ marginBottom: Spacing.two }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 }}>
                           <TouchableOpacity
-                            activeOpacity={0.9}
-                            onPress={() => handleOpenPhoto(item.uri)}
-                            style={{ width: '100%', height: '100%' }}
-                          >
-                            <Image source={{ uri: item.uri }} style={styles.adicionalImage} />
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.removeAdicionalBtn, { width: 22, height: 22, top: 2, right: 2 }]}
                             onPress={() => {
-                              setTrabajos(prev => prev.map((t, i) => i === index ? {
-                                ...t,
-                                fotosAdicionales: t.fotosAdicionales?.filter((_, pI) => pI !== photoIndex)
-                              } : t));
+                              Alert.alert(
+                                'Eliminar fotos',
+                                `¿Estás seguro de que deseas eliminar todas las fotos adicionales del Trabajo #${index + 1}?`,
+                                [
+                                  { text: 'Cancelar', style: 'cancel' },
+                                  {
+                                    text: 'Eliminar todas',
+                                    style: 'destructive',
+                                    onPress: () => {
+                                      setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, fotosAdicionales: [] } : t));
+                                    }
+                                  }
+                                ]
+                              );
                             }}
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingHorizontal: 4 }}
                           >
-                            <Ionicons name="trash" size={12} color="#ffffff" />
+                            <Ionicons name="trash-outline" size={13} color={Colors.light.danger} />
+                            <Text style={{ fontSize: 11, color: Colors.light.danger, fontWeight: '600' }}>Limpiar ({trabajo.fotosAdicionales.length})</Text>
                           </TouchableOpacity>
                         </View>
-                      ))}
-                    </ScrollView>
-                  )}
-                  
-                  <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.four }}>
-                    <TouchableOpacity onPress={() => handleCapturePhoto('adicional', index)} style={[styles.actionBtn, { flex: 1, paddingVertical: 6, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <Ionicons name="camera" size={14} color={themeColors.accent} />
-                      <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 11 }]}>Tomar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleSelectGallery('adicional', index)} style={[styles.actionBtn, { flex: 1, paddingVertical: 6, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <Ionicons name="images" size={14} color={themeColors.accent} />
-                      <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 11 }]}>Galería</Text>
-                    </TouchableOpacity>
-                  </View>
 
+                        <ScrollView horizontal showsHorizontalScrollIndicator={true} style={styles.adicionalesList}>
+                          {trabajo.fotosAdicionales.map((item, photoIdx) => (
+                            <View key={photoIdx} style={[styles.adicionalCard, { borderColor: themeColors.border }]}>
+                              <TouchableOpacity
+                                activeOpacity={0.9}
+                                onPress={() => handleOpenPhoto(item.uri)}
+                                style={{ width: '100%', height: '100%' }}
+                              >
+                                <Image source={{ uri: item.uri }} style={styles.adicionalImage} />
+                              </TouchableOpacity>
+                              <View style={styles.adicionalIndexBadge}>
+                                <Text style={styles.adicionalIndexText}>#{photoIdx + 1}</Text>
+                              </View>
+                              <TouchableOpacity
+                                style={styles.removeAdicionalBtn}
+                                onPress={() => {
+                                  setTrabajos(prev => prev.map((t, i) => {
+                                    if (i === index) {
+                                      return {
+                                        ...t,
+                                        fotosAdicionales: (t.fotosAdicionales || []).filter((_, pI) => pI !== photoIdx)
+                                      };
+                                    }
+                                    return t;
+                                  }));
+                                }}
+                              >
+                                <Ionicons name="trash" size={14} color="#ffffff" />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    ) : null}
+
+                    <View style={styles.actionGrid}>
+                      <TouchableOpacity
+                        onPress={() => handleCapturePhoto('adicional', index)}
+                        disabled={(trabajo.fotosAdicionales?.length || 0) >= 250}
+                        style={[
+                          styles.actionBtn, 
+                          { 
+                            backgroundColor: themeColors.backgroundElement, 
+                            borderColor: themeColors.border,
+                            opacity: (trabajo.fotosAdicionales?.length || 0) >= 250 ? 0.5 : 1
+                          }
+                        ]}
+                      >
+                        <Ionicons name="camera" size={16} color={themeColors.accent} />
+                        <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 12 }]}>Tomar Foto</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => handleSelectGallery('adicional', index)}
+                        disabled={(trabajo.fotosAdicionales?.length || 0) >= 250}
+                        style={[
+                          styles.actionBtn, 
+                          { 
+                            backgroundColor: themeColors.backgroundElement, 
+                            borderColor: themeColors.border,
+                            opacity: (trabajo.fotosAdicionales?.length || 0) >= 250 ? 0.5 : 1
+                          }
+                        ]}
+                      >
+                        <Ionicons name="images" size={16} color={themeColors.accent} />
+                        <Text style={[styles.actionBtnText, { color: themeColors.text, fontSize: 12 }]}>Galería</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 </View>
               ))}
 
               <TouchableOpacity
                 onPress={() => {
-                  setTrabajos(prev => [...prev, { descripcion: '', materiales: '', solucion: '' }]);
+                  setTrabajos(prev => [...prev, { descripcion: '', materiales: '', solucion: '', fotosAdicionales: [] }]);
                 }}
                 style={{
                   flexDirection: 'row',
@@ -874,6 +1071,95 @@ export default function EvidenciaForm() {
         imageUrl={selectedPhoto}
         onClose={() => setViewerVisible(false)}
       />
+
+      {/* Modal de Carga y Progreso (Ruedita de Carga) */}
+      <Modal
+        visible={loadingModalVisible}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+      >
+        <View style={styles.loadingModalBackdrop}>
+          <View style={[styles.loadingModalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+            <View style={[styles.loadingSpinnerContainer, { backgroundColor: themeColors.primary + '15' }]}>
+              <ActivityIndicator size="large" color={themeColors.primary} />
+            </View>
+            
+            <Text style={[styles.loadingModalTitle, { color: themeColors.text }]}>
+              {loadingTitle}
+            </Text>
+            
+            <Text style={[styles.loadingModalSubtitle, { color: themeColors.textSecondary }]}>
+              {loadingMessage || 'Por favor espera un momento...'}
+            </Text>
+
+            {loadingTotal > 0 && (
+              <View style={[styles.counterBoxContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                {/* Gran Contador Numérico de Fotos Subidas */}
+                <View style={styles.counterStatsRow}>
+                  <View style={styles.counterStatCol}>
+                    <Text style={[styles.counterBigNumber, { color: themeColors.primary }]}>
+                      {loadingCurrent}
+                    </Text>
+                    <Text style={[styles.counterStatLabel, { color: themeColors.textSecondary }]}>
+                      SUBIDAS
+                    </Text>
+                  </View>
+
+                  <View style={[styles.counterStatDivider, { backgroundColor: themeColors.border }]} />
+
+                  <View style={styles.counterStatCol}>
+                    <Text style={[styles.counterBigNumber, { color: themeColors.text }]}>
+                      {loadingTotal}
+                    </Text>
+                    <Text style={[styles.counterStatLabel, { color: themeColors.textSecondary }]}>
+                      TOTAL
+                    </Text>
+                  </View>
+
+                  <View style={[styles.counterStatDivider, { backgroundColor: themeColors.border }]} />
+
+                  <View style={styles.counterStatCol}>
+                    <Text style={[styles.counterBigNumber, { color: '#10B981' }]}>
+                      {Math.min(100, Math.max(0, Math.round((loadingCurrent / loadingTotal) * 100)))}%
+                    </Text>
+                    <Text style={[styles.counterStatLabel, { color: themeColors.textSecondary }]}>
+                      AVANCE
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Barra de Progreso */}
+                <View style={styles.progressContainer}>
+                  <View style={[styles.progressBarBg, { backgroundColor: themeColors.border }]}>
+                    <View
+                      style={[
+                        styles.progressBarFill,
+                        {
+                          backgroundColor: themeColors.primary,
+                          width: `${Math.min(100, Math.max(0, Math.round((loadingCurrent / loadingTotal) * 100)))}%`
+                        }
+                      ]}
+                    />
+                  </View>
+                </View>
+
+                <Text style={[styles.counterRemainingText, { color: themeColors.textSecondary }]}>
+                  {loadingCurrent >= loadingTotal
+                    ? '✓ ¡Todas las fotos se han procesado!'
+                    : `Quedan ${loadingTotal - loadingCurrent} fotos pendientes de subir`}
+                </Text>
+              </View>
+            )}
+
+            <Text style={[styles.loadingNote, { color: themeColors.textSecondary }]}>
+              {loadingTitle.includes('Subiendo') || loadingTitle.includes('Guardando')
+                ? 'Subiendo fotos a la nube. Por favor mantén la app abierta.' 
+                : 'Optimizando imágenes para un rendimiento óptimo.'}
+            </Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1055,5 +1341,132 @@ const styles = StyleSheet.create({
   },
   dropdownItem: {
     // inline styled mostly
+  },
+  adicionalIndexBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  adicionalIndexText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  loadingModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.four,
+  },
+  loadingModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: BorderRadius.large,
+    borderWidth: 1,
+    padding: Spacing.five,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  loadingSpinnerContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.three,
+  },
+  loadingModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: Spacing.one,
+  },
+  loadingModalSubtitle: {
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: Spacing.three,
+    lineHeight: 18,
+  },
+  counterBoxContainer: {
+    width: '100%',
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    padding: Spacing.three,
+    marginBottom: Spacing.three,
+    alignItems: 'center',
+  },
+  counterStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginBottom: Spacing.three,
+  },
+  counterStatCol: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  counterBigNumber: {
+    fontSize: 22,
+    fontWeight: '900',
+    marginBottom: 2,
+  },
+  counterStatLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  counterStatDivider: {
+    width: 1,
+    height: 28,
+  },
+  counterRemainingText: {
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: Spacing.one,
+  },
+  progressContainer: {
+    width: '100%',
+    marginBottom: Spacing.one,
+  },
+  progressBarBg: {
+    width: '100%',
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: Spacing.one,
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressTextRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  progressCountText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  progressPercentText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  loadingNote: {
+    fontSize: 11,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginTop: Spacing.one,
   },
 });

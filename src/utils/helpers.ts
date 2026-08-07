@@ -23,3 +23,26 @@ export const getComentariosPlaceholder = (categoria: string, subcategoria: strin
   }
   return 'Escribe tus comentarios o detalles adicionales...';
 };
+
+/**
+ * Determina si una combinación de categoría y subcategoría corresponde a un gasto de combustible / gasolina / diésel,
+ * para activar el registro de odómetro (kilometraje), litros y vehículo.
+ */
+export const isCombustibleExpense = (
+  categoria: string | null | undefined,
+  subcategoria: string | null | undefined
+): boolean => {
+  const normCat = (categoria || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const normSub = (subcategoria || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+  const esCatVehiculo = normCat === 'vehiculos' || normCat === 'vehiculo' || normCat.includes('vehicul');
+  const esSubCombustible =
+    normSub === 'combustible' ||
+    normSub === 'gasolina' ||
+    normSub === 'diesel' ||
+    normSub.includes('combustible') ||
+    normSub.includes('gasolina') ||
+    normSub.includes('diesel');
+
+  return (esCatVehiculo && esSubCombustible) || normSub === 'combustible' || normSub === 'gasolina' || normSub === 'diesel';
+};

@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, GastoHelper, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
+import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
 import { SyncService, OfflineGastoItem } from '@/services/sync';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
@@ -385,22 +385,47 @@ export default function EmpleadoDashboard() {
       setMisRegistrosGasolina([]);
     }
     try {
-      // 1. Obtener de Supabase
-      const { data, error } = await supabase
-        .from('gastos')
-        .select(`
-          *,
-          categoria_rel:categorias(id, nombre),
-          subcategoria_rel:subcategorias(id, nombre),
-          proveedor_rel:proveedores(id, nombre),
-          cliente_rel:clientes(id, nombre),
-          sucursal_rel:sucursales_cliente(id, nombre)
-        `)
-        .eq('empleado_id', userId)
-        .order('created_at', { ascending: false });
+      // 1. Obtener de Supabase (con fallback resiliente y enriquecimiento)
+      const [gastosRes, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
+        supabase
+          .from('gastos')
+          .select(`
+            *,
+            subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
+            proveedor_rel:proveedores(id, nombre),
+            cliente_rel:clientes(id, nombre),
+            sucursal_rel:sucursales_cliente(id, nombre)
+          `)
+          .eq('empleado_id', userId)
+          .order('created_at', { ascending: false }),
+        supabase.from('categorias').select('*'),
+        supabase.from('subcategorias').select('*'),
+        supabase.from('proveedores').select('*'),
+        supabase.from('clientes').select('*'),
+        supabase.from('sucursales_cliente').select('*'),
+      ]);
 
-      if (error) throw error;
-      setGastos(data || []);
+      let rawGastos = gastosRes.data || [];
+      if (gastosRes.error) {
+        console.warn('Relational gastos query failed, attempting basic query:', gastosRes.error.message);
+        const fallbackRes = await supabase
+          .from('gastos')
+          .select('*')
+          .eq('empleado_id', userId)
+          .order('created_at', { ascending: false });
+        rawGastos = fallbackRes.data || [];
+      }
+
+      const enrichedGastos = GastoService.enrichGastosWithCatalogs(
+        rawGastos,
+        catRes.data || [],
+        subRes.data || [],
+        provRes.data || [],
+        cliRes.data || [],
+        sucRes.data || []
+      );
+
+      setGastos(enrichedGastos);
 
       // 2. Obtener cola local offline
       const localQueue = await SyncService.getOfflineQueue();
@@ -416,6 +441,17 @@ export default function EmpleadoDashboard() {
       setMisRegistrosGasolina(myGasLogs);
     } catch (err: any) {
       console.error('Error al cargar datos:', err);
+      // Emergency fallback
+      try {
+        const emergency = await supabase
+          .from('gastos')
+          .select('*')
+          .eq('empleado_id', userId)
+          .order('created_at', { ascending: false });
+        if (emergency.data && emergency.data.length > 0) {
+          setGastos(emergency.data);
+        }
+      } catch (_) {}
     } finally {
       if (!silent) setIsLoading(false);
     }

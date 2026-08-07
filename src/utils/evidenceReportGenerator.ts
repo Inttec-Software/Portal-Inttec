@@ -1,4 +1,5 @@
 import { cacheDirectory, copyAsync, getContentUriAsync } from 'expo-file-system/legacy';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform } from 'react-native';
@@ -53,6 +54,57 @@ const parseMarkdownToHtml = (markdown: string): string => {
   return finalHtml;
 };
 
+// Helper para optimizar y convertir imágenes a Base64 ligero para el PDF y asegurar que carguen 100% en Android/iOS/Web
+const preparePdfImage = async (uriOrBase64: string): Promise<string> => {
+  if (!uriOrBase64 || typeof uriOrBase64 !== 'string') return '';
+  const clean = uriOrBase64.trim();
+  if (!clean) return '';
+
+  try {
+    let inputUri = clean;
+    
+    // Si ya es un data URI base64
+    if (clean.startsWith('data:image/')) {
+      try {
+        const manipulated = await ImageManipulator.manipulateAsync(
+          clean,
+          [{ resize: { width: 500 } }],
+          { compress: 0.35, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        );
+        return manipulated.base64 ? `data:image/jpeg;base64,${manipulated.base64}` : clean;
+      } catch {
+        return clean;
+      }
+    }
+
+    // Si es un base64 sin prefijo
+    if (
+      clean.includes('base64,') || 
+      (!clean.startsWith('http://') && !clean.startsWith('https://') && !clean.startsWith('file:') && !clean.startsWith('content:') && !clean.startsWith('/'))
+    ) {
+      inputUri = clean.startsWith('data:') ? clean : `data:image/jpeg;base64,${clean}`;
+    }
+
+    // Redimensionar a 500px ancho y comprimir a JPEG liviano (~15KB)
+    const manipulated = await ImageManipulator.manipulateAsync(
+      inputUri,
+      [{ resize: { width: 500 } }],
+      { compress: 0.35, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+    );
+
+    if (manipulated.base64) {
+      return `data:image/jpeg;base64,${manipulated.base64}`;
+    }
+    return manipulated.uri || clean;
+  } catch (err) {
+    console.warn('Could not downsample image for PDF, returning fallback:', err);
+    if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('file:') || clean.startsWith('content:')) {
+      return clean;
+    }
+    return `data:image/jpeg;base64,${clean}`;
+  }
+};
+
 export const EvidenceReportGenerator = {
   async exportToPDF(
     evidencia: Omit<Evidencia, 'id'> & { id?: string },
@@ -62,8 +114,6 @@ export const EvidenceReportGenerator = {
     const fecha = evidencia.created_at
       ? new Date(evidencia.created_at).toLocaleString('es-MX')
       : new Date().toLocaleString('es-MX');
-
-
 
     const textToBulletPoints = (text: string): string => {
       if (!text) return '';
@@ -78,32 +128,17 @@ export const EvidenceReportGenerator = {
       return `<ul style="margin: 4px 0; padding-left: 18px; list-style-type: none;">\n${bulletLines.join('\n')}\n</ul>`;
     };
 
-
-    let fotosAdicionalesHtml = '';
-    if (fotosAdicionales && fotosAdicionales.length > 0) {
-      fotosAdicionales.forEach((foto, index) => {
-        if (!foto) return;
-        const imgSrc = foto.startsWith('data:') || foto.startsWith('http') 
-          ? foto 
-          : `data:image/jpeg;base64,${foto}`;
-        
-        fotosAdicionalesHtml += `
-          <div style="page-break-before: always; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-inside: avoid; text-align: center; box-sizing: border-box; padding: 20px 0;">
-            <div style="font-size: 12px; font-weight: bold; color: #1a365d; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">Foto Adicional #${index + 1}</div>
-            <div style="display: flex; align-items: center; justify-content: center; width: 100%; max-height: 800px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; box-sizing: border-box;">
-              <img src="${imgSrc}" style="max-width: 100%; max-height: 800px; object-fit: contain; border-radius: 4px;" />
-            </div>
-            <div style="margin-top: 15px; font-size: 8px; color: #a0aec0; letter-spacing: 0.5px;">
-              Reporte de Evidencias - Anexo Fotográfico Adicional
-            </div>
-          </div>
-        `;
-      });
-    }
-
-    let trabajosHtml = '';
+    // Parse list of trabajos
+    let listTrabajos: { 
+      descripcion: string; 
+      materiales?: string | null; 
+      observaciones?: string | null; 
+      solucion?: string | null; 
+      antesImg?: string | null; 
+      despuesImg?: string | null; 
+      fotosAdicionales?: string[] 
+    }[] = [];
     let isMultiple = false;
-    let listTrabajos: { descripcion: string; materiales?: string | null; observaciones?: string | null; solucion?: string | null; antesImg?: string | null; despuesImg?: string | null; fotosAdicionales?: string[] }[] = [];
 
     try {
       if (evidencia.descripcion_trabajo && evidencia.descripcion_trabajo.trim().startsWith('[')) {
@@ -118,14 +153,107 @@ export const EvidenceReportGenerator = {
       listTrabajos = [{
         descripcion: evidencia.descripcion_trabajo || '',
         materiales: evidencia.materiales_usados,
-        observaciones: evidencia.observaciones
+        observaciones: evidencia.observaciones,
+        antesImg: evidencia.foto_antes_url,
+        despuesImg: evidencia.foto_despues_url,
+        fotosAdicionales: evidencia.fotos_adicionales_urls || [],
       }];
     }
 
-    if (listTrabajos.length > 0) {
-      trabajosHtml = listTrabajos.map((t) => {
+    // Downscale y conversión a base64 seguro en lotes de 4
+    const optimizedTrabajos = await Promise.all(
+      listTrabajos.map(async (t) => {
+        const antesOpt = t.antesImg ? await preparePdfImage(t.antesImg) : null;
+        const despuesOpt = t.despuesImg ? await preparePdfImage(t.despuesImg) : null;
+        const validExtras = (t.fotosAdicionales || []).filter(Boolean);
+        const optExtras: string[] = [];
+        const BATCH_SIZE = 4;
+        for (let i = 0; i < validExtras.length; i += BATCH_SIZE) {
+          const chunk = validExtras.slice(i, i + BATCH_SIZE);
+          const processed = await Promise.all(chunk.map(f => preparePdfImage(f)));
+          optExtras.push(...processed.filter(Boolean));
+        }
+        return {
+          ...t,
+          antesImg: antesOpt,
+          despuesImg: despuesOpt,
+          fotosAdicionales: optExtras,
+        };
+      })
+    );
+
+    // Optimizar fotos adicionales globales si se pasaron por separado
+    const validExtras = (fotosAdicionales || []).filter(Boolean);
+    const optimizedExtras: string[] = [];
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < validExtras.length; i += BATCH_SIZE) {
+      const chunk = validExtras.slice(i, i + BATCH_SIZE);
+      const processed = await Promise.all(chunk.map(f => preparePdfImage(f)));
+      optimizedExtras.push(...processed.filter(Boolean));
+    }
+
+    // Renderizar exactamente 2 fotos grandes por hoja (página independiente)
+    const renderPhotoPages = (photos: string[], sectionTitle: string) => {
+      const cleanPhotos = (photos || []).filter(Boolean);
+      if (cleanPhotos.length === 0) return '';
+      let pagesHtml = '';
+      const PHOTOS_PER_PAGE = 2; // 2 fotos de tamaño grande por hoja
+      
+      for (let i = 0; i < cleanPhotos.length; i += PHOTOS_PER_PAGE) {
+        const pagePhotos = cleanPhotos.slice(i, i + PHOTOS_PER_PAGE);
+        const startIdx = i + 1;
+        const endIdx = i + pagePhotos.length;
+        const pageSubtitle = pagePhotos.length === 1 
+          ? `Foto ${startIdx} de ${cleanPhotos.length}` 
+          : `Fotos ${startIdx} y ${endIdx} de ${cleanPhotos.length}`;
+
+        pagesHtml += `
+          <div class="photo-page" style="page-break-before: always; page-break-inside: avoid; padding-top: 15px;">
+            <div class="photo-page-header" style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #1a365d; padding-bottom: 6px; margin-bottom: 18px;">
+              <div style="font-size: 14px; font-weight: 800; color: #1a365d; text-transform: uppercase; letter-spacing: 0.5px;">
+                ${sectionTitle}
+              </div>
+              <div style="font-size: 11px; font-weight: 700; color: #718096;">
+                ${pageSubtitle}
+              </div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+              ${pagePhotos.map((imgSrc, pIdx) => `
+                <div class="large-photo-card" style="border: 1px solid #cbd5e0; border-radius: 8px; background-color: #ffffff; overflow: hidden; page-break-inside: avoid;">
+                  <div style="font-size: 12px; font-weight: 700; color: #2d3748; background-color: #f1f5f9; padding: 8px 14px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                    <span>Fotografía #${i + pIdx + 1}</span>
+                    <span style="font-size: 10px; color: #64748b; font-weight: 600;">Evidencia de Trabajo</span>
+                  </div>
+                  <div style="height: 380px; display: flex; align-items: center; justify-content: center; background-color: #f8fafc; padding: 10px;">
+                    <img src="${imgSrc}" alt="Foto #${i + pIdx + 1}" style="max-width: 100%; max-height: 380px; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;" />
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+      return pagesHtml;
+    };
+
+    let trabajosHtml = '';
+    let perJobPhotoAnnexesHtml = '';
+
+    if (optimizedTrabajos.length > 0) {
+      trabajosHtml = optimizedTrabajos.map((t, idx) => {
+        if (t.fotosAdicionales && t.fotosAdicionales.length > 0) {
+          const jobTitle = optimizedTrabajos.length > 1 ? `Anexo Fotográfico - Trabajo #${idx + 1}` : 'Anexo Fotográfico de Evidencia';
+          perJobPhotoAnnexesHtml += renderPhotoPages(t.fotosAdicionales, jobTitle);
+        }
+
         return `
           <div style="margin-bottom: 25px; page-break-inside: avoid;">
+            ${optimizedTrabajos.length > 1 ? `
+              <div style="background-color: #edf2f7; padding: 6px 10px; border-radius: 4px; font-size: 14px; font-weight: 800; color: #2d3748; margin-bottom: 12px; border-left: 4px solid #3182ce;">
+                TRABAJO #${idx + 1}
+              </div>
+            ` : ''}
             <h2 style="font-size: 18px; font-weight: bold; color: #000; margin-bottom: 8px; margin-top: 0;">Situación encontrada</h2>
             <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5; padding-left: 2px;">
               ${parseMarkdownToHtml(t.descripcion || '')}
@@ -146,24 +274,24 @@ export const EvidenceReportGenerator = {
             ` : ''}
 
             ${(t.antesImg || t.despuesImg) ? `
-            <table style="width: 100%; border-collapse: collapse; margin-top: 15px; border: none;">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 12px 0; margin-top: 15px; border: none;">
               <tr>
                 ${t.antesImg ? `
-                  <td style="width: 50%; padding: 0 10px 0 0; vertical-align: top; border: none;">
-                    <div class="evidence-card" style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; background-color: #f7fafc;">
-                      <div class="card-header antes" style="font-size: 10px; font-weight: 800; text-align: center; padding: 4px; color: #ffffff; background-color: #e53e3e;">ESTADO ANTES</div>
-                      <div class="image-wrapper" style="height: 180px; display: flex; align-items: center; justify-content: center; background-color: #edf2f7; padding: 8px;">
-                        <img src="${t.antesImg.startsWith('data:') || t.antesImg.startsWith('http') ? t.antesImg : `data:image/jpeg;base64,${t.antesImg}`}" alt="Antes del trabajo" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px;" />
+                  <td style="width: 50%; vertical-align: top; padding: 0; border: none;">
+                    <div class="evidence-card" style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background-color: #f7fafc;">
+                      <div class="card-header antes" style="font-size: 11px; font-weight: 800; text-align: center; padding: 6px; color: #ffffff; background-color: #e53e3e; letter-spacing: 0.5px;">ESTADO ANTES</div>
+                      <div class="image-wrapper" style="height: 220px; display: flex; align-items: center; justify-content: center; background-color: #f1f5f9; padding: 8px;">
+                        <img src="${t.antesImg}" alt="Antes del trabajo" style="max-width: 100%; max-height: 220px; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;" />
                       </div>
                     </div>
                   </td>
                 ` : ''}
                 ${t.despuesImg ? `
-                  <td style="width: 50%; padding: 0 0 0 10px; vertical-align: top; border: none;">
-                    <div class="evidence-card" style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; background-color: #f7fafc;">
-                      <div class="card-header despues" style="font-size: 10px; font-weight: 800; text-align: center; padding: 4px; color: #ffffff; background-color: #38a169;">ESTADO DESPUÉS</div>
-                      <div class="image-wrapper" style="height: 180px; display: flex; align-items: center; justify-content: center; background-color: #edf2f7; padding: 8px;">
-                        <img src="${t.despuesImg.startsWith('data:') || t.despuesImg.startsWith('http') ? t.despuesImg : `data:image/jpeg;base64,${t.despuesImg}`}" alt="Después del trabajo" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px;" />
+                  <td style="width: 50%; vertical-align: top; padding: 0; border: none;">
+                    <div class="evidence-card" style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background-color: #f7fafc;">
+                      <div class="card-header despues" style="font-size: 11px; font-weight: 800; text-align: center; padding: 6px; color: #ffffff; background-color: #38a169; letter-spacing: 0.5px;">ESTADO DESPUÉS</div>
+                      <div class="image-wrapper" style="height: 220px; display: flex; align-items: center; justify-content: center; background-color: #f1f5f9; padding: 8px;">
+                        <img src="${t.despuesImg}" alt="Después del trabajo" style="max-width: 100%; max-height: 220px; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;" />
                       </div>
                     </div>
                   </td>
@@ -174,31 +302,9 @@ export const EvidenceReportGenerator = {
           </div>
         `;
       }).join('');
-      
-      // Append per-job additional photos
-      listTrabajos.forEach((t, i) => {
-        if (t.fotosAdicionales && t.fotosAdicionales.length > 0) {
-          t.fotosAdicionales.forEach((foto, index) => {
-            if (!foto) return;
-            const imgSrc = foto.startsWith('data:') || foto.startsWith('http') 
-              ? foto 
-              : `data:image/jpeg;base64,${foto}`;
-            
-            fotosAdicionalesHtml += `
-              <div style="page-break-before: always; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-inside: avoid; text-align: center; box-sizing: border-box; padding: 20px 0;">
-                <div style="font-size: 12px; font-weight: bold; color: #1a365d; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">Trabajo #${i + 1} - Foto Adicional #${index + 1}</div>
-                <div style="display: flex; align-items: center; justify-content: center; width: 100%; max-height: 800px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; box-sizing: border-box;">
-                  <img src="${imgSrc}" style="max-width: 100%; max-height: 800px; object-fit: contain; border-radius: 4px;" />
-                </div>
-                <div style="margin-top: 15px; font-size: 8px; color: #a0aec0; letter-spacing: 0.5px;">
-                  Reporte de Evidencias - Anexo Fotográfico Adicional
-                </div>
-              </div>
-            `;
-          });
-        }
-      });
     }
+
+    const globalExtrasHtml = renderPhotoPages(optimizedExtras, 'Anexo Fotográfico General');
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -207,6 +313,9 @@ export const EvidenceReportGenerator = {
         <meta charset="utf-8" />
         <title>Hoja de servicio - ${evidencia.cliente || 'General'}</title>
         <style>
+          * {
+            box-sizing: border-box;
+          }
           body {
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             color: #2b2d42;
@@ -226,7 +335,14 @@ export const EvidenceReportGenerator = {
             }
             @page {
               size: letter;
-              margin: 12mm;
+              margin: 12mm 10mm;
+            }
+            .photo-page {
+              page-break-before: always !important;
+              page-break-inside: avoid !important;
+            }
+            .large-photo-card {
+              page-break-inside: avoid !important;
             }
           }
           .header-container {
@@ -236,42 +352,6 @@ export const EvidenceReportGenerator = {
             border-bottom: 3px solid #1a365d;
             padding-bottom: 12px;
             margin-bottom: 15px;
-          }
-          .logo-area {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-          }
-          .logo-text {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-          }
-          .logo-brand {
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-size: 38px;
-            font-weight: 900;
-            font-style: italic;
-            color: #1a365d;
-            line-height: 1;
-            letter-spacing: 0.5px;
-          }
-          .logo-tagline {
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-size: 7px;
-            font-weight: 700;
-            color: #4a5568;
-            letter-spacing: 0.8px;
-            text-transform: uppercase;
-            margin-top: 2px;
-          }
-          .logo-img {
-            width: 300px;
-            height: 100px;
-            object-fit: contain;
-          }
-          .report-info {
-            text-align: right;
           }
           .report-title {
             font-size: 15px;
@@ -285,17 +365,6 @@ export const EvidenceReportGenerator = {
             font-size: 10px;
             color: #718096;
             margin-top: 2px;
-          }
-          .section-title {
-            font-size: 12px;
-            font-weight: 800;
-            color: #1a365d;
-            border-bottom: 1px solid #e2e8f0;
-            padding-bottom: 4px;
-            margin-top: 15px;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
           }
           .info-table {
             width: 100%;
@@ -317,23 +386,17 @@ export const EvidenceReportGenerator = {
             color: #2d3748;
             border: 1px solid #edf2f7;
           }
-          .evidence-grid {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 15px;
-          }
           .evidence-card {
-            flex: 1;
             border: 1px solid #e2e8f0;
-            border-radius: 6px;
+            border-radius: 8px;
             overflow: hidden;
             background-color: #f7fafc;
           }
           .card-header {
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 800;
             text-align: center;
-            padding: 4px;
+            padding: 6px;
             color: #ffffff;
           }
           .card-header.antes {
@@ -343,54 +406,18 @@ export const EvidenceReportGenerator = {
             background-color: #38a169;
           }
           .image-wrapper {
-            height: 180px;
+            height: 220px;
             display: flex;
             align-items: center;
             justify-content: center;
-            background-color: #edf2f7;
+            background-color: #f1f5f9;
             padding: 8px;
           }
           .image-wrapper img {
             max-width: 100%;
-            max-height: 100%;
+            max-height: 220px;
             object-fit: contain;
             border-radius: 4px;
-          }
-          .report-box {
-            background-color: #f8fafc;
-            border-left: 4px solid #1a365d;
-            border-radius: 6px;
-            padding: 12px 18px;
-            font-size: 11px;
-            color: #1e293b;
-            margin-bottom: 20px;
-            box-shadow: inset 0 1px 3px rgba(0,0,0,0.02);
-          }
-          .report-box p {
-            margin: 4px 0;
-          }
-          .report-box ul {
-            margin: 4px 0;
-            padding-left: 20px;
-          }
-          .report-box li {
-            margin: 3px 0;
-            color: #334155;
-          }
-          .report-box strong {
-            color: #0f172a;
-            display: inline-block;
-            margin-top: 6px;
-          }
-          .footer {
-            margin-top: 25px;
-            text-align: center;
-            font-size: 8px;
-            color: #a0aec0;
-            border-top: 1px solid #e2e8f0;
-            padding-top: 10px;
-            letter-spacing: 0.5px;
-            page-break-inside: avoid;
           }
         </style>
       </head>
@@ -413,7 +440,7 @@ export const EvidenceReportGenerator = {
           </tr>
         </table>
 
-        <table class="info-table" style="margin-bottom: 10px;">
+        <table class="info-table" style="margin-bottom: 15px;">
           <tr>
             <td class="label">Responsable</td>
             <td class="value">${userName}</td>
@@ -424,10 +451,12 @@ export const EvidenceReportGenerator = {
 
         ${trabajosHtml}
         
-        <div style="margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; text-align: center; font-size: 9px; color: #718096; page-break-inside: avoid;">
+        <div style="margin-top: 25px; border-top: 1px solid #e2e8f0; padding-top: 8px; text-align: center; font-size: 9px; color: #718096; page-break-inside: avoid;">
           Documento Generado por el Sistema de Control de Gastos y Evidencias. CONFIDENCIAL.
         </div>
-        ${fotosAdicionalesHtml}
+
+        ${perJobPhotoAnnexesHtml}
+        ${globalExtrasHtml}
       </body>
       </html>
     `;
@@ -472,36 +501,28 @@ export const EvidenceReportGenerator = {
         return;
       }
 
-      // Generar archivo PDF temporal
-      const { uri } = await Print.printToFileAsync({ html: htmlContent });
-      
-      const safeUri = `${cacheDirectory}${cacheDirectory?.endsWith('/') ? '' : '/'}${pdfFileName}`;
-      
+      // Intentar generación de archivo PDF y compartir nativamente
       try {
-        // Copiar el archivo generado por Print al cacheDirectory de la app
-        // para evitar errores de permisos al compartir (sin usar Base64 para evitar OOM)
+        const { uri } = await Print.printToFileAsync({ html: htmlContent });
+        const safeUri = `${cacheDirectory}${cacheDirectory?.endsWith('/') ? '' : '/'}${pdfFileName}`;
         await copyAsync({ from: uri, to: safeUri });
 
-        // Convertir a URI content:// en Android para asegurar que otras apps puedan leer el archivo
         const shareUri = Platform.OS === 'android' ? await getContentUriAsync(safeUri) : safeUri;
 
-        // Compartir nativamente
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(shareUri, {
             mimeType: 'application/pdf',
             dialogTitle: 'Exportar Reporte de Evidencia PDF',
             UTI: 'com.adobe.pdf',
           });
-        } else {
-          throw new Error('La función de compartir no está disponible en este dispositivo.');
+          return;
         }
-      } catch (shareError) {
-        console.warn('Error al compartir archivo directo (normal en Expo Go, se usará impresión nativa):', shareError);
-        // Fallback definitivo: Abre el diálogo de impresión del sistema
-        // Desde aquí el usuario puede "Guardar como PDF" o imprimir directamente,
-        // lo cual funciona 100% en Expo Go ya que el sistema operativo maneja la renderización.
-        await Print.printAsync({ html: htmlContent });
+      } catch (fileErr) {
+        console.warn('printToFileAsync/Sharing error, attempting native print fallback:', fileErr);
       }
+
+      // Fallback 100% confiable: Abre el diálogo de impresión/guardar como PDF del sistema
+      await Print.printAsync({ html: htmlContent });
     } catch (error: any) {
       console.error('Error generating evidence PDF report:', error);
       throw new Error(error.message || 'Error al generar el reporte de evidencia PDF.');

@@ -241,8 +241,7 @@ export default function EditarGastoForm() {
             .from('gastos')
             .select(`
               *,
-              categoria_rel:categorias(id, nombre),
-              subcategoria_rel:subcategorias(id, nombre),
+              subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
               proveedor_rel:proveedores(id, nombre),
               cliente_rel:clientes(id, nombre),
               sucursal_rel:sucursales_cliente(id, nombre)
@@ -282,7 +281,7 @@ export default function EditarGastoForm() {
             setMetodoPago(data.metodo_pago as any || 'efectivo');
             setTipoTarjeta(data.tipo_tarjeta as any || null);
             setJustificacion(cleanJustificacion(data.justificacion));
-            setSelectedCategoria(data.categoria_rel?.nombre || data.categoria || '');
+            setSelectedCategoria(data.subcategoria_rel?.categoria_rel?.nombre || data.categoria_rel?.nombre || data.categoria || '');
             setSelectedSubcategoria(data.subcategoria_rel?.nombre || data.subcategoria || '');
             setSelectedCliente(data.cliente_rel?.nombre || data.cliente || '');
             if (data.motivo_sin_factura?.startsWith('PENDIENTE_ENTREGA')) {
@@ -690,7 +689,6 @@ export default function EditarGastoForm() {
 
     const gastoPayload = {
       monto: totalGasto,
-      categoria_id: activeCatObj?.id || null,
       subcategoria_id: activeSubObj?.id || null,
       metodo_pago: metodoPago,
       justificacion: finalJustificacion,
