@@ -156,7 +156,7 @@ export default function GastoForm() {
 
   // División de Gasto
   const [isSplit, setIsSplit] = useState(false);
-  const [splits, setSplits] = useState<{ id: string; clienteId: string; monto: string }[]>([]);
+  const [splits, setSplits] = useState<{ id: string; clienteId: string; sucursalNombre: string; monto: string }[]>([]);
 
   // Dropdown list visibility toggles (Mock pickers since RN Picker is external)
   const [showCatDropdown, setShowCatDropdown] = useState(false);
@@ -168,8 +168,12 @@ export default function GastoForm() {
   // Modal para agregar división de gasto
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [newSplitClienteId, setNewSplitClienteId] = useState('');
+  const [newSplitSucursalNombre, setNewSplitSucursalNombre] = useState('');
   const [newSplitMonto, setNewSplitMonto] = useState('');
   const [showNewSplitCliDropdown, setShowNewSplitCliDropdown] = useState(false);
+  const [showNewSplitSucDropdown, setShowNewSplitSucDropdown] = useState(false);
+  const [splitClienteSearch, setSplitClienteSearch] = useState('');
+  const [splitSucursalSearch, setSplitSucursalSearch] = useState('');
   const alertaLocal = useMemo(() => {
     const alerts: string[] = [];
 
@@ -460,6 +464,100 @@ export default function GastoForm() {
     }
   };
 
+  const handleAddNewSucursal = async (nombre: string) => {
+    if (!nombre.trim()) return;
+    const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === selectedCliente?.trim().toLowerCase());
+    if (!currentCliente) {
+      showAlert('Validación', 'Primero debes seleccionar un cliente para vincular la sucursal.');
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('sucursales_cliente')
+        .insert([{ cliente_id: currentCliente.id, nombre: nombre.trim().toUpperCase() }])
+        .select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+        const newSuc = data[0];
+        setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+        setSucursal(newSuc.nombre);
+      } else {
+        const { data: allSuc } = await supabase.from('sucursales_cliente').select('*').order('nombre');
+        if (allSuc) {
+          setSucursalesCliente(allSuc);
+          setSucursal(nombre.trim().toUpperCase());
+        }
+      }
+      setSucursalSearch('');
+      setShowSucursalDropdown(false);
+      showAlert('Éxito', `Sucursal "${nombre.trim().toUpperCase()}" agregada y vinculada a ${currentCliente.nombre}.`);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo agregar la sucursal.');
+    }
+  };
+
+  const handleAddNewClienteForSplit = async (nombre: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('clientes')
+        .insert([{ nombre: nombre.trim() }])
+        .select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+        const newCli = data[0];
+        setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+        setNewSplitClienteId(newCli.nombre);
+        setNewSplitSucursalNombre('');
+      } else {
+        const { data: allCli } = await supabase.from('clientes').select('*').order('nombre');
+        if (allCli) {
+          setClientes(allCli);
+          setNewSplitClienteId(nombre.trim());
+          setNewSplitSucursalNombre('');
+        }
+      }
+      setSplitClienteSearch('');
+      setShowNewSplitCliDropdown(false);
+      showAlert('Éxito', `Cliente "${nombre.trim()}" agregado correctamente.`);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo agregar el cliente.');
+    }
+  };
+
+  const handleAddNewSucursalForSplit = async (nombre: string) => {
+    if (!nombre.trim()) return;
+    const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === newSplitClienteId?.trim().toLowerCase());
+    if (!currentCliente) {
+      showAlert('Validación', 'Primero debes seleccionar un cliente para vincular la sucursal.');
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('sucursales_cliente')
+        .insert([{ cliente_id: currentCliente.id, nombre: nombre.trim().toUpperCase() }])
+        .select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+        const newSuc = data[0];
+        setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+        setNewSplitSucursalNombre(newSuc.nombre);
+      } else {
+        const { data: allSuc } = await supabase.from('sucursales_cliente').select('*').order('nombre');
+        if (allSuc) {
+          setSucursalesCliente(allSuc);
+          setNewSplitSucursalNombre(nombre.trim().toUpperCase());
+        }
+      }
+      setSplitSucursalSearch('');
+      setShowNewSplitSucDropdown(false);
+      showAlert('Éxito', `Sucursal "${nombre.trim().toUpperCase()}" agregada y vinculada a ${currentCliente.nombre}.`);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo agregar la sucursal.');
+    }
+  };
+
   // Guardar Gasto (Finalizar)
   const handleSaveGasto = async () => {
     if (!currentUser) return;
@@ -493,14 +591,7 @@ export default function GastoForm() {
       return;
     }
 
-    // 5. Validar Sucursal
-    if (!sucursal.trim()) {
-      showAlert('Validación', 'Por favor ingresa la sucursal o ubicación del comercio.');
-      setCurrentStep(2);
-      return;
-    }
-
-    // 6. Validar Método de Pago y Tarjeta
+    // 5. Validar Método de Pago y Tarjeta
     if (!metodoPago) {
       showAlert('Validación', 'Por favor selecciona el método de pago.');
       setCurrentStep(2);
@@ -610,22 +701,38 @@ export default function GastoForm() {
     if (isSplit) {
       if (splits.length === 0) {
         showAlert('Validación', 'Por favor agrega al menos una división o desactiva la opción de dividir gasto.');
+        setCurrentStep(3);
         return;
       }
       let sum = 0;
       for (const s of splits) {
-        if (!s.clienteId) {
+        if (!s.clienteId || !s.clienteId.trim()) {
           showAlert('Validación', 'Por favor selecciona un cliente para todas las divisiones del gasto.');
+          setCurrentStep(3);
+          return;
+        }
+        if (!s.sucursalNombre || !s.sucursalNombre.trim()) {
+          showAlert('Validación', `Por favor selecciona la sucursal para la división del cliente "${s.clienteId}".`);
+          setCurrentStep(3);
           return;
         }
         if (!s.monto || isNaN(Number(s.monto)) || Number(s.monto) <= 0) {
           showAlert('Validación', 'Por favor ingresa un monto válido mayor a 0 para todas las divisiones.');
+          setCurrentStep(3);
           return;
         }
         sum += Number(s.monto);
       }
-      if (sum > totalGasto + 0.01) {
-        showAlert('Validación', `La suma de las divisiones ($${sum.toFixed(2)}) no puede exceder el total del ticket ($${totalGasto.toFixed(2)}).`);
+      if (Math.abs(sum - totalGasto) > 0.05) {
+        showAlert(
+          'Validación de Monto',
+          `La suma de las divisiones ($${sum.toFixed(2)}) debe coincidir con el total del ticket ($${totalGasto.toFixed(2)}).\n\n${
+            sum < totalGasto
+              ? `Falta por asignar: $${(totalGasto - sum).toFixed(2)}`
+              : `Exceso de asignación: $${(sum - totalGasto).toFixed(2)}`
+          }`
+        );
+        setCurrentStep(3);
         return;
       }
     }
@@ -725,11 +832,13 @@ export default function GastoForm() {
 
         let payloadsToInsert = isSplit ? splits.map((s, index) => {
           const splitCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (s.clienteId || '').trim().toLowerCase());
+          const splitSucObj = sucursalesCliente.find(suc => suc.nombre && suc.nombre.trim().toLowerCase() === (s.sucursalNombre || '').trim().toLowerCase() && (!splitCliObj || suc.cliente_id === splitCliObj.id));
           return {
             ...gastoPayload,
             monto: Number(s.monto),
             cliente_id: splitCliObj?.id || null,
-            justificacion: `[Gasto dividido del ticket total de $${totalGasto}] - División ${index + 1}/${splits.length}\n\n${gastoPayload.justificacion}`,
+            sucursal_id: splitSucObj?.id || null,
+            justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${index + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`,
             foto_url: publicUrl || null,
             factura_url: publicInvoiceUrl || null,
             status: 'PENDING',
@@ -742,23 +851,6 @@ export default function GastoForm() {
             status: 'PENDING',
           }
         ];
-
-        if (isSplit) {
-          const sum = splits.reduce((acc, curr) => acc + Number(curr.monto), 0);
-          const remainder = totalGasto - sum;
-          if (remainder > 0.01) {
-            const remainderCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (selectedCliente || '').trim().toLowerCase());
-            payloadsToInsert.push({
-              ...gastoPayload,
-              monto: remainder,
-              cliente_id: remainderCliObj?.id || null,
-              justificacion: `[Gasto principal / Restante del ticket total de $${totalGasto}]\n\n${gastoPayload.justificacion}`,
-              foto_url: publicUrl || null,
-              factura_url: publicInvoiceUrl || null,
-              status: 'PENDING',
-            });
-          }
-        }
 
         const { data: insertedGastos, error: dbError } = await supabase
           .from('gastos')
@@ -808,31 +900,19 @@ export default function GastoForm() {
           for (let i = 0; i < splits.length; i++) {
             const s = splits[i];
             const splitCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (s.clienteId || '').trim().toLowerCase());
+            const splitSucObj = sucursalesCliente.find(suc => suc.nombre && suc.nombre.trim().toLowerCase() === (s.sucursalNombre || '').trim().toLowerCase() && (!splitCliObj || suc.cliente_id === splitCliObj.id));
             await SyncService.enqueueGasto({
               ...gastoPayload,
               monto: Number(s.monto),
               cliente: s.clienteId || null,
               cliente_id: splitCliObj?.id || null,
-              justificacion: `[Gasto dividido del ticket total de $${totalGasto}] - División ${i + 1}/${splits.length}\n\n${gastoPayload.justificacion}`,
+              sucursal: s.sucursalNombre || null,
+              sucursal_id: splitSucObj?.id || null,
+              justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${i + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
               fotoExt: imageExt,
-              vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
-              kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
-              litros: esGasolina ? Number(litrosGasolina) : undefined,
-            });
-          }
-          const sum = splits.reduce((acc, curr) => acc + Number(curr.monto), 0);
-          const remainder = totalGasto - sum;
-          if (remainder > 0.01) {
-            const remainderCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (selectedCliente || '').trim().toLowerCase());
-            await SyncService.enqueueGasto({
-              ...gastoPayload,
-              monto: remainder,
-              cliente: selectedCliente || null,
-              cliente_id: remainderCliObj?.id || null,
-              justificacion: `[Gasto principal / Restante del ticket total de $${totalGasto}]\n\n${gastoPayload.justificacion}`,
-              base64Foto: imageBase64 || undefined,
-              fotoExt: imageExt,
+              base64Factura: facturaBase64 || undefined,
+              facturaExt: facturaExt,
               vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
               kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
               litros: esGasolina ? Number(litrosGasolina) : undefined,
@@ -843,6 +923,8 @@ export default function GastoForm() {
             ...gastoPayload,
             base64Foto: imageBase64 || undefined,
             fotoExt: imageExt,
+            base64Factura: facturaBase64 || undefined,
+            facturaExt: facturaExt,
             vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
             kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
             litros: esGasolina ? Number(litrosGasolina) : undefined,
@@ -1616,7 +1698,12 @@ export default function GastoForm() {
                                   ]}
                                   onPress={() => {
                                     setSelectedCliente(cli.nombre);
-                                    setSucursal('');
+                                    const cliSucs = sucursalesCliente.filter(s => s.cliente_id === cli.id);
+                                    if (cliSucs.length === 1) {
+                                      setSucursal(cliSucs[0].nombre);
+                                    } else {
+                                      setSucursal('');
+                                    }
                                     setClienteSearch('');
                                     setShowCliDropdown(false);
                                   }}
@@ -1653,36 +1740,73 @@ export default function GastoForm() {
                       <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                         <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                           <CustomInput
-                            placeholder="Buscar sucursal..."
+                            placeholder="Buscar o agregar sucursal..."
                             value={sucursalSearch}
                             onChangeText={setSucursalSearch}
                             iconName="search-outline"
                             style={{ margin: Spacing.one, height: 40 }}
                           />
-                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 220, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                             {(() => {
-                               const currentCliente = clientes.find(c => c.nombre === selectedCliente);
+                               const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === selectedCliente?.trim().toLowerCase());
                                const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())) : [];
-                               if (filteredSucursales.length === 0) {
-                                 return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas para este cliente.</Text>;
-                               }
-                               return filteredSucursales.map((suc, index, array) => (
-                                  <TouchableOpacity
-                                    key={suc.id}
-                                    style={[
-                                      styles.dropdownItem,
-                                      index === array.length - 1 && { borderBottomWidth: 0 },
-                                      { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                                    ]}
-                                    onPress={() => {
-                                      setSucursal(suc.nombre);
-                                      setShowSucursalDropdown(false);
-                                    }}
-                                  >
-                                    <Ionicons name="business-outline" size={24} color={themeColors.primary} />
-                                    <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
-                                  </TouchableOpacity>
-                               ));
+                               const existsExact = currentCliente && sucursalesCliente.some(s => s.cliente_id === currentCliente.id && s.nombre.trim().toLowerCase() === sucursalSearch.trim().toLowerCase());
+
+                               return (
+                                 <>
+                                   {sucursalSearch.trim().length > 0 && !existsExact && currentCliente && (
+                                     <TouchableOpacity
+                                       style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                       onPress={() => handleAddNewSucursal(sucursalSearch)}
+                                     >
+                                       <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                                       <View style={{ flex: 1 }}>
+                                         <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                                           {`➕ Agregar "${sucursalSearch.trim().toUpperCase()}"`}
+                                         </Text>
+                                         <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                                           {`Vincular a cliente: ${currentCliente.nombre}`}
+                                         </Text>
+                                       </View>
+                                     </TouchableOpacity>
+                                   )}
+
+                                   {filteredSucursales.map((suc, index, array) => (
+                                      <TouchableOpacity
+                                        key={suc.id}
+                                        style={[
+                                          styles.dropdownItem,
+                                          index === array.length - 1 && { borderBottomWidth: 0 },
+                                          { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, justifyContent: 'space-between' }
+                                        ]}
+                                        onPress={() => {
+                                          setSucursal(suc.nombre);
+                                          setSucursalSearch('');
+                                          setShowSucursalDropdown(false);
+                                        }}
+                                      >
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flex: 1 }}>
+                                          <Ionicons name="business-outline" size={20} color={themeColors.primary} />
+                                          <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                                        </View>
+                                        {sucursal === suc.nombre && (
+                                          <Ionicons name="checkmark" size={18} color={themeColors.primary} />
+                                        )}
+                                      </TouchableOpacity>
+                                   ))}
+
+                                   {filteredSucursales.length === 0 && !sucursalSearch.trim() && (
+                                     <View style={{ padding: Spacing.two, alignItems: 'center' }}>
+                                       <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 4 }}>
+                                         No hay sucursales registradas para este cliente.
+                                       </Text>
+                                       <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+                                         Escribe arriba en el buscador para agregar una nueva.
+                                       </Text>
+                                     </View>
+                                   )}
+                                 </>
+                               );
                             })()}
                           </ScrollView>
                         </View>
@@ -1692,34 +1816,124 @@ export default function GastoForm() {
                 </>
               ) : (
                 <View style={{ marginBottom: Spacing.three }}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Divisiones del Gasto</Text>
-                  {splits.filter(s => s.clienteId).map((split) => (
-                    <View key={split.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: themeColors.backgroundElement, padding: Spacing.two, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, marginBottom: Spacing.one }}>
-                      <Text style={{ color: themeColors.text, flex: 1, fontSize: 13 }} numberOfLines={1}>
-                        {split.clienteId} <Text style={{ fontWeight: '700' }}>(${Number(split.monto).toFixed(2)})</Text>
-                      </Text>
-                      <TouchableOpacity
-                        onPress={() => {
-                          const newSplits = splits.filter(s => s.id !== split.id);
-                          setSplits(newSplits);
-                        }}
-                        style={{ padding: Spacing.half }}
-                      >
-                        <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
-                      </TouchableOpacity>
+                  {/* Resumen de Asignación */}
+                  {(() => {
+                    const currentTotalGasto = Number(monto || 0) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
+                    const sumDividido = splits.reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
+                    const diff = currentTotalGasto - sumDividido;
+                    const isCompleto = Math.abs(diff) < 0.05 && currentTotalGasto > 0;
+                    const isExcedido = diff < -0.05;
+
+                    return (
+                      <View style={{
+                        backgroundColor: themeColors.backgroundElement,
+                        borderRadius: BorderRadius.medium,
+                        padding: Spacing.two,
+                        borderWidth: 1,
+                        borderColor: isCompleto ? (themeColors.success || '#10b981') : isExcedido ? themeColors.danger : (themeColors.warning || '#f59e0b'),
+                        marginBottom: Spacing.two
+                      }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Total del Ticket:</Text>
+                          <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }}>${currentTotalGasto.toFixed(2)}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Total Dividido:</Text>
+                          <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 13 }}>${sumDividido.toFixed(2)}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: 4 }}>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+                            {isCompleto ? '✅ Estado:' : isExcedido ? '❌ Exceso:' : '⏳ Restante por asignar:'}
+                          </Text>
+                          <Text style={{
+                            fontWeight: '700',
+                            fontSize: 13,
+                            color: isCompleto ? (themeColors.success || '#10b981') : isExcedido ? themeColors.danger : (themeColors.warning || '#f59e0b')
+                          }}>
+                            {isCompleto ? '100% Asignado' : `$${Math.abs(diff).toFixed(2)}`}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
+
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text, marginBottom: Spacing.one }]}>
+                    Divisiones registradas ({splits.length})
+                  </Text>
+
+                  {splits.map((split) => (
+                    <View key={split.id} style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      backgroundColor: themeColors.backgroundElement,
+                      padding: Spacing.two,
+                      borderRadius: BorderRadius.small,
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                      marginBottom: Spacing.one
+                    }}>
+                      <View style={{ flex: 1, marginRight: Spacing.one }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="person-circle-outline" size={16} color={themeColors.primary} />
+                          <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 13 }} numberOfLines={1}>
+                            {split.clienteId}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                          <Ionicons name="business-outline" size={14} color={themeColors.textSecondary} />
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 12 }} numberOfLines={1}>
+                            {split.sucursalNombre || 'Sin sucursal'}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                        <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 14 }}>
+                          ${Number(split.monto).toFixed(2)}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => {
+                            const newSplits = splits.filter(s => s.id !== split.id);
+                            setSplits(newSplits);
+                          }}
+                          style={{ padding: 4 }}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   ))}
+
                   <TouchableOpacity
                     onPress={() => {
+                      const currentTotalGasto = Number(monto || 0) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
+                      const sumDividido = splits.reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
+                      const remainder = Math.max(0, currentTotalGasto - sumDividido);
+
                       setNewSplitClienteId('');
-                      setNewSplitMonto('');
-                      setClienteSearch('');
+                      setNewSplitSucursalNombre('');
+                      setNewSplitMonto(remainder > 0 ? remainder.toFixed(2) : '');
+                      setSplitClienteSearch('');
+                      setSplitSucursalSearch('');
+                      setShowNewSplitCliDropdown(false);
+                      setShowNewSplitSucDropdown(false);
                       setShowSplitModal(true);
                     }}
-                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: themeColors.primary + '15', padding: Spacing.two, borderRadius: BorderRadius.small, marginTop: Spacing.one }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: themeColors.primary + '15',
+                      padding: Spacing.two,
+                      borderRadius: BorderRadius.small,
+                      marginTop: Spacing.one,
+                      borderWidth: 1,
+                      borderColor: themeColors.primary + '40',
+                      borderStyle: 'dashed'
+                    }}
                   >
                     <Ionicons name="add-circle-outline" size={20} color={themeColors.primary} style={{ marginRight: Spacing.half }} />
-                    <Text style={{ color: themeColors.primary, fontWeight: '600' }}>Agregar División de Gasto</Text>
+                    <Text style={{ color: themeColors.primary, fontWeight: '700' }}>➕ Agregar División de Gasto</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -2219,17 +2433,37 @@ export default function GastoForm() {
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: Spacing.four }}
           onPress={() => setShowSplitModal(false)}
         >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%' }}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%', maxWidth: 480 }}>
             <Pressable style={{ backgroundColor: themeColors.background, borderRadius: BorderRadius.large, padding: Spacing.four, width: '100%', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 }} onPress={(e) => e.stopPropagation()}>
-              <Text style={{ fontSize: 18, fontWeight: '700', color: themeColors.text, marginBottom: Spacing.three }}>Agregar División</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.two }}>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: themeColors.text }}>Agregar División de Gasto</Text>
+                <TouchableOpacity onPress={() => setShowSplitModal(false)}>
+                  <Ionicons name="close-circle-outline" size={24} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Banner de Total y Restante */}
+              {(() => {
+                const totalGasto = Number(monto || 0) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
+                const currentSum = splits.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
+                const remainder = Math.max(0, totalGasto - currentSum);
+
+                return (
+                  <View style={{ backgroundColor: themeColors.primary + '15', padding: Spacing.two, borderRadius: BorderRadius.small, marginBottom: Spacing.three, flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Total Ticket: <Text style={{ color: themeColors.text, fontWeight: '700' }}>${totalGasto.toFixed(2)}</Text></Text>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Restante: <Text style={{ color: themeColors.primary, fontWeight: '700' }}>${remainder.toFixed(2)}</Text></Text>
+                  </View>
+                );
+              })()}
 
               {/* Selector de Cliente */}
-              <View style={[styles.customDropdownContainer, { zIndex: 100 }]}>
+              <View style={[styles.customDropdownContainer, { zIndex: 120 }]}>
                 <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
                 <TouchableOpacity
                   style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                   onPress={() => {
                     Keyboard.dismiss();
+                    setShowNewSplitSucDropdown(false);
                     setShowNewSplitCliDropdown(!showNewSplitCliDropdown);
                   }}
                 >
@@ -2239,34 +2473,58 @@ export default function GastoForm() {
                   <Ionicons name={showNewSplitCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showNewSplitCliDropdown && (
-                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 100 }}>
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 120 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <CustomInput
-                        placeholder="Buscar cliente..."
-                        value={clienteSearch}
-                        onChangeText={setClienteSearch}
+                        placeholder="Buscar o agregar cliente..."
+                        value={splitClienteSearch}
+                        onChangeText={setSplitClienteSearch}
                         iconName="search-outline"
                         style={{ margin: Spacing.one, height: 40 }}
                       />
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        {splitClienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === splitClienteSearch.trim().toLowerCase()) && (
+                          <TouchableOpacity
+                            style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                            onPress={() => {
+                              handleAddNewClienteForSplit(splitClienteSearch);
+                            }}
+                          >
+                            <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                            <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 14 }}>
+                              {`Agregar "${splitClienteSearch.trim()}"`}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
                         {clientes
-                          .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                          .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(splitClienteSearch.toLowerCase()))
                           .map((cli, index, array) => (
                             <TouchableOpacity
                               key={cli.id}
                               style={[
                                 styles.dropdownItem,
                                 index === array.length - 1 && { borderBottomWidth: 0 },
-                                { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, justifyContent: 'space-between' }
                               ]}
                               onPress={() => {
                                 setNewSplitClienteId(cli.nombre);
-                                setClienteSearch('');
+                                const cliSucs = sucursalesCliente.filter(s => s.cliente_id === cli.id);
+                                if (cliSucs.length === 1) {
+                                  setNewSplitSucursalNombre(cliSucs[0].nombre);
+                                } else {
+                                  setNewSplitSucursalNombre('');
+                                }
+                                setSplitClienteSearch('');
                                 setShowNewSplitCliDropdown(false);
                               }}
                             >
-                              <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
-                              <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flex: 1 }}>
+                                <Ionicons name="person-circle-outline" size={20} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
+                              </View>
+                              {newSplitClienteId === cli.nombre && (
+                                <Ionicons name="checkmark" size={18} color={themeColors.primary} />
+                              )}
                             </TouchableOpacity>
                           ))}
                       </ScrollView>
@@ -2275,16 +2533,141 @@ export default function GastoForm() {
                 )}
               </View>
 
+              {/* Selector de Sucursal del Cliente */}
+              <View style={[styles.customDropdownContainer, { marginTop: Spacing.two, zIndex: 110 }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del Cliente *</Text>
+                <TouchableOpacity
+                  disabled={!newSplitClienteId}
+                  style={[
+                    styles.dropdownTrigger,
+                    {
+                      backgroundColor: !newSplitClienteId ? themeColors.backgroundElement + '80' : themeColors.backgroundElement,
+                      borderColor: themeColors.border,
+                      opacity: !newSplitClienteId ? 0.6 : 1
+                    }
+                  ]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowNewSplitCliDropdown(false);
+                    setShowNewSplitSucDropdown(!showNewSplitSucDropdown);
+                  }}
+                >
+                  <Text style={{ color: newSplitSucursalNombre ? themeColors.text : themeColors.textSecondary }}>
+                    {newSplitSucursalNombre || (newSplitClienteId ? 'Selecciona una sucursal' : 'Selecciona un cliente primero')}
+                  </Text>
+                  <Ionicons name={showNewSplitSucDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                </TouchableOpacity>
+                {showNewSplitSucDropdown && newSplitClienteId && (
+                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 110 }}>
+                    <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                      <CustomInput
+                        placeholder="Buscar o agregar sucursal..."
+                        value={splitSucursalSearch}
+                        onChangeText={setSplitSucursalSearch}
+                        iconName="search-outline"
+                        style={{ margin: Spacing.one, height: 40 }}
+                      />
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        {(() => {
+                          const currentCli = clientes.find(c => c.nombre?.trim().toLowerCase() === newSplitClienteId?.trim().toLowerCase());
+                          const filteredSuc = currentCli ? sucursalesCliente.filter(s => s.cliente_id === currentCli.id && s.nombre.toLowerCase().includes(splitSucursalSearch.toLowerCase())) : [];
+                          const existsExact = currentCli && sucursalesCliente.some(s => s.cliente_id === currentCli.id && s.nombre.trim().toLowerCase() === splitSucursalSearch.trim().toLowerCase());
+
+                          return (
+                            <>
+                              {splitSucursalSearch.trim().length > 0 && !existsExact && currentCli && (
+                                <TouchableOpacity
+                                  style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                  onPress={() => handleAddNewSucursalForSplit(splitSucursalSearch)}
+                                >
+                                  <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                                      {`➕ Agregar "${splitSucursalSearch.trim().toUpperCase()}"`}
+                                    </Text>
+                                    <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                                      {`Vincular a: ${currentCli.nombre}`}
+                                    </Text>
+                                  </View>
+                                </TouchableOpacity>
+                              )}
+
+                              {filteredSuc.map((suc, index, array) => (
+                                <TouchableOpacity
+                                  key={suc.id}
+                                  style={[
+                                    styles.dropdownItem,
+                                    index === array.length - 1 && { borderBottomWidth: 0 },
+                                    { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, justifyContent: 'space-between' }
+                                  ]}
+                                  onPress={() => {
+                                    setNewSplitSucursalNombre(suc.nombre);
+                                    setSplitSucursalSearch('');
+                                    setShowNewSplitSucDropdown(false);
+                                  }}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flex: 1 }}>
+                                    <Ionicons name="business-outline" size={18} color={themeColors.primary} />
+                                    <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                                  </View>
+                                  {newSplitSucursalNombre === suc.nombre && (
+                                    <Ionicons name="checkmark" size={18} color={themeColors.primary} />
+                                  )}
+                                </TouchableOpacity>
+                              ))}
+
+                              {filteredSuc.length === 0 && !splitSucursalSearch.trim() && (
+                                <View style={{ padding: Spacing.two, alignItems: 'center' }}>
+                                  <Text style={{ color: themeColors.textSecondary, fontSize: 12, textAlign: 'center', marginBottom: 4 }}>
+                                    No hay sucursales registradas para este cliente.
+                                  </Text>
+                                  <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '600', textAlign: 'center' }}>
+                                    Escribe arriba para agregar una nueva.
+                                  </Text>
+                                </View>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </ScrollView>
+                    </View>
+                  </Pressable>
+                )}
+              </View>
+
+              {/* Monto Asignado */}
               <View style={{ marginTop: Spacing.two, zIndex: 1 }}>
                 <CustomInput
-                  label="Monto Asignado"
+                  label="Monto Asignado *"
                   placeholder="Ej. 150.00"
                   keyboardType="decimal-pad"
                   value={newSplitMonto}
                   onChangeText={(val) => setNewSplitMonto(val.replace(',', '.'))}
                   iconName="cash-outline"
-                  onFocus={() => setShowNewSplitCliDropdown(false)}
+                  onFocus={() => {
+                    setShowNewSplitCliDropdown(false);
+                    setShowNewSplitSucDropdown(false);
+                  }}
                 />
+                {(() => {
+                  const totalGasto = Number(monto || 0) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
+                  const currentSum = splits.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
+                  const remainder = Math.max(0, totalGasto - currentSum);
+
+                  if (remainder > 0) {
+                    return (
+                      <TouchableOpacity
+                        onPress={() => setNewSplitMonto(remainder.toFixed(2))}
+                        style={{ alignSelf: 'flex-start', marginTop: 4, paddingVertical: 4, paddingHorizontal: 8, backgroundColor: themeColors.primary + '15', borderRadius: BorderRadius.small }}
+                      >
+                        <Text style={{ color: themeColors.primary, fontSize: 12, fontWeight: '600' }}>
+                          ⚡ Usar restante ($ {remainder.toFixed(2)})
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }
+                  return null;
+                })()}
               </View>
 
               <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.four, zIndex: 1 }}>
@@ -2297,17 +2680,25 @@ export default function GastoForm() {
                 <CustomButton
                   title="Guardar"
                   onPress={() => {
-                    if (!newSplitClienteId || !newSplitMonto || isNaN(Number(newSplitMonto)) || Number(newSplitMonto) <= 0) {
-                      showAlert('Atención', 'Seleccione un cliente y proporcione un monto válido.');
+                    if (!newSplitClienteId.trim()) {
+                      showAlert('Atención', 'Por favor selecciona un cliente.');
                       return;
                     }
-                    const totalGasto = Number(monto) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
-                    const currentSum = splits.reduce((acc, curr) => acc + Number(curr.monto), 0);
+                    if (!newSplitSucursalNombre.trim()) {
+                      showAlert('Atención', 'Por favor selecciona o agrega una sucursal para el cliente.');
+                      return;
+                    }
+                    if (!newSplitMonto || isNaN(Number(newSplitMonto)) || Number(newSplitMonto) <= 0) {
+                      showAlert('Atención', 'Por favor ingresa un monto válido mayor a 0.');
+                      return;
+                    }
+                    const totalGasto = Number(monto || 0) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
+                    const currentSum = splits.reduce((acc, curr) => acc + Number(curr.monto || 0), 0);
                     if (currentSum + Number(newSplitMonto) > totalGasto + 0.01) {
                       showAlert('Atención', `El monto ingresado excede el total del ticket ($${totalGasto.toFixed(2)}). Restante: $${(totalGasto - currentSum).toFixed(2)}`);
                       return;
                     }
-                    setSplits([...splits, { id: Date.now().toString(), clienteId: newSplitClienteId, monto: newSplitMonto }]);
+                    setSplits([...splits, { id: Date.now().toString(), clienteId: newSplitClienteId, sucursalNombre: newSplitSucursalNombre, monto: newSplitMonto }]);
                     setShowSplitModal(false);
                   }}
                   style={{ flex: 1 }}

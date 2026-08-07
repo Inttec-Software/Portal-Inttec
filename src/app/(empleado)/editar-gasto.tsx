@@ -533,6 +533,39 @@ export default function EditarGastoForm() {
     }
   };
 
+  const handleAddNewSucursal = async (nombre: string) => {
+    if (!nombre.trim()) return;
+    const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === selectedCliente?.trim().toLowerCase() || c.id === selectedCliente);
+    if (!currentCliente) {
+      showAlert('Validación', 'Primero debes seleccionar un cliente para vincular la sucursal.');
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('sucursales_cliente')
+        .insert([{ cliente_id: currentCliente.id, nombre: nombre.trim().toUpperCase() }])
+        .select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+        const newSuc = data[0];
+        setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+        setSucursal(newSuc.nombre);
+      } else {
+        const { data: allSuc } = await supabase.from('sucursales_cliente').select('*').order('nombre');
+        if (allSuc) {
+          setSucursalesCliente(allSuc);
+          setSucursal(nombre.trim().toUpperCase());
+        }
+      }
+      setSucursalSearch('');
+      setShowSucursalDropdown(false);
+      showAlert('Éxito', `Sucursal "${nombre.trim().toUpperCase()}" agregada y vinculada a ${currentCliente.nombre}.`);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo agregar la sucursal.');
+    }
+  };
+
   // Guardar Gasto (Finalizar)
   const handleSaveGasto = async () => {
     if (!currentUser) return;
@@ -1471,7 +1504,12 @@ export default function EditarGastoForm() {
                               style={styles.dropdownItem}
                               onPress={() => {
                                   setSelectedCliente(cli.nombre);
-                                  setSucursal('');
+                                  const cliSucs = sucursalesCliente.filter(s => s.cliente_id === cli.id);
+                                  if (cliSucs.length === 1) {
+                                    setSucursal(cliSucs[0].nombre);
+                                  } else {
+                                    setSucursal('');
+                                  }
                                   setClienteSearch('');
                                   setShowCliDropdown(false);
                                 }}
@@ -1507,36 +1545,73 @@ export default function EditarGastoForm() {
                   <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <CustomInput
-                        placeholder="Buscar sucursal..."
+                        placeholder="Buscar o agregar sucursal..."
                         value={sucursalSearch}
                         onChangeText={setSucursalSearch}
                         iconName="search-outline"
                         style={{ margin: Spacing.one, height: 40 }}
                       />
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 220, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                         {(() => {
                            const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === selectedCliente?.trim().toLowerCase() || c.id === selectedCliente);
                            const filteredSucursales = currentCliente ? sucursalesCliente.filter(s => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())) : [];
-                           if (filteredSucursales.length === 0) {
-                             return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas para este cliente.</Text>;
-                           }
-                           return filteredSucursales.map((suc, index, array) => (
-                              <TouchableOpacity
-                                key={suc.id}
-                                style={[
-                                  styles.dropdownItem,
-                                  index === array.length - 1 && { borderBottomWidth: 0 },
-                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                                ]}
-                                onPress={() => {
-                                  setSucursal(suc.nombre);
-                                  setShowSucursalDropdown(false);
-                                }}
-                              >
-                                <Ionicons name="business-outline" size={24} color={themeColors.primary} />
-                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
-                              </TouchableOpacity>
-                           ));
+                           const existsExact = currentCliente && sucursalesCliente.some(s => s.cliente_id === currentCliente.id && s.nombre.trim().toLowerCase() === sucursalSearch.trim().toLowerCase());
+
+                           return (
+                             <>
+                               {sucursalSearch.trim().length > 0 && !existsExact && currentCliente && (
+                                 <TouchableOpacity
+                                   style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                   onPress={() => handleAddNewSucursal(sucursalSearch)}
+                                 >
+                                   <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                                   <View style={{ flex: 1 }}>
+                                     <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                                       {`➕ Agregar "${sucursalSearch.trim().toUpperCase()}"`}
+                                     </Text>
+                                     <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                                       {`Vincular a cliente: ${currentCliente.nombre}`}
+                                     </Text>
+                                   </View>
+                                 </TouchableOpacity>
+                               )}
+
+                               {filteredSucursales.map((suc, index, array) => (
+                                  <TouchableOpacity
+                                    key={suc.id}
+                                    style={[
+                                      styles.dropdownItem,
+                                      index === array.length - 1 && { borderBottomWidth: 0 },
+                                      { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, justifyContent: 'space-between' }
+                                    ]}
+                                    onPress={() => {
+                                      setSucursal(suc.nombre);
+                                      setSucursalSearch('');
+                                      setShowSucursalDropdown(false);
+                                    }}
+                                  >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flex: 1 }}>
+                                      <Ionicons name="business-outline" size={20} color={themeColors.primary} />
+                                      <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                                    </View>
+                                    {sucursal === suc.nombre && (
+                                      <Ionicons name="checkmark" size={18} color={themeColors.primary} />
+                                    )}
+                                  </TouchableOpacity>
+                               ))}
+
+                               {filteredSucursales.length === 0 && !sucursalSearch.trim() && (
+                                 <View style={{ padding: Spacing.two, alignItems: 'center' }}>
+                                   <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 4 }}>
+                                     No hay sucursales registradas para este cliente.
+                                   </Text>
+                                   <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+                                     Escribe arriba en el buscador para agregar una nueva.
+                                   </Text>
+                                 </View>
+                               )}
+                             </>
+                           );
                         })()}
                       </ScrollView>
                     </View>
