@@ -677,13 +677,13 @@ export default function EditarGastoForm() {
     }
 
     if (facturado === false) {
-      if (!motivoSinFactura.trim()) {
-        showAlert('Validación', 'Por favor especifica el motivo por el cual no se cuenta con factura.');
+      if (facturaStatus === 'PENDIENTE' && !comentarioPendiente.trim()) {
+        showAlert('Validación', 'Por favor explica por qué la factura está pendiente.');
         setCurrentStep(2);
         return;
       }
-      if (motivoSinFactura.trim() === 'PENDIENTE_ENTREGA') {
-        showAlert('Validación', 'Por favor explica por qué la factura está pendiente.');
+      if (facturaStatus === 'NO' && (!motivoSinFactura || !motivoSinFactura.trim())) {
+        showAlert('Validación', 'Por favor explica el motivo por el cual no se cuenta con factura.');
         setCurrentStep(2);
         return;
       }
