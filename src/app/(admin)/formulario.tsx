@@ -1275,7 +1275,7 @@ export default function GastoForm() {
                 2. Detalles de la Compra
               </Text>
 
-              {(alertaPolitica || alertaLocal) && (
+              {!!(alertaPolitica || alertaLocal) && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}>
                   <Ionicons name="warning-outline" size={22} color={themeColors.danger} style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
@@ -1522,7 +1522,7 @@ export default function GastoForm() {
 
                         {proveedores
                           .filter(p => 
-                            p.nombre && (
+                            !!p.nombre && (
                               p.nombre.toLowerCase().includes(proveedorSearch.toLowerCase()) ||
                               (p.rfc && p.rfc.toLowerCase().includes(proveedorSearch.toLowerCase()))
                             )
@@ -1557,7 +1557,7 @@ export default function GastoForm() {
                           ))}
 
                         {proveedores.filter(p => 
-                          p.nombre && (
+                          !!p.nombre && (
                             p.nombre.toLowerCase().includes(proveedorSearch.toLowerCase()) ||
                             (p.rfc && p.rfc.toLowerCase().includes(proveedorSearch.toLowerCase()))
                           )
@@ -2215,7 +2215,7 @@ export default function GastoForm() {
                 3. Categorización e Información de Negocio
               </Text>
 
-              {(alertaPolitica || alertaLocal) && (
+              {!!(alertaPolitica || alertaLocal) && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}>
                   <Ionicons name="warning-outline" size={22} color={themeColors.danger} style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
@@ -2273,7 +2273,7 @@ export default function GastoForm() {
               </View>
 
               {/* Selector de Subcategorías (Filtrado dependiente) */}
-              {selectedCategoria && (
+              {!!selectedCategoria && (
                 <View style={styles.customDropdownContainer}>
                   <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Subcategoría *</Text>
                   <TouchableOpacity
