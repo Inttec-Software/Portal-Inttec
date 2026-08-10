@@ -1252,7 +1252,7 @@ export default function GastoForm() {
                 2. Detalles de la Compra
               </Text>
 
-              {(alertaPolitica || alertaLocal) && (
+              {!!(alertaPolitica || alertaLocal) && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}>
                   <Ionicons name="warning-outline" size={22} color={themeColors.danger} style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
@@ -1287,61 +1287,7 @@ export default function GastoForm() {
                   editable={false}
                   iconName="calendar-outline"
                 />
-                {Platform.OS === 'web' ? (
-                  createElement('input', {
-                    type: 'date',
-                    style: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', zIndex: 100 },
-                    onClick: (e: any) => {
-                      try { e.target.showPicker(); } catch (err) {}
-                    },
-                    onChange: (e: any) => {
-                      if (e.target.value) {
-                        const parts = e.target.value.split('-');
-                        if (parts.length === 3) {
-                          const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-                          setDateValue(d);
-                          const dd = String(d.getDate()).padStart(2, '0');
-                          const mm = String(d.getMonth() + 1).padStart(2, '0');
-                          const yyyy = d.getFullYear();
-                          setFechaComprobante(`${dd}/${mm}/${yyyy}`);
-                        }
-                      }
-                    }
-                  })
-                ) : (
-                  <TouchableOpacity 
-                    style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10 }}
-                    onPress={() => { Keyboard.dismiss(); setShowDatePicker(true); }}
-                  />
-                )}
               </View>
-
-                  {showDatePicker && (
-                    <View style={{
-                      backgroundColor: themeColors.backgroundElement,
-                      borderRadius: BorderRadius.medium,
-                      padding: Spacing.two,
-                      borderWidth: 1,
-                      borderColor: themeColors.border,
-                      marginTop: -Spacing.two,
-                      marginBottom: Spacing.two
-                    }}>
-                      <DateTimePicker
-                        value={dateValue}
-                        mode="date"
-                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                        onChange={onChangeDate}
-                        maximumDate={new Date()}
-                      />
-                      {Platform.OS === 'ios' && (
-                        <CustomButton
-                          title="Confirmar Fecha"
-                          onPress={() => setShowDatePicker(false)}
-                          style={{ marginTop: Spacing.one }}
-                        />
-                      )}
-                    </View>
-                  )}
 
               {/* Mensaje Informativo de Proveedor */}
               <View style={{ marginBottom: Spacing.half, marginTop: Spacing.one }}>
@@ -1450,7 +1396,7 @@ export default function GastoForm() {
 
                         {proveedores
                           .filter(p => 
-                            p.nombre && (
+                            !!p.nombre && (
                               p.nombre.toLowerCase().includes(proveedorSearch.toLowerCase()) ||
                               (p.rfc && p.rfc.toLowerCase().includes(proveedorSearch.toLowerCase()))
                             )
@@ -1485,7 +1431,7 @@ export default function GastoForm() {
                           ))}
 
                         {proveedores.filter(p => 
-                          p.nombre && (
+                          !!p.nombre && (
                             p.nombre.toLowerCase().includes(proveedorSearch.toLowerCase()) ||
                             (p.rfc && p.rfc.toLowerCase().includes(proveedorSearch.toLowerCase()))
                           )
@@ -2132,7 +2078,7 @@ export default function GastoForm() {
                 3. Categorización e Información de Negocio
               </Text>
 
-              {(alertaPolitica || alertaLocal) && (
+              {!!(alertaPolitica || alertaLocal) && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}>
                   <Ionicons name="warning-outline" size={22} color={themeColors.danger} style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
@@ -2190,7 +2136,7 @@ export default function GastoForm() {
               </View>
 
               {/* Selector de Subcategorías (Filtrado dependiente) */}
-              {selectedCategoria && (
+              {!!selectedCategoria && (
                 <View style={styles.customDropdownContainer}>
                   <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Subcategoría *</Text>
                   <TouchableOpacity
@@ -2503,7 +2449,7 @@ export default function GastoForm() {
                   </Text>
                   <Ionicons name={showNewSplitSucDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
-                {showNewSplitSucDropdown && newSplitClienteId && (
+                {showNewSplitSucDropdown && !!newSplitClienteId && (
                   <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 110 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                       <CustomInput
