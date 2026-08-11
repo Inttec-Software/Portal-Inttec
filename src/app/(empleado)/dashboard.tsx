@@ -364,7 +364,7 @@ export default function EmpleadoDashboard() {
 
     return () => unsubscribe();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company]);
+  }, [company, env]);
 
   useEffect(() => {
     if (!user) return;

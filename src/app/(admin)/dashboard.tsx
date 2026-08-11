@@ -372,7 +372,7 @@ export default function AdminDashboard() {
 
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company]);
+  }, [company, env]);
 
 
 
