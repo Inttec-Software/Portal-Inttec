@@ -618,6 +618,14 @@ export default function EmpleadoDashboard() {
           >
             <Ionicons name="person-circle-outline" size={20} color={themeColors.accent} />
           </TouchableOpacity>
+          {user?.rol === 'DEV' && (
+            <TouchableOpacity
+              onPress={() => router.replace('/(admin)/dashboard')}
+              style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
+            >
+              <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             onPress={handleLogout}
             style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}

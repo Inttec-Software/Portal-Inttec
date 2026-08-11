@@ -10,7 +10,7 @@ export default function AdminLayout() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
-  if (!user || user.rol !== 'ADMIN') {
+  if (!user || (user.rol !== 'ADMIN' && user.rol !== 'DEV')) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors.background }}>
         <ActivityIndicator size="large" color={themeColors.accent} />
