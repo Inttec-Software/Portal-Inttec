@@ -13,11 +13,18 @@ const inttecAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_INTTEC || proces
 const daravisaUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
 const daravisaAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
+const isLocalUrl = (url: string) => url ? (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('192.168.') || url.startsWith('http://')) : false;
+
 if (!inttecUrl || !inttecAnonKey) {
-  logger.error(
-    'WARNING: Supabase URL or Anon Key is missing in environment variables (.env file).\n' +
-    'The app is running with placeholder credentials and database operations will fail.'
-  );
+  logger.error('WARNING: Supabase INTTEC credentials missing in .env file.');
+} else {
+  console.log(isLocalUrl(inttecUrl) ? `🐳 [DATABASE INTTEC] Local Docker (${inttecUrl})` : `☁️ [DATABASE INTTEC] Supabase Cloud (${inttecUrl})`);
+}
+
+if (!daravisaUrl || !daravisaAnonKey) {
+  logger.error('WARNING: Supabase DARAVISA credentials missing in .env file.');
+} else {
+  console.log(isLocalUrl(daravisaUrl) ? `🐳 [DATABASE DARAVISA] Local Docker (${daravisaUrl})` : `☁️ [DATABASE DARAVISA] Supabase Cloud (${daravisaUrl})`);
 }
 
 const isBrowser = Platform.OS !== 'web' || typeof window !== 'undefined';

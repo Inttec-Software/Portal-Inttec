@@ -778,36 +778,48 @@ export default function GastoForm() {
         // En línea: Subir foto y guardar en Supabase
         let publicUrl = imageUri;
         if (imageBase64) {
-          const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
-          const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
-          const arrayBuffer = base64ToArrayBuffer(imageBase64);
+          try {
+            const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
+            const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
+            const arrayBuffer = base64ToArrayBuffer(imageBase64);
 
-          const { error: uploadError } = await supabase.storage
-            .from('tickets')
-            .upload(fileName, arrayBuffer, { contentType, upsert: true });
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('tickets')
+              .upload(fileName, arrayBuffer, { contentType, upsert: true });
 
-          if (uploadError) throw uploadError;
-
-          const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-          publicUrl = urlData.publicUrl;
+            if (!uploadError) {
+              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+              publicUrl = urlData.publicUrl;
+            } else {
+              console.warn('Supabase storage upload skipped or failed:', uploadError);
+            }
+          } catch (stErr) {
+            console.warn('Storage upload exception (continuing):', stErr);
+          }
         }
 
         // Subir factura si se seleccionó una
         let publicInvoiceUrl = '';
         if (facturado && facturaBase64) {
-          const ext = facturaExt || 'jpg';
-          const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-          const fileName = `${currentUser.id}/factura_${Date.now()}.${ext}`;
-          const arrayBuffer = base64ToArrayBuffer(facturaBase64);
+          try {
+            const ext = facturaExt || 'jpg';
+            const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
+            const fileName = `${currentUser.id}/factura_${Date.now()}.${ext}`;
+            const arrayBuffer = base64ToArrayBuffer(facturaBase64);
 
-          const { error: uploadError } = await supabase.storage
-            .from('tickets')
-            .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('tickets')
+              .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
 
-          if (uploadError) throw uploadError;
-
-          const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-          publicInvoiceUrl = urlData.publicUrl;
+            if (!uploadError) {
+              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+              publicInvoiceUrl = urlData.publicUrl;
+            } else {
+              console.warn('Invoice storage upload skipped or failed:', uploadError);
+            }
+          } catch (invErr) {
+            console.warn('Invoice storage upload exception (continuing):', invErr);
+          }
         }
 
         let payloadsToInsert = isSplit ? splits.map((s, index) => {
@@ -914,7 +926,9 @@ export default function GastoForm() {
 
       router.replace('/(admin)/dashboard');
     } catch (err: any) {
-      showAlert('Error al guardar', err.message || 'No se pudo guardar el gasto.');
+      const errorDetails = err?.message || err?.details || err?.hint || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      console.error('Error al guardar gasto:', errorDetails);
+      showAlert('Error al guardar', errorDetails || 'No se pudo guardar el gasto.');
     } finally {
       setIsSubmitting(false);
     }
