@@ -102,7 +102,7 @@ export interface Usuario {
   id: string;
   nombre: string;
   email: string;
-  rol: 'ADMIN' | 'EMPLEADO';
+  rol: 'ADMIN' | 'EMPLEADO' | 'DEV';
   telefono?: string;
   created_at?: string;
 }

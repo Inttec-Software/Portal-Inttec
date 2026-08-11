@@ -719,6 +719,9 @@ export default function GastoForm() {
     const dbFecha = formatFriendlyToDb(fechaComprobante);
     
     let finalJustificacion = justificacion.trim();
+    if (currentUser?.rol === 'DEV') {
+      finalJustificacion = `[PRUEBA] ${finalJustificacion}`;
+    }
     if (!proveedor.trim() && comentarioProveedor.trim()) {
       finalJustificacion = `[Proveedor a agregar: ${comentarioProveedor.trim()}]\n\n${finalJustificacion}`;
     }

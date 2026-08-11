@@ -121,7 +121,7 @@ export default function AdminDashboard() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
-  const [newUserRole, setNewUserRole] = useState<'EMPLEADO' | 'ADMIN'>('EMPLEADO');
+  const [newUserRole, setNewUserRole] = useState<'EMPLEADO' | 'ADMIN' | 'DEV'>('EMPLEADO');
   const [isAddingUser, setIsAddingUser] = useState(false);
 
   const [editingUser, setEditingUser] = useState<Usuario | null>(null);
@@ -130,7 +130,7 @@ export default function AdminDashboard() {
   const [editUserEmail, setEditUserEmail] = useState('');
   const [editUserPassword, setEditUserPassword] = useState('');
   const [editUserPhone, setEditUserPhone] = useState('');
-  const [editUserRole, setEditUserRole] = useState<'EMPLEADO' | 'ADMIN'>('EMPLEADO');
+  const [editUserRole, setEditUserRole] = useState<'EMPLEADO' | 'ADMIN' | 'DEV'>('EMPLEADO');
   const [isUpdatingUser, setIsUpdatingUser] = useState(false);
 
   // Modal de Perfil (Admin)
@@ -356,7 +356,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     const checkAdmin = async () => {
       const user = await AuthService.getCurrentUser();
-      if (!user || user.rol !== 'ADMIN') {
+      if (!user || (user.rol !== 'ADMIN' && user.rol !== 'DEV')) {
         router.replace('/');
         return;
       }
@@ -996,7 +996,7 @@ export default function AdminDashboard() {
         nombre: newUserName.trim(),
         email: newUserEmail.trim().toLowerCase(),
         password: newUserPassword,
-        rol: newUserRole as 'ADMIN' | 'EMPLEADO',
+        rol: newUserRole as 'ADMIN' | 'EMPLEADO' | 'DEV',
         telefono: newUserPhone.trim() || null,
       };
 
@@ -1588,6 +1588,14 @@ export default function AdminDashboard() {
           >
             <Ionicons name="person-circle-outline" size={20} color={themeColors.accent} />
           </TouchableOpacity>
+          {adminUser?.rol === 'DEV' && (
+            <TouchableOpacity
+              onPress={() => router.replace('/(empleado)/dashboard')}
+              style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
+            >
+              <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             onPress={handleLogout}
             style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
@@ -3947,7 +3955,7 @@ export default function AdminDashboard() {
               <View style={styles.selectorGroup}>
                 <Text style={[styles.selectorLabel, { color: themeColors.text }]}>Rol Organizacional *</Text>
                 <View style={styles.paymentSelector}>
-                  {(['EMPLEADO', 'ADMIN'] as const).map((role) => {
+                  {(['EMPLEADO', 'ADMIN', 'DEV'] as const).map((role) => {
                     const isActive = newUserRole === role;
                     return (
                       <TouchableOpacity
@@ -3958,7 +3966,7 @@ export default function AdminDashboard() {
                           {
                             backgroundColor: isActive ? themeColors.accent : themeColors.backgroundElement,
                             borderColor: isActive ? 'transparent' : themeColors.border,
-                            width: '48%',
+                            flex: 1,
                             alignItems: 'center',
                           },
                         ]}
@@ -4048,7 +4056,7 @@ export default function AdminDashboard() {
               <View style={styles.selectorGroup}>
                 <Text style={[styles.selectorLabel, { color: themeColors.text }]}>Rol Organizacional *</Text>
                 <View style={styles.paymentSelector}>
-                  {(['EMPLEADO', 'ADMIN'] as const).map((role) => {
+                  {(['EMPLEADO', 'ADMIN', 'DEV'] as const).map((role) => {
                     const isActive = editUserRole === role;
                     return (
                       <TouchableOpacity
@@ -4059,7 +4067,7 @@ export default function AdminDashboard() {
                           {
                             backgroundColor: isActive ? themeColors.accent : themeColors.backgroundElement,
                             borderColor: isActive ? 'transparent' : themeColors.border,
-                            width: '48%',
+                            flex: 1,
                             alignItems: 'center',
                           },
                         ]}

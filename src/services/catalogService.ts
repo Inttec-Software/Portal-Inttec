@@ -248,7 +248,7 @@ export const CatalogService = {
     nombre: string;
     email: string;
     password: string;
-    rol: 'ADMIN' | 'EMPLEADO';
+    rol: 'ADMIN' | 'EMPLEADO' | 'DEV';
     telefono?: string | null;
   }): Promise<Usuario> {
     // Insertar en AMBAS bases con el mismo payload para que el ID sea consistente

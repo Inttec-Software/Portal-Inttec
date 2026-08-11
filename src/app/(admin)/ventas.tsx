@@ -126,7 +126,7 @@ export default function VentasScreen() {
   useEffect(() => {
     const init = async () => {
       const user = await AuthService.getCurrentUser();
-      if (!user || user.rol !== 'ADMIN') {
+      if (!user || (user.rol !== 'ADMIN' && user.rol !== 'DEV')) {
         router.replace('/');
         return;
       }

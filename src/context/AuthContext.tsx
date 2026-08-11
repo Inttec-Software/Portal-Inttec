@@ -53,13 +53,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       let currentUser = await AuthService.getCurrentUser();
 
-      // Si la sesión guardada para la nueva empresa pertenece a otro usuario, la descartamos
-      if (currentUser && currentEmail && currentUser.email.trim().toLowerCase() !== currentEmail.trim().toLowerCase()) {
-        currentUser = null;
-      }
-
-      // Si no hay una sesión guardada para el correo actual en la nueva empresa, la buscamos
-      if (!currentUser && currentEmail) {
+      // Siempre actualizamos el usuario desde la base de datos al cambiar de empresa
+      // para garantizar que el rol y otros datos estén sincronizados.
+      if (currentEmail) {
         const { data: dbUser, error } = await supabase
           .from('usuarios')
           .select('*')
@@ -71,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           currentUser = dbUser as Usuario;
         } else {
           await AsyncStorage.removeItem(`logged_user_${newCompany}`);
+          currentUser = null;
         }
       }
 
@@ -131,12 +128,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } else if (user) {
       // If user is authenticated and is not in a protected group (e.g. login screen)
       if (!inAuthGroup) {
-        if (user.rol === 'ADMIN') {
+        if (user.rol === 'ADMIN' || user.rol === 'DEV') {
           router.replace('/(admin)/dashboard');
         } else {
           router.replace('/(empleado)/dashboard');
         }
-      } else if (rootSegment === '(admin)' && user.rol !== 'ADMIN') {
+      } else if (rootSegment === '(admin)' && user.rol !== 'ADMIN' && user.rol !== 'DEV') {
          // Redirect to their actual role if they try to access wrong group
          router.replace('/(empleado)/dashboard');
       } else if (rootSegment === '(empleado)' && user.rol === 'ADMIN') {
