@@ -13,6 +13,12 @@ const inttecAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_INTTEC || proces
 const daravisaUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
 const daravisaAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
+const inttecTestUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_TEST || 'http://localhost:54321');
+const inttecTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_TEST || 'placeholder-anon-key';
+
+const daravisaTestUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA_TEST || 'http://localhost:54321');
+const daravisaTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA_TEST || 'placeholder-anon-key';
+
 const isLocalUrl = (url: string) => url ? (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('192.168.') || url.startsWith('http://')) : false;
 
 if (!inttecUrl || !inttecAnonKey) {
@@ -68,8 +74,37 @@ export const daravisaClient = createClient(daravisaUrl, daravisaAnonKey, {
   },
 });
 
+export const inttecTestClient = createClient(inttecTestUrl, inttecTestAnonKey, {
+  auth: {
+    storage: ssrSafeStorage,
+    storageKey: 'supabase.auth.token.inttec.test',
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+
+export const daravisaTestClient = createClient(daravisaTestUrl, daravisaTestAnonKey, {
+  auth: {
+    storage: ssrSafeStorage,
+    storageKey: 'supabase.auth.token.daravisa.test',
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+
 let activeCompany: 'inttec' | 'daravisa' = 'inttec';
+let activeEnv: 'cloud' | 'test' = 'cloud';
 let activeClient = inttecClient;
+
+const updateActiveClient = () => {
+  if (activeEnv === 'test') {
+    activeClient = activeCompany === 'daravisa' ? daravisaTestClient : inttecTestClient;
+  } else {
+    activeClient = activeCompany === 'daravisa' ? daravisaClient : inttecClient;
+  }
+};
 
 export const supabase = new Proxy({}, {
   get(target, prop) {
@@ -87,7 +122,7 @@ export const CompanyService = {
   },
   async setActiveCompany(company: 'inttec' | 'daravisa'): Promise<void> {
     activeCompany = company;
-    activeClient = company === 'daravisa' ? daravisaClient : inttecClient;
+    updateActiveClient();
     if (isBrowser) {
       await AsyncStorage.setItem('active_company', company);
     }
@@ -97,10 +132,33 @@ export const CompanyService = {
       const saved = await AsyncStorage.getItem('active_company');
       if (saved === 'daravisa' || saved === 'inttec') {
         activeCompany = saved;
-        activeClient = saved === 'daravisa' ? daravisaClient : inttecClient;
+        updateActiveClient();
       }
     }
     return activeCompany;
+  }
+};
+
+export const EnvService = {
+  getActiveEnv(): 'cloud' | 'test' {
+    return activeEnv;
+  },
+  async setActiveEnv(env: 'cloud' | 'test'): Promise<void> {
+    activeEnv = env;
+    updateActiveClient();
+    if (isBrowser) {
+      await AsyncStorage.setItem('active_env', env);
+    }
+  },
+  async loadSavedEnv(): Promise<'cloud' | 'test'> {
+    if (isBrowser) {
+      const saved = await AsyncStorage.getItem('active_env');
+      if (saved === 'cloud' || saved === 'test') {
+        activeEnv = saved;
+        updateActiveClient();
+      }
+    }
+    return activeEnv;
   }
 };
 
@@ -337,8 +395,8 @@ export const AuthService = {
 
   async logout(): Promise<void> {
     if (isBrowser) {
-      const company = CompanyService.getActiveCompany();
-      await AsyncStorage.removeItem(`logged_user_${company}`);
+      await AsyncStorage.removeItem('logged_user_inttec');
+      await AsyncStorage.removeItem('logged_user_daravisa');
     }
   },
 

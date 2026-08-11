@@ -55,7 +55,7 @@ export default function AdminDashboard() {
   const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { setUser, company, changeCompany } = useAuth();
+  const { setUser, company, changeCompany, env, changeEnv } = useAuth();
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -1589,12 +1589,20 @@ export default function AdminDashboard() {
             <Ionicons name="person-circle-outline" size={20} color={themeColors.accent} />
           </TouchableOpacity>
           {adminUser?.rol === 'DEV' && (
-            <TouchableOpacity
-              onPress={() => router.replace('/(empleado)/dashboard')}
-              style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
-            >
-              <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                onPress={() => changeEnv(env === 'cloud' ? 'test' : 'cloud')}
+                style={[styles.headerIconBtn, { backgroundColor: env === 'cloud' ? themeColors.primary + '15' : Colors.light.danger + '15' }]}
+              >
+                <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={20} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.replace('/(empleado)/dashboard')}
+                style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
+              >
+                <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
+              </TouchableOpacity>
+            </>
           )}
           <TouchableOpacity
             onPress={handleLogout}

@@ -36,7 +36,7 @@ export default function EmpleadoDashboard() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { setUser: setAuthUser, company, changeCompany } = useAuth();
+  const { setUser: setAuthUser, company, changeCompany, env, changeEnv } = useAuth();
 
   const [user, setUser] = useState<Usuario | null>(null);
   const [gastos, setGastos] = useState<Gasto[]>([]);
@@ -619,12 +619,20 @@ export default function EmpleadoDashboard() {
             <Ionicons name="person-circle-outline" size={20} color={themeColors.accent} />
           </TouchableOpacity>
           {user?.rol === 'DEV' && (
-            <TouchableOpacity
-              onPress={() => router.replace('/(admin)/dashboard')}
-              style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
-            >
-              <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                onPress={() => changeEnv(env === 'cloud' ? 'test' : 'cloud')}
+                style={[styles.headerIconBtn, { backgroundColor: env === 'cloud' ? themeColors.primary + '15' : Colors.light.danger + '15' }]}
+              >
+                <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={20} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.replace('/(admin)/dashboard')}
+                style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
+              >
+                <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
+              </TouchableOpacity>
+            </>
           )}
           <TouchableOpacity
             onPress={handleLogout}
