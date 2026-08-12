@@ -1,25 +1,30 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { AuthService, Usuario, CompanyService, supabase } from '@/services/supabase';
+import { AuthService, Usuario, CompanyService, EnvService, supabase } from '@/services/supabase';
 import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PushNotificationService } from '@/services/pushNotifications';
+import { Platform } from 'react-native';
 
 interface AuthContextType {
   user: Usuario | null;
   isLoading: boolean;
   company: 'inttec' | 'daravisa';
+  env: 'cloud' | 'test';
   refreshSession: () => Promise<void>;
   setUser: React.Dispatch<React.SetStateAction<Usuario | null>>;
   changeCompany: (newCompany: 'inttec' | 'daravisa') => Promise<void>;
+  changeEnv: (newEnv: 'cloud' | 'test') => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   isLoading: true,
   company: 'inttec',
+  env: 'cloud',
   refreshSession: async () => {},
   setUser: () => {},
   changeCompany: async () => {},
+  changeEnv: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -28,6 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Usuario | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [company, setCompanyState] = useState<'inttec' | 'daravisa'>('inttec');
+  const [env, setEnvState] = useState<'cloud' | 'test'>('cloud');
   const segments = useSegments();
   const router = useRouter();
 
@@ -79,12 +85,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const changeEnv = async (newEnv: 'cloud' | 'test') => {
+    setIsLoading(true);
+    try {
+      await EnvService.setActiveEnv(newEnv);
+      setEnvState(newEnv);
+      
+      const currentEmail = user?.email;
+      let currentUser = null;
+
+      if (currentEmail) {
+        const { data: dbUser, error } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('email', currentEmail.trim().toLowerCase())
+          .maybeSingle();
+
+        if (dbUser && !error) {
+          await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(dbUser));
+          currentUser = dbUser as Usuario;
+        } else {
+          await AsyncStorage.removeItem(`logged_user_${company}`);
+        }
+      }
+      
+      setUser(currentUser);
+
+      // Force a reload of the app to clear all hooks/states
+      if (Platform.OS === 'web') {
+        window.location.reload();
+      } else {
+        try {
+          const Updates = require('expo-updates');
+          await Updates.reloadAsync();
+        } catch (e) {
+          console.warn('Updates.reloadAsync not available');
+        }
+      }
+    } catch (error) {
+      console.error('Error changing env:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
     let active = true;
     const initSession = async () => {
       try {
         const savedCompany = await CompanyService.loadSavedCompany();
         if (active) setCompanyState(savedCompany);
+        const savedEnv = await EnvService.loadSavedEnv();
+        if (active) setEnvState(savedEnv);
+        
         const currentUser = await AuthService.getCurrentUser();
         if (active) setUser(currentUser);
       } catch (error) {
@@ -143,7 +196,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, isLoading, segments, router]);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, company, refreshSession, setUser, changeCompany }}>
+    <AuthContext.Provider value={{ user, isLoading, company, env, refreshSession, setUser, changeCompany, changeEnv }}>
       {children}
     </AuthContext.Provider>
   );

@@ -316,6 +316,38 @@ CREATE TABLE IF NOT EXISTS public.app_settings (
 );
 
 -- =========================================================================
+-- MÓDULO DE TICKETS
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.tickets (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  creado_por uuid NOT NULL,
+  asignado_a uuid,
+  categoria text NOT NULL CHECK (categoria IN ('Bug', 'Feature', 'Mejora')),
+  empresa text NOT NULL CHECK (empresa IN ('Daravisa', 'Inttec')),
+  asunto text NOT NULL,
+  descripcion text NOT NULL,
+  prioridad text NOT NULL CHECK (prioridad IN ('Urgente', 'Alto', 'Medio', 'Bajo')),
+  status text NOT NULL DEFAULT 'Abierto' CHECK (status IN ('Abierto', 'En proceso', 'Cerrado')),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  
+  CONSTRAINT tickets_pkey PRIMARY KEY (id),
+  CONSTRAINT tickets_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id),
+  CONSTRAINT tickets_asignado_a_fkey FOREIGN KEY (asignado_a) REFERENCES public.usuarios(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.ticket_imagenes (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  ticket_id uuid NOT NULL,
+  url text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  
+  CONSTRAINT ticket_imagenes_pkey PRIMARY KEY (id),
+  CONSTRAINT ticket_imagenes_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES public.tickets(id) ON DELETE CASCADE
+);
+
+-- =========================================================================
 -- ÍNDICES DE RENDIMIENTO
 -- =========================================================================
 CREATE INDEX IF NOT EXISTS idx_gastos_subcategoria_id ON public.gastos(subcategoria_id);
@@ -335,6 +367,24 @@ CREATE INDEX IF NOT EXISTS idx_productos_categoria_id ON public.productos(catego
 -- =========================================================================
 DROP FUNCTION IF EXISTS public.login_usuario(text, text);
 DROP FUNCTION IF EXISTS public.login_usuario();
+
+-- Función y Trigger para hashear contraseñas automáticamente
+CREATE OR REPLACE FUNCTION public.hash_password_trigger()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Si la contraseña no está encriptada con bcrypt (no empieza con $2), la encriptamos
+  IF NEW.password IS NOT NULL AND NEW.password NOT LIKE '$2%' THEN
+    NEW.password = crypt(NEW.password, gen_salt('bf'));
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS hash_usuarios_password ON public.usuarios;
+CREATE TRIGGER hash_usuarios_password
+BEFORE INSERT OR UPDATE OF password ON public.usuarios
+FOR EACH ROW
+EXECUTE FUNCTION public.hash_password_trigger();
 
 CREATE OR REPLACE FUNCTION public.login_usuario(email_param text, password_param text)
 RETURNS TABLE (

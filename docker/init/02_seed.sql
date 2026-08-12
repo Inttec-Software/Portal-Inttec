@@ -8,26 +8,34 @@ VALUES
   (
     '11111111-1111-1111-1111-111111111111', 
     'Administrador Pruebas', 
-    'admin@inttec.com', 
+    'admin@inttec.net', 
     crypt('admin123', gen_salt('bf')), 
     'ADMIN', 
     '5551234567'
   ),
-  (
     '22222222-2222-2222-2222-222222222222', 
     'Técnico Empleado', 
-    'empleado@inttec.com', 
+    'empleado@inttec.net', 
     crypt('user123', gen_salt('bf')), 
     'EMPLEADO', 
     '5559876543'
+  ),
+  (
+    '33333333-3333-3333-3333-333333333333', 
+    'Desarrollador', 
+    'dev@inttec.net', 
+    crypt('dev123', gen_salt('bf')), 
+    'DEV', 
+    '5550000000'
   )
 ON CONFLICT (email) DO NOTHING;
 
 -- Insertar Perfiles correspondientes
 INSERT INTO public.perfiles (id, nombre, email, rol, telefono)
 VALUES
-  ('11111111-1111-1111-1111-111111111111', 'Administrador Pruebas', 'admin@inttec.com', 'ADMIN', '5551234567'),
-  ('22222222-2222-2222-2222-222222222222', 'Técnico Empleado', 'empleado@inttec.com', 'EMPLEADO', '5559876543')
+  ('11111111-1111-1111-1111-111111111111', 'Administrador Pruebas', 'admin@inttec.net', 'ADMIN', '5551234567'),
+  ('22222222-2222-2222-2222-222222222222', 'Técnico Empleado', 'empleado@inttec.net', 'EMPLEADO', '5559876543'),
+  ('33333333-3333-3333-3333-333333333333', 'Desarrollador', 'dev@inttec.net', 'DEV', '5550000000')
 ON CONFLICT (email) DO NOTHING;
 
 -- Insertar Categorías de Ejemplo

@@ -55,7 +55,7 @@ export default function AdminDashboard() {
   const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { setUser, company, changeCompany } = useAuth();
+  const { setUser, company, changeCompany, env, changeEnv } = useAuth();
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -372,7 +372,7 @@ export default function AdminDashboard() {
 
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company]);
+  }, [company, env]);
 
 
 
@@ -1588,14 +1588,7 @@ export default function AdminDashboard() {
           >
             <Ionicons name="person-circle-outline" size={20} color={themeColors.accent} />
           </TouchableOpacity>
-          {adminUser?.rol === 'DEV' && (
-            <TouchableOpacity
-              onPress={() => router.replace('/(empleado)/dashboard')}
-              style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
-            >
-              <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
-            </TouchableOpacity>
-          )}
+
           <TouchableOpacity
             onPress={handleLogout}
             style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
@@ -1604,6 +1597,25 @@ export default function AdminDashboard() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Herramientas de Desarrollo (Fuera de la cabecera) */}
+      {adminUser?.rol === 'DEV' && (
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, gap: 10, marginBottom: 10 }}>
+          <Text style={{ alignSelf: 'center', fontSize: 11, color: '#888', fontWeight: 'bold' }}>DEV TOOLS:</Text>
+          <TouchableOpacity
+            onPress={() => changeEnv(env === 'cloud' ? 'test' : 'cloud')}
+            style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: env === 'cloud' ? themeColors.primary + '15' : Colors.light.danger + '15', justifyContent: 'center', alignItems: 'center' }}
+          >
+            <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={18} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.replace('/(empleado)/dashboard')}
+            style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: themeColors.primary + '15', justifyContent: 'center', alignItems: 'center' }}
+          >
+            <Ionicons name="swap-horizontal-outline" size={18} color={themeColors.primary} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Switch de Empresa - Fila Dedicada */}
       <View style={{

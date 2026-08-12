@@ -103,6 +103,7 @@ export default function GastoForm() {
   const [tipoServicioProyecto, setTipoServicioProyecto] = useState<'Servicio' | 'Proyecto' | 'Venta' | 'Operativo' | null>(null);
   const [detalleServicioProyecto, setDetalleServicioProyecto] = useState('');
   const [sucursal, setSucursal] = useState('');
+  const [comentarioSucursal, setComentarioSucursal] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
   const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -157,7 +158,7 @@ export default function GastoForm() {
 
   // División de Gasto
   const [isSplit, setIsSplit] = useState(false);
-  const [splits, setSplits] = useState<{ id: string; clienteId: string; sucursalNombre: string; monto: string }[]>([]);
+  const [splits, setSplits] = useState<{ id: string; clienteId: string; sucursalNombre: string; comentarioSucursal?: string; monto: string }[]>([]);
 
   // Dropdown list visibility toggles (Mock pickers since RN Picker is external)
   const [showCatDropdown, setShowCatDropdown] = useState(false);
@@ -170,6 +171,7 @@ export default function GastoForm() {
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [newSplitClienteId, setNewSplitClienteId] = useState('');
   const [newSplitSucursalNombre, setNewSplitSucursalNombre] = useState('');
+  const [newSplitComentarioSucursal, setNewSplitComentarioSucursal] = useState('');
   const [newSplitMonto, setNewSplitMonto] = useState('');
   const [showNewSplitCliDropdown, setShowNewSplitCliDropdown] = useState(false);
   const [showNewSplitSucDropdown, setShowNewSplitSucDropdown] = useState(false);
@@ -635,8 +637,8 @@ export default function GastoForm() {
         setCurrentStep(3);
         return;
       }
-      if (!sucursal || !sucursal.trim()) {
-        showAlert('Validación', 'Por favor selecciona la sucursal del cliente.');
+      if (!sucursal.trim() && !comentarioSucursal.trim()) {
+        showAlert('Validación', 'Por favor selecciona la sucursal del cliente o indica una en "Sucursal a agregar".');
         setCurrentStep(3);
         return;
       }
@@ -657,8 +659,8 @@ export default function GastoForm() {
           setCurrentStep(3);
           return;
         }
-        if (!s.sucursalNombre || !s.sucursalNombre.trim()) {
-          showAlert('Validación', `Por favor selecciona la sucursal para la división del cliente "${s.clienteId}".`);
+        if (!s.sucursalNombre?.trim() && !s.comentarioSucursal?.trim()) {
+          showAlert('Validación', `Por favor selecciona la sucursal para la división del cliente "${s.clienteId}" o indica una en "Sucursal a agregar".`);
           setCurrentStep(3);
           return;
         }
@@ -693,6 +695,10 @@ export default function GastoForm() {
     }
     if (!proveedor.trim() && comentarioProveedor.trim()) {
       finalJustificacion = `[Proveedor a agregar: ${comentarioProveedor.trim()}]\n\n${finalJustificacion}`;
+    }
+
+    if (!isSplit && !sucursal.trim() && comentarioSucursal.trim()) {
+      finalJustificacion = `[Sucursal a agregar: ${comentarioSucursal.trim()}]\n\n${finalJustificacion}`;
     }
     if (esComida && selectedEmpleados.length > 0) {
       const nombresShared = selectedEmpleados.map(e => e.nombre).join(', ');
@@ -799,7 +805,7 @@ export default function GastoForm() {
             monto: Number(s.monto),
             cliente_id: splitCliObj?.id || null,
             sucursal_id: splitSucObj?.id || null,
-            justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${index + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`,
+            justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${index + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre || s.comentarioSucursal})${s.comentarioSucursal ? `\n[Sucursal a agregar: ${s.comentarioSucursal}]` : ''}\n\n${gastoPayload.justificacion}`,
             foto_url: publicUrl || null,
             factura_url: publicInvoiceUrl || null,
             status: 'PENDING',
@@ -873,7 +879,7 @@ export default function GastoForm() {
               cliente_id: splitCliObj?.id || null,
               sucursal: s.sucursalNombre || null,
               sucursal_id: splitSucObj?.id || null,
-              justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${i + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`,
+              justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${i + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre || s.comentarioSucursal})${s.comentarioSucursal ? `\n[Sucursal a agregar: ${s.comentarioSucursal}]` : ''}\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
               fotoExt: imageExt,
               base64Factura: facturaBase64 || undefined,
@@ -1249,7 +1255,7 @@ export default function GastoForm() {
                             placeholder="0.00"
                             keyboardType="decimal-pad"
                             value={montoPropina}
-                            onChangeText={(val) => setMontoPropina(val.replace(',', '.'))}
+                            onChangeText={(val) => setMontoPropina(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
                             iconName="logo-usd"
                           />
                         </View>
@@ -1290,7 +1296,7 @@ export default function GastoForm() {
                 placeholder="0.00"
                 keyboardType="decimal-pad"
                 value={monto}
-                onChangeText={(val) => setMonto(val.replace(',', '.'))}
+                onChangeText={(val) => setMonto(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
                 iconName="logo-usd"
               />
 
@@ -1667,22 +1673,19 @@ export default function GastoForm() {
 
                                return (
                                  <>
-                                   {sucursalSearch.trim().length > 0 && !existsExact && currentCliente && (
-                                     <TouchableOpacity
-                                       style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
-                                       onPress={() => handleAddNewSucursal(sucursalSearch)}
-                                     >
-                                       <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
-                                       <View style={{ flex: 1 }}>
-                                         <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
-                                           {`➕ Agregar "${sucursalSearch.trim().toUpperCase()}"`}
-                                         </Text>
-                                         <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                                           {`Vincular a cliente: ${currentCliente.nombre}`}
-                                         </Text>
-                                       </View>
-                                     </TouchableOpacity>
-                                   )}
+                                   <TouchableOpacity
+                                     style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '10', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                     onPress={() => {
+                                        setSucursal('');
+                                        setSucursalSearch('');
+                                        setShowSucursalDropdown(false);
+                                     }}
+                                   >
+                                     <Ionicons name="close-circle-outline" size={24} color={themeColors.danger} />
+                                     <Text style={{ color: themeColors.danger, fontWeight: '600', fontSize: 13 }}>
+                                       Dejar en blanco (Sin sucursal)
+                                     </Text>
+                                   </TouchableOpacity>
 
                                    {filteredSucursales.map((suc, index, array) => (
                                       <TouchableOpacity
@@ -1713,9 +1716,6 @@ export default function GastoForm() {
                                        <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 4 }}>
                                          No hay sucursales registradas para este cliente.
                                        </Text>
-                                       <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
-                                         Escribe arriba en el buscador para agregar una nueva.
-                                       </Text>
                                      </View>
                                    )}
                                  </>
@@ -1726,6 +1726,23 @@ export default function GastoForm() {
                       </Pressable>
                     )}
                   </View>
+
+                  {/* Campo obligatorio de Sucursal a agregar si no se seleccionó sucursal */}
+                  {!sucursal && selectedCliente ? (
+                    <View style={{ marginBottom: Spacing.three }}>
+                      <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal a agregar *</Text>
+                      <CustomInput
+                        placeholder="Escribe el nombre de la sucursal..."
+                        value={comentarioSucursal}
+                        onChangeText={setComentarioSucursal}
+                        iconName="business-outline"
+                      />
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4, marginLeft: 4 }}>
+                        El administrador se encargará de registrar esta sucursal.
+                      </Text>
+                    </View>
+                  ) : null}
+
                 </>
               ) : (
                 <View style={{ marginBottom: Spacing.three }}>
@@ -1825,6 +1842,7 @@ export default function GastoForm() {
 
                       setNewSplitClienteId('');
                       setNewSplitSucursalNombre('');
+                      setNewSplitComentarioSucursal('');
                       setNewSplitMonto(remainder > 0 ? remainder.toFixed(2) : '');
                       setSplitClienteSearch('');
                       setSplitSucursalSearch('');
@@ -2497,6 +2515,20 @@ export default function GastoForm() {
 
                               return (
                                 <>
+                                  <TouchableOpacity
+                                    style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '10', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                    onPress={() => {
+                                      setNewSplitSucursalNombre('');
+                                      setSplitSucursalSearch('');
+                                      setShowNewSplitSucDropdown(false);
+                                    }}
+                                  >
+                                    <Ionicons name="close-circle-outline" size={24} color={themeColors.danger} />
+                                    <Text style={{ color: themeColors.danger, fontWeight: '600', fontSize: 13 }}>
+                                      Dejar en blanco (Sin sucursal)
+                                    </Text>
+                                  </TouchableOpacity>
+
                                   {splitSucursalSearch.trim().length > 0 && !existsExact && currentCli && (
                                     <TouchableOpacity
                                       style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
@@ -2557,6 +2589,21 @@ export default function GastoForm() {
                     )}
                   </View>
 
+                  {!newSplitSucursalNombre && newSplitClienteId ? (
+                    <View style={{ marginTop: Spacing.two, zIndex: 105 }}>
+                      <CustomInput
+                        label="Sucursal a agregar *"
+                        placeholder="Escribe el nombre de la sucursal..."
+                        value={newSplitComentarioSucursal}
+                        onChangeText={setNewSplitComentarioSucursal}
+                        iconName="business-outline"
+                      />
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4, marginLeft: 4 }}>
+                        El administrador se encargará de registrar esta sucursal.
+                      </Text>
+                    </View>
+                  ) : null}
+
                   {/* Monto Asignado */}
                   <View style={{ marginTop: Spacing.two, zIndex: 1 }}>
                     <CustomInput
@@ -2606,8 +2653,8 @@ export default function GastoForm() {
                           showAlert('Atención', 'Por favor selecciona un cliente.');
                           return;
                         }
-                        if (!newSplitSucursalNombre.trim()) {
-                          showAlert('Atención', 'Por favor selecciona o agrega una sucursal para el cliente.');
+                        if (!newSplitSucursalNombre.trim() && !newSplitComentarioSucursal.trim()) {
+                          showAlert('Atención', 'Por favor selecciona la sucursal para el cliente o indica una nueva.');
                           return;
                         }
                         if (!newSplitMonto || isNaN(Number(newSplitMonto)) || Number(newSplitMonto) <= 0) {
@@ -2620,7 +2667,7 @@ export default function GastoForm() {
                           showAlert('Atención', `El monto ingresado excede el total del ticket ($${totalGasto.toFixed(2)}). Restante: $${(totalGasto - currentSum).toFixed(2)}`);
                           return;
                         }
-                        setSplits([...splits, { id: Date.now().toString(), clienteId: newSplitClienteId, sucursalNombre: newSplitSucursalNombre, monto: newSplitMonto }]);
+                        setSplits([...splits, { id: Date.now().toString(), clienteId: newSplitClienteId, sucursalNombre: newSplitSucursalNombre, comentarioSucursal: newSplitComentarioSucursal, monto: newSplitMonto }]);
                         setShowSplitModal(false);
                       }}
                       style={{ flex: 1 }}

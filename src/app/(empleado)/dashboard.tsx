@@ -36,7 +36,7 @@ export default function EmpleadoDashboard() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { setUser: setAuthUser, company, changeCompany } = useAuth();
+  const { setUser: setAuthUser, company, changeCompany, env, changeEnv } = useAuth();
 
   const [user, setUser] = useState<Usuario | null>(null);
   const [gastos, setGastos] = useState<Gasto[]>([]);
@@ -364,7 +364,7 @@ export default function EmpleadoDashboard() {
 
     return () => unsubscribe();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company]);
+  }, [company, env]);
 
   useEffect(() => {
     if (!user) return;
@@ -578,20 +578,39 @@ export default function EmpleadoDashboard() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary }]}>Bienvenido de nuevo,</Text>
-          <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
-            {user?.nombre || 'Empleado'}
-          </Text>
+      {/* Header Card Premium */}
+      <View style={[
+        styles.headerCard, 
+        { 
+          backgroundColor: themeColors.backgroundElement, 
+          borderColor: themeColors.border,
+          shadowColor: themeColors.text
+        }
+      ]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: Spacing.two }}>
+          <TouchableOpacity 
+            onPress={handleOpenProfile} 
+            style={[styles.headerAvatar, { backgroundColor: themeColors.primary + '15' }]}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.headerAvatarText, { color: themeColors.primary }]}>
+              {user?.nombre ? user.nombre.charAt(0).toUpperCase() : 'E'}
+            </Text>
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary }]}>¡Hola de nuevo!</Text>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
+              {user?.nombre || 'Empleado'}
+            </Text>
+          </View>
         </View>
+
         <View style={styles.headerActions}>
           {offlineGastos.length > 0 && (
             <TouchableOpacity
               onPress={handleSyncManual}
               disabled={isSyncing}
-              style={[styles.headerIconBtn, { backgroundColor: themeColors.warning + '20' }]}
+              style={[styles.headerIconBtn, { backgroundColor: themeColors.warning + '15' }]}
             >
               {isSyncing ? (
                 <ActivityIndicator size="small" color={themeColors.warning} />
@@ -602,30 +621,17 @@ export default function EmpleadoDashboard() {
           )}
           <TouchableOpacity
             onPress={() => router.push('/(empleado)/trabajo')}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
+            style={[styles.headerIconBtn, { backgroundColor: themeColors.accent + '10' }]}
           >
-            <Ionicons name="briefcase-outline" size={20} color={themeColors.accent} />
+            <Ionicons name="briefcase" size={20} color={themeColors.accent} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => setEmployeeVehiculosModalVisible(true)}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
+            style={[styles.headerIconBtn, { backgroundColor: themeColors.accent + '10' }]}
           >
-            <Ionicons name="car-outline" size={20} color={themeColors.accent} />
+            <Ionicons name="car" size={20} color={themeColors.accent} />
           </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleOpenProfile}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
-          >
-            <Ionicons name="person-circle-outline" size={20} color={themeColors.accent} />
-          </TouchableOpacity>
-          {user?.rol === 'DEV' && (
-            <TouchableOpacity
-              onPress={() => router.replace('/(admin)/dashboard')}
-              style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
-            >
-              <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
-            </TouchableOpacity>
-          )}
+
           <TouchableOpacity
             onPress={handleLogout}
             style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
@@ -634,6 +640,25 @@ export default function EmpleadoDashboard() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Herramientas de Desarrollo (Fuera de la tarjeta para no estorbar el diseño) */}
+      {user?.rol === 'DEV' && (
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, gap: 10, marginBottom: 10 }}>
+          <Text style={{ alignSelf: 'center', fontSize: 11, color: '#888', fontWeight: 'bold' }}>DEV TOOLS:</Text>
+          <TouchableOpacity
+            onPress={() => changeEnv(env === 'cloud' ? 'test' : 'cloud')}
+            style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: env === 'cloud' ? themeColors.primary + '15' : Colors.light.danger + '15', justifyContent: 'center', alignItems: 'center' }}
+          >
+            <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={18} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.replace('/(admin)/dashboard')}
+            style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: themeColors.primary + '15', justifyContent: 'center', alignItems: 'center' }}
+          >
+            <Ionicons name="swap-horizontal-outline" size={18} color={themeColors.primary} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Switch de Empresa - Fila Dedicada */}
       <View style={{
@@ -1492,29 +1517,52 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
+  headerCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    marginHorizontal: Spacing.four,
+    marginTop: Spacing.two,
+    marginBottom: Spacing.two,
+    borderRadius: BorderRadius.large,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  headerTitle: {
-    fontSize: 24,
+  headerAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerAvatarText: {
+    fontSize: 22,
     fontWeight: '800',
   },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 2,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    gap: Spacing.one,
   },
   headerIconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.medium,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     justifyContent: 'center',
     alignItems: 'center',
   },
