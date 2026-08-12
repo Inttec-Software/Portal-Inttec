@@ -1886,6 +1886,36 @@ export default function AdminDashboard() {
           </Text>
         </TouchableOpacity>
 
+        <TouchableOpacity
+          onPress={() => router.push('/(admin)/productos')}
+          style={[
+            styles.quickActionBtn,
+            {
+              backgroundColor: themeColors.backgroundElement,
+              borderColor: themeColors.border,
+              paddingHorizontal: isMobile ? 4 : Spacing.one,
+            }
+          ]}
+        >
+          <View style={[styles.quickActionIconBg, { backgroundColor: themeColors.primary + '15' }]}>
+            <Ionicons name="cube-outline" size={18} color={themeColors.primary} />
+          </View>
+          <Text
+            style={[
+              styles.quickActionLabel,
+              {
+                color: themeColors.text,
+                fontSize: isMobile ? 10 : 11,
+              }
+            ]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+          >
+            Productos
+          </Text>
+        </TouchableOpacity>
+
       </View>
 
       {/* BARRA DE BÚSQUEDA Y FILTRO DE CALENDARIO DE FECHAS */}
