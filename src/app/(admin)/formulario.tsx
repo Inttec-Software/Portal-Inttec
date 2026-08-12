@@ -1268,7 +1268,7 @@ export default function GastoForm() {
                             placeholder="0.00"
                             keyboardType="decimal-pad"
                             value={montoPropina}
-                            onChangeText={(val) => setMontoPropina(val.replace(',', '.'))}
+                            onChangeText={(val) => setMontoPropina(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
                             iconName="logo-usd"
                           />
                         </View>
@@ -1309,7 +1309,7 @@ export default function GastoForm() {
                 placeholder="0.00"
                 keyboardType="decimal-pad"
                 value={monto}
-                onChangeText={(val) => setMonto(val.replace(',', '.'))}
+                onChangeText={(val) => setMonto(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
                 iconName="logo-usd"
               />
 

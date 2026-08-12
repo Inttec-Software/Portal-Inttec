@@ -3,8 +3,23 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
+import Constants from 'expo-constants';
+
 const sanitizeUrl = (url: string) => {
   return url ? url.replace(/\/rest\/v1\/?$/, '') : url;
+};
+
+const resolveLocalhost = (url: string) => {
+  // Solo en desarrollo y si la URL tiene localhost
+  if (__DEV__ && url && (url.includes('localhost') || url.includes('127.0.0.1'))) {
+    const debuggerHost = Constants.expoConfig?.hostUri || (Constants.manifest as any)?.debuggerHost;
+    if (debuggerHost) {
+      const ip = debuggerHost.split(':')[0];
+      // Reemplaza localhost por la IP real de tu PC en la red local
+      return url.replace(/localhost|127\.0\.0\.1/, ip);
+    }
+  }
+  return url;
 };
 
 const inttecUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_INTTEC || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
@@ -13,7 +28,13 @@ const inttecAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_INTTEC || proces
 const daravisaUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
 const daravisaAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
-const isLocalUrl = (url: string) => url ? (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('192.168.') || url.startsWith('http://')) : false;
+const inttecTestUrl = resolveLocalhost(sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_TEST || 'http://localhost:54321'));
+const inttecTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_TEST || 'placeholder-anon-key';
+
+const daravisaTestUrl = resolveLocalhost(sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA_TEST || 'http://localhost:54321'));
+const daravisaTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA_TEST || 'placeholder-anon-key';
+
+const isLocalUrl = (url: string) => url ? (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('192.168.') || url.includes('10.') || url.startsWith('http://')) : false;
 
 if (!inttecUrl || !inttecAnonKey) {
   logger.error('WARNING: Supabase INTTEC credentials missing in .env file.');
@@ -68,8 +89,37 @@ export const daravisaClient = createClient(daravisaUrl, daravisaAnonKey, {
   },
 });
 
+export const inttecTestClient = createClient(inttecTestUrl, inttecTestAnonKey, {
+  auth: {
+    storage: ssrSafeStorage,
+    storageKey: 'supabase.auth.token.inttec.test',
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+
+export const daravisaTestClient = createClient(daravisaTestUrl, daravisaTestAnonKey, {
+  auth: {
+    storage: ssrSafeStorage,
+    storageKey: 'supabase.auth.token.daravisa.test',
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+
 let activeCompany: 'inttec' | 'daravisa' = 'inttec';
+let activeEnv: 'cloud' | 'test' = 'cloud';
 let activeClient = inttecClient;
+
+const updateActiveClient = () => {
+  if (activeEnv === 'test') {
+    activeClient = activeCompany === 'daravisa' ? daravisaTestClient : inttecTestClient;
+  } else {
+    activeClient = activeCompany === 'daravisa' ? daravisaClient : inttecClient;
+  }
+};
 
 export const supabase = new Proxy({}, {
   get(target, prop) {
@@ -87,7 +137,7 @@ export const CompanyService = {
   },
   async setActiveCompany(company: 'inttec' | 'daravisa'): Promise<void> {
     activeCompany = company;
-    activeClient = company === 'daravisa' ? daravisaClient : inttecClient;
+    updateActiveClient();
     if (isBrowser) {
       await AsyncStorage.setItem('active_company', company);
     }
@@ -97,10 +147,33 @@ export const CompanyService = {
       const saved = await AsyncStorage.getItem('active_company');
       if (saved === 'daravisa' || saved === 'inttec') {
         activeCompany = saved;
-        activeClient = saved === 'daravisa' ? daravisaClient : inttecClient;
+        updateActiveClient();
       }
     }
     return activeCompany;
+  }
+};
+
+export const EnvService = {
+  getActiveEnv(): 'cloud' | 'test' {
+    return activeEnv;
+  },
+  async setActiveEnv(env: 'cloud' | 'test'): Promise<void> {
+    activeEnv = env;
+    updateActiveClient();
+    if (isBrowser) {
+      await AsyncStorage.setItem('active_env', env);
+    }
+  },
+  async loadSavedEnv(): Promise<'cloud' | 'test'> {
+    if (isBrowser) {
+      const saved = await AsyncStorage.getItem('active_env');
+      if (saved === 'cloud' || saved === 'test') {
+        activeEnv = saved;
+        updateActiveClient();
+      }
+    }
+    return activeEnv;
   }
 };
 
@@ -337,8 +410,8 @@ export const AuthService = {
 
   async logout(): Promise<void> {
     if (isBrowser) {
-      const company = CompanyService.getActiveCompany();
-      await AsyncStorage.removeItem(`logged_user_${company}`);
+      await AsyncStorage.removeItem('logged_user_inttec');
+      await AsyncStorage.removeItem('logged_user_daravisa');
     }
   },
 
