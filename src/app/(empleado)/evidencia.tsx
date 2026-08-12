@@ -16,7 +16,8 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Usuario, AuthService } from '@/services/supabase';
+import { supabase, Usuario, AuthService, inttecClient, daravisaClient } from '@/services/supabase';
+import { useAuth } from '@/context/AuthContext';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { optimizeImage } from '@/utils/imageOptimizer';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
@@ -31,6 +32,7 @@ export default function EvidenciaForm() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { company, changeCompany } = useAuth();
 
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
@@ -494,7 +496,7 @@ export default function EvidenciaForm() {
 
       setLoadingModalVisible(false);
       Alert.alert('Éxito', 'Evidencia y reporte guardados correctamente en el servidor.');
-      router.replace('/(empleado)/dashboard');
+      router.replace('/(empleado)/gastos');
     } catch (err: any) {
       console.error('Error saving evidence:', err);
       setLoadingModalVisible(false);
@@ -531,12 +533,63 @@ export default function EvidenciaForm() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/dashboard')} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/gastos')} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={themeColors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
         <View style={{ width: 40 }} />
       </View>
+
+      {/* Switch de Empresa */}
+      <View style={{
+        flexDirection: 'row',
+        backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+        borderRadius: 20,
+        padding: 2,
+        alignItems: 'center',
+        width: 200,
+        alignSelf: 'center',
+        marginBottom: 10,
+        marginTop: 5,
+      }}>
+        <TouchableOpacity
+          onPress={() => company !== 'inttec' && changeCompany && changeCompany('inttec')}
+          style={{
+            flex: 1,
+            paddingVertical: 8,
+            borderRadius: 18,
+            backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
+            alignItems: 'center'
+          }}
+        >
+          <Text style={{
+            fontSize: 12,
+            fontWeight: '700',
+            color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+          }}>
+            INTTEC
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => company !== 'daravisa' && changeCompany && changeCompany('daravisa')}
+          style={{
+            flex: 1,
+            paddingVertical: 8,
+            borderRadius: 18,
+            backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
+            alignItems: 'center'
+          }}
+        >
+          <Text style={{
+            fontSize: 12,
+            fontWeight: '700',
+            color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+          }}>
+            DARAVISA
+          </Text>
+        </TouchableOpacity>
+      </View>
+
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

@@ -32,7 +32,7 @@ import { useAuth } from '@/context/AuthContext';
 
 
 
-export default function EmpleadoDashboard() {
+export default function EmpleadoGastos() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
@@ -619,25 +619,6 @@ export default function EmpleadoDashboard() {
               )}
             </TouchableOpacity>
           )}
-          <TouchableOpacity
-            onPress={() => router.push('/(empleado)/trabajo')}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.accent + '10' }]}
-          >
-            <Ionicons name="briefcase" size={20} color={themeColors.accent} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setEmployeeVehiculosModalVisible(true)}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.accent + '10' }]}
-          >
-            <Ionicons name="car" size={20} color={themeColors.accent} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={handleLogout}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
-          >
-            <Ionicons name="log-out-outline" size={20} color={themeColors.danger} />
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -802,30 +783,8 @@ export default function EmpleadoDashboard() {
         />
       )}
 
-      {/* IA Button (Left Side) */}
-      <TouchableOpacity
-        activeOpacity={0.8}
-        onPress={() => router.push('/(empleado)/chat-ia')}
-        style={[styles.fabSecondary, { position: 'absolute', bottom: Spacing.four, left: Spacing.four, backgroundColor: '#8b5cf6' }]}
-      >
-        <Ionicons name="sparkles" size={22} color="#ffffff" />
-      </TouchableOpacity>
-
       {/* Floating Action Buttons (Right Side) */}
       <View style={styles.fabContainer}>
-        {/* Auto-Checador */}
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={handleOpenChecador}
-          disabled={isLoadingChecador}
-          style={[styles.fabSecondary, { backgroundColor: themeColors.success }]}
-        >
-          {isLoadingChecador ? (
-            <ActivityIndicator size="small" color="#ffffff" />
-          ) : (
-            <Ionicons name="finger-print" size={22} color="#ffffff" />
-          )}
-        </TouchableOpacity>
         {/* Registrar Gasto */}
         <TouchableOpacity
           activeOpacity={0.8}

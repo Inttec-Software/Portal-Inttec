@@ -184,11 +184,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (user.rol === 'ADMIN' || user.rol === 'DEV') {
           router.replace('/(admin)/dashboard');
         } else {
-          router.replace('/(empleado)/dashboard');
+          router.replace('/(empleado)/gastos');
         }
       } else if (rootSegment === '(admin)' && user.rol !== 'ADMIN' && user.rol !== 'DEV') {
          // Redirect to their actual role if they try to access wrong group
-         router.replace('/(empleado)/dashboard');
+         router.replace('/(empleado)/gastos');
       } else if (rootSegment === '(empleado)' && user.rol === 'ADMIN') {
          router.replace('/(admin)/dashboard');
       }
