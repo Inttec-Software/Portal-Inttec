@@ -908,11 +908,10 @@ export default function InventarioDashboard() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Control de Inventario</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -1055,7 +1054,7 @@ export default function InventarioDashboard() {
               <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando catálogo...</Text>
             </View>
           ) : (
-            <FlatList
+            <FlatList scrollEnabled={false}
               data={filteredProducts}
               initialNumToRender={10}
               maxToRenderPerBatch={10}
@@ -1666,7 +1665,7 @@ export default function InventarioDashboard() {
               style={{ marginBottom: Spacing.two }}
             />
 
-            <FlatList
+            <FlatList scrollEnabled={false}
               data={filteredSelectorOptions}
               initialNumToRender={10}
               maxToRenderPerBatch={10}
@@ -1781,6 +1780,7 @@ export default function InventarioDashboard() {
           </View>
         </View>
       </Modal>
+    </ScrollView>
     </SafeAreaView>
   );
 }

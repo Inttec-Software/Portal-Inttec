@@ -988,11 +988,10 @@ export default function GastoForm() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Registrar Gasto</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -2837,6 +2836,7 @@ export default function GastoForm() {
           </KeyboardAvoidingView>
         </Pressable>
       </Modal>
+    </ScrollView>
     </SafeAreaView>
   );
 }

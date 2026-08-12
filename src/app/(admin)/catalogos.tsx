@@ -370,12 +370,11 @@ export default function CatalogosManager() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       <View style={isDesktop ? { maxWidth: 800, width: '100%', alignSelf: 'center', flex: 1, paddingHorizontal: Spacing.two } : { flex: 1 }}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-          </TouchableOpacity>
+          
           <Text style={[styles.headerTitle, { color: themeColors.text }]}>Catálogos de Empresa</Text>
           <TouchableOpacity
             onPress={() => {
@@ -563,7 +562,7 @@ export default function CatalogosManager() {
           <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando catálogo...</Text>
         </View>
       ) : (
-        <FlatList
+        <FlatList scrollEnabled={false}
           data={
             activeCatalog === 'categorias'
               ? categorias
@@ -1019,7 +1018,7 @@ export default function CatalogosManager() {
                 <ActivityIndicator color={themeColors.primary} />
               </View>
             ) : (
-              <FlatList
+              <FlatList scrollEnabled={false}
                 data={clientSucursales}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={{ paddingBottom: Spacing.four }}
@@ -1154,6 +1153,7 @@ export default function CatalogosManager() {
         </View>
       </Modal>
 
+    </ScrollView>
     </SafeAreaView>
   );
 }

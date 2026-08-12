@@ -352,13 +352,6 @@ export default function CotizacionesListScreen() {
         </View>
       </View>
       <View style={styles.desktopNavBarRight}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.push('/(admin)/dashboard')}
-        >
-          <Ionicons name="arrow-back" size={16} color="#ffffff" />
-          <Text style={styles.backButtonText}>Regresar al Dashboard</Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -556,12 +549,11 @@ export default function CotizacionesListScreen() {
       ) : (
         // --- DISEÑO MÓVIL/TABLETA ORIGINAL RESPETADO ---
         <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
           {/* HEADER MÓVIL */}
           <View style={styles.header}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <TouchableOpacity onPress={() => router.push('/(admin)/dashboard')} style={{ paddingRight: Spacing.two }}>
-                <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-              </TouchableOpacity>
+              
               <Image
                 source={
                   company === 'daravisa'
@@ -755,7 +747,8 @@ export default function CotizacionesListScreen() {
               <Ionicons name="add" size={30} color="#fff" />
             </TouchableOpacity>
           )}
-        </SafeAreaView>
+        </ScrollView>
+    </SafeAreaView>
       )}
     </View>
   );
