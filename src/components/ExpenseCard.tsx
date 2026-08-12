@@ -176,7 +176,18 @@ export default function ExpenseCard({
             <Text style={{fontWeight: '600', color: themeColors.text}}>Sucursal: </Text>
             {sucursalNombre}
           </Text>
-        ) : null}
+        ) : (
+          (() => {
+            const match = gasto.justificacion?.match(/\[Sucursal a agregar:\s*([^\]]+)\]/);
+            const sucSugerida = match ? match[1].trim() : null;
+            return sucSugerida ? (
+              <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
+                <Text style={{fontWeight: '600', color: themeColors.text}}>Sucursal: </Text>
+                <Text style={{ color: themeColors.warning, fontWeight: '500' }}>[Pendiente: {sucSugerida}]</Text>
+              </Text>
+            ) : null;
+          })()
+        )}
       </View>
 
       {/* Footer: Fecha & Monto */}

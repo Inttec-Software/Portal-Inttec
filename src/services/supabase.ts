@@ -3,8 +3,23 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
+import Constants from 'expo-constants';
+
 const sanitizeUrl = (url: string) => {
   return url ? url.replace(/\/rest\/v1\/?$/, '') : url;
+};
+
+const resolveLocalhost = (url: string) => {
+  // Solo en desarrollo y si la URL tiene localhost
+  if (__DEV__ && url && (url.includes('localhost') || url.includes('127.0.0.1'))) {
+    const debuggerHost = Constants.expoConfig?.hostUri || (Constants.manifest as any)?.debuggerHost;
+    if (debuggerHost) {
+      const ip = debuggerHost.split(':')[0];
+      // Reemplaza localhost por la IP real de tu PC en la red local
+      return url.replace(/localhost|127\.0\.0\.1/, ip);
+    }
+  }
+  return url;
 };
 
 const inttecUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_INTTEC || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
@@ -13,13 +28,13 @@ const inttecAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_INTTEC || proces
 const daravisaUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
 const daravisaAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
-const inttecTestUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_TEST || 'http://localhost:54321');
+const inttecTestUrl = resolveLocalhost(sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_TEST || 'http://localhost:54321'));
 const inttecTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_TEST || 'placeholder-anon-key';
 
-const daravisaTestUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA_TEST || 'http://localhost:54321');
+const daravisaTestUrl = resolveLocalhost(sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA_TEST || 'http://localhost:54321'));
 const daravisaTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA_TEST || 'placeholder-anon-key';
 
-const isLocalUrl = (url: string) => url ? (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('192.168.') || url.startsWith('http://')) : false;
+const isLocalUrl = (url: string) => url ? (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('192.168.') || url.includes('10.') || url.startsWith('http://')) : false;
 
 if (!inttecUrl || !inttecAnonKey) {
   logger.error('WARNING: Supabase INTTEC credentials missing in .env file.');

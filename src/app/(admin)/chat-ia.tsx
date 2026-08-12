@@ -88,7 +88,12 @@ export default function AdminChatIA() {
               gasolinaData,
               auditoriasData,
               clientesData,
-              sucursalesData
+              sucursalesData,
+              productosData,
+              categoriasProductosData,
+              proveedoresData,
+              movimientosData,
+              cotizacionesData
             ] = await Promise.all([
               safeFetch(client, 'gastos'),
               safeFetch(client, 'ventas'),
@@ -99,7 +104,12 @@ export default function AdminChatIA() {
               safeFetch(client, 'registro_gasolina'),
               safeFetch(client, 'auditorias_tarjeta'),
               safeFetch(client, 'clientes'),
-              safeFetch(client, 'sucursales_cliente')
+              safeFetch(client, 'sucursales_cliente'),
+              safeFetch(client, 'productos'),
+              safeFetch(client, 'categorias_productos'),
+              safeFetch(client, 'proveedores'),
+              safeFetch(client, 'movimientos_inventario'),
+              safeFetch(client, 'cotizaciones')
             ]);
 
             const userMap: Record<string, string> = {};
@@ -140,7 +150,12 @@ export default function AdminChatIA() {
               registro_gasolina: gasolina,
               auditorias_tarjeta: auditoriasData.map((aud: any) => ({ ...aud, empresa: companyName })),
               clientes: clientesData,
-              sucursales_cliente: sucursalesData
+              sucursales_cliente: sucursalesData,
+              productos: productosData,
+              categorias_productos: categoriasProductosData,
+              proveedores: proveedoresData,
+              movimientos_inventario: movimientosData,
+              cotizaciones: cotizacionesData
             };
           } catch (e) {
             logger.error(`Error fetching data for ${companyName}:`, e);
