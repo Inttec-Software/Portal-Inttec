@@ -863,7 +863,19 @@ export default function VentasScreen() {
       loadHistorial();
     } catch (err: any) {
       console.error('Error timbrando:', err);
-      showAlert('Error al timbrar', err.message || 'Error desconocido.');
+      let errorMsg = err.message || 'Error desconocido.';
+      
+      // Supabase-js esconde el JSON devuelto en la propiedad 'context' cuando hay un HTTP error
+      if (err.context && typeof err.context.json === 'function') {
+        try {
+          const body = await err.context.json();
+          if (body.error) errorMsg = body.error;
+        } catch (e) {
+          // Si no se puede parsear JSON, ignorar
+        }
+      }
+      
+      showAlert('Error al timbrar', errorMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -1721,7 +1733,7 @@ export default function VentasScreen() {
                   </View>
                 </ScrollView>
       ) : (
-        <FlatList
+        <FlatList scrollEnabled={false}
           data={ventasFiltradas}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
@@ -1797,11 +1809,10 @@ export default function VentasScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: themeColors.background }]}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity onPress={() => (editingVentaId ? cancelEditing() : router.replace('/(admin)/dashboard' as any))} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>
           {editingVentaId ? 'Editar Venta' : 'Registro de Ventas'}
         </Text>
@@ -2273,6 +2284,7 @@ export default function VentasScreen() {
           </View>
         </View>
       </Modal>
+    </ScrollView>
     </SafeAreaView>
   );
 }

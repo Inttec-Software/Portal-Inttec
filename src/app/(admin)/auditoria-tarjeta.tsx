@@ -1139,12 +1139,7 @@ export default function AuditoriaTarjetaScreen() {
 
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity
-          onPress={() => router.replace('/(admin)/dashboard' as any)}
-          style={styles.backBtn}
-        >
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        
         <View>
           <Text style={[styles.headerTitle, { color: themeColors.text }]}>Auditoría de Tarjeta</Text>
           <Text style={[styles.headerSub, { color: themeColors.textSecondary }]}>

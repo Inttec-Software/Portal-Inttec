@@ -84,16 +84,15 @@ serve(async (req) => {
     // Importar dependencias de Finkok
     // Nota: Necesitamos usar importaciones relativas o absolutas dinámicas en Deno.
     // Usaremos un hack local si el import de arriba fallara, pero Deno maneja imports locales bien.
-    const { buildAndSignCFDI } = await import('./finkok/xmlBuilder.ts')
-    const { timbrarFinkok } = await import('./finkok/soapClient.ts')
+    const { buildUnsignedCFDI } = await import('./finkok/xmlBuilder.ts')
+    const { signStampFinkok } = await import('./finkok/soapClient.ts')
 
-    // 4. Construir y sellar el XML del CFDI 4.0
-    // Aquí es donde sucede la mayor complejidad: Generar la estructura XML según el SAT
-    // y firmar la Cadena Original con la llave privada del CSD.
-    const xmlFirmado = await buildAndSignCFDI(venta, cliente, partidas);
+    // 4. Construir el XML del CFDI 4.0 sin sellar
+    // Al usar el método sign_stamp, Finkok utilizará el CSD subido a su portal para sellar y timbrar.
+    const xmlSinSellar = await buildUnsignedCFDI(venta, cliente, partidas);
 
-    // 5. Solicitar timbrado a Finkok (SOAP)
-    const { success, uuid: sat_uuid, xml: xmlTimbrado } = await timbrarFinkok(xmlFirmado, FINKOK_USERNAME, FINKOK_PASSWORD, isProduction);
+    // 5. Solicitar sellado y timbrado a Finkok (SOAP sign_stamp)
+    const { success, uuid: sat_uuid, xml: xmlTimbrado } = await signStampFinkok(xmlSinSellar, FINKOK_USERNAME, FINKOK_PASSWORD, isProduction);
 
     if (!success || !sat_uuid) {
       throw new Error('Finkok no devolvió un UUID válido');

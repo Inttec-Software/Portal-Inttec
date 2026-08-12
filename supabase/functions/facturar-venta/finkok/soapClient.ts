@@ -1,20 +1,21 @@
-export async function timbrarFinkok(xmlFirmado: string, finkokUsername: string, finkokPassword: string, isProduction: boolean = false) {
+export async function signStampFinkok(xmlString: string, finkokUsername: string, finkokPassword: string, isProduction: boolean = false) {
   const finkokUrl = isProduction 
     ? 'https://facturacion.finkok.com/servicios/soap/stamp' 
     : 'https://demo-facturacion.finkok.com/servicios/soap/stamp';
 
-  // El XML debe enviarse en base64 según la especificación de Finkok
-  const xmlB64 = btoa(unescape(encodeURIComponent(xmlFirmado)));
+  // El XML debe enviarse en base64
+  const xmlB64 = btoa(unescape(encodeURIComponent(xmlString)));
 
+  // Usar sign_stamp en lugar de stamp. Finkok usará el CSD subido a su portal para sellar y luego timbrar.
   const soapEnvelope = `
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:stam="http://facturacion.finkok.com/stamp">
    <soapenv:Header/>
    <soapenv:Body>
-      <stam:stamp>
+      <stam:sign_stamp>
          <stam:xml>${xmlB64}</stam:xml>
          <stam:username>${finkokUsername}</stam:username>
          <stam:password>${finkokPassword}</stam:password>
-      </stam:stamp>
+      </stam:sign_stamp>
    </soapenv:Body>
 </soapenv:Envelope>
 `.trim();
@@ -23,7 +24,7 @@ export async function timbrarFinkok(xmlFirmado: string, finkokUsername: string, 
     method: 'POST',
     headers: {
       'Content-Type': 'text/xml;charset=UTF-8',
-      'SOAPAction': '"http://facturacion.finkok.com/stamp/stamp"',
+      'SOAPAction': '"http://facturacion.finkok.com/stamp/sign_stamp"',
     },
     body: soapEnvelope
   });
@@ -33,29 +34,27 @@ export async function timbrarFinkok(xmlFirmado: string, finkokUsername: string, 
   if (!response.ok) {
     throw new Error(`Finkok HTTP Error ${response.status}: ${responseText}`);
   }
-
-  // Parsear la respuesta XML para extraer el UUID y el XML timbrado
-  // Ya que en Edge Functions (Deno) no tenemos DOMParser de forma nativa sin importar librerías pesadas,
-  // usaremos regex seguros para extraer los campos principales.
   
   const faultStringMatch = responseText.match(/<faultstring>(.*?)<\/faultstring>/);
   if (faultStringMatch) {
     throw new Error(`Finkok Fault: ${faultStringMatch[1]}`);
   }
 
+  // CodEstatus debe decir "Comprobante sellado y timbrado satisfactoriamente" o similar
   const xmlTimbradoMatch = responseText.match(/<xml>([\s\S]*?)<\/xml>/);
   const uuidMatch = responseText.match(/<UUID>(.*?)<\/UUID>/);
   const incarnatesErrorMatch = responseText.match(/<Incidencias>([\s\S]*?)<\/Incidencias>/);
 
   if (incarnatesErrorMatch && incarnatesErrorMatch[1].includes('<IdIncidencia>')) {
-    // Hubo un error de validación
     const msgMatch = incarnatesErrorMatch[1].match(/<MensajeIncidencia>(.*?)<\/MensajeIncidencia>/);
     const errorMsg = msgMatch ? msgMatch[1] : 'Error desconocido al timbrar';
     throw new Error(`Incidencia Finkok: ${errorMsg}`);
   }
 
   if (!xmlTimbradoMatch || !xmlTimbradoMatch[1]) {
-    throw new Error("No se recibió el XML timbrado de Finkok.");
+    // Para propósitos de depuración, devolveremos los primeros 500 caracteres de la respuesta
+    const debugResponse = responseText.substring(0, 500);
+    throw new Error(`No se recibió el XML timbrado de Finkok. Respuesta de Finkok: ${debugResponse}`);
   }
 
   return {
@@ -70,7 +69,6 @@ export async function cancelarFinkok(uuid: string, rfcReceptor: string, total: n
     ? 'https://facturacion.finkok.com/servicios/soap/cancel' 
     : 'https://demo-facturacion.finkok.com/servicios/soap/cancel';
 
-  // Finkok cancel endpoint requires the UUID and the CSD to sign the cancellation request.
   const soapEnvelope = `
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:can="http://facturacion.finkok.com/cancel">
    <soapenv:Header/>
@@ -81,7 +79,6 @@ export async function cancelarFinkok(uuid: string, rfcReceptor: string, total: n
          </can:UUIDS>
          <can:username>${finkokUsername}</can:username>
          <can:password>${finkokPassword}</can:password>
-         <!-- RFC Emisor lo obtiene finkok internamente o debemos pasarlo según la documentación -->
          <can:taxpayer_id>RFC_EMISOR</can:taxpayer_id> 
          <can:cer>${cerB64}</can:cer>
          <can:key>${keyB64}</can:key>
@@ -105,7 +102,6 @@ export async function cancelarFinkok(uuid: string, rfcReceptor: string, total: n
     throw new Error(`Finkok Cancel HTTP Error ${response.status}: ${responseText}`);
   }
 
-  // Parse response
   const faultStringMatch = responseText.match(/<faultstring>(.*?)<\/faultstring>/);
   if (faultStringMatch) {
     throw new Error(`Finkok Fault: ${faultStringMatch[1]}`);

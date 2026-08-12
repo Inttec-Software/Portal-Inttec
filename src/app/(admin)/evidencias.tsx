@@ -185,11 +185,10 @@ export default function AdminEvidenciasScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -306,7 +305,7 @@ export default function AdminEvidenciasScreen() {
           </View>
         </ScrollView>
       ) : (
-        <FlatList
+        <FlatList scrollEnabled={false}
           initialNumToRender={8}
           maxToRenderPerBatch={8}
           windowSize={5}
@@ -615,6 +614,7 @@ export default function AdminEvidenciasScreen() {
         imageUrl={selectedPhoto}
         onClose={() => setViewerVisible(false)}
       />
+    </ScrollView>
     </SafeAreaView>
   );
 }
