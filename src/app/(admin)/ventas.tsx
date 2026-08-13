@@ -25,6 +25,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, Venta, VentaPartida, VentaPago, calcularEstadoPago, EstadoPagoVenta, syncVentaPaymentStatus, recalculateVentaTotals, ClienteItem, SucursalCliente, GastoHelper } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
+import { CatalogService } from '@/services/catalogService';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import StepIndicator from '@/components/StepIndicator';
@@ -227,6 +228,29 @@ export default function VentasScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.fromCotizacion]);
+
+  const handleAddNewSucursal = async (nombre: string) => {
+    if (!nombre.trim()) return;
+    const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === cliente?.trim().toLowerCase());
+    if (!currentCliente) {
+      Alert.alert('Validación', 'Primero debes seleccionar un cliente para vincular la sucursal.');
+      return;
+    }
+
+    try {
+      const newSuc = await CatalogService.crearSucursal({
+        cliente_id: currentCliente.id,
+        nombre: nombre.trim().toUpperCase(),
+      });
+      setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setSucursal(newSuc.nombre);
+      setSucursalSearch('');
+      setShowSucursalDropdown(false);
+      Alert.alert('Éxito', `Sucursal "${newSuc.nombre}" agregada y vinculada a ${currentCliente.nombre}.`);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo agregar la sucursal.');
+    }
+  };
 
   // === Cargar Historial ===
   const loadHistorial = async () => {
@@ -591,27 +615,14 @@ export default function VentasScreen() {
 
   const handleAddNewCliente = async (nombre: string) => {
     try {
-      const { data, error } = await supabase
-        .from('clientes')
-        .insert([{ nombre: nombre.trim() }])
-        .select();
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const newCli = data[0];
-        setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-        if (newCli) {
-          setCliente(newCli.nombre);
-          setProveedor('');
-        }
-      } else {
-        // Fallback optimista si no retornó
-        if (!clientes.some(c => c.nombre === nombre.trim())) {
-          setCliente(nombre.trim());
-          setProveedor('');
-        }
-      }
+      const newCli = await CatalogService.crearCliente({ nombre: nombre.trim() });
+      setClientes(prev => [...prev, newCli].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')));
+      setCliente(newCli.nombre);
+      setSucursal('');
+      setProveedor('');
       setClienteSearch('');
       setShowCliDropdown(false);
+      showAlert('Éxito', `Cliente "${nombre.trim()}" agregado correctamente.`);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo agregar el cliente.');
     }
@@ -1494,27 +1505,52 @@ export default function VentasScreen() {
                     />
                     <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                       {(() => {
-                        const filteredSucursales = sucursales.filter(s => s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase()));
-                        if (filteredSucursales.length === 0) {
-                          return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>;
-                        }
-                        return filteredSucursales.map((suc, index, array) => (
-                          <TouchableOpacity
-                            key={suc.id}
-                            style={[
-                              styles.customDropdownItem,
-                              index === array.length - 1 && { borderBottomWidth: 0 },
-                              { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                            ]}
-                            onPress={() => {
-                              setSucursal(suc.nombre);
-                              setShowSucursalDropdown(false);
-                            }}
-                          >
-                            <Ionicons name="business-outline" size={24} color={themeColors.primary} />
-                            <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
-                          </TouchableOpacity>
-                        ))
+                        const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === cliente?.trim().toLowerCase());
+                        const filteredSucursales = currentCliente ? sucursales.filter(s => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())) : [];
+                        const existsExact = currentCliente && sucursales.some(s => s.cliente_id === currentCliente.id && s.nombre.trim().toLowerCase() === sucursalSearch.trim().toLowerCase());
+
+                        return (
+                          <>
+                            {sucursalSearch.trim().length > 0 && !existsExact && currentCliente && (
+                              <TouchableOpacity
+                                style={[styles.customDropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                onPress={() => handleAddNewSucursal(sucursalSearch)}
+                              >
+                                <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                                    {`➕ Agregar "${sucursalSearch.trim().toUpperCase()}"`}
+                                  </Text>
+                                  <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                                    {`Vincular a cliente: ${currentCliente.nombre}`}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            )}
+                            
+                            {filteredSucursales.length === 0 && (!sucursalSearch.trim() || existsExact) && (
+                              <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>
+                            )}
+                            
+                            {filteredSucursales.map((suc, index, array) => (
+                              <TouchableOpacity
+                                key={suc.id}
+                                style={[
+                                  styles.customDropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
+                                onPress={() => {
+                                  setSucursal(suc.nombre);
+                                  setShowSucursalDropdown(false);
+                                }}
+                              >
+                                <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </>
+                        );
                       })()}
                     </ScrollView>
                   </View>
@@ -1942,15 +1978,16 @@ export default function VentasScreen() {
         <ScrollView style={{ flex: 1 }}>
           <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
             <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '16%', fontWeight: 'bold' }]}>Cliente</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Cliente</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Sucursal</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Fecha</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Referencia</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Proyecto</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Estado Pago</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>Facturado</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
-              <View style={{ width: '8%', alignItems: 'center' }}>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Referencia</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Proyecto</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Estado Pago</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Facturado</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '7%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
+              <View style={{ width: '7%', alignItems: 'center' }}>
                 <Text style={{ fontSize: 11, fontWeight: 'bold', color: themeColors.text }}>Acciones</Text>
               </View>
             </View>
@@ -1973,10 +2010,11 @@ export default function VentasScreen() {
                       hovered && { backgroundColor: themeColors.backgroundSelected }
                     ] as any}
                   >
-                    <Text style={[styles.tableCell, { color: themeColors.text, width: '16%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '14%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
+                    <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%' }]} numberOfLines={1}>{item.sucursal || '--'}</Text>
                     <Text style={[styles.tableCell, { color: themeColors.text, width: '8%' }]}>{item.fecha}</Text>
-                    <Text style={[styles.tableCell, { width: '10%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
-                    <View style={{ width: '10%' }}>
+                    <Text style={[styles.tableCell, { width: '9%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
+                    <View style={{ width: '9%' }}>
                       {item.tipo_proyecto ? (
                         <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }]}>
                           <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
@@ -1985,7 +2023,7 @@ export default function VentasScreen() {
                     </View>
 
                     {/* Badge Estado de Pago */}
-                    <View style={{ width: '14%', justifyContent: 'center' }}>
+                    <View style={{ width: '12%', justifyContent: 'center' }}>
                       <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                         <Text style={{ color: styleCfg.text, fontSize: 10, fontWeight: '800' }}>{estadoPago}</Text>
                       </View>
@@ -1996,10 +2034,10 @@ export default function VentasScreen() {
                       ) : null}
                     </View>
 
-                    <Text style={[styles.tableCell, { width: '12%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]}>{formatCurrency(item.precio_total_facturado)}</Text>
+                    <Text style={[styles.tableCell, { width: '11%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]}>{formatCurrency(item.precio_total_facturado)}</Text>
                     
                     {/* Pagado / Saldo Pendiente */}
-                    <View style={{ width: '14%', alignItems: 'flex-end', justifyContent: 'center' }}>
+                    <View style={{ width: '13%', alignItems: 'flex-end', justifyContent: 'center' }}>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.success }}>
                         {formatCurrency(totalPag)}
                       </Text>
@@ -2008,7 +2046,7 @@ export default function VentasScreen() {
                       </Text>
                     </View>
 
-                    <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{formatCurrency(item.utilidad_bruta)}</Text>
+                    <Text style={[styles.tableCell, { width: '7%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{formatCurrency(item.utilidad_bruta)}</Text>
                     
                     {/* Acciones */}
                     <View style={{ width: '8%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
