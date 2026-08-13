@@ -122,7 +122,7 @@ export default function EditarGastoForm() {
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
   const [sucursalSearch, setSucursalSearch] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
-  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | null>(null);
+  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
   const [alertaPolitica, setAlertaPolitica] = useState<string | null>(null);
@@ -837,7 +837,7 @@ export default function EditarGastoForm() {
       }
 
       if (metodoPago !== 'efectivo' && !tipoTarjeta) {
-        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE).');
+        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX).');
         return;
       }
       if (facturado === null) {
@@ -1829,7 +1829,7 @@ export default function EditarGastoForm() {
                   <View>
                     <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13, marginBottom: Spacing.one }]}>Selecciona la Tarjeta *</Text>
                     <View style={styles.paymentSelector}>
-                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE'] as const).map((card) => (
+                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX'] as const).map((card) => (
                         <TouchableOpacity
                           key={card}
                           onPress={() => setTipoTarjeta(card)}

@@ -417,8 +417,8 @@ export default function AdminEmpleadosScreen() {
       return;
     }
 
-    if (status === 'ACTION_REQUIRED' && !rejectionFeedback.trim()) {
-      showAlert('Observación requerida', 'Por favor escribe una duda o comentario para devolver el gasto.');
+    if ((status === 'ACTION_REQUIRED' || status === 'REJECTED') && !rejectionFeedback.trim()) {
+      showAlert('Observación requerida', 'Por favor escribe una duda o motivo para esta acción.');
       return;
     }
 
@@ -429,10 +429,13 @@ export default function AdminEmpleadosScreen() {
       
       if (status === 'APPROVED') {
         updatePayload.approved_at = new Date().toISOString();
+        updatePayload.rejection_feedback = `[Aprobado por ${adminUser.nombre}]`;
       } else {
         updatePayload.venta_id = null;
         if (status === 'ACTION_REQUIRED') {
-          updatePayload.rejection_feedback = rejectionFeedback.trim();
+          updatePayload.rejection_feedback = `[Devuelto por ${adminUser.nombre}] ${rejectionFeedback.trim()}`;
+        } else if (status === 'REJECTED') {
+          updatePayload.rejection_feedback = `[Rechazado por ${adminUser.nombre}] ${rejectionFeedback.trim()}`;
         } else if (status === 'PENDING') {
           updatePayload.approved_at = null;
           updatePayload.rejection_feedback = null;
@@ -538,6 +541,7 @@ export default function AdminEmpleadosScreen() {
         status: 'APPROVED',
         approved_at: new Date().toISOString(),
         venta_id: ventaId,
+        rejection_feedback: `[Aprobado por ${adminUser.nombre}]`,
       };
 
       const { error } = await supabase
@@ -1561,25 +1565,6 @@ export default function AdminEmpleadosScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       {false && <View>
-      {/* Herramientas de Desarrollo (Fuera de la cabecera) */}
-      {adminUser?.rol === 'DEV' && (
-        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, gap: 10, marginBottom: 10 }}>
-          <Text style={{ alignSelf: 'center', fontSize: 11, color: '#888', fontWeight: 'bold' }}>DEV TOOLS:</Text>
-          <TouchableOpacity
-            onPress={() => changeEnv(env === 'cloud' ? 'test' : 'cloud')}
-            style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: env === 'cloud' ? themeColors.primary + '15' : Colors.light.danger + '15', justifyContent: 'center', alignItems: 'center' }}
-          >
-            <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={18} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => router.replace('/(empleado)/dashboard')}
-            style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: themeColors.primary + '15', justifyContent: 'center', alignItems: 'center' }}
-          >
-            <Ionicons name="swap-horizontal-outline" size={18} color={themeColors.primary} />
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* Switch de Empresa - Fila Dedicada */}
       <View style={{
         flexDirection: 'row',
@@ -1948,13 +1933,14 @@ export default function AdminEmpleadosScreen() {
               <ScrollView style={{ flex: 1 }}>
                 <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
                   <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Categoría</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Empleado</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '18%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Sucursal</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Fecha</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Empleado</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '16%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Sucursal</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Fecha</Text>
                     <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Estado</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Autorizado</Text>
+                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
                     <View style={{ width: '10%', alignItems: 'center' }}>
                       <Ionicons name="settings-outline" size={14} color={themeColors.text} />
                     </View>
@@ -1995,19 +1981,22 @@ export default function AdminEmpleadosScreen() {
                               hovered && { backgroundColor: themeColors.backgroundSelected }
                             ] as any}
                           >
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
-                            <Text style={[styles.tableCell, { width: '18%', color: themeColors.textSecondary }]} numberOfLines={1}>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '12%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '12%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
+                            <Text style={[styles.tableCell, { width: '16%', color: themeColors.textSecondary }]} numberOfLines={1}>
                               {GastoHelper.getProveedor(item)} {GastoHelper.getProveedor(item) && GastoHelper.getCliente(item) ? ' | ' : ''} {GastoHelper.getCliente(item)}
                             </Text>
-                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '12%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '11%' }]}>{fecha}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '11%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '10%' }]}>{fecha}</Text>
                             <View style={{ width: '9%' }}>
                                <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                                  <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColor }}>{statusText}</Text>
                                </View>
                             </View>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '14%', fontWeight: '700', textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%', fontSize: 11 }]} numberOfLines={1}>
+                              {item.rejection_feedback?.match(/\[(?:Aprobado|Devuelto|Rechazado) por (.*?)\]/)?.[1] || '-'}
+                            </Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '10%', fontWeight: '700', textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
                             <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
                               <TouchableOpacity
                                 onPress={(e) => {
@@ -2102,13 +2091,14 @@ export default function AdminEmpleadosScreen() {
                 <ScrollView style={{ flex: 1 }}>
                   <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
                     <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Categoría</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Empleado</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '18%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Sucursal</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Fecha</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Empleado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '16%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Sucursal</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Fecha</Text>
                       <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Estado</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Autorizado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
                       <View style={{ width: '10%', alignItems: 'center' }}>
                         <Ionicons name="settings-outline" size={14} color={themeColors.text} />
                       </View>
@@ -2146,19 +2136,22 @@ export default function AdminEmpleadosScreen() {
                               hovered && { backgroundColor: themeColors.backgroundSelected }
                             ] as any}
                           >
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '13%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
-                            <Text style={[styles.tableCell, { width: '18%', color: themeColors.textSecondary }]} numberOfLines={1}>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '12%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '12%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
+                            <Text style={[styles.tableCell, { width: '16%', color: themeColors.textSecondary }]} numberOfLines={1}>
                               {GastoHelper.getProveedor(item)} {GastoHelper.getProveedor(item) && GastoHelper.getCliente(item) ? ' | ' : ''} {GastoHelper.getCliente(item)}
                             </Text>
-                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '12%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '11%' }]}>{fecha}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '11%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '10%' }]}>{fecha}</Text>
                             <View style={{ width: '9%' }}>
                                <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                                  <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColor }}>{statusText}</Text>
                                </View>
                             </View>
-                            <Text style={[styles.tableCell, { width: '14%', fontWeight: '700', color: themeColors.text, textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%', fontSize: 11 }]} numberOfLines={1}>
+                              {item.rejection_feedback?.match(/\[(?:Aprobado|Devuelto|Rechazado) por (.*?)\]/)?.[1] || '-'}
+                            </Text>
+                            <Text style={[styles.tableCell, { width: '10%', fontWeight: '700', color: themeColors.text, textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
                             <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
                               <TouchableOpacity
                                 onPress={(e) => {
@@ -3065,7 +3058,7 @@ export default function AdminEmpleadosScreen() {
                   {/* Acciones para gastos PENDIENTES */}
                   {selectedGasto.status === 'PENDING' && (
                     <View style={styles.reviewActions}>
-                      {selectedGasto.empleado_id === adminUser?.id ? (
+                      {selectedGasto.empleado_id === adminUser?.id && adminUser?.rol !== 'DEV' ? (
                         <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning, marginBottom: 0, padding: Spacing.two, borderRadius: BorderRadius.medium, borderWidth: 1, flexDirection: 'row', gap: Spacing.one }]}>
                           <Ionicons name="warning-outline" size={22} color={themeColors.warning} style={{ marginTop: 2 }} />
                           <View style={{ flex: 1 }}>

@@ -16,6 +16,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
+import ZoomableView from './ZoomableView';
 
 interface AsistenciaInfo {
   fecha: string;
@@ -261,72 +262,74 @@ export default function ImageViewerModal({
 
         {/* Imagen a pantalla completa */}
         <View style={styles.imageContainer}>
-          {asistenciaInfo ? (
-            <View 
-              ref={viewRef} 
-              style={styles.captureContainer}
-              collapsable={false}
-            >
-              <Image
-                source={{ uri: imageUrl }}
-                style={styles.image}
-                resizeMode="cover"
-              />
-              <View style={styles.watermarkOverlay}>
-                {/* Info Izquierda */}
-                <View style={styles.watermarkLeftCol}>
-                  <View style={styles.watermarkTimeDateRow}>
-                    <Text style={styles.watermarkTimeText}>
-                      {asistenciaInfo.hora.substring(0, 5)}
+          <ZoomableView>
+            {asistenciaInfo ? (
+              <View 
+                ref={viewRef} 
+                style={styles.captureContainer}
+                collapsable={false}
+              >
+                <Image
+                  source={{ uri: imageUrl }}
+                  style={styles.image}
+                  resizeMode="cover"
+                />
+                <View style={styles.watermarkOverlay}>
+                  {/* Info Izquierda */}
+                  <View style={styles.watermarkLeftCol}>
+                    <View style={styles.watermarkTimeDateRow}>
+                      <Text style={styles.watermarkTimeText}>
+                        {asistenciaInfo.hora.substring(0, 5)}
+                      </Text>
+                      <View style={styles.watermarkVerticalLine} />
+                      <View style={styles.watermarkDateCol}>
+                        <Text style={styles.watermarkDateText}>
+                          {formatFecha(asistenciaInfo.fecha)}
+                        </Text>
+                        <Text style={styles.watermarkDayText}>
+                          {asistenciaInfo.tipo.toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.watermarkAddressText} numberOfLines={3}>
+                      {asistenciaInfo.direccion}
                     </Text>
-                    <View style={styles.watermarkVerticalLine} />
-                    <View style={styles.watermarkDateCol}>
-                      <Text style={styles.watermarkDateText}>
-                        {formatFecha(asistenciaInfo.fecha)}
-                      </Text>
-                      <Text style={styles.watermarkDayText}>
-                        {asistenciaInfo.tipo.toUpperCase()}
-                      </Text>
-                    </View>
+                    <Text style={styles.watermarkEmployeeText}>
+                      👤 {asistenciaInfo.empleadoNombre}
+                    </Text>
                   </View>
-                  <Text style={styles.watermarkAddressText} numberOfLines={3}>
-                    {asistenciaInfo.direccion}
-                  </Text>
-                  <Text style={styles.watermarkEmployeeText}>
-                    👤 {asistenciaInfo.empleadoNombre}
-                  </Text>
-                </View>
 
-                {/* Mapa Derecha */}
-                <View style={styles.watermarkMapContainer}>
-                  {mapUrl ? (
-                    <Image
-                      source={{
-                        uri: mapUrl,
-                      }}
-                      onError={() => {
-                        if (asistenciaInfo && !mapUrl.includes('openstreetmap.de')) {
-                          setMapUrl(`https://staticmap.openstreetmap.de/staticmap.php?center=${asistenciaInfo.lat},${asistenciaInfo.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${asistenciaInfo.lat},${asistenciaInfo.lng},red-pushpin`);
-                        }
-                      }}
-                      style={styles.watermarkMap}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#333' }}>
-                      <ActivityIndicator size="small" color="#fff" />
-                    </View>
-                  )}
+                  {/* Mapa Derecha */}
+                  <View style={styles.watermarkMapContainer}>
+                    {mapUrl ? (
+                      <Image
+                        source={{
+                          uri: mapUrl,
+                        }}
+                        onError={() => {
+                          if (asistenciaInfo && !mapUrl.includes('openstreetmap.de')) {
+                            setMapUrl(`https://staticmap.openstreetmap.de/staticmap.php?center=${asistenciaInfo.lat},${asistenciaInfo.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${asistenciaInfo.lat},${asistenciaInfo.lng},red-pushpin`);
+                          }
+                        }}
+                        style={styles.watermarkMap}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#333' }}>
+                        <ActivityIndicator size="small" color="#fff" />
+                      </View>
+                    )}
+                  </View>
                 </View>
               </View>
-            </View>
-          ) : (
-            <Image
-              source={{ uri: imageUrl }}
-              style={styles.fullImage}
-              resizeMode="contain"
-            />
-          )}
+            ) : (
+              <Image
+                source={{ uri: imageUrl }}
+                style={styles.fullImage}
+                resizeMode="contain"
+              />
+            )}
+          </ZoomableView>
         </View>
       </SafeAreaView>
     </Modal>

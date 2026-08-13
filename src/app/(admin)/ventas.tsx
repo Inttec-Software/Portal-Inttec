@@ -23,7 +23,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, Venta, VentaPartida, recalculateVentaTotals, ClienteItem, SucursalCliente, GastoHelper } from '@/services/supabase';
+import { supabase, AuthService, Usuario, Venta, VentaPartida, VentaPago, calcularEstadoPago, EstadoPagoVenta, syncVentaPaymentStatus, recalculateVentaTotals, ClienteItem, SucursalCliente, GastoHelper } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
@@ -43,6 +43,26 @@ interface PartidaEditable {
   precio_unitario_venta: string;
   costo_unitario_proveedor: string;
 }
+
+export interface VentaConPago extends Venta {
+  total_pagado?: number;
+  saldo_pendiente?: number;
+  estado_pago?: EstadoPagoVenta;
+  fecha_ultimo_pago?: string | null;
+  pagos_count?: number;
+}
+
+const getEstadoPagoStyle = (estado?: EstadoPagoVenta) => {
+  switch (estado) {
+    case 'PAGADO':
+      return { bg: 'rgba(16, 185, 129, 0.15)', text: '#10b981', border: '#10b981' };
+    case 'PAGO PARCIAL':
+      return { bg: 'rgba(245, 158, 11, 0.15)', text: '#f59e0b', border: '#f59e0b' };
+    case 'PENDIENTE DE PAGO':
+    default:
+      return { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444', border: '#ef4444' };
+  }
+};
 
 const TIPOS_PROYECTO = ['Venta', 'Servicio', 'Proyecto'];
 
@@ -100,19 +120,37 @@ export default function VentasScreen() {
 
   // === Historial ===
   const [activeTab, setActiveTab] = useState<'registrar' | 'historial'>('registrar');
-  const [ventasHistorial, setVentasHistorial] = useState<Venta[]>([]);
+  const [ventasHistorial, setVentasHistorial] = useState<VentaConPago[]>([]);
   const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
   const [historialSearch, setHistorialSearch] = useState('');
   const [filterDate, setFilterDate] = useState<Date | null>(null);
   const [showFilterDatePicker, setShowFilterDatePicker] = useState(false);
 
   // === Edición y Detalle de Ventas ===
-  const [selectedVenta, setSelectedVenta] = useState<Venta | null>(null);
+  const [selectedVenta, setSelectedVenta] = useState<VentaConPago | null>(null);
   const [selectedVentaPartidas, setSelectedVentaPartidas] = useState<VentaPartida[]>([]);
   const [selectedVentaGastos, setSelectedVentaGastos] = useState<any[]>([]);
   const [isLoadingPartidas, setIsLoadingPartidas] = useState(false);
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [editingVentaId, setEditingVentaId] = useState<string | null>(null);
+
+  // === Pagos y Parcialidades ===
+  const [isPagoModalVisible, setIsPagoModalVisible] = useState(false);
+  const [selectedVentaPagos, setSelectedVentaPagos] = useState<VentaPago[]>([]);
+  const [isLoadingPagos, setIsLoadingPagos] = useState(false);
+  const [pagoMonto, setPagoMonto] = useState('');
+  const [pagoFecha, setPagoFecha] = useState(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  });
+  const [pagoMetodo, setPagoMetodo] = useState('Transferencia');
+  const [pagoReferencia, setPagoReferencia] = useState('');
+  const [isSubmittingPago, setIsSubmittingPago] = useState(false);
+  const [showPagoDatePicker, setShowPagoDatePicker] = useState(false);
+  const [pagoDateValue, setPagoDateValue] = useState(new Date());
 
   // === Clientes de Supabase ===
   const [clientes, setClientes] = useState<any[]>([]);
@@ -194,14 +232,62 @@ export default function VentasScreen() {
   const loadHistorial = async () => {
     setIsLoadingHistorial(true);
     try {
-      const { data, error } = await supabase
+      const { data: ventasData, error } = await supabase
         .from('ventas')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (error) throw error;
-      setVentasHistorial(data || []);
+
+      const rawVentas = ventasData || [];
+      const ventaIds = rawVentas.map(v => v.id);
+
+      let pagosMap: Record<string, VentaPago[]> = {};
+      if (ventaIds.length > 0) {
+        try {
+          const { data: pagosData, error: pagosErr } = await supabase
+            .from('ventas_pagos')
+            .select('*')
+            .in('venta_id', ventaIds)
+            .order('fecha_pago', { ascending: false });
+
+          if (!pagosErr && pagosData) {
+            pagosData.forEach((p: VentaPago) => {
+              if (!pagosMap[p.venta_id]) pagosMap[p.venta_id] = [];
+              pagosMap[p.venta_id].push(p);
+            });
+          }
+        } catch (errPagos) {
+          // Ignorar si la tabla no existe en Supabase aun
+        }
+      }
+
+      const ventasConPagos: VentaConPago[] = rawVentas.map(v => {
+        const pagos = pagosMap[v.id] || [];
+        const totalPagado = pagos.length > 0
+          ? pagos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0)
+          : (Number(v.total_pagado) || 0);
+
+        const precioFacturado = Number(v.precio_total_facturado) || 0;
+        const saldoPendiente = v.saldo_pendiente !== undefined && v.saldo_pendiente !== null
+          ? Number(v.saldo_pendiente)
+          : Math.max(0, precioFacturado - totalPagado);
+
+        const estadoPago = v.estado_pago || calcularEstadoPago(precioFacturado, totalPagado);
+        const fechaUltimoPago = pagos.length > 0 ? pagos[0].fecha_pago : null;
+
+        return {
+          ...v,
+          total_pagado: totalPagado,
+          saldo_pendiente: saldoPendiente,
+          estado_pago: estadoPago,
+          fecha_ultimo_pago: fechaUltimoPago,
+          pagos_count: pagos.length,
+        };
+      });
+
+      setVentasHistorial(ventasConPagos);
     } catch (err: any) {
       console.error('Error loading sales history:', err);
     } finally {
@@ -209,10 +295,92 @@ export default function VentasScreen() {
     }
   };
 
-  const handleSelectVenta = async (venta: Venta) => {
+  const loadPagosForSelectedVenta = async (ventaId: string, currentVentaObj?: VentaConPago) => {
+    setIsLoadingPagos(true);
+    try {
+      const { data: pagosData, error } = await supabase
+        .from('ventas_pagos')
+        .select('*')
+        .eq('venta_id', ventaId)
+        .order('fecha_pago', { ascending: false });
+
+      if (error) {
+        console.warn('Error fetching pagos for sale:', error);
+        setSelectedVentaPagos([]);
+        return [];
+      }
+
+      const pagos = pagosData || [];
+      setSelectedVentaPagos(pagos);
+
+      // Recalcular métricas de pago para la venta seleccionada
+      const totalPagado = pagos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+      const targetVenta = currentVentaObj || selectedVenta;
+      if (targetVenta) {
+        const precioFacturado = Number(targetVenta.precio_total_facturado) || 0;
+        const saldoPendiente = Math.max(0, precioFacturado - totalPagado);
+        const estadoPago = calcularEstadoPago(precioFacturado, totalPagado);
+        const fechaUltimo = pagos.length > 0 ? pagos[0].fecha_pago : null;
+
+        const updatedSelectedVenta: VentaConPago = {
+          ...targetVenta,
+          total_pagado: totalPagado,
+          saldo_pendiente: saldoPendiente,
+          estado_pago: estadoPago,
+          fecha_ultimo_pago: fechaUltimo,
+          pagos_count: pagos.length,
+        };
+        setSelectedVenta(updatedSelectedVenta);
+
+        // Actualizar en la base de datos Supabase
+        await syncVentaPaymentStatus(ventaId);
+
+        // Actualizar en el estado de historial local
+        setVentasHistorial(prev => prev.map(v => (v.id === ventaId ? updatedSelectedVenta : v)));
+      }
+      return pagos;
+    } catch (err) {
+      console.error('Error loading pagos:', err);
+      setSelectedVentaPagos([]);
+      return [];
+    } finally {
+      setIsLoadingPagos(false);
+    }
+  };
+
+  const handleOpenPagoModal = async (venta: VentaConPago) => {
+    setSelectedVenta(venta);
+    setIsPagoModalVisible(true);
+
+    const totalPag = venta.total_pagado || 0;
+    const saldoSug = venta.saldo_pendiente !== undefined ? venta.saldo_pendiente : Math.max(0, (Number(venta.precio_total_facturado) || 0) - totalPag);
+    setPagoMonto(saldoSug > 0 ? String(saldoSug) : '');
+
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    setPagoFecha(`${yyyy}-${mm}-${dd}`);
+    setPagoReferencia('');
+
+    await loadPagosForSelectedVenta(venta.id, venta);
+  };
+
+
+  const handleSelectVenta = async (venta: VentaConPago) => {
     setSelectedVenta(venta);
     setIsDetailModalVisible(true);
     setIsLoadingPartidas(true);
+    // Reiniciar form de pago con monto pendiente sugerido
+    const saldoSug = venta.saldo_pendiente !== undefined ? venta.saldo_pendiente : (Number(venta.precio_total_facturado) || 0);
+    setPagoMonto(saldoSug > 0 ? String(saldoSug) : '');
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    setPagoFecha(`${yyyy}-${mm}-${dd}`);
+    setPagoReferencia('');
+
     try {
       // 1. Cargar partidas
       const { data: partData, error: partError } = await supabase
@@ -230,6 +398,9 @@ export default function VentasScreen() {
         .eq('status', 'APPROVED');
       if (gastosError) throw gastosError;
       setSelectedVentaGastos(gastosData || []);
+
+      // 3. Cargar pagos
+      await loadPagosForSelectedVenta(venta.id, venta);
     } catch (err: any) {
       console.error('Error fetching venta details:', err);
       showAlert('Error', 'No se pudieron cargar los detalles de la venta.');
@@ -237,6 +408,92 @@ export default function VentasScreen() {
       setIsLoadingPartidas(false);
     }
   };
+
+  const handleRegistrarPago = async () => {
+    if (!selectedVenta) return;
+    const montoNum = parseFloat(pagoMonto);
+    if (isNaN(montoNum) || montoNum <= 0) {
+      showAlert('Validación', 'Por favor ingresa un monto válido mayor a 0.');
+      return;
+    }
+
+    if (!pagoFecha.trim()) {
+      showAlert('Validación', 'Por favor ingresa la fecha del pago.');
+      return;
+    }
+
+    setIsSubmittingPago(true);
+    try {
+      const payload = {
+        venta_id: selectedVenta.id,
+        monto: montoNum,
+        fecha_pago: pagoFecha,
+        metodo_pago: pagoMetodo || 'Transferencia',
+        referencia: pagoReferencia.trim() || null,
+        registrado_por: currentUser?.id || null,
+      };
+
+      const { error } = await supabase
+        .from('ventas_pagos')
+        .insert([payload]);
+
+      if (error) throw error;
+
+      showAlert('Éxito', `Se registró la parcialidad de ${formatCurrency(montoNum)} correctamente.`);
+      
+      const updatedPagos = await loadPagosForSelectedVenta(selectedVenta.id);
+      const nuevoTotalPagado = updatedPagos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+      const nuevoSaldo = Math.max(0, (Number(selectedVenta.precio_total_facturado) || 0) - nuevoTotalPagado);
+      setPagoMonto(nuevoSaldo > 0 ? String(nuevoSaldo) : '');
+      setPagoReferencia('');
+    } catch (err: any) {
+      console.error('Error al registrar pago:', err);
+      const isMissingTable = err?.code === '42P01' || err?.message?.includes('ventas_pagos');
+      const msg = isMissingTable
+        ? 'La tabla "ventas_pagos" aún no existe en Supabase. Por favor ejecuta el script SQL en el Dashboard de Supabase.'
+        : (err?.message || 'No se pudo registrar el pago.');
+      showAlert('Error', msg);
+    } finally {
+      setIsSubmittingPago(false);
+    }
+  };
+
+  const handleDeletePago = async (pagoId: string) => {
+    if (!selectedVenta) return;
+
+    const performDelete = async () => {
+      try {
+        const { error } = await supabase
+          .from('ventas_pagos')
+          .delete()
+          .eq('id', pagoId);
+
+        if (error) throw error;
+
+        showAlert('Éxito', 'Pago/Parcialidad eliminada correctamente.');
+        await loadPagosForSelectedVenta(selectedVenta.id);
+      } catch (err: any) {
+        console.error('Error al eliminar pago:', err);
+        showAlert('Error', err.message || 'No se pudo eliminar el pago.');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Estás seguro de que deseas eliminar este pago del historial?')) {
+        await performDelete();
+      }
+    } else {
+      Alert.alert(
+        'Confirmar Eliminación',
+        '¿Estás seguro de que deseas eliminar este pago del historial?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Eliminar', style: 'destructive', onPress: performDelete }
+        ]
+      );
+    }
+  };
+
 
   const handleDeleteVenta = async () => {
     if (!selectedVenta) return;
@@ -383,7 +640,8 @@ export default function VentasScreen() {
         v.descripcion?.toLowerCase().includes(q) ||
         v.fecha?.toLowerCase().includes(q) ||
         v.tipo_proyecto?.toLowerCase().includes(q) ||
-        v.proveedor?.toLowerCase().includes(q)
+        v.proveedor?.toLowerCase().includes(q) ||
+        v.estado_pago?.toLowerCase().includes(q)
       );
     }
     
@@ -1681,57 +1939,105 @@ export default function VentasScreen() {
           </Text>
         </View>
       ) : isDesktop ? (
-                <ScrollView style={{ flex: 1 }}>
-                  <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
-                    <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '20%', fontWeight: 'bold' }]}>Cliente</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Fecha</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Referencia</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Proyecto</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold', textAlign: 'right' }]}>Facturado</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold', textAlign: 'right' }]}>Margen</Text>
-                      <View style={{ width: '10%', alignItems: 'center' }}>
-                        <Ionicons name="settings-outline" size={14} color={themeColors.text} />
+        <ScrollView style={{ flex: 1 }}>
+          <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
+            <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '16%', fontWeight: 'bold' }]}>Cliente</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Fecha</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Referencia</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Proyecto</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Estado Pago</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>Facturado</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
+              <View style={{ width: '8%', alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, fontWeight: 'bold', color: themeColors.text }}>Acciones</Text>
+              </View>
+            </View>
+            <View style={{ backgroundColor: themeColors.backgroundElement, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderTopWidth: 0 }}>
+              {ventasFiltradas.map((item) => {
+                const isProfit = item.utilidad_bruta >= 0;
+                const margenPct = (item.margen_porcentual * 100).toFixed(1);
+                const totalPag = item.total_pagado || 0;
+                const saldoPen = item.saldo_pendiente !== undefined ? item.saldo_pendiente : Math.max(0, item.precio_total_facturado - totalPag);
+                const estadoPago = item.estado_pago || calcularEstadoPago(item.precio_total_facturado, totalPag);
+                const styleCfg = getEstadoPagoStyle(estadoPago);
+
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => handleSelectVenta(item)}
+                    style={({ hovered }: any) => [
+                      styles.tableRow,
+                      { borderBottomColor: themeColors.border },
+                      hovered && { backgroundColor: themeColors.backgroundSelected }
+                    ] as any}
+                  >
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '16%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '8%' }]}>{item.fecha}</Text>
+                    <Text style={[styles.tableCell, { width: '10%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
+                    <View style={{ width: '10%' }}>
+                      {item.tipo_proyecto ? (
+                        <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }]}>
+                          <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
+                        </View>
+                      ) : <Text style={{ color: themeColors.textSecondary }}>--</Text>}
+                    </View>
+
+                    {/* Badge Estado de Pago */}
+                    <View style={{ width: '14%', justifyContent: 'center' }}>
+                      <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
+                        <Text style={{ color: styleCfg.text, fontSize: 10, fontWeight: '800' }}>{estadoPago}</Text>
                       </View>
+                      {item.fecha_ultimo_pago ? (
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 9, marginTop: 2 }}>
+                          Últ: {item.fecha_ultimo_pago}
+                        </Text>
+                      ) : null}
                     </View>
-                    <View style={{ backgroundColor: themeColors.backgroundElement, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderTopWidth: 0 }}>
-                      {ventasFiltradas.map((item) => {
-                        const isProfit = item.utilidad_bruta >= 0;
-                        const margenPct = (item.margen_porcentual * 100).toFixed(1);
-                        return (
-                          <Pressable
-                            key={item.id}
-                            onPress={() => handleSelectVenta(item)}
-                            style={({ hovered }: any) => [
-                              styles.tableRow,
-                              { borderBottomColor: themeColors.border },
-                              hovered && { backgroundColor: themeColors.backgroundSelected }
-                            ] as any}
-                          >
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '20%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '10%' }]}>{item.fecha}</Text>
-                            <Text style={[styles.tableCell, { width: '12%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
-                            <View style={{ width: '15%' }}>
-                              {item.tipo_proyecto ? (
-                                <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }]}>
-                                  <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
-                                </View>
-                              ) : <Text style={{ color: themeColors.textSecondary }}>--</Text>}
-                            </View>
-                            <Text style={[styles.tableCell, { width: '13%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]}>{formatCurrency(item.precio_total_facturado)}</Text>
-                            <Text style={[styles.tableCell, { width: '12%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{formatCurrency(item.utilidad_bruta)}</Text>
-                            <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{margenPct}%</Text>
-                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', gap: 12 }}>
-                              <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
-                              <Ionicons name="pencil-outline" size={16} color={themeColors.accent} />
-                            </View>
-                          </Pressable>
-                        );
-                      })}
+
+                    <Text style={[styles.tableCell, { width: '12%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]}>{formatCurrency(item.precio_total_facturado)}</Text>
+                    
+                    {/* Pagado / Saldo Pendiente */}
+                    <View style={{ width: '14%', alignItems: 'flex-end', justifyContent: 'center' }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.success }}>
+                        {formatCurrency(totalPag)}
+                      </Text>
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: saldoPen > 0 ? themeColors.danger : themeColors.textSecondary }}>
+                        Pend: {formatCurrency(saldoPen)}
+                      </Text>
                     </View>
-                  </View>
-                </ScrollView>
+
+                    <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{formatCurrency(item.utilidad_bruta)}</Text>
+                    
+                    {/* Acciones */}
+                    <View style={{ width: '8%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleOpenPagoModal(item);
+                        }}
+                        style={{ padding: 5, backgroundColor: themeColors.success + '20', borderColor: themeColors.success + '40', borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Ionicons name="cash-outline" size={16} color={themeColors.success} />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleSelectVenta(item);
+                        }}
+                        style={{ padding: 4 }}
+                      >
+                        <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                      </TouchableOpacity>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </ScrollView>
       ) : (
         <FlatList scrollEnabled={false}
           data={ventasFiltradas}
@@ -1744,20 +2050,32 @@ export default function VentasScreen() {
           renderItem={({ item }) => {
             const isProfit = item.utilidad_bruta >= 0;
             const margenPct = (item.margen_porcentual * 100).toFixed(1);
+            const totalPag = item.total_pagado || 0;
+            const saldoPen = item.saldo_pendiente !== undefined ? item.saldo_pendiente : Math.max(0, item.precio_total_facturado - totalPag);
+            const estadoPago = item.estado_pago || calcularEstadoPago(item.precio_total_facturado, totalPag);
+            const styleCfg = getEstadoPagoStyle(estadoPago);
+
             return (
               <TouchableOpacity
                 onPress={() => handleSelectVenta(item)}
                 style={[styles.historialCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
                     <Ionicons name="bar-chart-sharp" size={16} color={themeColors.primary} />
                     <Text style={[styles.cardTitle, { color: themeColors.text }]} numberOfLines={1}>
                       {item.cliente} {item.sucursal ? `(${item.sucursal})` : ''}
                     </Text>
                   </View>
-                  <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }]}>
-                    <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto || 'Venta'}</Text>
+                  <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+                    <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }}>
+                      <Text style={{ color: styleCfg.text, fontSize: 10, fontWeight: '800' }}>{estadoPago}</Text>
+                    </View>
+                    {item.tipo_proyecto && (
+                      <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }]}>
+                        <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
                 
@@ -1774,29 +2092,60 @@ export default function VentasScreen() {
                       {item.descripcion}
                     </Text>
                   ) : null}
-
                 </View>
 
-                <View style={styles.historialTotals}>
+                {/* Totales y Saldos de Pago */}
+                <View style={[styles.historialTotals, { marginBottom: 8 }]}>
                   <View style={{ alignItems: 'flex-start', flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                      <Ionicons name="calendar-outline" size={12} color={themeColors.textSecondary} />
-                      <Text style={[styles.historialFecha, { color: themeColors.textSecondary, fontSize: 11 }]}>{item.fecha}</Text>
-                    </View>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FECHA</Text>
+                    <Text style={[styles.historialFecha, { color: themeColors.text, fontSize: 11, fontWeight: '600' }]}>{item.fecha}</Text>
+                    {item.fecha_ultimo_pago && (
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 9, marginTop: 2 }}>
+                        Pago: {item.fecha_ultimo_pago}
+                      </Text>
+                    )}
                   </View>
                   <View style={{ alignItems: 'center', flex: 1 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FACTURADO</Text>
-                    <Text style={{ color: themeColors.accent, fontSize: 13, fontWeight: '800' }}>
+                    <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '800' }}>
                       {formatCurrency(item.precio_total_facturado)}
+                    </Text>
+                    <Text style={{ color: themeColors.success, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
+                      Pag: {formatCurrency(totalPag)}
                     </Text>
                   </View>
                   <View style={{ alignItems: 'flex-end', flex: 1 }}>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>UTILIDAD ({margenPct}%)</Text>
-                    <Text style={{ color: isProfit ? themeColors.success : themeColors.danger, fontSize: 13, fontWeight: '800' }}>
-                      {formatCurrency(item.utilidad_bruta)}
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>SALDO PEND.</Text>
+                    <Text style={{ color: saldoPen > 0 ? themeColors.danger : themeColors.success, fontSize: 12, fontWeight: '800' }}>
+                      {formatCurrency(saldoPen)}
+                    </Text>
+                    <Text style={{ color: isProfit ? themeColors.success : themeColors.danger, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
+                      Util: {formatCurrency(item.utilidad_bruta)}
                     </Text>
                   </View>
                 </View>
+
+                {/* Botón rápido Agregar Pago en Tarjeta */}
+                <TouchableOpacity
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleOpenPagoModal(item);
+                  }}
+                  style={{
+                    backgroundColor: themeColors.success + '15',
+                    borderColor: themeColors.success + '40',
+                    borderWidth: 1,
+                    borderRadius: 8,
+                    paddingVertical: 6,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexDirection: 'row',
+                    gap: 6
+                  }}
+                >
+                  <Ionicons name="cash-outline" size={14} color={themeColors.success} />
+                  <Text style={{ color: themeColors.success, fontWeight: '800', fontSize: 12 }}>+ Registrar Pago / Parcialidad</Text>
+                </TouchableOpacity>
               </TouchableOpacity>
             );
           }}
@@ -2059,6 +2408,185 @@ export default function VentasScreen() {
                   </View>
                 </View>
 
+                {/* Bloque Estado de Pago y Historial de Parcialidades */}
+                <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <Text style={[styles.modalSectionTitle, { color: themeColors.accent, marginBottom: 0 }]}>
+                      Historial de Pagos / Abonos ({selectedVentaPagos.length})
+                    </Text>
+                    {(() => {
+                      const totalPag = selectedVentaPagos.reduce((s, p) => s + (Number(p.monto) || 0), 0);
+                      const est = selectedVenta.estado_pago || calcularEstadoPago(selectedVenta.precio_total_facturado, totalPag);
+                      const st = getEstadoPagoStyle(est);
+                      return (
+                        <View style={{ backgroundColor: st.bg, borderColor: st.border, borderWidth: 1, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 12 }}>
+                          <Text style={{ color: st.text, fontSize: 11, fontWeight: '800' }}>{est}</Text>
+                        </View>
+                      );
+                    })()}
+                  </View>
+
+                  {/* Resumen de Montos de Pago */}
+                  {(() => {
+                    const totalPag = selectedVentaPagos.reduce((s, p) => s + (Number(p.monto) || 0), 0);
+                    const saldoPen = Math.max(0, (Number(selectedVenta.precio_total_facturado) || 0) - totalPag);
+
+                    return (
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', padding: 12, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: themeColors.border }}>
+                        <View style={{ alignItems: 'center', flex: 1 }}>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>TOTAL FACTURADO</Text>
+                          <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
+                            {formatCurrency(selectedVenta.precio_total_facturado)}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'center', flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>TOTAL PAGADO</Text>
+                          <Text style={{ color: themeColors.success, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
+                            {formatCurrency(totalPag)}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'center', flex: 1 }}>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>SALDO PENDIENTE</Text>
+                          <Text style={{ color: saldoPen > 0 ? themeColors.danger : themeColors.success, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
+                            {formatCurrency(saldoPen)}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
+
+                  {/* Lista de Abonos Parciales */}
+                  {isLoadingPagos ? (
+                    <ActivityIndicator size="small" color={themeColors.accent} style={{ marginVertical: Spacing.two }} />
+                  ) : selectedVentaPagos.length === 0 ? (
+                    <Text style={{ color: themeColors.textSecondary, fontStyle: 'italic', fontSize: 12, marginVertical: 6 }}>
+                      No hay abonos registrados aún para esta venta. Usa el siguiente formulario para registrar una parcialidad.
+                    </Text>
+                  ) : (
+                    <View style={{ gap: 8, marginBottom: 12 }}>
+                      {selectedVentaPagos.map((pago, idx) => (
+                        <View key={pago.id || idx} style={[styles.modalPartidaItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <View style={{ flex: 1 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Ionicons name="cash-outline" size={14} color={themeColors.success} />
+                                <Text style={{ color: themeColors.success, fontWeight: '800', fontSize: 14 }}>
+                                  {formatCurrency(Number(pago.monto) || 0)}
+                                </Text>
+                                <View style={{ backgroundColor: themeColors.accent + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
+                                  <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>
+                                    {pago.metodo_pago || 'Transferencia'}
+                                  </Text>
+                                </View>
+                              </View>
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 3 }}>
+                                Fecha de Pago: <Text style={{ color: themeColors.text, fontWeight: '600' }}>{pago.fecha_pago}</Text>
+                                {pago.referencia ? ` • Ref: ${pago.referencia}` : ''}
+                              </Text>
+                            </View>
+
+                            <TouchableOpacity
+                              onPress={() => handleDeletePago(pago.id)}
+                              style={{ padding: 6 }}
+                            >
+                              <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Formulario para registrar nueva parcialidad */}
+                  <View style={{ marginTop: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: themeColors.border }}>
+                    <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13, marginBottom: 8 }}>
+                      + Registrar Nueva Parcialidad / Pago
+                    </Text>
+
+                    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginBottom: 4 }}>Monto ($)</Text>
+                        <TextInput
+                          style={{ height: 40, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 10, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 13 }}
+                          value={pagoMonto}
+                          onChangeText={setPagoMonto}
+                          placeholder="0.00"
+                          placeholderTextColor={themeColors.textSecondary}
+                          keyboardType="numeric"
+                        />
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginBottom: 4 }}>Fecha de Pago (AAAA-MM-DD)</Text>
+                        <TextInput
+                          style={{ height: 40, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 10, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 13 }}
+                          value={pagoFecha}
+                          onChangeText={setPagoFecha}
+                          placeholder="YYYY-MM-DD"
+                          placeholderTextColor={themeColors.textSecondary}
+                        />
+                      </View>
+                    </View>
+
+                    {/* Método de Pago */}
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginBottom: 4 }}>Método de Pago</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        {['Transferencia', 'Efectivo', 'Cheque', 'Tarjeta', 'Otro'].map(met => (
+                          <TouchableOpacity
+                            key={met}
+                            onPress={() => setPagoMetodo(met)}
+                            style={{
+                              paddingHorizontal: 10,
+                              paddingVertical: 6,
+                              borderRadius: 10,
+                              borderWidth: 1,
+                              borderColor: pagoMetodo === met ? themeColors.accent : themeColors.border,
+                              backgroundColor: pagoMetodo === met ? themeColors.accent + '20' : themeColors.background
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: pagoMetodo === met ? '700' : '500', color: pagoMetodo === met ? themeColors.accent : themeColors.textSecondary }}>
+                              {met}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </ScrollView>
+
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginBottom: 4 }}>Referencia / Folio (Opcional)</Text>
+                    <TextInput
+                      style={{ height: 40, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 10, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 13, marginBottom: 12 }}
+                      value={pagoReferencia}
+                      onChangeText={setPagoReferencia}
+                      placeholder="Ej. Transferencia #987654"
+                      placeholderTextColor={themeColors.textSecondary}
+                    />
+
+                    <TouchableOpacity
+                      onPress={handleRegistrarPago}
+                      disabled={isSubmittingPago}
+                      style={{
+                        backgroundColor: themeColors.success,
+                        borderRadius: 8,
+                        paddingVertical: 10,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'row',
+                        gap: 6
+                      }}
+                    >
+                      {isSubmittingPago ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
+                          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>Registrar Pago</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
                 {/* Lista de Partidas */}
                 <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                   <Text style={[styles.modalSectionTitle, { color: themeColors.accent }]}>Partidas / Productos</Text>
@@ -2280,6 +2808,216 @@ export default function VentasScreen() {
                   </TouchableOpacity>
                 )}
               </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Dedicado Exclusivamente para Registrar Pago */}
+      <Modal
+        visible={isPagoModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsPagoModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, borderColor: themeColors.border, maxWidth: 550, maxHeight: '85%' }]}>
+            {/* Header del Modal */}
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="cash" size={22} color={themeColors.success} />
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Registrar Pago / Abono</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsPagoModalVisible(false)} style={styles.modalCloseBtn}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {selectedVenta ? (
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: Spacing.three }} showsVerticalScrollIndicator={false}>
+                {/* Resumen del Cliente y Venta */}
+                <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, marginBottom: Spacing.two }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontWeight: '700' }}>CLIENTE</Text>
+                      <Text style={{ color: themeColors.text, fontSize: 15, fontWeight: '800', marginTop: 2 }}>{selectedVenta.cliente}</Text>
+                      {selectedVenta.factura_referencia ? (
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 2 }}>PO/Ref: {selectedVenta.factura_referencia}</Text>
+                      ) : null}
+                    </View>
+                    {(() => {
+                      const totalPag = selectedVentaPagos.reduce((s, p) => s + (Number(p.monto) || 0), 0);
+                      const est = selectedVenta.estado_pago || calcularEstadoPago(selectedVenta.precio_total_facturado, totalPag);
+                      const st = getEstadoPagoStyle(est);
+                      return (
+                        <View style={{ backgroundColor: st.bg, borderColor: st.border, borderWidth: 1, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 12 }}>
+                          <Text style={{ color: st.text, fontSize: 11, fontWeight: '800' }}>{est}</Text>
+                        </View>
+                      );
+                    })()}
+                  </View>
+
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', padding: 12, borderRadius: 10, marginTop: 12, borderWidth: 1, borderColor: themeColors.border }}>
+                    <View style={{ alignItems: 'center', flex: 1 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>FACTURADO</Text>
+                      <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
+                        {formatCurrency(selectedVenta.precio_total_facturado)}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: 'center', flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>PAGADO</Text>
+                      <Text style={{ color: themeColors.success, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
+                        {formatCurrency(selectedVentaPagos.reduce((s, p) => s + (Number(p.monto) || 0), 0))}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: 'center', flex: 1 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>SALDO PENDIENTE</Text>
+                      <Text style={{ color: (selectedVenta.saldo_pendiente || 0) > 0 ? themeColors.danger : themeColors.success, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
+                        {formatCurrency(selectedVenta.saldo_pendiente !== undefined ? selectedVenta.saldo_pendiente : Math.max(0, selectedVenta.precio_total_facturado - selectedVentaPagos.reduce((s, p) => s + (Number(p.monto) || 0), 0)))}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Formulario de Pago */}
+                <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, marginBottom: Spacing.two }]}>
+                  <Text style={{ color: themeColors.text, fontWeight: '800', fontSize: 14, marginBottom: 12 }}>
+                    Datos del Nuevo Pago
+                  </Text>
+
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>Monto del Pago ($)</Text>
+                      <TextInput
+                        style={{ height: 42, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 12, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 14, fontWeight: '700' }}
+                        value={pagoMonto}
+                        onChangeText={setPagoMonto}
+                        placeholder="0.00"
+                        placeholderTextColor={themeColors.textSecondary}
+                        keyboardType="numeric"
+                      />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>Fecha de Pago (AAAA-MM-DD)</Text>
+                      <TextInput
+                        style={{ height: 42, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 12, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 13 }}
+                        value={pagoFecha}
+                        onChangeText={setPagoFecha}
+                        placeholder="YYYY-MM-DD"
+                        placeholderTextColor={themeColors.textSecondary}
+                      />
+                    </View>
+                  </View>
+
+                  {/* Método de Pago */}
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 6 }}>Método de Pago</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      {['Transferencia', 'Efectivo', 'Cheque', 'Tarjeta', 'Otro'].map(met => (
+                        <TouchableOpacity
+                          key={met}
+                          onPress={() => setPagoMetodo(met)}
+                          style={{
+                            paddingHorizontal: 12,
+                            paddingVertical: 7,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: pagoMetodo === met ? themeColors.accent : themeColors.border,
+                            backgroundColor: pagoMetodo === met ? themeColors.accent + '20' : themeColors.background
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: pagoMetodo === met ? '800' : '500', color: pagoMetodo === met ? themeColors.accent : themeColors.textSecondary }}>
+                            {met}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>Referencia / Folio (Opcional)</Text>
+                  <TextInput
+                    style={{ height: 42, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 12, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 13, marginBottom: 16 }}
+                    value={pagoReferencia}
+                    onChangeText={setPagoReferencia}
+                    placeholder="Ej. Transferencia #987654"
+                    placeholderTextColor={themeColors.textSecondary}
+                  />
+
+                  <TouchableOpacity
+                    onPress={handleRegistrarPago}
+                    disabled={isSubmittingPago}
+                    style={{
+                      backgroundColor: themeColors.success,
+                      borderRadius: 10,
+                      paddingVertical: 12,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexDirection: 'row',
+                      gap: 6
+                    }}
+                  >
+                    {isSubmittingPago ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                        <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>Guardar Pago</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {/* Historial de Pagos Anteriores */}
+                {selectedVentaPagos.length > 0 && (
+                  <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                    <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13, marginBottom: 8 }}>
+                      Abonos Anteriores Registrados ({selectedVentaPagos.length})
+                    </Text>
+                    <View style={{ gap: 8 }}>
+                      {selectedVentaPagos.map((pago, idx) => (
+                        <View key={pago.id || idx} style={[styles.modalPartidaItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <View style={{ flex: 1 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Ionicons name="cash-outline" size={14} color={themeColors.success} />
+                                <Text style={{ color: themeColors.success, fontWeight: '800', fontSize: 14 }}>
+                                  {formatCurrency(Number(pago.monto) || 0)}
+                                </Text>
+                                <View style={{ backgroundColor: themeColors.accent + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
+                                  <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>
+                                    {pago.metodo_pago || 'Transferencia'}
+                                  </Text>
+                                </View>
+                              </View>
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 3 }}>
+                                Fecha: <Text style={{ color: themeColors.text, fontWeight: '600' }}>{pago.fecha_pago}</Text>
+                                {pago.referencia ? ` • Ref: ${pago.referencia}` : ''}
+                              </Text>
+                            </View>
+
+                            <TouchableOpacity
+                              onPress={() => handleDeletePago(pago.id)}
+                              style={{ padding: 6 }}
+                            >
+                              <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </ScrollView>
+            ) : null}
+
+            <View style={[styles.modalFooter, { borderTopColor: themeColors.border, justifyContent: 'flex-end' }]}>
+              <TouchableOpacity
+                onPress={() => setIsPagoModalVisible(false)}
+                style={[styles.modalActionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+              >
+                <Text style={[styles.modalActionText, { color: themeColors.text }]}>Cerrar</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>

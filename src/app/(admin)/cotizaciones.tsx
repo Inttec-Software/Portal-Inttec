@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Platform, TextInput, Alert, useWindowDimensions, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -93,6 +93,13 @@ export default function CotizacionesListScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+
+  // Al volver a esta pantalla, cerrar automáticamente cualquier fila expandida
+  useFocusEffect(
+    useCallback(() => {
+      setExpandedRowId(null);
+    }, [])
+  );
 
   const filteredCotizaciones = cotizaciones.filter((cot) => {
     if (!searchQuery) return true;

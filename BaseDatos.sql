@@ -117,6 +117,9 @@ CREATE TABLE IF NOT EXISTS public.ventas (
   cfdi_facturapi_id character varying,
   cotizacion_id uuid,
   sucursal text,
+  total_pagado numeric DEFAULT 0,
+  saldo_pendiente numeric DEFAULT 0,
+  estado_pago text DEFAULT 'PENDIENTE DE PAGO'::text,
   CONSTRAINT ventas_pkey PRIMARY KEY (id),
   CONSTRAINT ventas_cotizacion_id_fkey FOREIGN KEY (cotizacion_id) REFERENCES public.cotizaciones(id),
   CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
@@ -134,6 +137,20 @@ CREATE TABLE IF NOT EXISTS public.ventas_partidas (
   costo_total_proveedor numeric DEFAULT 0,
   CONSTRAINT ventas_partidas_pkey PRIMARY KEY (id),
   CONSTRAINT ventas_partidas_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.ventas_pagos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  venta_id uuid NOT NULL,
+  monto numeric NOT NULL CHECK (monto > 0),
+  fecha_pago date NOT NULL DEFAULT CURRENT_DATE,
+  metodo_pago text DEFAULT 'Transferencia'::text,
+  referencia text,
+  registrado_por uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ventas_pagos_pkey PRIMARY KEY (id),
+  CONSTRAINT ventas_pagos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id) ON DELETE CASCADE,
+  CONSTRAINT ventas_pagos_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
 );
 
 CREATE TABLE IF NOT EXISTS public.gastos (

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
+import { AuthService } from '@/services/supabase';
 
 interface ModuleConfig {
   id: string;
@@ -35,7 +36,6 @@ const MODULES: ModuleConfig[] = [
   { id: 'reportes', name: 'Reportes', icon: 'document-text', route: '/(admin)/reportes', color: '#10ac84' },
   { id: 'catalogos', name: 'Catálogos', icon: 'list', route: '/(admin)/catalogos', color: '#5f27cd' },
   { id: 'auditoria', name: 'Auditoría', icon: 'shield-checkmark', route: '/(admin)/auditoria-tarjeta', color: '#ff9f43' },
-  { id: 'formularios', name: 'Formularios', icon: 'clipboard', route: '/(admin)/formulario', color: '#01a3a4' },
   { id: 'ia', name: 'Chat IA', icon: 'sparkles', route: '/(admin)/chat-ia', color: '#2e86de' },
 ];
 
@@ -60,12 +60,14 @@ export default function AdminDashboardGrid() {
   
   const handleLogout = async () => {
     try {
-      const { AuthService } = require('@/services/supabase');
       await AuthService.logout();
       setUser(null);
       router.replace('/');
     } catch (error) {
       console.error('Error logging out:', error);
+      // Forzar logout limpiando usuario aunque falle el servicio
+      setUser(null);
+      router.replace('/');
     }
   };
 
@@ -78,91 +80,147 @@ export default function AdminDashboardGrid() {
       <LinearGradient colors={gradientColors} style={styles.container}>
         
         {/* Top Bar para Perfil, Empresa y Salir */}
-        <View style={styles.topBar}>
-          <View style={styles.userInfo}>
-            <View style={[styles.avatar, { backgroundColor: themeColors.accent }]}>
-              <Text style={styles.avatarText}>{user?.nombre?.charAt(0) || 'A'}</Text>
+        <View style={[styles.topBar, isMobile && styles.topBarMobile]}>
+          <View style={styles.topBarMainRow}>
+            <View style={styles.userInfo}>
+              <View style={[styles.avatar, { backgroundColor: themeColors.accent }]}>
+                <Text style={styles.avatarText}>{user?.nombre?.charAt(0) || 'A'}</Text>
+              </View>
+              <View style={{ flexShrink: 1 }}>
+                <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                  Bienvenido,
+                </Text>
+                <Text style={[styles.userName, { color: scheme === 'dark' ? '#fff' : '#0f172a' }]} numberOfLines={1}>
+                  {user?.nombre || 'Administrador'}
+                </Text>
+                <Text style={{ color: themeColors.primary, fontSize: 10, fontWeight: 'bold', marginTop: 1 }}>
+                  {user?.rol || 'Rol'}
+                </Text>
+              </View>
             </View>
-            <View>
-              <Text style={[{ color: themeColors.textSecondary, fontSize: 12 }]}>
-                Bienvenido,
-              </Text>
-              <Text style={[styles.userName, { color: scheme === 'dark' ? '#fff' : '#000' }]}>
-                {user?.nombre || 'Administrador'}
-              </Text>
-              <Text style={[{ color: themeColors.primary, fontSize: 11, fontWeight: 'bold', marginTop: 2 }]}>
-                {user?.rol || 'Rol'}
-              </Text>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              {!isMobile && (
+                <View style={[
+                  styles.companySwitch,
+                  { backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' }
+                ]}>
+                  <TouchableOpacity
+                    onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 6,
+                      borderRadius: 18,
+                      backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Text style={{
+                      fontSize: 10,
+                      fontWeight: '700',
+                      color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+                    }}>
+                      INTTEC
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 6,
+                      borderRadius: 18,
+                      backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Text style={{
+                      fontSize: 10,
+                      fontWeight: '700',
+                      color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+                    }}>
+                      DARAVISA
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              <TouchableOpacity
+                onPress={() => router.push('/(admin)/perfil')}
+                style={[
+                  styles.logoutBtn,
+                  { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)', borderRadius: 20 }
+                ]}
+              >
+                <Ionicons name="person-circle-outline" size={22} color={themeColors.accent} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleLogout}
+                style={[
+                  styles.logoutBtn,
+                  { backgroundColor: scheme === 'dark' ? 'rgba(255,51,51,0.15)' : 'rgba(211,47,47,0.1)', borderRadius: 20 }
+                ]}
+              >
+                <Ionicons name="log-out-outline" size={22} color={themeColors.danger} />
+              </TouchableOpacity>
             </View>
           </View>
 
-          {/* Switch de Empresa */}
-          <View style={{
-            flexDirection: 'row',
-            backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
-            borderRadius: 20,
-            padding: 2,
-            alignItems: 'center',
-            width: 160,
-            marginHorizontal: 10,
-          }}>
-            <TouchableOpacity
-              onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
-              style={{
-                flex: 1,
-                paddingVertical: 6,
-                borderRadius: 18,
-                backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
-                alignItems: 'center'
-              }}
-            >
-              <Text style={{
-                fontSize: 10,
-                fontWeight: '700',
-                color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
-              }}>
-                INTTEC
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
-              style={{
-                flex: 1,
-                paddingVertical: 6,
-                borderRadius: 18,
-                backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
-                alignItems: 'center'
-              }}
-            >
-              <Text style={{
-                fontSize: 10,
-                fontWeight: '700',
-                color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
-              }}>
-                DARAVISA
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <TouchableOpacity onPress={() => router.push('/(admin)/perfil')} style={styles.logoutBtn}>
-              <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-              <Ionicons name="log-out-outline" size={24} color={themeColors.danger} />
-            </TouchableOpacity>
-          </View>
+          {/* Switch de Empresa solo en móvil */}
+          {isMobile && (
+            <View style={[
+              styles.companySwitch,
+              { backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' },
+              { marginTop: 10, alignSelf: 'center' }
+            ]}>
+              <TouchableOpacity
+                onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 6,
+                  borderRadius: 18,
+                  backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
+                  alignItems: 'center'
+                }}
+              >
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: '700',
+                  color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+                }}>
+                  INTTEC
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 6,
+                  borderRadius: 18,
+                  backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
+                  alignItems: 'center'
+                }}
+              >
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: '700',
+                  color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+                }}>
+                  DARAVISA
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
-        {/* Grid de M├│dulos */}
+        {/* Grid de Módulos */}
         <ScrollView contentContainerStyle={styles.scrollContent}>
           <View style={[styles.gridContainer, { justifyContent: 'center' }]}>
             {MODULES.map((mod) => {
               const containerWidth = Math.min(width, 1200);
-              const padding = 32; // paddingHorizontal: Spacing.four = 16 * 2
+              const padding = 32;
               const availableWidth = containerWidth - padding;
               const columns = isMobile ? 2 : Math.min(6, Math.floor(availableWidth / 200));
-              const itemWidth = Math.floor(availableWidth / columns) - 16; // 16 is the gap
+              const itemWidth = Math.floor(availableWidth / columns) - 16;
 
               return (
                 <TouchableOpacity
@@ -171,24 +229,24 @@ export default function AdminDashboardGrid() {
                     styles.moduleCard,
                     { 
                       width: itemWidth,
-                      backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.8)',
-                      borderColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'
+                      backgroundColor: scheme === 'dark' ? '#1e293b' : '#ffffff',
+                      borderColor: scheme === 'dark' ? '#334155' : '#e2e8f0'
                     }
                   ]}
                   onPress={() => handleModulePress(mod.route)}
                   activeOpacity={0.7}
                 >
-                <View style={[styles.iconContainer, { backgroundColor: mod.color }]}>
-                  <Ionicons name={mod.icon} size={32} color="#fff" />
-                </View>
-                <Text style={[
-                  styles.moduleName, 
-                  { color: scheme === 'dark' ? '#e2e8f0' : '#334155' }
-                ]} numberOfLines={1}>
-                  {mod.name}
-                </Text>
-              </TouchableOpacity>
-            );
+                  <View style={[styles.iconContainer, { backgroundColor: mod.color }]}>
+                    <Ionicons name={mod.icon} size={28} color="#fff" />
+                  </View>
+                  <Text style={[
+                    styles.moduleName, 
+                    { color: scheme === 'dark' ? '#f1f5f9' : '#1e293b' }
+                  ]} numberOfLines={1}>
+                    {mod.name}
+                  </Text>
+                </TouchableOpacity>
+              );
             })}
           </View>
         </ScrollView>
@@ -208,6 +266,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     paddingVertical: Spacing.three,
   },
+  topBarMobile: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  topBarMainRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+  },
+  companySwitch: {
+    flexDirection: 'row',
+    borderRadius: 20,
+    padding: 2,
+    alignItems: 'center',
+    width: 160,
+  },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -226,15 +303,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   userName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
+    maxWidth: 140,
   },
   logoutBtn: {
-    padding: Spacing.one,
+    padding: 6,
   },
   scrollContent: {
     paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.five,
+    paddingTop: Spacing.three,
     paddingBottom: Spacing.seven,
     alignItems: 'center',
   },
@@ -248,40 +326,34 @@ const styles = StyleSheet.create({
   },
   moduleCard: {
     aspectRatio: 1,
-    borderRadius: BorderRadius.large,
+    borderRadius: 20,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: Spacing.two,
+    padding: Spacing.three,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
     ...Platform.select({
       web: {
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
         transition: 'transform 0.2s ease, box-shadow 0.2s ease',
         cursor: 'pointer',
       } as any
     })
   },
   iconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: Spacing.three,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 4,
+    marginBottom: 10,
   },
   moduleName: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
   }

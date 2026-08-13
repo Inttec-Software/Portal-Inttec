@@ -199,16 +199,16 @@ export default function ExpenseCard({
         <Text style={[styles.monto, { color: themeColors.text }]}>{montoFormatted}</Text>
       </View>
 
-      {gasto.status === 'ACTION_REQUIRED' && gasto.rejection_feedback && (
-        <View style={[styles.feedbackContainer, { backgroundColor: themeColors.actionRequired + '08' }]}>
-          <Text style={[styles.feedbackTitle, { color: themeColors.actionRequired }]}>
-            Nota de revisión:
+      {gasto.rejection_feedback ? (
+        <View style={[styles.feedbackContainer, { backgroundColor: statusColor + '10' }]}>
+          <Text style={[styles.feedbackTitle, { color: statusColor }]}>
+            {gasto.status === 'APPROVED' ? 'Revisión:' : gasto.status === 'REJECTED' ? 'Motivo de rechazo:' : 'Nota de revisión:'}
           </Text>
-          <Text style={[styles.feedbackText, { color: themeColors.text }]} numberOfLines={2}>
-            {`"${gasto.rejection_feedback}"`}
+          <Text style={[styles.feedbackText, { color: themeColors.text }]} numberOfLines={3}>
+            {gasto.rejection_feedback.startsWith('[') ? gasto.rejection_feedback : `"${gasto.rejection_feedback}"`}
           </Text>
         </View>
-      )}
+      ) : null}
     </TouchableOpacity>
   );
 }

@@ -6,6 +6,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DevToolsFAB from '@/components/DevToolsFAB';
 
 export default function AdminLayout() {
   const { user } = useAuth();
@@ -46,7 +47,6 @@ export default function AdminLayout() {
     { route: '/(admin)/reportes', icon: 'document-text-outline', color: '#10ac84', name: 'Reportes' },
     { route: '/(admin)/catalogos', icon: 'list-outline', color: '#5f27cd', name: 'Catálogos' },
     { route: '/(admin)/auditoria-tarjeta', icon: 'shield-checkmark-outline', color: '#ff9f43', name: 'Auditoría' },
-    { route: '/(admin)/formulario', icon: 'clipboard-outline', color: '#01a3a4', name: 'Formularios' },
     { route: '/(admin)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },
   ];
 
@@ -57,7 +57,10 @@ export default function AdminLayout() {
         <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
           <TouchableOpacity
             style={styles.headerTitleContainer}
-            onPress={() => router.replace('/(admin)/dashboard')}
+            onPress={() => {
+              setIsMenuOpen(false);
+              router.replace('/(admin)/dashboard');
+            }}
             // @ts-ignore
             onMouseEnter={() => setIsHoveringHeader(true)}
             // @ts-ignore
@@ -73,6 +76,20 @@ export default function AdminLayout() {
           </TouchableOpacity>
 
           <View style={{ flex: 1 }} />
+
+          {/* Botón de Formulario (Solo en Gastos) */}
+          {(pathname === '/gastos' || pathname === '/(admin)/gastos') && (
+            <TouchableOpacity 
+              style={[styles.menuButton, { marginRight: 4 }]} 
+              onPress={() => {
+                setIsMenuOpen(false);
+                router.push('/(admin)/formulario');
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="ticket-outline" size={26} color={themeColors.text} />
+            </TouchableOpacity>
+          )}
 
           {/* Botón de Menú Desplegable */}
           <TouchableOpacity 
@@ -117,6 +134,8 @@ export default function AdminLayout() {
           </View>
         </>
       )}
+
+      <DevToolsFAB />
     </SafeAreaView>
   );
 }
