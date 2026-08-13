@@ -1942,15 +1942,16 @@ export default function VentasScreen() {
         <ScrollView style={{ flex: 1 }}>
           <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
             <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '16%', fontWeight: 'bold' }]}>Cliente</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Cliente</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Sucursal</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Fecha</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Referencia</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Proyecto</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Estado Pago</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>Facturado</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
-              <View style={{ width: '8%', alignItems: 'center' }}>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Referencia</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Proyecto</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Estado Pago</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Facturado</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '7%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
+              <View style={{ width: '7%', alignItems: 'center' }}>
                 <Text style={{ fontSize: 11, fontWeight: 'bold', color: themeColors.text }}>Acciones</Text>
               </View>
             </View>
@@ -1973,10 +1974,11 @@ export default function VentasScreen() {
                       hovered && { backgroundColor: themeColors.backgroundSelected }
                     ] as any}
                   >
-                    <Text style={[styles.tableCell, { color: themeColors.text, width: '16%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '14%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
+                    <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%' }]} numberOfLines={1}>{item.sucursal || '--'}</Text>
                     <Text style={[styles.tableCell, { color: themeColors.text, width: '8%' }]}>{item.fecha}</Text>
-                    <Text style={[styles.tableCell, { width: '10%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
-                    <View style={{ width: '10%' }}>
+                    <Text style={[styles.tableCell, { width: '9%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
+                    <View style={{ width: '9%' }}>
                       {item.tipo_proyecto ? (
                         <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }]}>
                           <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
@@ -1985,7 +1987,7 @@ export default function VentasScreen() {
                     </View>
 
                     {/* Badge Estado de Pago */}
-                    <View style={{ width: '14%', justifyContent: 'center' }}>
+                    <View style={{ width: '12%', justifyContent: 'center' }}>
                       <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                         <Text style={{ color: styleCfg.text, fontSize: 10, fontWeight: '800' }}>{estadoPago}</Text>
                       </View>
@@ -1996,10 +1998,10 @@ export default function VentasScreen() {
                       ) : null}
                     </View>
 
-                    <Text style={[styles.tableCell, { width: '12%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]}>{formatCurrency(item.precio_total_facturado)}</Text>
+                    <Text style={[styles.tableCell, { width: '11%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]}>{formatCurrency(item.precio_total_facturado)}</Text>
                     
                     {/* Pagado / Saldo Pendiente */}
-                    <View style={{ width: '14%', alignItems: 'flex-end', justifyContent: 'center' }}>
+                    <View style={{ width: '13%', alignItems: 'flex-end', justifyContent: 'center' }}>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.success }}>
                         {formatCurrency(totalPag)}
                       </Text>
@@ -2008,7 +2010,7 @@ export default function VentasScreen() {
                       </Text>
                     </View>
 
-                    <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{formatCurrency(item.utilidad_bruta)}</Text>
+                    <Text style={[styles.tableCell, { width: '7%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{formatCurrency(item.utilidad_bruta)}</Text>
                     
                     {/* Acciones */}
                     <View style={{ width: '8%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
