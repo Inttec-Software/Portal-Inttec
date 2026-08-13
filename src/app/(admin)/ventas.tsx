@@ -25,6 +25,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, Venta, VentaPartida, VentaPago, calcularEstadoPago, EstadoPagoVenta, syncVentaPaymentStatus, recalculateVentaTotals, ClienteItem, SucursalCliente, GastoHelper } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
+import { CatalogService } from '@/services/catalogService';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import StepIndicator from '@/components/StepIndicator';
@@ -227,6 +228,29 @@ export default function VentasScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.fromCotizacion]);
+
+  const handleAddNewSucursal = async (nombre: string) => {
+    if (!nombre.trim()) return;
+    const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === cliente?.trim().toLowerCase());
+    if (!currentCliente) {
+      Alert.alert('Validación', 'Primero debes seleccionar un cliente para vincular la sucursal.');
+      return;
+    }
+
+    try {
+      const newSuc = await CatalogService.crearSucursal({
+        cliente_id: currentCliente.id,
+        nombre: nombre.trim().toUpperCase(),
+      });
+      setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setSucursal(newSuc.nombre);
+      setSucursalSearch('');
+      setShowSucursalDropdown(false);
+      Alert.alert('Éxito', `Sucursal "${newSuc.nombre}" agregada y vinculada a ${currentCliente.nombre}.`);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo agregar la sucursal.');
+    }
+  };
 
   // === Cargar Historial ===
   const loadHistorial = async () => {
@@ -591,27 +615,14 @@ export default function VentasScreen() {
 
   const handleAddNewCliente = async (nombre: string) => {
     try {
-      const { data, error } = await supabase
-        .from('clientes')
-        .insert([{ nombre: nombre.trim() }])
-        .select();
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const newCli = data[0];
-        setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-        if (newCli) {
-          setCliente(newCli.nombre);
-          setProveedor('');
-        }
-      } else {
-        // Fallback optimista si no retornó
-        if (!clientes.some(c => c.nombre === nombre.trim())) {
-          setCliente(nombre.trim());
-          setProveedor('');
-        }
-      }
+      const newCli = await CatalogService.crearCliente({ nombre: nombre.trim() });
+      setClientes(prev => [...prev, newCli].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')));
+      setCliente(newCli.nombre);
+      setSucursal('');
+      setProveedor('');
       setClienteSearch('');
       setShowCliDropdown(false);
+      showAlert('Éxito', `Cliente "${nombre.trim()}" agregado correctamente.`);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo agregar el cliente.');
     }
@@ -1494,27 +1505,52 @@ export default function VentasScreen() {
                     />
                     <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
                       {(() => {
-                        const filteredSucursales = sucursales.filter(s => s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase()));
-                        if (filteredSucursales.length === 0) {
-                          return <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>;
-                        }
-                        return filteredSucursales.map((suc, index, array) => (
-                          <TouchableOpacity
-                            key={suc.id}
-                            style={[
-                              styles.customDropdownItem,
-                              index === array.length - 1 && { borderBottomWidth: 0 },
-                              { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
-                            ]}
-                            onPress={() => {
-                              setSucursal(suc.nombre);
-                              setShowSucursalDropdown(false);
-                            }}
-                          >
-                            <Ionicons name="business-outline" size={24} color={themeColors.primary} />
-                            <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
-                          </TouchableOpacity>
-                        ))
+                        const currentCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === cliente?.trim().toLowerCase());
+                        const filteredSucursales = currentCliente ? sucursales.filter(s => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())) : [];
+                        const existsExact = currentCliente && sucursales.some(s => s.cliente_id === currentCliente.id && s.nombre.trim().toLowerCase() === sucursalSearch.trim().toLowerCase());
+
+                        return (
+                          <>
+                            {sucursalSearch.trim().length > 0 && !existsExact && currentCliente && (
+                              <TouchableOpacity
+                                style={[styles.customDropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                onPress={() => handleAddNewSucursal(sucursalSearch)}
+                              >
+                                <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                                    {`➕ Agregar "${sucursalSearch.trim().toUpperCase()}"`}
+                                  </Text>
+                                  <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                                    {`Vincular a cliente: ${currentCliente.nombre}`}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            )}
+                            
+                            {filteredSucursales.length === 0 && (!sucursalSearch.trim() || existsExact) && (
+                              <Text style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales registradas.</Text>
+                            )}
+                            
+                            {filteredSucursales.map((suc, index, array) => (
+                              <TouchableOpacity
+                                key={suc.id}
+                                style={[
+                                  styles.customDropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
+                                onPress={() => {
+                                  setSucursal(suc.nombre);
+                                  setShowSucursalDropdown(false);
+                                }}
+                              >
+                                <Ionicons name="business-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{suc.nombre}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </>
+                        );
                       })()}
                     </ScrollView>
                   </View>

@@ -177,6 +177,8 @@ export const EnvService = {
   }
 };
 
+export const getInttecClient = () => EnvService.getActiveEnv() === 'test' ? inttecTestClient : inttecClient;
+export const getDaravisaClient = () => EnvService.getActiveEnv() === 'test' ? daravisaTestClient : daravisaClient;
 
 export interface Usuario {
   id: string;
