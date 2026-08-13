@@ -38,6 +38,7 @@ export default function EmpleadoLayout() {
     { route: '/(empleado)/asistencia', icon: 'time-outline', color: '#1dd1a1', name: 'Asistencia' },
     { route: '/(empleado)/evidencia', icon: 'briefcase-outline', color: '#ff5252', name: 'Evidencias' },
     { route: '/(empleado)/vehiculos', icon: 'car-outline', color: '#ff9ff3', name: 'Vehículos' },
+    { route: '/(empleado)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
     { route: '/(empleado)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },
     { route: '/(empleado)/perfil', icon: 'person-outline', color: '#5f27cd', name: 'Perfil' },
   ];

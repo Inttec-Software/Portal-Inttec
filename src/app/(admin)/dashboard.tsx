@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import { AuthService } from '@/services/supabase';
+import PendingTasksPopover from '@/components/PendingTasksPopover';
 
 interface ModuleConfig {
   id: string;
@@ -26,6 +27,7 @@ interface ModuleConfig {
 }
 
 const MODULES: ModuleConfig[] = [
+  { id: 'tareas', name: 'Tareas', icon: 'checkbox-outline', route: '/(admin)/tareas', color: '#f39c12' },
   { id: 'ventas', name: 'Ventas', icon: 'cart', route: '/(admin)/ventas', color: '#ff6b6b' },
   { id: 'gastos', name: 'Gastos', icon: 'cash', route: '/(admin)/gastos', color: '#feca57' },
   { id: 'cotizaciones', name: 'Cotizaciones', icon: 'document-text', route: '/(admin)/cotizaciones', color: '#54a0ff' },
@@ -40,6 +42,7 @@ const MODULES: ModuleConfig[] = [
 ];
 
 export default function AdminDashboardGrid() {
+  const [showTasksPopover, setShowTasksPopover] = useState(false);
   const router = useRouter();
   const { width } = useWindowDimensions();
   const scheme = useColorScheme();
@@ -144,6 +147,18 @@ export default function AdminDashboardGrid() {
                 </View>
               )}
 
+              {/* Notificaciones */}
+              <TouchableOpacity
+                onPress={() => setShowTasksPopover(true)}
+                style={[
+                  styles.logoutBtn,
+                  { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)', borderRadius: 20 }
+                ]}
+              >
+                <Ionicons name="notifications-outline" size={22} color={themeColors.text} />
+              </TouchableOpacity>
+
+              {/* Perfil */}
               <TouchableOpacity
                 onPress={() => router.push('/(admin)/perfil')}
                 style={[
@@ -153,6 +168,8 @@ export default function AdminDashboardGrid() {
               >
                 <Ionicons name="person-circle-outline" size={22} color={themeColors.accent} />
               </TouchableOpacity>
+              
+              {/* Salir */}
               <TouchableOpacity
                 onPress={handleLogout}
                 style={[
@@ -211,6 +228,11 @@ export default function AdminDashboardGrid() {
             </View>
           )}
         </View>
+
+        <PendingTasksPopover 
+          visible={showTasksPopover} 
+          onClose={() => setShowTasksPopover(false)} 
+        />
 
         {/* Grid de Módulos */}
         <ScrollView contentContainerStyle={styles.scrollContent}>
