@@ -100,7 +100,51 @@ export default function AdminDashboardGrid() {
               </View>
             </View>
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              {!isMobile && (
+                <View style={[
+                  styles.companySwitch,
+                  { backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' }
+                ]}>
+                  <TouchableOpacity
+                    onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 6,
+                      borderRadius: 18,
+                      backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Text style={{
+                      fontSize: 10,
+                      fontWeight: '700',
+                      color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+                    }}>
+                      INTTEC
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 6,
+                      borderRadius: 18,
+                      backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <Text style={{
+                      fontSize: 10,
+                      fontWeight: '700',
+                      color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+                    }}>
+                      DARAVISA
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               <TouchableOpacity
                 onPress={() => router.push('/(admin)/perfil')}
                 style={[
@@ -122,49 +166,51 @@ export default function AdminDashboardGrid() {
             </View>
           </View>
 
-          {/* Switch de Empresa */}
-          <View style={[
-            styles.companySwitch,
-            { backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' },
-            isMobile && { marginTop: 10, alignSelf: 'center' }
-          ]}>
-            <TouchableOpacity
-              onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
-              style={{
-                flex: 1,
-                paddingVertical: 6,
-                borderRadius: 18,
-                backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
-                alignItems: 'center'
-              }}
-            >
-              <Text style={{
-                fontSize: 10,
-                fontWeight: '700',
-                color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
-              }}>
-                INTTEC
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
-              style={{
-                flex: 1,
-                paddingVertical: 6,
-                borderRadius: 18,
-                backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
-                alignItems: 'center'
-              }}
-            >
-              <Text style={{
-                fontSize: 10,
-                fontWeight: '700',
-                color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
-              }}>
-                DARAVISA
-              </Text>
-            </TouchableOpacity>
-          </View>
+          {/* Switch de Empresa solo en móvil */}
+          {isMobile && (
+            <View style={[
+              styles.companySwitch,
+              { backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' },
+              { marginTop: 10, alignSelf: 'center' }
+            ]}>
+              <TouchableOpacity
+                onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 6,
+                  borderRadius: 18,
+                  backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
+                  alignItems: 'center'
+                }}
+              >
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: '700',
+                  color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+                }}>
+                  INTTEC
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 6,
+                  borderRadius: 18,
+                  backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
+                  alignItems: 'center'
+                }}
+              >
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: '700',
+                  color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+                }}>
+                  DARAVISA
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Grid de Módulos */}
