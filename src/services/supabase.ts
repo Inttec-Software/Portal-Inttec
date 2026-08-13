@@ -649,6 +649,9 @@ export interface Venta {
   costo_total: number;
   utilidad_bruta: number;
   margen_porcentual: number;
+  total_pagado?: number;
+  saldo_pendiente?: number;
+  estado_pago?: EstadoPagoVenta;
   factura_url?: string | null;
   notas?: string | null;
   descripcion?: string | null;
@@ -671,6 +674,29 @@ export interface VentaPartida {
   costo_unitario_proveedor: number;
   precio_total_venta: number;
   costo_total_proveedor: number;
+}
+
+export interface VentaPago {
+  id: string;
+  venta_id: string;
+  monto: number;
+  fecha_pago: string;
+  metodo_pago?: string | null;
+  referencia?: string | null;
+  registrado_por?: string | null;
+  created_at?: string;
+}
+
+export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO';
+
+export function calcularEstadoPago(precioTotalFacturado: number, totalPagado: number): EstadoPagoVenta {
+  if (totalPagado >= precioTotalFacturado && precioTotalFacturado > 0) {
+    return 'PAGADO';
+  } else if (totalPagado > 0) {
+    return 'PAGO PARCIAL';
+  } else {
+    return 'PENDIENTE DE PAGO';
+  }
 }
 
 export async function recalculateVentaTotals(ventaId: string): Promise<void> {
@@ -724,6 +750,38 @@ export async function recalculateVentaTotals(ventaId: string): Promise<void> {
     logger.error('[Recalculate] Error recalculating venta totals:', err);
   }
 }
+
+export async function syncVentaPaymentStatus(ventaId: string): Promise<void> {
+  try {
+    const { data: venta } = await supabase
+      .from('ventas')
+      .select('precio_total_facturado')
+      .eq('id', ventaId)
+      .single();
+
+    const { data: pagos } = await supabase
+      .from('ventas_pagos')
+      .select('monto')
+      .eq('venta_id', ventaId);
+
+    const precioTotal = Number(venta?.precio_total_facturado) || 0;
+    const totalPagado = (pagos || []).reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+    const saldoPendiente = Math.max(0, precioTotal - totalPagado);
+    const estadoPago = calcularEstadoPago(precioTotal, totalPagado);
+
+    await supabase
+      .from('ventas')
+      .update({
+        total_pagado: totalPagado,
+        saldo_pendiente: saldoPendiente,
+        estado_pago: estadoPago
+      })
+      .eq('id', ventaId);
+  } catch (err) {
+    logger.error('[SyncPaymentStatus] Error updating payment status for venta:', err);
+  }
+}
+
 
 export interface Vehiculo {
   id: string;
