@@ -753,23 +753,27 @@ export async function recalculateVentaTotals(ventaId: string): Promise<void> {
 
 export async function syncVentaPaymentStatus(ventaId: string): Promise<void> {
   try {
-    const { data: venta } = await supabase
+    const { data: venta, error: vErr } = await supabase
       .from('ventas')
       .select('precio_total_facturado')
       .eq('id', ventaId)
       .single();
 
-    const { data: pagos } = await supabase
+    if (vErr || !venta) return;
+
+    const { data: pagos, error: pErr } = await supabase
       .from('ventas_pagos')
       .select('monto')
       .eq('venta_id', ventaId);
+
+    if (pErr) return; // Si la tabla aún no existe, omitimos silenciosamente
 
     const precioTotal = Number(venta?.precio_total_facturado) || 0;
     const totalPagado = (pagos || []).reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
     const saldoPendiente = Math.max(0, precioTotal - totalPagado);
     const estadoPago = calcularEstadoPago(precioTotal, totalPagado);
 
-    await supabase
+    const { error: updErr } = await supabase
       .from('ventas')
       .update({
         total_pagado: totalPagado,
@@ -777,8 +781,12 @@ export async function syncVentaPaymentStatus(ventaId: string): Promise<void> {
         estado_pago: estadoPago
       })
       .eq('id', ventaId);
+
+    if (updErr) {
+      console.warn('[SyncPaymentStatus] No se pudieron actualizar columnas de pago en ventas:', updErr.message);
+    }
   } catch (err) {
-    logger.error('[SyncPaymentStatus] Error updating payment status for venta:', err);
+    // Captura limpia sin romper la ejecucion
   }
 }
 
