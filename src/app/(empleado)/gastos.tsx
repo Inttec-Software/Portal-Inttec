@@ -25,6 +25,7 @@ import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import PendingTasksPopover from '@/components/PendingTasksPopover';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 
@@ -44,6 +45,7 @@ export default function EmpleadoGastos() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showTasksPopover, setShowTasksPopover] = useState(false);
 
   // Modal de Detalles
   const [selectedGasto, setSelectedGasto] = useState<(Gasto & { isOffline?: boolean }) | null>(null);
@@ -606,6 +608,13 @@ export default function EmpleadoGastos() {
         </View>
 
         <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={() => setShowTasksPopover(true)}
+            style={[styles.headerIconBtn, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)' }]}
+          >
+            <Ionicons name="notifications-outline" size={20} color={themeColors.text} />
+          </TouchableOpacity>
+
           {user?.rol === 'DEV' && (
             <View style={{ flexDirection: 'row', gap: 8, marginRight: 8 }}>
               <TouchableOpacity
@@ -693,6 +702,11 @@ export default function EmpleadoGastos() {
           </TouchableOpacity>
         </View>
       </View>
+
+      <PendingTasksPopover 
+        visible={showTasksPopover} 
+        onClose={() => setShowTasksPopover(false)} 
+      />
 
       {/* Resumen Cards */}
       <View style={styles.summaryContainer}>
