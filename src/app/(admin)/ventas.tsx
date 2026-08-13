@@ -2011,16 +2011,15 @@ export default function VentasScreen() {
                     <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{formatCurrency(item.utilidad_bruta)}</Text>
                     
                     {/* Acciones */}
-                    <View style={{ width: '8%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: '8%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
                       <TouchableOpacity
                         onPress={(e) => {
                           e.stopPropagation();
                           handleOpenPagoModal(item);
                         }}
-                        style={{ paddingHorizontal: 8, paddingVertical: 4, backgroundColor: themeColors.success + '20', borderColor: themeColors.success + '40', borderWidth: 1, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                        style={{ padding: 5, backgroundColor: themeColors.success + '20', borderColor: themeColors.success + '40', borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }}
                       >
-                        <Ionicons name="cash-outline" size={14} color={themeColors.success} />
-                        <Text style={{ fontSize: 10, fontWeight: '800', color: themeColors.success }}>+ Pago</Text>
+                        <Ionicons name="cash-outline" size={16} color={themeColors.success} />
                       </TouchableOpacity>
 
                       <TouchableOpacity
