@@ -907,7 +907,7 @@ export default function GastoForm() {
         );
       }
 
-      router.replace('/(empleado)/dashboard');
+      router.replace('/(empleado)/gastos' as any);
     } catch (err: any) {
       const errorDetails = err?.message || err?.details || err?.hint || (typeof err === 'object' ? JSON.stringify(err) : String(err));
       console.error('Error al guardar gasto:', errorDetails);
@@ -977,7 +977,7 @@ export default function GastoForm() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/dashboard')} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/gastos' as any)} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={themeColors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Registrar Gasto</Text>

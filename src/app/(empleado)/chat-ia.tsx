@@ -154,7 +154,7 @@ export default function EmployeeChatIA() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
         <TouchableOpacity 
-          onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/dashboard')} 
+          onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/gastos' as any)} 
           style={styles.backButton}
         >
           <Ionicons name="arrow-back" size={24} color={themeColors.text} />

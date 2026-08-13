@@ -1571,7 +1571,7 @@ export default function AdminGastosScreen() {
             <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={18} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => router.replace('/(empleado)/dashboard')}
+            onPress={() => router.replace('/(empleado)/gastos' as any)}
             style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: themeColors.primary + '15', justifyContent: 'center', alignItems: 'center' }}
           >
             <Ionicons name="swap-horizontal-outline" size={18} color={themeColors.primary} />

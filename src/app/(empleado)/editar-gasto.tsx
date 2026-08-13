@@ -313,7 +313,7 @@ export default function EditarGastoForm() {
           }
         } catch {
           showAlert('Error', 'No se pudo cargar el gasto a editar.');
-          router.replace('/(empleado)/dashboard');
+          router.replace('/(empleado)/gastos' as any);
         } finally {
           setIsLoadingGasto(false);
         }
@@ -755,7 +755,7 @@ export default function EditarGastoForm() {
 
       showAlert('Éxito', 'Gasto modificado correctamente y enviado a revisión.');
 
-      router.replace('/(empleado)/dashboard');
+      router.replace('/(empleado)/gastos' as any);
     } catch (err: any) {
       showAlert('Error al guardar', err.message || 'No se pudo guardar el gasto.');
     } finally {
@@ -826,7 +826,7 @@ export default function EditarGastoForm() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/dashboard')} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/gastos' as any)} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={themeColors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Editar Gasto</Text>
