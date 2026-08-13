@@ -17,7 +17,7 @@ export default function EmpleadoLayout() {
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  if (!user || user.rol !== 'EMPLEADO') {
+  if (!user || (user.rol !== 'EMPLEADO' && user.rol !== 'DEV')) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors.background }}>
         <ActivityIndicator size="large" color={themeColors.accent} />
@@ -128,6 +128,7 @@ export default function EmpleadoLayout() {
           </View>
         </>
       )}
+
     </SafeAreaView>
   );
 }

@@ -36,7 +36,6 @@ const MODULES: ModuleConfig[] = [
   { id: 'reportes', name: 'Reportes', icon: 'document-text', route: '/(admin)/reportes', color: '#10ac84' },
   { id: 'catalogos', name: 'Catálogos', icon: 'list', route: '/(admin)/catalogos', color: '#5f27cd' },
   { id: 'auditoria', name: 'Auditoría', icon: 'shield-checkmark', route: '/(admin)/auditoria-tarjeta', color: '#ff9f43' },
-  { id: 'formularios', name: 'Formularios', icon: 'clipboard', route: '/(admin)/formulario', color: '#01a3a4' },
   { id: 'ia', name: 'Chat IA', icon: 'sparkles', route: '/(admin)/chat-ia', color: '#2e86de' },
 ];
 

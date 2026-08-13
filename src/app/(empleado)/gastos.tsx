@@ -606,6 +606,23 @@ export default function EmpleadoGastos() {
         </View>
 
         <View style={styles.headerActions}>
+          {user?.rol === 'DEV' && (
+            <View style={{ flexDirection: 'row', gap: 8, marginRight: 8 }}>
+              <TouchableOpacity
+                onPress={() => changeEnv(env === 'cloud' ? 'test' : 'cloud')}
+                style={[styles.headerIconBtn, { backgroundColor: env === 'cloud' ? themeColors.primary + '15' : Colors.light.danger + '15' }]}
+              >
+                <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={20} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.replace('/(admin)/dashboard')}
+                style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
+              >
+                <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
+              </TouchableOpacity>
+            </View>
+          )}
+
           {offlineGastos.length > 0 && (
             <TouchableOpacity
               onPress={handleSyncManual}
@@ -621,25 +638,6 @@ export default function EmpleadoGastos() {
           )}
         </View>
       </View>
-
-      {/* Herramientas de Desarrollo (Fuera de la tarjeta para no estorbar el diseño) */}
-      {user?.rol === 'DEV' && (
-        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, gap: 10, marginBottom: 10 }}>
-          <Text style={{ alignSelf: 'center', fontSize: 11, color: '#888', fontWeight: 'bold' }}>DEV TOOLS:</Text>
-          <TouchableOpacity
-            onPress={() => changeEnv(env === 'cloud' ? 'test' : 'cloud')}
-            style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: env === 'cloud' ? themeColors.primary + '15' : Colors.light.danger + '15', justifyContent: 'center', alignItems: 'center' }}
-          >
-            <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={18} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => router.replace('/(admin)/dashboard')}
-            style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: themeColors.primary + '15', justifyContent: 'center', alignItems: 'center' }}
-          >
-            <Ionicons name="swap-horizontal-outline" size={18} color={themeColors.primary} />
-          </TouchableOpacity>
-        </View>
-      )}
 
       {/* Switch de Empresa - Fila Dedicada */}
       <View style={{
