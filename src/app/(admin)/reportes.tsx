@@ -702,7 +702,7 @@ export default function ReportesScreen() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*',
-        copyToCacheDirectory: false,
+        copyToCacheDirectory: true,
       });
 
       if (!result.canceled && result.assets?.[0]) {
@@ -723,19 +723,23 @@ export default function ReportesScreen() {
         if (Platform.OS !== 'web') {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const FileSys = require('expo-file-system');
-          const tempFileName = `temp_${Date.now()}_${asset.name || 'factura.pdf'}`;
-          const targetUri = `${FileSys.cacheDirectory}${tempFileName}`;
-
-          await FileSys.copyAsync({
-            from: uri,
-            to: targetUri,
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.onload = () => {
+              try {
+                const base64Str = require('buffer').Buffer.from(xhr.response).toString('base64');
+                resolve(base64Str);
+              } catch (e) {
+                reject(e);
+              }
+            };
+            xhr.onerror = reject;
+            xhr.responseType = 'arraybuffer';
+            xhr.open('GET', uri, true);
+            xhr.send(null);
           });
 
-          const b64 = await FileSys.readAsStringAsync(targetUri, {
-            encoding: FileSys.EncodingType.Base64,
-          });
-
-          await uploadInvoiceToSupabase(targetUri, b64, ext);
+          await uploadInvoiceToSupabase(uri, b64, ext);
         } else {
           const response = await fetch(uri);
           const blob = await response.blob();

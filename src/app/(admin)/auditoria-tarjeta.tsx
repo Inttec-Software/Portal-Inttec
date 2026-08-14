@@ -162,11 +162,21 @@ export default function AuditoriaTarjetaScreen() {
         if (Platform.OS !== 'web') {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const FileSys = require('expo-file-system/legacy');
-          const tempFileName = `temp_${Date.now()}_${asset.name || 'estado.pdf'}`;
-          const targetUri = `${FileSys.cacheDirectory}${tempFileName}`;
-          await FileSys.copyAsync({ from: uri, to: targetUri });
-          const b64 = await FileSys.readAsStringAsync(targetUri, {
-            encoding: FileSys.EncodingType.Base64,
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.onload = () => {
+              try {
+                // Buffer is available globally in React Native / Expo
+                const base64Str = Buffer.from(xhr.response).toString('base64');
+                resolve(base64Str);
+              } catch (e) {
+                reject(e);
+              }
+            };
+            xhr.onerror = reject;
+            xhr.responseType = 'arraybuffer';
+            xhr.open('GET', uri, true);
+            xhr.send(null);
           });
           setFileBase64(b64);
         } else {

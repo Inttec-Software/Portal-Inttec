@@ -767,7 +767,7 @@ export default function VentasScreen() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*', 
-        copyToCacheDirectory: false, // Obtener la URI content:// original de Android para poder copiarla con permisos
+        copyToCacheDirectory: true,
       });
 
       if (!result.canceled && result.assets?.[0]) {
@@ -791,22 +791,24 @@ export default function VentasScreen() {
           if (Platform.OS !== 'web') {
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             const FileSys = require('expo-file-system/legacy');
-            
-            // Copiar el archivo desde content:// al directorio de caché privado de nuestro sandbox
-            const tempFileName = `temp_${Date.now()}_${asset.name || 'documento.pdf'}`;
-            const targetUri = `${FileSys.cacheDirectory}${tempFileName}`;
-            
-            await FileSys.copyAsync({
-              from: uri,
-              to: targetUri,
-            });
+            // Actualizar la URI al archivo (que ya está en caché)
+            setFileUri(uri);
 
-            // Actualizar la URI al archivo copiado en nuestro sandbox seguro
-            setFileUri(targetUri);
-
-            // Leer desde la ubicación segura del sandbox
-            const b64 = await FileSys.readAsStringAsync(targetUri, {
-              encoding: FileSys.EncodingType.Base64,
+            // Leer directamente
+            const b64 = await new Promise<string>((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              xhr.onload = () => {
+                try {
+                  const base64Str = require('buffer').Buffer.from(xhr.response).toString('base64');
+                  resolve(base64Str);
+                } catch (e) {
+                  reject(e);
+                }
+              };
+              xhr.onerror = reject;
+              xhr.responseType = 'arraybuffer';
+              xhr.open('GET', uri, true);
+              xhr.send(null);
             });
             setFileBase64(b64);
           } else {

@@ -504,6 +504,7 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 
@@ -584,6 +585,7 @@ Formato de Salida: Devuelve strictly un objeto JSON con esta estructura, sin tex
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 
@@ -690,6 +692,7 @@ Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin mark
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 

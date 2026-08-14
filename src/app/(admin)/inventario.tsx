@@ -625,7 +625,7 @@ export default function InventarioDashboard() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*'],
-        copyToCacheDirectory: false, // Obtener URI content:// original para resolver permisos correctos
+        copyToCacheDirectory: true,
       });
 
       if (result.canceled || !result.assets?.[0]) return;
@@ -665,26 +665,23 @@ export default function InventarioDashboard() {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const FileSystem = require('expo-file-system/legacy');
         
-        // Copiar archivo temporal a la sandbox para evitar restricciones de lectura nativas en Android
-        const tempFileName = `temp_inv_${Date.now()}_${fileAsset.name || 'factura.pdf'}`;
-        const targetUri = `${FileSystem.cacheDirectory}${tempFileName}`;
-        
-        await FileSystem.copyAsync({
-          from: uri,
-          to: targetUri,
-        });
-
-        base64Data = await FileSystem.readAsStringAsync(targetUri, {
-          encoding: FileSystem.EncodingType.Base64,
+        base64Data = await new Promise<string>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = () => {
+            try {
+              const base64Str = require('buffer').Buffer.from(xhr.response).toString('base64');
+              resolve(base64Str);
+            } catch (e) {
+              reject(e);
+            }
+          };
+          xhr.onerror = reject;
+          xhr.responseType = 'arraybuffer';
+          xhr.open('GET', uri, true);
+          xhr.send(null);
         });
         base64Data = base64Data.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, ''); // Safety cleanup
 
-        // Limpiar el archivo temporal
-        try {
-          await FileSystem.deleteAsync(targetUri, { idempotent: true });
-        } catch (cleanErr) {
-          console.log('Error cleaning inventory temp file:', cleanErr);
-        }
       }
 
       // 2. Compilar catálogo maestro JSON

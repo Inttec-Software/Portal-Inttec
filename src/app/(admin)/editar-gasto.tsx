@@ -439,8 +439,20 @@ export default function EditarGastoForm() {
              reader.readAsDataURL(blob);
            });
         } else {
-           base64Str = await FileSystem.readAsStringAsync(file.uri, {
-             encoding: FileSystem.EncodingType.Base64,
+           base64Str = await new Promise<string>((resolve, reject) => {
+             const xhr = new XMLHttpRequest();
+             xhr.onload = () => {
+               try {
+                 const b64 = require('buffer').Buffer.from(xhr.response).toString('base64');
+                 resolve(b64);
+               } catch (e) {
+                 reject(e);
+               }
+             };
+             xhr.onerror = reject;
+             xhr.responseType = 'arraybuffer';
+             xhr.open('GET', file.uri, true);
+             xhr.send(null);
            });
         }
         setImageBase64(base64Str);
