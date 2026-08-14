@@ -977,9 +977,7 @@ export default function GastoForm() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/gastos' as any)} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={styles.backBtn} />
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Registrar Gasto</Text>
         <View style={{ width: 40 }} />
       </View>

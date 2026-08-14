@@ -169,9 +169,7 @@ export default function NuevaTareaScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['bottom', 'left', 'right']}>
       {/* HEADER */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={styles.backBtn} />
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Nueva Tarea</Text>
         <TouchableOpacity 
           onPress={handleSave} 

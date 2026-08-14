@@ -47,8 +47,9 @@ La aplicación interactúa principalmente con las siguientes tablas:
   - Visualiza el balance de gastos aprobados y pendientes en MXN.
   - Pestaña **Pendientes**: Muestra gastos `PENDING`, `ACTION_REQUIRED` y gastos offline pendientes de subida (`SYNC_PENDING`).
   - Pestaña **Historial**: Muestra gastos `APPROVED` y `REJECTED`.
-  - Botones flotantes (FAB) para registrar un nuevo gasto (`/formulario`) o reportar evidencias (`/evidencia`).
-  - Botón de maletín en la cabecera para abrir **Mi Trabajo** (`/trabajo`).
+  - Módulos dinámicos reorganizados para un flujo más eficiente (por ejemplo, *Tareas* ubicado después de *Cotizaciones*).
+- **Navegación e Interfaz**:
+  - Navegación centralizada e interactiva en la cabecera superior (`_layout.tsx`), la cual muestra el nombre del módulo actual de forma dinámica y cambia a "Volver al inicio" al pasar el cursor (o interactuar), reemplazando los antiguos botones flotantes de retroceso.
 - **Registrar Evidencia (`src/app/(empleado)/evidencia.tsx`)**:
   - Formulario en 3 pasos: Carga de fotos (antes/después), información textual del servicio (cliente, trabajo, materiales) y generación del reporte con IA.
 - **Historial de Trabajo - "Mi Trabajo" (`src/app/(empleado)/trabajo.tsx`)**:
@@ -129,3 +130,15 @@ sequenceDiagram
 1. **Diferencia de Modelos en Gastos**: La restricción CHECK en Supabase obliga a enviar los métodos de pago en minúsculas (`efectivo`, `tarjeta`, `tarjeta_credito`, `tarjeta_debito`). No alterar estas conversiones en los formularios.
 2. **Generación de Reportes PDF**: La renderización de logotipos e imágenes en `expo-print` debe realizarse preferentemente mediante Base64 o URLs remotas públicas directas. No intentar referenciar recursos de la carpeta local de assets (`../../assets/...`) usando URIs relativas en las plantillas HTML, ya que fallará al compilarse en los emuladores o dispositivos físicos por seguridad de la WebView.
 3. **Unicidad de Iconos y Componentes**: El diseño utiliza el tema visual global y los iconos nativos de `Ionicons` de Expo Router. Mantener siempre la coherencia del esquema de colores (Modo Oscuro/Claro).
+
+---
+
+## 6. Entorno Docker y Scripts SQL (Backups)
+
+Para facilitar el desarrollo y pruebas locales sin afectar el entorno de producción, la base de datos está dockerizada utilizando imágenes de Supabase:
+- **Scripts de Inicialización (`docker/init/`)**: Durante la inicialización del contenedor, se procesan únicamente dos archivos para crear una base de datos funcional en limpio:
+  1. `01_schema.sql`: Contiene extensiones de PostgreSQL y esquemas limpios para todas las tablas (`gastos`, `usuarios`, `sucursales_cliente`, `proveedores`, etc).
+  2. `02_seed.sql`: Inserta los datos iniciales y catálogos estáticos completos (usuarios predefinidos, categorías, clientes, proveedores, sucursales) integrando cláusulas `ON CONFLICT DO NOTHING` para evitar duplicidad de llaves.
+- **Respaldos Globales en Raíz**: El proyecto cuenta con los respaldos crudos (dumps) en la raíz del proyecto para referencia, migraciones manuales o comparativa de esquemas:
+  - `BaseDatos.sql`: Respaldo principal de la base de datos en producción de INTTEC.
+  - `BaseDatosDaravisa.sql`: Respaldo principal de la base de datos de producción para el tenant Daravisa.

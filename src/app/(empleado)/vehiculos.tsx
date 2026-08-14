@@ -54,12 +54,7 @@ export default function EmpleadoVehiculosScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={{ marginRight: Spacing.three, padding: Spacing.one }}
-        >
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={{ marginRight: Spacing.three, padding: Spacing.one, width: 32 }} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary }]}>Gestión</Text>
           <Text style={[styles.headerTitle, { color: themeColors.text }]}>Vehículos y Gasolina</Text>

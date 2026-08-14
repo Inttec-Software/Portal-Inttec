@@ -533,9 +533,7 @@ export default function EvidenciaForm() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/gastos')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={styles.backBtn} />
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -752,7 +750,7 @@ export default function EvidenciaForm() {
               </View>
 
               {/* Selector de Sucursal */}
-              {selectedCliente && (
+              {selectedCliente !== '' && (
                 <View style={[styles.customDropdownContainer, { marginBottom: Spacing.four, zIndex: 90 }]}>
                   <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal</Text>
                   <TouchableOpacity

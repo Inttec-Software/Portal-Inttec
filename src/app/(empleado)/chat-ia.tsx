@@ -153,12 +153,7 @@ export default function EmployeeChatIA() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'bottom']}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity 
-          onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/gastos' as any)} 
-          style={styles.backButton}
-        >
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={styles.backButton} />
         <View style={styles.headerTitleContainer}>
           <Ionicons name="sparkles" size={20} color="#8b5cf6" />
           <View>

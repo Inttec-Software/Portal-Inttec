@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator, Text, TouchableOpacity, StyleSheet, Platform, TouchableWithoutFeedback, ScrollView, Alert } from 'react-native';
 import { Slot, usePathname, useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
@@ -16,6 +16,11 @@ export default function EmpleadoLayout() {
   const router = useRouter();
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isHoveringHeader, setIsHoveringHeader] = useState(false);
+
+  useEffect(() => {
+    setIsHoveringHeader(false);
+  }, [pathname]);
 
   if (!user || (user.rol !== 'EMPLEADO' && user.rol !== 'DEV')) {
     return (
@@ -64,15 +69,39 @@ export default function EmpleadoLayout() {
     }
   };
 
+  const isHome = getModuleName() === 'Gastos';
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: themeColors.background }} edges={['top', 'bottom', 'left', 'right']}>
       {/* Header estilo Odoo (Visible en TODAS las pantallas del empleado) */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <View style={styles.headerTitleContainer}>
-          <Text style={[styles.headerTitle, { color: themeColors.text }]}>
-            {getModuleName()}
-          </Text>
-        </View>
+        {isHome ? (
+          <View style={styles.headerTitleContainer}>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]}>
+              {getModuleName()}
+            </Text>
+          </View>
+        ) : (
+          <TouchableOpacity 
+            style={styles.headerTitleContainer}
+            onPress={() => {
+              setIsMenuOpen(false);
+              router.replace('/(empleado)/gastos');
+            }}
+            // @ts-ignore
+            onMouseEnter={() => setIsHoveringHeader(true)}
+            // @ts-ignore
+            onMouseLeave={() => setIsHoveringHeader(false)}
+            activeOpacity={0.7}
+          >
+            {isHoveringHeader || Platform.OS !== 'web' ? (
+              <Ionicons name="arrow-back" size={24} color={themeColors.text} style={{ marginRight: 8 }} />
+            ) : null}
+            <Text style={[styles.headerTitle, { color: themeColors.text }]}>
+              {isHoveringHeader && Platform.OS === 'web' ? 'Volver al Inicio' : getModuleName()}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <View style={{ flex: 1 }} />
 

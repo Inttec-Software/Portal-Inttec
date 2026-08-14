@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator, Text, TouchableOpacity, StyleSheet, Platform, TouchableWithoutFeedback, ScrollView } from 'react-native';
 import { Slot, usePathname, useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
@@ -17,6 +17,10 @@ export default function AdminLayout() {
 
   const [isHoveringHeader, setIsHoveringHeader] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setIsHoveringHeader(false);
+  }, [pathname]);
 
   if (!user || (user.rol !== 'ADMIN' && user.rol !== 'DEV')) {
     return (
@@ -40,6 +44,7 @@ export default function AdminLayout() {
     { route: '/(admin)/ventas', icon: 'cart-outline', color: '#ff6b6b', name: 'Ventas' },
     { route: '/(admin)/gastos', icon: 'cash-outline', color: '#feca57', name: 'Gastos' },
     { route: '/(admin)/cotizaciones', icon: 'document-text-outline', color: '#54a0ff', name: 'Cotizaciones' },
+    { route: '/(admin)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
     { route: '/(admin)/inventario', icon: 'cube-outline', color: '#48dbfb', name: 'Inventario' },
     { route: '/(admin)/empleados', icon: 'people-outline', color: '#1dd1a1', name: 'Empleados' },
     { route: '/(admin)/vehiculos', icon: 'car-outline', color: '#ff9ff3', name: 'Flota' },

@@ -63,11 +63,12 @@ Para realizar pruebas sin riesgo de alterar o contaminar los datos reales de pro
 ```bash
 npm run db:up
 ```
-Esto iniciará un contenedor PostgreSQL (puerto `5432`) y un servicio PostgREST (puerto `3000`) inicializados automáticamente con `BaseDatos.sql`.
+Esto iniciará un contenedor PostgreSQL (puerto `5432`) y un servicio PostgREST (puerto `3000`) inicializados automáticamente con los archivos `01_schema.sql` y `02_seed.sql` (ubicados en `docker/init/`), los cuales incluyen toda la estructura, catálogos reales (clientes, sucursales, proveedores) y configuraciones básicas.
 
-### 2. Usuarios de Prueba Disponibles
-- **Administrador**: `admin@inttec.com` / contraseña: `admin123`
-- **Empleado**: `empleado@inttec.com` / contraseña: `user123`
+Adicionalmente, se incluyen los respaldos crudos `BaseDatos.sql` (INTTEC) y `BaseDatosDaravisa.sql` (Daravisa) en la raíz del proyecto para referencia o migración manual.
+
+### 2. Usuarios Disponibles
+Para conocer los correos de prueba disponibles, revisa el archivo `docker/init/02_seed.sql` en la sección de inserción de `usuarios`.
 
 ### 3. Configurar la App para el entorno Local
 Asegúrate de que tu archivo `.env` apunte a tu servidor local:
