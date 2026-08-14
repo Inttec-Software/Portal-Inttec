@@ -32,10 +32,17 @@ export default function EmpleadoLayout() {
 
   const getModuleName = () => {
     const parts = pathname.split('/');
-    const lastPart = parts[parts.length - 1];
+    let lastPart = parts[parts.length - 1];
+
+    // Si el último segmento es un UUID (detalle), usar el segmento anterior
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(lastPart) && parts.length > 1) {
+      lastPart = parts[parts.length - 2];
+    }
+
     if (!lastPart || lastPart === 'gastos' || lastPart === 'dashboard') return 'Gastos';
     if (lastPart === 'chat-ia') return 'Chat IA';
-    return lastPart.charAt(0).toUpperCase() + lastPart.slice(1).replace('-', ' ');
+    return lastPart.charAt(0).toUpperCase() + lastPart.slice(1).replace(/-/g, ' ');
   };
 
   const quickLinks = [

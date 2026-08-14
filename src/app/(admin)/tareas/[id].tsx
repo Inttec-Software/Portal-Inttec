@@ -55,10 +55,20 @@ export default function TaskDetailScreen() {
         .eq('tarea_id', id)
         .order('created_at', { ascending: false });
 
+      let vinculo_nombre = '';
+      if (taskData.vinculo_tipo === 'Cliente' && taskData.vinculo_id) {
+        const { data: clientData } = await supabase.from('clientes').select('nombre').eq('id', taskData.vinculo_id).single();
+        if (clientData) vinculo_nombre = clientData.nombre;
+      } else if (taskData.vinculo_tipo === 'Venta' && taskData.vinculo_id) {
+        const { data: ventaData } = await supabase.from('ventas').select('cliente, factura_referencia').eq('id', taskData.vinculo_id).single();
+        if (ventaData) vinculo_nombre = `${ventaData.cliente} - ${ventaData.factura_referencia}`;
+      }
+
       setTask({
         ...taskData,
         creado_por_nombre: Array.isArray(taskData.creador) ? taskData.creador[0]?.nombre : taskData.creador?.nombre,
         responsable_nombre: Array.isArray(taskData.responsable) ? taskData.responsable[0]?.nombre : taskData.responsable?.nombre,
+        vinculo_nombre
       });
 
       setNotes((notesData || []).map((n: any) => ({
@@ -218,6 +228,7 @@ export default function TaskDetailScreen() {
                     <Text style={[styles.metaLabel, { color: themeColors.textSecondary }]}>Vinculación</Text>
                     <Text style={[styles.metaValue, { color: themeColors.text }]}>
                       {task.vinculo_tipo === 'Interna' ? 'Interno' : task.vinculo_tipo}
+                      {task.vinculo_nombre ? ` - ${task.vinculo_nombre}` : ''}
                     </Text>
                   </View>
                 </View>

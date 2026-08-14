@@ -34,6 +34,7 @@ export default function TareasScreen() {
   // Nuevos Filtros
   const [showCompleted, setShowCompleted] = useState(false);
   const [dateRange, setDateRange] = useState<'30days' | 'all'>('30days');
+  const [filterColors, setFilterColors] = useState({ red: true, yellow: true, green: true });
   
   // Estado Acordeones
   const [myTasksExpanded, setMyTasksExpanded] = useState(true);
@@ -59,11 +60,38 @@ export default function TareasScreen() {
         const { data, error } = await query;
         if (error) throw error;
 
-        const formattedTasks = (data || []).map(t => ({
-          ...t,
-          creado_por: Array.isArray(t.creador) ? t.creador[0]?.nombre : t.creador?.nombre,
-          responsable_nombre: Array.isArray(t.responsable) ? t.responsable[0]?.nombre : t.responsable?.nombre,
-        }));
+        // FETCH LINKED ENTITIES (CLIENTS AND SALES)
+        const clientIds = (data || []).filter(t => t.vinculo_tipo === 'Cliente' && t.vinculo_id).map(t => t.vinculo_id);
+        const ventaIds = (data || []).filter(t => t.vinculo_tipo === 'Venta' && t.vinculo_id).map(t => t.vinculo_id);
+
+        let clientsMap: any = {};
+        let ventasMap: any = {};
+
+        if (clientIds.length > 0) {
+          const { data: clientsData } = await supabase.from('clientes').select('id, nombre').in('id', clientIds);
+          (clientsData || []).forEach(c => clientsMap[c.id] = c.nombre);
+        }
+        
+        if (ventaIds.length > 0) {
+          const { data: ventasData } = await supabase.from('ventas').select('id, cliente, factura_referencia').in('id', ventaIds);
+          (ventasData || []).forEach(v => ventasMap[v.id] = { cliente: v.cliente, referencia: v.factura_referencia });
+        }
+
+        const formattedTasks = (data || []).map(t => {
+          let vinculo_nombre = '';
+          if (t.vinculo_tipo === 'Cliente' && clientsMap[t.vinculo_id]) {
+            vinculo_nombre = clientsMap[t.vinculo_id];
+          } else if (t.vinculo_tipo === 'Venta' && ventasMap[t.vinculo_id]) {
+            vinculo_nombre = `${ventasMap[t.vinculo_id].cliente} - ${ventasMap[t.vinculo_id].referencia}`;
+          }
+
+          return {
+            ...t,
+            creado_por: Array.isArray(t.creador) ? t.creador[0]?.nombre : t.creador?.nombre,
+            responsable_nombre: Array.isArray(t.responsable) ? t.responsable[0]?.nombre : t.responsable?.nombre,
+            vinculo_nombre
+          };
+        });
 
         setTasks(formattedTasks);
       } catch (error) {
@@ -76,21 +104,39 @@ export default function TareasScreen() {
     fetchTasks();
   }, [user?.id, user?.nombre]);
 
-  const getSemaforoColor = (fechaCompromiso: string, status: string) => {
-    if (status === 'Completada') return '#3498db'; // Azul
-    if (status === 'Cancelada') return '#95a5a6'; // Gris
-
+  const getDaysDiff = (fechaCompromiso: string) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const target = new Date(fechaCompromiso);
     target.setHours(0, 0, 0, 0);
-
     const diffTime = target.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
 
-    if (diffDays >= 2) return '#2ecc71'; // Verde
-    if (diffDays === 1 || diffDays === 0) return '#f1c40f'; // Amarillo
-    return '#e74c3c'; // Rojo (Vencido, diffDays < 0)
+  const getUrgencyLevel = (fechaCompromiso: string, status: string) => {
+    if (status === 'Completada' || status === 'Cancelada') return 4;
+    const diffDays = getDaysDiff(fechaCompromiso);
+    if (diffDays < 0) return 1; // Rojo (Vencido)
+    if (diffDays === 0 || diffDays === 1) return 2; // Amarillo
+    return 3; // Verde
+  };
+
+  const getSemaforoColor = (fechaCompromiso: string, status: string) => {
+    if (status === 'Completada') return '#3498db';
+    if (status === 'Cancelada') return '#95a5a6';
+    const urgency = getUrgencyLevel(fechaCompromiso, status);
+    if (urgency === 1) return '#e74c3c'; // Rojo
+    if (urgency === 2) return '#f1c40f'; // Amarillo
+    return '#2ecc71'; // Verde
+  };
+
+  const renderDaysText = (fechaCompromiso: string, status: string) => {
+    if (status === 'Completada' || status === 'Cancelada') return null;
+    const diffDays = getDaysDiff(fechaCompromiso);
+    if (diffDays < 0) return `Venció hace ${Math.abs(diffDays)} días`;
+    if (diffDays === 0) return `Vence hoy`;
+    if (diffDays === 1) return `Vence mañana`;
+    return `Faltan ${diffDays} días`;
   };
 
   // 1. Filtrar por texto (titulo, descripcion o responsable)
@@ -119,9 +165,30 @@ export default function TareasScreen() {
     });
   }
 
+  // 4. Filtrar por colores (Urgencia)
+  filtered = filtered.filter(t => {
+    if (t.status === 'Completada' || t.status === 'Cancelada') return true; 
+    const urgency = getUrgencyLevel(t.fecha_compromiso, t.status);
+    if (urgency === 1 && !filterColors.red) return false;
+    if (urgency === 2 && !filterColors.yellow) return false;
+    if (urgency === 3 && !filterColors.green) return false;
+    return true;
+  });
+
+  // Sort array
+  const sortTasks = (tasksList: any[]) => {
+    return tasksList.sort((a, b) => {
+      const urgencyA = getUrgencyLevel(a.fecha_compromiso, a.status);
+      const urgencyB = getUrgencyLevel(b.fecha_compromiso, b.status);
+      if (urgencyA !== urgencyB) return urgencyA - urgencyB;
+      // If same urgency, sort by fecha_compromiso ascending
+      return new Date(a.fecha_compromiso).getTime() - new Date(b.fecha_compromiso).getTime();
+    });
+  };
+
   // Agrupar en Acordeón
-  const myTasks = filtered.filter(t => t.responsable_id === user?.id);
-  const otherTasks = filtered.filter(t => t.responsable_id !== user?.id);
+  const myTasks = sortTasks(filtered.filter(t => t.responsable_id === user?.id));
+  const otherTasks = sortTasks(filtered.filter(t => t.responsable_id !== user?.id));
 
   const renderTask = (item: any) => {
     const semaforoColor = getSemaforoColor(item.fecha_compromiso, item.status);
@@ -161,7 +228,18 @@ export default function TareasScreen() {
 
           {item.vinculo_tipo && (
             <View style={{ alignSelf: 'flex-start', backgroundColor: themeColors.primary + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginBottom: 8 }}>
-              <Text style={{ color: themeColors.primary, fontSize: 10, fontWeight: '600' }}>Vínculo: {item.vinculo_tipo === 'Interna' ? 'Interno' : item.vinculo_tipo}</Text>
+              <Text style={{ color: themeColors.primary, fontSize: 10, fontWeight: '600' }}>
+                Vínculo: {item.vinculo_tipo === 'Interna' ? 'Interno' : item.vinculo_tipo}
+                {item.vinculo_nombre ? ` - ${item.vinculo_nombre}` : ''}
+              </Text>
+            </View>
+          )}
+
+          {renderDaysText(item.fecha_compromiso, item.status) && (
+            <View style={{ marginBottom: 8 }}>
+              <Text style={{ color: getSemaforoColor(item.fecha_compromiso, item.status), fontSize: 12, fontWeight: '600' }}>
+                {renderDaysText(item.fecha_compromiso, item.status)}
+              </Text>
             </View>
           )}
           
@@ -219,6 +297,28 @@ export default function TareasScreen() {
             trackColor={{ false: themeColors.border, true: themeColors.accent + '80' }}
             thumbColor={showCompleted ? themeColors.accent : '#f4f3f4'}
           />
+        </View>
+
+        {/* Color Filters */}
+        <View style={styles.colorFiltersContainer}>
+          <TouchableOpacity 
+            style={[styles.colorFilterBtn, { borderColor: '#e74c3c' }, filterColors.red && { backgroundColor: '#e74c3c' }]}
+            onPress={() => setFilterColors(prev => ({ ...prev, red: !prev.red }))}
+          >
+            <Text style={{ color: filterColors.red ? '#fff' : '#e74c3c', fontSize: 12, fontWeight: '600' }}>Mostrar tareas vencidas</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.colorFilterBtn, { borderColor: '#f1c40f' }, filterColors.yellow && { backgroundColor: '#f1c40f' }]}
+            onPress={() => setFilterColors(prev => ({ ...prev, yellow: !prev.yellow }))}
+          >
+            <Text style={{ color: filterColors.yellow ? '#fff' : '#f1c40f', fontSize: 12, fontWeight: '600' }}>Mostrar tareas urgentes</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.colorFilterBtn, { borderColor: '#2ecc71' }, filterColors.green && { backgroundColor: '#2ecc71' }]}
+            onPress={() => setFilterColors(prev => ({ ...prev, green: !prev.green }))}
+          >
+            <Text style={{ color: filterColors.green ? '#fff' : '#2ecc71', fontSize: 12, fontWeight: '600' }}>Mostrar tareas vigentes</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Date Filter */}
@@ -379,6 +479,17 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   dateBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  colorFiltersContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  colorFilterBtn: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
