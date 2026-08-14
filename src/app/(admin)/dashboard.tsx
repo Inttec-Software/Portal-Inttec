@@ -27,10 +27,10 @@ interface ModuleConfig {
 }
 
 const MODULES: ModuleConfig[] = [
-  { id: 'tareas', name: 'Tareas', icon: 'checkbox-outline', route: '/(admin)/tareas', color: '#f39c12' },
   { id: 'ventas', name: 'Ventas', icon: 'cart', route: '/(admin)/ventas', color: '#ff6b6b' },
   { id: 'gastos', name: 'Gastos', icon: 'cash', route: '/(admin)/gastos', color: '#feca57' },
   { id: 'cotizaciones', name: 'Cotizaciones', icon: 'document-text', route: '/(admin)/cotizaciones', color: '#54a0ff' },
+  { id: 'tareas', name: 'Tareas', icon: 'checkbox-outline', route: '/(admin)/tareas', color: '#f39c12' },
   { id: 'inventario', name: 'Inventario', icon: 'cube', route: '/(admin)/inventario', color: '#48dbfb' },
   { id: 'empleados', name: 'Empleados', icon: 'people', route: '/(admin)/empleados', color: '#1dd1a1' },
   { id: 'vehiculos', name: 'Flota', icon: 'car', route: '/(admin)/vehiculos', color: '#ff9ff3' },

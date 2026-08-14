@@ -1,11 +1,23 @@
+﻿-- Extensiones necesarias para UUIDs y Hashes de Contraseña
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Crear roles genéricos de Supabase si no existen para evitar errores en GRANTs
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'anon') THEN
+    CREATE ROLE anon NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'service_role') THEN
+    CREATE ROLE service_role NOLOGIN;
+  END IF;
+END $$;
+
 -- =========================================================================
--- ESQUEMA DE BASE DE DATOS SUPABASE: DARAVISA
--- =========================================================================
--- Versión actualizada: 2026
--- Incluye arquitectura relacional de Gastos (subcategoria_id),
--- Catálogos normalizados (Categorías -> Subcategorías),
--- Clientes con Sucursales múltiples (incluye CHIHUAHUA), Evidencias, Asistencias,
--- Control de Vehículos/Gasolina, Inventario, Facturación y Auditoría.
+-- ESQUEMA DE BASE DE DATOS LOCAL DOCKER: DARAVISA
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.usuarios (
@@ -13,7 +25,7 @@ CREATE TABLE IF NOT EXISTS public.usuarios (
   nombre text NOT NULL,
   email text NOT NULL UNIQUE,
   password text NOT NULL,
-  rol text NOT NULL CHECK (rol = ANY (ARRAY['ADMIN'::text, 'EMPLEADO'::text])),
+  rol text NOT NULL CHECK (rol = ANY (ARRAY['ADMIN'::text, 'EMPLEADO'::text, 'DEV'::text])),
   telefono text,
   expo_push_token text,
   created_at timestamp with time zone DEFAULT now(),
@@ -24,7 +36,7 @@ CREATE TABLE IF NOT EXISTS public.perfiles (
   id uuid NOT NULL,
   nombre text NOT NULL,
   email text NOT NULL UNIQUE,
-  rol text CHECK (rol = ANY (ARRAY['ADMIN'::text, 'EMPLEADO'::text])),
+  rol text CHECK (rol = ANY (ARRAY['ADMIN'::text, 'EMPLEADO'::text, 'DEV'::text])),
   telefono text,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT perfiles_pkey PRIMARY KEY (id),
@@ -117,6 +129,9 @@ CREATE TABLE IF NOT EXISTS public.ventas (
   cfdi_facturapi_id character varying,
   cotizacion_id uuid,
   sucursal text,
+  total_pagado numeric DEFAULT 0,
+  saldo_pendiente numeric DEFAULT 0,
+  estado_pago text DEFAULT 'PENDIENTE DE PAGO'::text,
   CONSTRAINT ventas_pkey PRIMARY KEY (id),
   CONSTRAINT ventas_cotizacion_id_fkey FOREIGN KEY (cotizacion_id) REFERENCES public.cotizaciones(id),
   CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
@@ -134,6 +149,20 @@ CREATE TABLE IF NOT EXISTS public.ventas_partidas (
   costo_total_proveedor numeric DEFAULT 0,
   CONSTRAINT ventas_partidas_pkey PRIMARY KEY (id),
   CONSTRAINT ventas_partidas_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.ventas_pagos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  venta_id uuid NOT NULL,
+  monto numeric NOT NULL CHECK (monto > 0),
+  fecha_pago date NOT NULL DEFAULT CURRENT_DATE,
+  metodo_pago text DEFAULT 'Transferencia'::text,
+  referencia text,
+  registrado_por uuid,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT ventas_pagos_pkey PRIMARY KEY (id),
+  CONSTRAINT ventas_pagos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id) ON DELETE CASCADE,
+  CONSTRAINT ventas_pagos_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
 );
 
 CREATE TABLE IF NOT EXISTS public.gastos (
@@ -322,6 +351,38 @@ CREATE TABLE IF NOT EXISTS public.app_settings (
 );
 
 -- =========================================================================
+-- MÓDULO DE TICKETS
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.tickets (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  creado_por uuid NOT NULL,
+  asignado_a uuid,
+  categoria text NOT NULL CHECK (categoria IN ('Bug', 'Feature', 'Mejora')),
+  empresa text NOT NULL CHECK (empresa IN ('Daravisa', 'Inttec')),
+  asunto text NOT NULL,
+  descripcion text NOT NULL,
+  prioridad text NOT NULL CHECK (prioridad IN ('Urgente', 'Alto', 'Medio', 'Bajo')),
+  status text NOT NULL DEFAULT 'Abierto' CHECK (status IN ('Abierto', 'En proceso', 'Cerrado')),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  
+  CONSTRAINT tickets_pkey PRIMARY KEY (id),
+  CONSTRAINT tickets_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id),
+  CONSTRAINT tickets_asignado_a_fkey FOREIGN KEY (asignado_a) REFERENCES public.usuarios(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.ticket_imagenes (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  ticket_id uuid NOT NULL,
+  url text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  
+  CONSTRAINT ticket_imagenes_pkey PRIMARY KEY (id),
+  CONSTRAINT ticket_imagenes_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES public.tickets(id) ON DELETE CASCADE
+);
+
+-- =========================================================================
 -- ÍNDICES DE RENDIMIENTO
 -- =========================================================================
 CREATE INDEX IF NOT EXISTS idx_gastos_subcategoria_id ON public.gastos(subcategoria_id);
@@ -341,6 +402,24 @@ CREATE INDEX IF NOT EXISTS idx_productos_categoria_id ON public.productos(catego
 -- =========================================================================
 DROP FUNCTION IF EXISTS public.login_usuario(text, text);
 DROP FUNCTION IF EXISTS public.login_usuario();
+
+-- Función y Trigger para hashear contraseñas automáticamente
+CREATE OR REPLACE FUNCTION public.hash_password_trigger()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Si la contraseña no está encriptada con bcrypt (no empieza con $2), la encriptamos
+  IF NEW.password IS NOT NULL AND NEW.password NOT LIKE '$2%' THEN
+    NEW.password = crypt(NEW.password, gen_salt('bf'));
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS hash_usuarios_password ON public.usuarios;
+CREATE TRIGGER hash_usuarios_password
+BEFORE INSERT OR UPDATE OF password ON public.usuarios
+FOR EACH ROW
+EXECUTE FUNCTION public.hash_password_trigger();
 
 CREATE OR REPLACE FUNCTION public.login_usuario(email_param text, password_param text)
 RETURNS TABLE (
@@ -364,4 +443,66 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.login_usuario(text, text) TO anon, authenticated, service_role;
+
+-- =========================================================================
+-- MÓDULO DE TAREAS PENDIENTES
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.tareas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  titulo text NOT NULL,
+  descripcion text,
+  creado_por uuid NOT NULL,
+  responsable_id uuid NOT NULL,
+  fecha_compromiso date NOT NULL,
+  status text NOT NULL DEFAULT 'Pendiente' CHECK (status IN ('Pendiente', 'Completada', 'Cancelada')),
+  vinculo_tipo text CHECK (vinculo_tipo IN ('Venta', 'Cliente', 'Interna')),
+  vinculo_id uuid, -- Referencia opcional (depende del vinculo_tipo)
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  
+  CONSTRAINT tareas_pkey PRIMARY KEY (id),
+  CONSTRAINT tareas_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id),
+  CONSTRAINT tareas_responsable_id_fkey FOREIGN KEY (responsable_id) REFERENCES public.usuarios(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.tarea_corresponsables (
+  tarea_id uuid NOT NULL,
+  usuario_id uuid NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  
+  CONSTRAINT tarea_corresponsables_pkey PRIMARY KEY (tarea_id, usuario_id),
+  CONSTRAINT tarea_corresponsables_tarea_id_fkey FOREIGN KEY (tarea_id) REFERENCES public.tareas(id) ON DELETE CASCADE,
+  CONSTRAINT tarea_corresponsables_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.tarea_notas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tarea_id uuid NOT NULL,
+  usuario_id uuid NOT NULL,
+  comentario text NOT NULL,
+  adjunto_url text,
+  created_at timestamp with time zone DEFAULT now(),
+  
+  CONSTRAINT tarea_notas_pkey PRIMARY KEY (id),
+  CONSTRAINT tarea_notas_tarea_id_fkey FOREIGN KEY (tarea_id) REFERENCES public.tareas(id) ON DELETE CASCADE,
+  CONSTRAINT tarea_notas_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.tarea_reprogramaciones (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tarea_id uuid NOT NULL,
+  usuario_id uuid NOT NULL,
+  fecha_original date NOT NULL,
+  nueva_fecha date NOT NULL,
+  motivo_cambio text NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  
+  CONSTRAINT tarea_reprogramaciones_pkey PRIMARY KEY (id),
+  CONSTRAINT tarea_reprogramaciones_tarea_id_fkey FOREIGN KEY (tarea_id) REFERENCES public.tareas(id) ON DELETE CASCADE,
+  CONSTRAINT tarea_reprogramaciones_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id)
+);
+
+-- Políticas RLS opcionales (Si tienen RLS activado)
+-- Para asegurar el acceso y modificación
 

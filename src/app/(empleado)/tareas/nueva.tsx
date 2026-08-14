@@ -18,6 +18,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import SelectDropdown from '@/components/SelectDropdown';
+import VentaSelectModal from '@/components/VentaSelectModal';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '@/services/supabase';
 
@@ -68,7 +69,7 @@ export default function NuevaTareaScreen() {
       const { data: clientsData } = await supabase.from('clientes').select('id, nombre');
       setClientes((clientsData || []).map((c: any) => ({ id: c.id, nombre: c.nombre })));
 
-      const { data: ventasData } = await supabase.from('ventas').select('id, cliente, factura_referencia');
+      const { data: ventasData } = await supabase.from('ventas').select('id, cliente, factura_referencia, fecha, sucursal');
       setVentas(ventasData || []);
       
       if (user?.id) {
@@ -169,9 +170,7 @@ export default function NuevaTareaScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['bottom', 'left', 'right']}>
       {/* HEADER */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={styles.backBtn} />
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Nueva Tarea</Text>
         <TouchableOpacity 
           onPress={handleSave} 
@@ -371,13 +370,11 @@ export default function NuevaTareaScreen() {
             />
 
             {relacionarVenta && (
-              <SelectDropdown
+              <VentaSelectModal
                 label="Referencia de Venta *"
                 data={ventasDisponibles}
                 value={referenciaVentaId}
                 onSelect={setReferenciaVentaId}
-                labelKey="factura_referencia"
-                searchable
                 disabled={!clienteId}
                 placeholder={!clienteId ? "Primero selecciona un cliente" : "Buscar referencia..."}
               />
