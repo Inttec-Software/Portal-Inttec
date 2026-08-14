@@ -1978,6 +1978,7 @@ export default function VentasScreen() {
         </View>
       ) : isDesktop ? (
         <ScrollView style={{ flex: 1 }}>
+          {renderScreenHeader()}
           <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
             <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Cliente</Text>
@@ -2079,7 +2080,8 @@ export default function VentasScreen() {
           </View>
         </ScrollView>
       ) : (
-        <FlatList scrollEnabled={false}
+        <FlatList scrollEnabled={true} style={{ flex: 1 }}
+          ListHeaderComponent={renderScreenHeader}
           data={ventasFiltradas}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
@@ -2196,9 +2198,8 @@ export default function VentasScreen() {
     </View>
   );
 
-  return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: themeColors.background }]}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
+  const renderScreenHeader = () => (
+    <View>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
         
@@ -2271,11 +2272,19 @@ export default function VentasScreen() {
           </TouchableOpacity>
         </View>
       )}
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: themeColors.background }]}>
+      <View style={{ flex: 1 }}>
+
 
       {activeTab === 'historial' ? (
         renderHistorial()
       ) : (
         <>
+          {renderScreenHeader()}
           {/* Step Indicator */}
           <StepIndicator 
             currentStep={currentStep} 
@@ -3062,7 +3071,7 @@ export default function VentasScreen() {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }

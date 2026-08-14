@@ -903,9 +903,8 @@ export default function InventarioDashboard() {
   const activeFormCategoryName = categorias.find(c => c.id === formCategoriaId)?.nombre;
   const activeProveedorName = proveedores.find(p => p.id === selectedProveedorId)?.nombre;
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
+  const renderScreenHeader = () => (
+    <View>
       {/* Header */}
       <View style={styles.header}>
         
@@ -1018,6 +1017,12 @@ export default function InventarioDashboard() {
           </Text>
         </TouchableOpacity>
       </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <View style={{ flex: 1 }}>
 
       {/* VISTA 1: CATÁLOGO */}
       {activeTab === 'catalogo' && (
@@ -1045,13 +1050,15 @@ export default function InventarioDashboard() {
             </View>
           </View>
 
+          {isLoading && renderScreenHeader()}
           {isLoading ? (
             <View style={styles.loaderContainer}>
               <ActivityIndicator size="large" color={themeColors.accent} />
               <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando catálogo...</Text>
             </View>
           ) : (
-            <FlatList scrollEnabled={false}
+            <FlatList scrollEnabled={true} style={{ flex: 1 }}
+              ListHeaderComponent={renderScreenHeader}
               data={filteredProducts}
               initialNumToRender={10}
               maxToRenderPerBatch={10}
@@ -1138,6 +1145,7 @@ export default function InventarioDashboard() {
       {/* VISTA 2: IMPORTACIÓN POR IA */}
        {activeTab === 'ia-import' && (
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {renderScreenHeader()}
           <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Extraer Factura con IA</Text>
           <Text style={[styles.description, { color: themeColors.textSecondary }]}>
             Sube un PDF de factura o imagen de recibo para extraer los productos, su cantidad y mapear su SKU en tu catálogo oficial mediante IA.
@@ -1332,6 +1340,7 @@ export default function InventarioDashboard() {
       {activeTab === 'categorias' && (
         <View style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 80 }]} keyboardShouldPersistTaps="handled">
+            {renderScreenHeader()}
             <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Categorías de Productos</Text>
             <Text style={[styles.description, { color: themeColors.textSecondary }]}>
               Visualiza el catálogo de categorías de productos y el volumen total de artículos asociados a cada una.
@@ -1382,6 +1391,7 @@ export default function InventarioDashboard() {
       {/* VISTA 4: REGISTRAR CONSUMO */}
       {activeTab === 'consumo' && (
         <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]} keyboardShouldPersistTaps="handled">
+          {renderScreenHeader()}
           <Pressable onPress={() => { setShowCliDropdown(false); setClienteSearch(''); }} style={{ flex: 1 }}>
             <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Registrar Consumo de Materiales</Text>
             <Text style={[styles.description, { color: themeColors.textSecondary }]}>
@@ -1662,7 +1672,8 @@ export default function InventarioDashboard() {
               style={{ marginBottom: Spacing.two }}
             />
 
-            <FlatList scrollEnabled={false}
+            <FlatList scrollEnabled={true} style={{ flex: 1 }}
+              ListHeaderComponent={renderScreenHeader}
               data={filteredSelectorOptions}
               initialNumToRender={10}
               maxToRenderPerBatch={10}
@@ -1777,7 +1788,7 @@ export default function InventarioDashboard() {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }

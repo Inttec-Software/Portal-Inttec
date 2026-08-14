@@ -1565,9 +1565,8 @@ export default function AdminGastosScreen() {
     return { alerta, proveedorSugerido, justificacion: remaining.trim() };
   };
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
+  const renderScreenHeader = () => (
+    <View>
       {/* Switch de Empresa - Fila Dedicada */}
       <View style={{
         flexDirection: 'row',
@@ -1733,6 +1732,12 @@ export default function AdminGastosScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <View style={{ flex: 1 }}>
 
       {/* Contents based on tab */}
       {isLoading ? (
@@ -1746,6 +1751,7 @@ export default function AdminGastosScreen() {
           {activeTab === 'pendientes' && (
             isDesktop ? (
               <ScrollView style={{ flex: 1 }}>
+                {renderScreenHeader()}
                 <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
                   <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
                     <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
@@ -1841,7 +1847,8 @@ export default function AdminGastosScreen() {
                 </View>
               </ScrollView>
             ) : (
-              <FlatList scrollEnabled={false}
+              <FlatList scrollEnabled={true} style={{ flex: 1 }}
+                ListHeaderComponent={renderScreenHeader}
                 data={pendingGastos}
                 initialNumToRender={8}
                 maxToRenderPerBatch={8}
@@ -1904,6 +1911,7 @@ export default function AdminGastosScreen() {
               </View>
               {isDesktop ? (
                 <ScrollView style={{ flex: 1 }}>
+                  {renderScreenHeader()}
                   <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
                     <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
                       <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
@@ -1996,7 +2004,8 @@ export default function AdminGastosScreen() {
                   </View>
                 </ScrollView>
               ) : (
-                <FlatList scrollEnabled={false}
+              <FlatList scrollEnabled={true} style={{ flex: 1 }}
+                ListHeaderComponent={renderScreenHeader}
                   data={historyGastos}
                   initialNumToRender={8}
                   maxToRenderPerBatch={8}
@@ -4150,7 +4159,7 @@ export default function AdminGastosScreen() {
         }}
       />
       
-    </ScrollView>
+    </View>
     </SafeAreaView>
   );
 }

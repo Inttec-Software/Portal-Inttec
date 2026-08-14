@@ -1567,7 +1567,7 @@ export default function AdminEmpleadosScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
+      <View style={{ flex: 1 }}>
       {false && <View>
       {/* Switch de Empresa - Fila Dedicada */}
       <View style={{
@@ -2554,13 +2554,12 @@ export default function AdminEmpleadosScreen() {
 
       </View>}
       {/* MODAL 1 EXTRA: PERSONAL MANAGER */}
-      <View style={{ flex: 1, backgroundColor: themeColors.background, paddingHorizontal: 16 }}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: themeColors.text }]}>Administración de Personal</Text>
-
-            </View>
-
-            <FlatList scrollEnabled={false}
+            <FlatList scrollEnabled={true} style={{ flex: 1 }}
+              ListHeaderComponent={
+                <View style={styles.modalHeader}>
+                  <Text style={[styles.modalTitle, { color: themeColors.text }]}>Administración de Personal</Text>
+                </View>
+              }
               initialNumToRender={8}
               maxToRenderPerBatch={8}
               windowSize={5}
@@ -2612,7 +2611,6 @@ export default function AdminEmpleadosScreen() {
             >
               <Ionicons name="person-add" size={24} color="#ffffff" />
             </TouchableOpacity>
-          </View>
       {/* MODAL 2 EXTRA: REPORTES */}
       <Modal
         animationType="slide"
@@ -4328,7 +4326,7 @@ export default function AdminEmpleadosScreen() {
         }}
       />
       
-    </ScrollView>
+    </View>
     </SafeAreaView>
   );
 }
