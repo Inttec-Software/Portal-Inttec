@@ -104,10 +104,16 @@ export default function TareasScreen() {
     fetchTasks();
   }, [user?.id, user?.nombre]);
 
+  const parseLocalDate = (dateString: string) => {
+    if (!dateString) return new Date();
+    const [year, month, day] = dateString.split('T')[0].split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
   const getDaysDiff = (fechaCompromiso: string) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const target = new Date(fechaCompromiso);
+    const target = parseLocalDate(fechaCompromiso);
     target.setHours(0, 0, 0, 0);
     const diffTime = target.getTime() - today.getTime();
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -160,7 +166,7 @@ export default function TareasScreen() {
     thirtyDaysAgo.setHours(0, 0, 0, 0);
     
     filtered = filtered.filter(t => {
-      const fecha = new Date(t.fecha_compromiso);
+      const fecha = parseLocalDate(t.fecha_compromiso);
       return fecha >= thirtyDaysAgo;
     });
   }
@@ -182,7 +188,7 @@ export default function TareasScreen() {
       const urgencyB = getUrgencyLevel(b.fecha_compromiso, b.status);
       if (urgencyA !== urgencyB) return urgencyA - urgencyB;
       // If same urgency, sort by fecha_compromiso ascending
-      return new Date(a.fecha_compromiso).getTime() - new Date(b.fecha_compromiso).getTime();
+      return parseLocalDate(a.fecha_compromiso).getTime() - parseLocalDate(b.fecha_compromiso).getTime();
     });
   };
 
@@ -247,7 +253,7 @@ export default function TareasScreen() {
             <View style={styles.footerItem}>
               <Ionicons name="calendar-outline" size={14} color={themeColors.textSecondary} style={{ marginRight: 4 }} />
               <Text style={[styles.footerText, { color: themeColors.textSecondary }]}>
-                {new Date(item.fecha_compromiso).toLocaleDateString()}
+                {parseLocalDate(item.fecha_compromiso).toLocaleDateString()}
               </Text>
             </View>
             <View style={styles.footerItem}>
