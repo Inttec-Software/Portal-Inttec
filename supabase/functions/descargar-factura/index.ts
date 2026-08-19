@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,67 +14,50 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url)
-    const id = url.searchParams.get('id')
-    const format = url.searchParams.get('format') // 'pdf' o 'xml'
+    const uuid = url.searchParams.get('uuid') || url.searchParams.get('id')
+    const format = (url.searchParams.get('format') || 'xml').toLowerCase()
 
-    if (!id || !format) {
-      throw new Error('Faltan parámetros: id o format')
+    if (!uuid) {
+      throw new Error('Falta parámetro: uuid')
     }
 
-    if (format !== 'pdf' && format !== 'xml' && format !== 'zip' && format !== 'json') {
-      throw new Error('Formato inválido. Debe ser pdf, xml, zip o json.')
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    // Descargar XML desde el bucket facturas
+    const fileName = uuid.endsWith('.xml') ? uuid : `${uuid}.xml`
+    const { data: fileData, error: downloadError } = await supabaseClient
+      .storage
+      .from('facturas')
+      .download(fileName)
+
+    if (downloadError || !fileData) {
+      throw new Error(`No se encontró el archivo XML para el folio fiscal ${uuid}`)
     }
 
-    const FACTURAPI_KEY = Deno.env.get('FACTURAPI_KEY')
-    if (!FACTURAPI_KEY) throw new Error('FACTURAPI_KEY no configurado en entorno')
+    const xmlText = await fileData.text()
 
-    // Solicitar archivo o datos a Facturapi
-    const facturapiEndpoint = format === 'json' 
-      ? `https://www.facturapi.io/v2/invoices/${id}`
-      : `https://www.facturapi.io/v2/invoices/${id}/${format}`
-
-    const fileResponse = await fetch(facturapiEndpoint, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${FACTURAPI_KEY}`
-      }
-    })
-
-    if (!fileResponse.ok) {
-      const errorData = await fileResponse.text()
-      console.error("Facturapi Error Response:", errorData)
-      throw new Error('Error al descargar el archivo desde Facturapi')
-    }
-
-    if (format === 'json') {
-      const jsonData = await fileResponse.json()
-      return new Response(JSON.stringify(jsonData), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    if (format === 'text' || format === 'xml') {
+      const customFilename = url.searchParams.get('filename') || `Factura_${uuid}.xml`
+      return new Response(xmlText, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/xml; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${customFilename}"`
+        },
         status: 200,
       })
     }
 
-    const fileBlob = await fileResponse.blob()
-
-    // Configurar Content-Type y Content-Disposition para forzar descarga
-    const contentType = format === 'pdf' ? 'application/pdf' : 'text/xml'
-    const extension = format === 'pdf' ? 'pdf' : 'xml'
-    
-    // Si viene un filename en la URL, lo usamos; si no, usamos el default
-    const customFilename = url.searchParams.get('filename')
-    const filename = customFilename ? `${customFilename}.${extension}` : `factura_${id}.${extension}`
-
-    return new Response(fileBlob, {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${filename}"`
-      },
+    return new Response(JSON.stringify({ success: true, uuid, xml: xmlText }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
 
   } catch (error: any) {
-    console.error("Edge Function Error:", error)
+    console.error("Edge Function descargar-factura Error:", error)
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400,

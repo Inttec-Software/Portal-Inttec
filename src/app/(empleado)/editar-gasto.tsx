@@ -114,7 +114,7 @@ export default function EditarGastoForm() {
   const [detalleServicioProyecto, setDetalleServicioProyecto] = useState('');
   const [sucursal, setSucursal] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
-  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | null>(null);
+  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
   const [alertaPolitica, setAlertaPolitica] = useState<string | null>(null);
@@ -313,7 +313,7 @@ export default function EditarGastoForm() {
           }
         } catch {
           showAlert('Error', 'No se pudo cargar el gasto a editar.');
-          router.replace('/(empleado)/dashboard');
+          router.replace('/(empleado)/gastos' as any);
         } finally {
           setIsLoadingGasto(false);
         }
@@ -433,8 +433,20 @@ export default function EditarGastoForm() {
              reader.readAsDataURL(blob);
            });
         } else {
-           base64Str = await FileSystem.readAsStringAsync(file.uri, {
-             encoding: FileSystem.EncodingType.Base64,
+           base64Str = await new Promise<string>((resolve, reject) => {
+             const xhr = new XMLHttpRequest();
+             xhr.onload = () => {
+               try {
+                 const b64 = require('buffer').Buffer.from(xhr.response).toString('base64');
+                 resolve(b64);
+               } catch (e) {
+                 reject(e);
+               }
+             };
+             xhr.onerror = reject;
+             xhr.responseType = 'arraybuffer';
+             xhr.open('GET', file.uri, true);
+             xhr.send(null);
            });
         }
         setImageBase64(base64Str);
@@ -755,7 +767,7 @@ export default function EditarGastoForm() {
 
       showAlert('Éxito', 'Gasto modificado correctamente y enviado a revisión.');
 
-      router.replace('/(empleado)/dashboard');
+      router.replace('/(empleado)/gastos' as any);
     } catch (err: any) {
       showAlert('Error al guardar', err.message || 'No se pudo guardar el gasto.');
     } finally {
@@ -792,7 +804,7 @@ export default function EditarGastoForm() {
       }
 
       if (metodoPago !== 'efectivo' && !tipoTarjeta) {
-        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE).');
+        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX).');
         return;
       }
       if (facturado === null) {
@@ -826,9 +838,7 @@ export default function EditarGastoForm() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/dashboard')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={styles.backBtn} />
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Editar Gasto</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -1149,7 +1159,7 @@ export default function EditarGastoForm() {
                 placeholder="0.00"
                 keyboardType="decimal-pad"
                 value={monto}
-                onChangeText={(val) => setMonto(val.replace(',', '.'))}
+                onChangeText={(val) => setMonto(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
                 iconName="logo-usd"
               />
 
@@ -1714,7 +1724,7 @@ export default function EditarGastoForm() {
                   <View>
                     <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13, marginBottom: Spacing.one }]}>Selecciona la Tarjeta *</Text>
                     <View style={styles.paymentSelector}>
-                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE'] as const).map((card) => (
+                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX'] as const).map((card) => (
                         <TouchableOpacity
                           key={card}
                           onPress={() => setTipoTarjeta(card)}

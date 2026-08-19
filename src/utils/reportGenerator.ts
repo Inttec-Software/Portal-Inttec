@@ -2456,10 +2456,10 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
             <img src="${branding.logo}" alt="Logo" style="max-height: 150px; height: 170px; width: 450px; object-fit: contain; margin-top: -10px; z-index: 10; position: relative;">
           </div>
           <div class="company-details" style="width: 50%;">
-            <div style="font-weight: bold; font-size: 13px;">${branding.name}</div>
-            <div>RFC: FETR83041461A</div>
-            <div>Ozorno 811, 31107 Chihuahua, CHH</div>
-            <div>Régimen Fiscal: 612</div>
+            <div style="font-weight: bold; font-size: 13px;">${facturaData.issuer?.legal_name || branding.name}</div>
+            <div>RFC: ${facturaData.issuer?.tax_id || 'FETR83041461A'}</div>
+            <div>${facturaData.issuer?.zip ? `Lugar Expedición (CP): ${facturaData.issuer.zip}` : 'Ozorno 811, 31107 Chihuahua, CHH'}</div>
+            <div>Régimen Fiscal: ${facturaData.issuer?.tax_system || '612'}</div>
           </div>
         </div>
 

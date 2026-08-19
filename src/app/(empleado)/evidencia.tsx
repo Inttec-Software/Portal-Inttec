@@ -16,7 +16,8 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Usuario, AuthService } from '@/services/supabase';
+import { supabase, Usuario, AuthService, inttecClient, daravisaClient } from '@/services/supabase';
+import { useAuth } from '@/context/AuthContext';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { optimizeImage } from '@/utils/imageOptimizer';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
@@ -26,11 +27,13 @@ import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import MaterialesSelector from '@/components/MaterialesSelector';
 
 export default function EvidenciaForm() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { company, changeCompany } = useAuth();
 
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
@@ -54,16 +57,18 @@ export default function EvidenciaForm() {
   const [selectedSucursal, setSelectedSucursal] = useState<string>('');
   const [sucursalSearch, setSucursalSearch] = useState('');
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
+  const [productos, setProductos] = useState<any[]>([]);
 
   const [trabajos, setTrabajos] = useState<{
     descripcion: string;
     materiales: string;
+    materiales_usados?: { productoId: string; nombre: string; retirado: number; usado: number; sobrante: number }[];
     solucion: string;
     antesImg?: { uri: string; base64: string | null };
     despuesImg?: { uri: string; base64: string | null };
     fotosAdicionales?: { uri: string; base64: string | null }[];
   }[]>([
-    { descripcion: '', materiales: '', solucion: '', fotosAdicionales: [] }
+    { descripcion: '', materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [] }
   ]);
 
   // Modal de imagen a pantalla completa
@@ -78,14 +83,25 @@ export default function EvidenciaForm() {
   };
 
 
-  const loadCatalogos = async () => {
+  const loadCatalogos = async (userId?: string) => {
     try {
-      const [cliRes, sucRes] = await Promise.all([
+      const uId = userId || currentUser?.id;
+      const [cliRes, sucRes, prodRes] = await Promise.all([
         supabase.from('clientes').select('*').order('nombre'),
         supabase.from('sucursales_cliente').select('*').order('nombre'),
+        uId ? supabase.from('inventario_empleados').select('cantidad_disponible, producto_id, productos(sku_interno, nombre_oficial)').eq('empleado_id', uId).gt('cantidad_disponible', 0) : Promise.resolve({ data: [] }),
       ]);
       if (cliRes.data) setClientes(cliRes.data);
       if (sucRes.data) setSucursalesCliente(sucRes.data);
+      if (prodRes && prodRes.data) {
+        const formattedProductos = prodRes.data.map((item: any) => ({
+          id: item.producto_id,
+          sku_interno: item.productos?.sku_interno || '',
+          nombre_oficial: item.productos?.nombre_oficial || '',
+          stock_actual: item.cantidad_disponible
+        }));
+        setProductos(formattedProductos);
+      }
     } catch (err) {
       console.error('Error loading catalogs:', err);
     }
@@ -99,7 +115,7 @@ export default function EvidenciaForm() {
         return;
       }
       setCurrentUser(user);
-      await loadCatalogos();
+      await loadCatalogos(user.id);
     };
     init();
   }, [router]);
@@ -327,6 +343,7 @@ export default function EvidenciaForm() {
         descripcion_trabajo: JSON.stringify(trabajos.map(t => ({
           descripcion: t.descripcion.trim(),
           materiales: t.materiales.trim() || null,
+          materiales_usados: t.materiales_usados || [],
           solucion: t.solucion.trim() || null,
           antesImg: t.antesImg?.uri || (t.antesImg?.base64 ? `data:image/jpeg;base64,${t.antesImg.base64}` : null),
           despuesImg: t.despuesImg?.uri || (t.despuesImg?.base64 ? `data:image/jpeg;base64,${t.despuesImg.base64}` : null),
@@ -447,6 +464,7 @@ export default function EvidenciaForm() {
         trabajosPayload.push({
           descripcion: t.descripcion.trim(),
           materiales: t.materiales.trim() || null,
+          materiales_usados: t.materiales_usados || [],
           solucion: t.solucion.trim() || null,
           antesImg: antesUrl || t.antesImg?.uri || null,
           despuesImg: despuesUrl || t.despuesImg?.uri || null,
@@ -484,6 +502,32 @@ export default function EvidenciaForm() {
         },
       ]);
 
+      if (!dbError) {
+        // Descontar del inventario personal del empleado
+        for (const t of trabajosPayload) {
+          for (const m of (t.materiales_usados || [])) {
+            if (m.usado > 0) {
+              const { data: invEmp } = await supabase
+                .from('inventario_empleados')
+                .select('id, cantidad_disponible')
+                .eq('empleado_id', currentUser.id)
+                .eq('producto_id', m.productoId)
+                .maybeSingle();
+                
+              if (invEmp) {
+                await supabase
+                  .from('inventario_empleados')
+                  .update({ 
+                    cantidad_disponible: Math.max(0, invEmp.cantidad_disponible - m.usado), 
+                    updated_at: new Date().toISOString() 
+                  })
+                  .eq('id', invEmp.id);
+              }
+            }
+          }
+        }
+      }
+
       if (dbError) {
         throw new Error(
           dbError.code === '42P01' 
@@ -494,7 +538,7 @@ export default function EvidenciaForm() {
 
       setLoadingModalVisible(false);
       Alert.alert('Éxito', 'Evidencia y reporte guardados correctamente en el servidor.');
-      router.replace('/(empleado)/dashboard');
+      router.replace('/(empleado)/gastos');
     } catch (err: any) {
       console.error('Error saving evidence:', err);
       setLoadingModalVisible(false);
@@ -531,12 +575,61 @@ export default function EvidenciaForm() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/dashboard')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={styles.backBtn} />
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
         <View style={{ width: 40 }} />
       </View>
+
+      {/* Switch de Empresa */}
+      <View style={{
+        flexDirection: 'row',
+        backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+        borderRadius: 20,
+        padding: 2,
+        alignItems: 'center',
+        width: 200,
+        alignSelf: 'center',
+        marginBottom: 10,
+        marginTop: 5,
+      }}>
+        <TouchableOpacity
+          onPress={() => company !== 'inttec' && changeCompany && changeCompany('inttec')}
+          style={{
+            flex: 1,
+            paddingVertical: 8,
+            borderRadius: 18,
+            backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
+            alignItems: 'center'
+          }}
+        >
+          <Text style={{
+            fontSize: 12,
+            fontWeight: '700',
+            color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+          }}>
+            INTTEC
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => company !== 'daravisa' && changeCompany && changeCompany('daravisa')}
+          style={{
+            flex: 1,
+            paddingVertical: 8,
+            borderRadius: 18,
+            backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
+            alignItems: 'center'
+          }}
+        >
+          <Text style={{
+            fontSize: 12,
+            fontWeight: '700',
+            color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+          }}>
+            DARAVISA
+          </Text>
+        </TouchableOpacity>
+      </View>
+
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -699,7 +792,7 @@ export default function EvidenciaForm() {
               </View>
 
               {/* Selector de Sucursal */}
-              {selectedCliente && (
+              {selectedCliente !== '' && (
                 <View style={[styles.customDropdownContainer, { marginBottom: Spacing.four, zIndex: 90 }]}>
                   <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal</Text>
                   <TouchableOpacity
@@ -788,22 +881,14 @@ export default function EvidenciaForm() {
                     iconName="construct-outline"
                   />
 
-                  <CustomInput
-                    label="Materiales Utilizados *"
-                    placeholder="Ej. ৹ 2 metros cable UTP&#10;৹ 4 conectores RJ45..."
-                    value={trabajo.materiales}
-                    onChangeText={(val) => {
-                      let formatted = val;
-                      if (formatted.length > 0 && !formatted.startsWith('৹ ') && !formatted.startsWith('৹')) {
-                        formatted = '৹ ' + formatted;
-                      }
-                      formatted = formatted.replace(/\n([^৹\n])/g, '\n৹ $1');
-                      setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, materiales: formatted } : t));
+                  {/* Selector de Materiales Estructurado */}
+                  <MaterialesSelector
+                    productos={productos}
+                    materiales={trabajo.materiales_usados || []}
+                    onChange={(nuevosMateriales) => {
+                      const textoMateriales = nuevosMateriales.map(m => `৹ ${m.usado}x ${m.nombre} (Sobrante: ${m.sobrante})`).join('\n');
+                      setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, materiales_usados: nuevosMateriales, materiales: textoMateriales } : t));
                     }}
-                    multiline
-                    numberOfLines={2}
-                    style={{ minHeight: 60 }}
-                    iconName="build-outline"
                   />
 
                   <CustomInput

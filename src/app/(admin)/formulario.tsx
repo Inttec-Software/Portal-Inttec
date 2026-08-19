@@ -107,7 +107,7 @@ export default function GastoForm() {
   const [detalleServicioProyecto, setDetalleServicioProyecto] = useState('');
   const [sucursal, setSucursal] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
-  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | null>(null);
+  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
   const [alertaPolitica, setAlertaPolitica] = useState<string | null>(null);
@@ -360,8 +360,20 @@ export default function GastoForm() {
              reader.readAsDataURL(blob);
            });
         } else {
-           base64Str = await FileSystem.readAsStringAsync(file.uri, {
-             encoding: FileSystem.EncodingType.Base64,
+           base64Str = await new Promise<string>((resolve, reject) => {
+             const xhr = new XMLHttpRequest();
+             xhr.onload = () => {
+               try {
+                 const b64 = require('buffer').Buffer.from(xhr.response).toString('base64');
+                 resolve(b64);
+               } catch (e) {
+                 reject(e);
+               }
+             };
+             xhr.onerror = reject;
+             xhr.responseType = 'arraybuffer';
+             xhr.open('GET', file.uri, true);
+             xhr.send(null);
            });
         }
         setImageBase64(base64Str);
@@ -719,6 +731,9 @@ export default function GastoForm() {
     const dbFecha = formatFriendlyToDb(fechaComprobante);
     
     let finalJustificacion = justificacion.trim();
+    if (currentUser?.rol === 'DEV') {
+      finalJustificacion = `[PRUEBA] ${finalJustificacion}`;
+    }
     if (!proveedor.trim() && comentarioProveedor.trim()) {
       finalJustificacion = `[Proveedor a agregar: ${comentarioProveedor.trim()}]\n\n${finalJustificacion}`;
     }
@@ -775,36 +790,48 @@ export default function GastoForm() {
         // En línea: Subir foto y guardar en Supabase
         let publicUrl = imageUri;
         if (imageBase64) {
-          const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
-          const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
-          const arrayBuffer = base64ToArrayBuffer(imageBase64);
+          try {
+            const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
+            const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
+            const arrayBuffer = base64ToArrayBuffer(imageBase64);
 
-          const { error: uploadError } = await supabase.storage
-            .from('tickets')
-            .upload(fileName, arrayBuffer, { contentType, upsert: true });
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('tickets')
+              .upload(fileName, arrayBuffer, { contentType, upsert: true });
 
-          if (uploadError) throw uploadError;
-
-          const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-          publicUrl = urlData.publicUrl;
+            if (!uploadError) {
+              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+              publicUrl = urlData.publicUrl;
+            } else {
+              console.warn('Supabase storage upload skipped or failed:', uploadError);
+            }
+          } catch (stErr) {
+            console.warn('Storage upload exception (continuing):', stErr);
+          }
         }
 
         // Subir factura si se seleccionó una
         let publicInvoiceUrl = '';
         if (facturado && facturaBase64) {
-          const ext = facturaExt || 'jpg';
-          const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-          const fileName = `${currentUser.id}/factura_${Date.now()}.${ext}`;
-          const arrayBuffer = base64ToArrayBuffer(facturaBase64);
+          try {
+            const ext = facturaExt || 'jpg';
+            const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
+            const fileName = `${currentUser.id}/factura_${Date.now()}.${ext}`;
+            const arrayBuffer = base64ToArrayBuffer(facturaBase64);
 
-          const { error: uploadError } = await supabase.storage
-            .from('tickets')
-            .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('tickets')
+              .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
 
-          if (uploadError) throw uploadError;
-
-          const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-          publicInvoiceUrl = urlData.publicUrl;
+            if (!uploadError) {
+              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+              publicInvoiceUrl = urlData.publicUrl;
+            } else {
+              console.warn('Invoice storage upload skipped or failed:', uploadError);
+            }
+          } catch (invErr) {
+            console.warn('Invoice storage upload exception (continuing):', invErr);
+          }
         }
 
         let payloadsToInsert = isSplit ? splits.map((s, index) => {
@@ -911,7 +938,9 @@ export default function GastoForm() {
 
       router.replace('/(admin)/dashboard');
     } catch (err: any) {
-      showAlert('Error al guardar', err.message || 'No se pudo guardar el gasto.');
+      const errorDetails = err?.message || err?.details || err?.hint || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      console.error('Error al guardar gasto:', errorDetails);
+      showAlert('Error al guardar', errorDetails || 'No se pudo guardar el gasto.');
     } finally {
       setIsSubmitting(false);
     }
@@ -942,7 +971,7 @@ export default function GastoForm() {
       }
 
       if (metodoPago !== 'efectivo' && !tipoTarjeta) {
-        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE).');
+        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX).');
         return;
       }
       if (facturado === null) {
@@ -971,11 +1000,10 @@ export default function GastoForm() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Registrar Gasto</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -1251,7 +1279,7 @@ export default function GastoForm() {
                             placeholder="0.00"
                             keyboardType="decimal-pad"
                             value={montoPropina}
-                            onChangeText={(val) => setMontoPropina(val.replace(',', '.'))}
+                            onChangeText={(val) => setMontoPropina(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
                             iconName="logo-usd"
                           />
                         </View>
@@ -1292,7 +1320,7 @@ export default function GastoForm() {
                 placeholder="0.00"
                 keyboardType="decimal-pad"
                 value={monto}
-                onChangeText={(val) => setMonto(val.replace(',', '.'))}
+                onChangeText={(val) => setMonto(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
                 iconName="logo-usd"
               />
 
@@ -2062,7 +2090,7 @@ export default function GastoForm() {
                   <View>
                     <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13, marginBottom: Spacing.one }]}>Selecciona la Tarjeta *</Text>
                     <View style={styles.paymentSelector}>
-                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE'] as const).map((card) => (
+                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX'] as const).map((card) => (
                         <TouchableOpacity
                           key={card}
                           onPress={() => setTipoTarjeta(card)}
@@ -2820,6 +2848,7 @@ export default function GastoForm() {
           </KeyboardAvoidingView>
         </Pressable>
       </Modal>
+    </ScrollView>
     </SafeAreaView>
   );
 }

@@ -3,8 +3,23 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
+import Constants from 'expo-constants';
+
 const sanitizeUrl = (url: string) => {
   return url ? url.replace(/\/rest\/v1\/?$/, '') : url;
+};
+
+const resolveLocalhost = (url: string) => {
+  // Solo en desarrollo y si la URL tiene localhost
+  if (__DEV__ && url && (url.includes('localhost') || url.includes('127.0.0.1'))) {
+    const debuggerHost = Constants.expoConfig?.hostUri || (Constants.manifest as any)?.debuggerHost;
+    if (debuggerHost) {
+      const ip = debuggerHost.split(':')[0];
+      // Reemplaza localhost por la IP real de tu PC en la red local
+      return url.replace(/localhost|127\.0\.0\.1/, ip);
+    }
+  }
+  return url;
 };
 
 const inttecUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_INTTEC || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
@@ -13,11 +28,24 @@ const inttecAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_INTTEC || proces
 const daravisaUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
 const daravisaAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
+const inttecTestUrl = resolveLocalhost(sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_TEST || 'http://localhost:54321'));
+const inttecTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_TEST || 'placeholder-anon-key';
+
+const daravisaTestUrl = resolveLocalhost(sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA_TEST || 'http://localhost:54321'));
+const daravisaTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA_TEST || 'placeholder-anon-key';
+
+const isLocalUrl = (url: string) => url ? (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('192.168.') || url.includes('10.') || url.startsWith('http://')) : false;
+
 if (!inttecUrl || !inttecAnonKey) {
-  logger.error(
-    'WARNING: Supabase URL or Anon Key is missing in environment variables (.env file).\n' +
-    'The app is running with placeholder credentials and database operations will fail.'
-  );
+  logger.error('WARNING: Supabase INTTEC credentials missing in .env file.');
+} else {
+  console.log(isLocalUrl(inttecUrl) ? `🐳 [DATABASE INTTEC] Local Docker (${inttecUrl})` : `☁️ [DATABASE INTTEC] Supabase Cloud (${inttecUrl})`);
+}
+
+if (!daravisaUrl || !daravisaAnonKey) {
+  logger.error('WARNING: Supabase DARAVISA credentials missing in .env file.');
+} else {
+  console.log(isLocalUrl(daravisaUrl) ? `🐳 [DATABASE DARAVISA] Local Docker (${daravisaUrl})` : `☁️ [DATABASE DARAVISA] Supabase Cloud (${daravisaUrl})`);
 }
 
 const isBrowser = Platform.OS !== 'web' || typeof window !== 'undefined';
@@ -61,8 +89,37 @@ export const daravisaClient = createClient(daravisaUrl, daravisaAnonKey, {
   },
 });
 
+export const inttecTestClient = createClient(inttecTestUrl, inttecTestAnonKey, {
+  auth: {
+    storage: ssrSafeStorage,
+    storageKey: 'supabase.auth.token.inttec.test',
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+
+export const daravisaTestClient = createClient(daravisaTestUrl, daravisaTestAnonKey, {
+  auth: {
+    storage: ssrSafeStorage,
+    storageKey: 'supabase.auth.token.daravisa.test',
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+
 let activeCompany: 'inttec' | 'daravisa' = 'inttec';
+let activeEnv: 'cloud' | 'test' = 'cloud';
 let activeClient = inttecClient;
+
+const updateActiveClient = () => {
+  if (activeEnv === 'test') {
+    activeClient = activeCompany === 'daravisa' ? daravisaTestClient : inttecTestClient;
+  } else {
+    activeClient = activeCompany === 'daravisa' ? daravisaClient : inttecClient;
+  }
+};
 
 export const supabase = new Proxy({}, {
   get(target, prop) {
@@ -80,7 +137,7 @@ export const CompanyService = {
   },
   async setActiveCompany(company: 'inttec' | 'daravisa'): Promise<void> {
     activeCompany = company;
-    activeClient = company === 'daravisa' ? daravisaClient : inttecClient;
+    updateActiveClient();
     if (isBrowser) {
       await AsyncStorage.setItem('active_company', company);
     }
@@ -90,19 +147,44 @@ export const CompanyService = {
       const saved = await AsyncStorage.getItem('active_company');
       if (saved === 'daravisa' || saved === 'inttec') {
         activeCompany = saved;
-        activeClient = saved === 'daravisa' ? daravisaClient : inttecClient;
+        updateActiveClient();
       }
     }
     return activeCompany;
   }
 };
 
+export const EnvService = {
+  getActiveEnv(): 'cloud' | 'test' {
+    return activeEnv;
+  },
+  async setActiveEnv(env: 'cloud' | 'test'): Promise<void> {
+    activeEnv = env;
+    updateActiveClient();
+    if (isBrowser) {
+      await AsyncStorage.setItem('active_env', env);
+    }
+  },
+  async loadSavedEnv(): Promise<'cloud' | 'test'> {
+    if (isBrowser) {
+      const saved = await AsyncStorage.getItem('active_env');
+      if (saved === 'cloud' || saved === 'test') {
+        activeEnv = saved;
+        updateActiveClient();
+      }
+    }
+    return activeEnv;
+  }
+};
+
+export const getInttecClient = () => EnvService.getActiveEnv() === 'test' ? inttecTestClient : inttecClient;
+export const getDaravisaClient = () => EnvService.getActiveEnv() === 'test' ? daravisaTestClient : daravisaClient;
 
 export interface Usuario {
   id: string;
   nombre: string;
   email: string;
-  rol: 'ADMIN' | 'EMPLEADO';
+  rol: 'ADMIN' | 'EMPLEADO' | 'DEV';
   telefono?: string;
   created_at?: string;
 }
@@ -330,8 +412,8 @@ export const AuthService = {
 
   async logout(): Promise<void> {
     if (isBrowser) {
-      const company = CompanyService.getActiveCompany();
-      await AsyncStorage.removeItem(`logged_user_${company}`);
+      await AsyncStorage.removeItem('logged_user_inttec');
+      await AsyncStorage.removeItem('logged_user_daravisa');
     }
   },
 
@@ -569,6 +651,9 @@ export interface Venta {
   costo_total: number;
   utilidad_bruta: number;
   margen_porcentual: number;
+  total_pagado?: number;
+  saldo_pendiente?: number;
+  estado_pago?: EstadoPagoVenta;
   factura_url?: string | null;
   notas?: string | null;
   descripcion?: string | null;
@@ -591,6 +676,29 @@ export interface VentaPartida {
   costo_unitario_proveedor: number;
   precio_total_venta: number;
   costo_total_proveedor: number;
+}
+
+export interface VentaPago {
+  id: string;
+  venta_id: string;
+  monto: number;
+  fecha_pago: string;
+  metodo_pago?: string | null;
+  referencia?: string | null;
+  registrado_por?: string | null;
+  created_at?: string;
+}
+
+export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO';
+
+export function calcularEstadoPago(precioTotalFacturado: number, totalPagado: number): EstadoPagoVenta {
+  if (totalPagado >= precioTotalFacturado && precioTotalFacturado > 0) {
+    return 'PAGADO';
+  } else if (totalPagado > 0) {
+    return 'PAGO PARCIAL';
+  } else {
+    return 'PENDIENTE DE PAGO';
+  }
 }
 
 export async function recalculateVentaTotals(ventaId: string): Promise<void> {
@@ -644,6 +752,46 @@ export async function recalculateVentaTotals(ventaId: string): Promise<void> {
     logger.error('[Recalculate] Error recalculating venta totals:', err);
   }
 }
+
+export async function syncVentaPaymentStatus(ventaId: string): Promise<void> {
+  try {
+    const { data: venta, error: vErr } = await supabase
+      .from('ventas')
+      .select('precio_total_facturado')
+      .eq('id', ventaId)
+      .single();
+
+    if (vErr || !venta) return;
+
+    const { data: pagos, error: pErr } = await supabase
+      .from('ventas_pagos')
+      .select('monto')
+      .eq('venta_id', ventaId);
+
+    if (pErr) return; // Si la tabla aún no existe, omitimos silenciosamente
+
+    const precioTotal = Number(venta?.precio_total_facturado) || 0;
+    const totalPagado = (pagos || []).reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+    const saldoPendiente = Math.max(0, precioTotal - totalPagado);
+    const estadoPago = calcularEstadoPago(precioTotal, totalPagado);
+
+    const { error: updErr } = await supabase
+      .from('ventas')
+      .update({
+        total_pagado: totalPagado,
+        saldo_pendiente: saldoPendiente,
+        estado_pago: estadoPago
+      })
+      .eq('id', ventaId);
+
+    if (updErr) {
+      console.warn('[SyncPaymentStatus] No se pudieron actualizar columnas de pago en ventas:', updErr.message);
+    }
+  } catch (err) {
+    // Captura limpia sin romper la ejecucion
+  }
+}
+
 
 export interface Vehiculo {
   id: string;

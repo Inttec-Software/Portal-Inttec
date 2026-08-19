@@ -55,7 +55,42 @@ Join our community of developers creating universal apps.
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
 
+## Base de Datos Local en Docker para Pruebas Aisladas 🐳
+
+Para realizar pruebas sin riesgo de alterar o contaminar los datos reales de producción:
+
+### 1. Iniciar la base de datos local
+```bash
+npm run db:up
+```
+Esto iniciará un contenedor PostgreSQL (puerto `5432`) y un servicio PostgREST (puerto `3000`) inicializados automáticamente con los archivos `01_schema.sql` y `02_seed.sql` (ubicados en `docker/init/`), los cuales incluyen toda la estructura, catálogos reales (clientes, sucursales, proveedores) y configuraciones básicas.
+
+Adicionalmente, se incluyen los respaldos crudos `BaseDatos.sql` (INTTEC) y `BaseDatosDaravisa.sql` (Daravisa) en la raíz del proyecto para referencia o migración manual.
+
+### 2. Usuarios Disponibles
+Para conocer los correos de prueba disponibles, revisa el archivo `docker/init/02_seed.sql` en la sección de inserción de `usuarios`.
+
+### 3. Configurar la App para el entorno Local
+Asegúrate de que tu archivo `.env` apunte a tu servidor local:
+```env
+EXPO_PUBLIC_SUPABASE_URL=http://localhost:3000
+EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicG9zdGdyZXMiLCJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoyMDAwMDAwMDAwfQ.M82JoBr-CUPUbJPD7ZYGdwGwYSVjwPhcmuGd8YaIk2Q
+```
+*(Si estás probando desde un dispositivo físico Android/iOS o emulador en red local, usa la IP de tu PC en lugar de `localhost`, por ejemplo `http://192.168.1.X:3000`)*.
+
+### 4. Reiniciar/Limpiar datos de prueba
+Si deseas borrar todas las modificaciones hechas durante las pruebas y restaurar la base de datos limpia con los esquemas originales:
+```bash
+npm run db:reset
+```
+
+### 5. Detener el contenedor
+```bash
+npm run db:down
+```
+
 ## Daravisa Setup Notes
 - The Daravisa database uses the exact same schema as Inttec (BaseDatos.sql).
 - To ensure proper functionality, Row Level Security (RLS) MUST BE DISABLED on all main tables (gastos, evidencias, registro_gasolina, etc.) in the Daravisa Supabase project.
 - Ensure the 'tickets' bucket is created in Storage with public access and policies that allow ALL operations (SELECT, INSERT, UPDATE, DELETE) for authenticated users.
+

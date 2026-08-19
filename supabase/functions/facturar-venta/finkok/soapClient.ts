@@ -1,20 +1,28 @@
-export async function timbrarFinkok(xmlFirmado: string, finkokUsername: string, finkokPassword: string, isProduction: boolean = false) {
+// @ts-nocheck
+
+export async function signStampFinkok(
+  xmlString: string,
+  finkokUsername: string,
+  finkokPassword: string,
+  isProduction: boolean = false
+) {
   const finkokUrl = isProduction 
     ? 'https://facturacion.finkok.com/servicios/soap/stamp' 
     : 'https://demo-facturacion.finkok.com/servicios/soap/stamp';
 
-  // El XML debe enviarse en base64 según la especificación de Finkok
-  const xmlB64 = btoa(unescape(encodeURIComponent(xmlFirmado)));
+  // Codificar XML a Base64 en UTF-8 seguro
+  const xmlB64 = btoa(unescape(encodeURIComponent(xmlString)));
 
+  // Método sign_stamp: Finkok sella usando el CSD precargado en su portal y timbra ante el SAT
   const soapEnvelope = `
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:stam="http://facturacion.finkok.com/stamp">
    <soapenv:Header/>
    <soapenv:Body>
-      <stam:stamp>
+      <stam:sign_stamp>
          <stam:xml>${xmlB64}</stam:xml>
          <stam:username>${finkokUsername}</stam:username>
          <stam:password>${finkokPassword}</stam:password>
-      </stam:stamp>
+      </stam:sign_stamp>
    </soapenv:Body>
 </soapenv:Envelope>
 `.trim();
@@ -23,7 +31,7 @@ export async function timbrarFinkok(xmlFirmado: string, finkokUsername: string, 
     method: 'POST',
     headers: {
       'Content-Type': 'text/xml;charset=UTF-8',
-      'SOAPAction': '"http://facturacion.finkok.com/stamp/stamp"',
+      'SOAPAction': '"http://facturacion.finkok.com/stamp/sign_stamp"',
     },
     body: soapEnvelope
   });
@@ -33,59 +41,88 @@ export async function timbrarFinkok(xmlFirmado: string, finkokUsername: string, 
   if (!response.ok) {
     throw new Error(`Finkok HTTP Error ${response.status}: ${responseText}`);
   }
-
-  // Parsear la respuesta XML para extraer el UUID y el XML timbrado
-  // Ya que en Edge Functions (Deno) no tenemos DOMParser de forma nativa sin importar librerías pesadas,
-  // usaremos regex seguros para extraer los campos principales.
   
-  const faultStringMatch = responseText.match(/<faultstring>(.*?)<\/faultstring>/);
+  const faultStringMatch = responseText.match(/<faultstring>(.*?)<\/faultstring>/i);
   if (faultStringMatch) {
     throw new Error(`Finkok Fault: ${faultStringMatch[1]}`);
   }
 
-  const xmlTimbradoMatch = responseText.match(/<xml>([\s\S]*?)<\/xml>/);
-  const uuidMatch = responseText.match(/<UUID>(.*?)<\/UUID>/);
-  const incarnatesErrorMatch = responseText.match(/<Incidencias>([\s\S]*?)<\/Incidencias>/);
-
-  if (incarnatesErrorMatch && incarnatesErrorMatch[1].includes('<IdIncidencia>')) {
-    // Hubo un error de validación
-    const msgMatch = incarnatesErrorMatch[1].match(/<MensajeIncidencia>(.*?)<\/MensajeIncidencia>/);
+  // Verificar si hay incidencias/errores reportados por Finkok / SAT
+  const incidenciasMatch = responseText.match(/<Incidencias>([\s\S]*?)<\/Incidencias>/i);
+  if (incidenciasMatch && incidenciasMatch[1].includes('<IdIncidencia>')) {
+    const msgMatch = incidenciasMatch[1].match(/<MensajeIncidencia>(.*?)<\/MensajeIncidencia>/i);
+    const codigoMatch = incidenciasMatch[1].match(/<CodigoError>(.*?)<\/CodigoError>/i);
     const errorMsg = msgMatch ? msgMatch[1] : 'Error desconocido al timbrar';
-    throw new Error(`Incidencia Finkok: ${errorMsg}`);
+    const codigo = codigoMatch ? `[${codigoMatch[1]}] ` : '';
+    throw new Error(`Incidencia Finkok / SAT: ${codigo}${errorMsg}`);
   }
 
+  // Extraer XML timbrado
+  const xmlTimbradoMatch = responseText.match(/<xml>([\s\S]*?)<\/xml>/i);
   if (!xmlTimbradoMatch || !xmlTimbradoMatch[1]) {
-    throw new Error("No se recibió el XML timbrado de Finkok.");
+    const debugResponse = responseText.substring(0, 500);
+    throw new Error(`No se recibió el XML timbrado de Finkok. Respuesta: ${debugResponse}`);
+  }
+
+  let xmlTimbrado = xmlTimbradoMatch[1].trim();
+  // Si viene con entidades escapadas como &lt;cfdi:Comprobante... des-escapar
+  if (xmlTimbrado.startsWith('&lt;')) {
+    xmlTimbrado = xmlTimbrado
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'");
+  }
+
+  // Extraer UUID
+  let uuid = null;
+  const uuidTagMatch = responseText.match(/<UUID>(.*?)<\/UUID>/i);
+  if (uuidTagMatch && uuidTagMatch[1]) {
+    uuid = uuidTagMatch[1].trim();
+  } else {
+    const uuidAttrMatch = xmlTimbrado.match(/UUID="([0-9a-fA-F-]{36})"/i);
+    if (uuidAttrMatch) {
+      uuid = uuidAttrMatch[1];
+    }
   }
 
   return {
     success: true,
-    uuid: uuidMatch ? uuidMatch[1] : null,
-    xml: xmlTimbradoMatch[1]
+    uuid: uuid,
+    xml: xmlTimbrado
   };
 }
 
-export async function cancelarFinkok(uuid: string, rfcReceptor: string, total: number, finkokUsername: string, finkokPassword: string, cerB64: string, keyB64: string, isProduction: boolean = false) {
+export async function signCancelFinkok(
+  uuid: string,
+  rfcEmisor: string,
+  finkokUsername: string,
+  finkokPassword: string,
+  motivo: string = '02',
+  folioSustitucion: string = '',
+  isProduction: boolean = false
+) {
   const finkokUrl = isProduction 
     ? 'https://facturacion.finkok.com/servicios/soap/cancel' 
     : 'https://demo-facturacion.finkok.com/servicios/soap/cancel';
 
-  // Finkok cancel endpoint requires the UUID and the CSD to sign the cancellation request.
   const soapEnvelope = `
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:can="http://facturacion.finkok.com/cancel">
    <soapenv:Header/>
    <soapenv:Body>
-      <can:cancel>
+      <can:sign_cancel>
          <can:UUIDS>
-            <can:string>${uuid}</can:string>
+            <can:UUIDItem>
+               <can:UUID>${uuid}</can:UUID>
+               <can:Motivo>${motivo}</can:Motivo>
+               ${folioSustitucion ? `<can:FolioSustitucion>${folioSustitucion}</can:FolioSustitucion>` : ''}
+            </can:UUIDItem>
          </can:UUIDS>
          <can:username>${finkokUsername}</can:username>
          <can:password>${finkokPassword}</can:password>
-         <!-- RFC Emisor lo obtiene finkok internamente o debemos pasarlo según la documentación -->
-         <can:taxpayer_id>RFC_EMISOR</can:taxpayer_id> 
-         <can:cer>${cerB64}</can:cer>
-         <can:key>${keyB64}</can:key>
-      </can:cancel>
+         <can:taxpayer_id>${rfcEmisor}</can:taxpayer_id>
+      </can:sign_cancel>
    </soapenv:Body>
 </soapenv:Envelope>
 `.trim();
@@ -94,7 +131,7 @@ export async function cancelarFinkok(uuid: string, rfcReceptor: string, total: n
     method: 'POST',
     headers: {
       'Content-Type': 'text/xml;charset=UTF-8',
-      'SOAPAction': '"http://facturacion.finkok.com/cancel/cancel"',
+      'SOAPAction': '"http://facturacion.finkok.com/cancel/sign_cancel"',
     },
     body: soapEnvelope
   });
@@ -105,14 +142,25 @@ export async function cancelarFinkok(uuid: string, rfcReceptor: string, total: n
     throw new Error(`Finkok Cancel HTTP Error ${response.status}: ${responseText}`);
   }
 
-  // Parse response
-  const faultStringMatch = responseText.match(/<faultstring>(.*?)<\/faultstring>/);
+  const faultStringMatch = responseText.match(/<faultstring>(.*?)<\/faultstring>/i);
   if (faultStringMatch) {
-    throw new Error(`Finkok Fault: ${faultStringMatch[1]}`);
+    throw new Error(`Finkok Fault al Cancelar: ${faultStringMatch[1]}`);
   }
+
+  // Verificar incidencias
+  const incidenciasMatch = responseText.match(/<Incidencias>([\s\S]*?)<\/Incidencias>/i);
+  if (incidenciasMatch && incidenciasMatch[1].includes('<IdIncidencia>')) {
+    const msgMatch = incidenciasMatch[1].match(/<MensajeIncidencia>(.*?)<\/MensajeIncidencia>/i);
+    const errorMsg = msgMatch ? msgMatch[1] : 'Error desconocido al cancelar';
+    throw new Error(`Error SAT/Finkok al cancelar: ${errorMsg}`);
+  }
+
+  const estatusMatch = responseText.match(/<EstatusUUID>(.*?)<\/EstatusUUID>/i);
+  const estatus = estatusMatch ? estatusMatch[1] : '201'; // 201: Solicitud de cancelación recibida
 
   return {
     success: true,
+    estatus: estatus,
     response: responseText
   };
 }

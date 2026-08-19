@@ -103,8 +103,9 @@ export default function GastoForm() {
   const [tipoServicioProyecto, setTipoServicioProyecto] = useState<'Servicio' | 'Proyecto' | 'Venta' | 'Operativo' | null>(null);
   const [detalleServicioProyecto, setDetalleServicioProyecto] = useState('');
   const [sucursal, setSucursal] = useState('');
+  const [comentarioSucursal, setComentarioSucursal] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
-  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | null>(null);
+  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
   const [alertaPolitica, setAlertaPolitica] = useState<string | null>(null);
@@ -157,7 +158,7 @@ export default function GastoForm() {
 
   // División de Gasto
   const [isSplit, setIsSplit] = useState(false);
-  const [splits, setSplits] = useState<{ id: string; clienteId: string; sucursalNombre: string; monto: string }[]>([]);
+  const [splits, setSplits] = useState<{ id: string; clienteId: string; sucursalNombre: string; comentarioSucursal?: string; monto: string }[]>([]);
 
   // Dropdown list visibility toggles (Mock pickers since RN Picker is external)
   const [showCatDropdown, setShowCatDropdown] = useState(false);
@@ -170,6 +171,7 @@ export default function GastoForm() {
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [newSplitClienteId, setNewSplitClienteId] = useState('');
   const [newSplitSucursalNombre, setNewSplitSucursalNombre] = useState('');
+  const [newSplitComentarioSucursal, setNewSplitComentarioSucursal] = useState('');
   const [newSplitMonto, setNewSplitMonto] = useState('');
   const [showNewSplitCliDropdown, setShowNewSplitCliDropdown] = useState(false);
   const [showNewSplitSucDropdown, setShowNewSplitSucDropdown] = useState(false);
@@ -357,8 +359,20 @@ export default function GastoForm() {
              reader.readAsDataURL(blob);
            });
         } else {
-           base64Str = await FileSystem.readAsStringAsync(file.uri, {
-             encoding: FileSystem.EncodingType.Base64,
+           base64Str = await new Promise<string>((resolve, reject) => {
+             const xhr = new XMLHttpRequest();
+             xhr.onload = () => {
+               try {
+                 const b64 = require('buffer').Buffer.from(xhr.response).toString('base64');
+                 resolve(b64);
+               } catch (e) {
+                 reject(e);
+               }
+             };
+             xhr.onerror = reject;
+             xhr.responseType = 'arraybuffer';
+             xhr.open('GET', file.uri, true);
+             xhr.send(null);
            });
         }
         setImageBase64(base64Str);
@@ -635,8 +649,8 @@ export default function GastoForm() {
         setCurrentStep(3);
         return;
       }
-      if (!sucursal || !sucursal.trim()) {
-        showAlert('Validación', 'Por favor selecciona la sucursal del cliente.');
+      if (!sucursal.trim() && !comentarioSucursal.trim()) {
+        showAlert('Validación', 'Por favor selecciona la sucursal del cliente o indica una en "Sucursal a agregar".');
         setCurrentStep(3);
         return;
       }
@@ -657,8 +671,8 @@ export default function GastoForm() {
           setCurrentStep(3);
           return;
         }
-        if (!s.sucursalNombre || !s.sucursalNombre.trim()) {
-          showAlert('Validación', `Por favor selecciona la sucursal para la división del cliente "${s.clienteId}".`);
+        if (!s.sucursalNombre?.trim() && !s.comentarioSucursal?.trim()) {
+          showAlert('Validación', `Por favor selecciona la sucursal para la división del cliente "${s.clienteId}" o indica una en "Sucursal a agregar".`);
           setCurrentStep(3);
           return;
         }
@@ -688,8 +702,15 @@ export default function GastoForm() {
     const dbFecha = formatFriendlyToDb(fechaComprobante);
     
     let finalJustificacion = justificacion.trim();
+    if (currentUser?.rol === 'DEV') {
+      finalJustificacion = `[PRUEBA] ${finalJustificacion}`;
+    }
     if (!proveedor.trim() && comentarioProveedor.trim()) {
       finalJustificacion = `[Proveedor a agregar: ${comentarioProveedor.trim()}]\n\n${finalJustificacion}`;
+    }
+
+    if (!isSplit && !sucursal.trim() && comentarioSucursal.trim()) {
+      finalJustificacion = `[Sucursal a agregar: ${comentarioSucursal.trim()}]\n\n${finalJustificacion}`;
     }
     if (esComida && selectedEmpleados.length > 0) {
       const nombresShared = selectedEmpleados.map(e => e.nombre).join(', ');
@@ -744,36 +765,48 @@ export default function GastoForm() {
         // En línea: Subir foto y guardar en Supabase
         let publicUrl = imageUri;
         if (imageBase64) {
-          const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
-          const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
-          const arrayBuffer = base64ToArrayBuffer(imageBase64);
+          try {
+            const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
+            const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
+            const arrayBuffer = base64ToArrayBuffer(imageBase64);
 
-          const { error: uploadError } = await supabase.storage
-            .from('tickets')
-            .upload(fileName, arrayBuffer, { contentType, upsert: true });
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('tickets')
+              .upload(fileName, arrayBuffer, { contentType, upsert: true });
 
-          if (uploadError) throw uploadError;
-
-          const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-          publicUrl = urlData.publicUrl;
+            if (!uploadError) {
+              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+              publicUrl = urlData.publicUrl;
+            } else {
+              console.warn('Supabase storage upload skipped or failed:', uploadError);
+            }
+          } catch (stErr) {
+            console.warn('Storage upload exception (continuing):', stErr);
+          }
         }
 
         // Subir factura si se seleccionó una
         let publicInvoiceUrl = '';
         if (facturado && facturaBase64) {
-          const ext = facturaExt || 'jpg';
-          const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-          const fileName = `${currentUser.id}/factura_${Date.now()}.${ext}`;
-          const arrayBuffer = base64ToArrayBuffer(facturaBase64);
+          try {
+            const ext = facturaExt || 'jpg';
+            const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
+            const fileName = `${currentUser.id}/factura_${Date.now()}.${ext}`;
+            const arrayBuffer = base64ToArrayBuffer(facturaBase64);
 
-          const { error: uploadError } = await supabase.storage
-            .from('tickets')
-            .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('tickets')
+              .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
 
-          if (uploadError) throw uploadError;
-
-          const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-          publicInvoiceUrl = urlData.publicUrl;
+            if (!uploadError) {
+              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+              publicInvoiceUrl = urlData.publicUrl;
+            } else {
+              console.warn('Invoice storage upload skipped or failed:', uploadError);
+            }
+          } catch (invErr) {
+            console.warn('Invoice storage upload exception (continuing):', invErr);
+          }
         }
 
         let payloadsToInsert = isSplit ? splits.map((s, index) => {
@@ -784,7 +817,7 @@ export default function GastoForm() {
             monto: Number(s.monto),
             cliente_id: splitCliObj?.id || null,
             sucursal_id: splitSucObj?.id || null,
-            justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${index + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`,
+            justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${index + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre || s.comentarioSucursal})${s.comentarioSucursal ? `\n[Sucursal a agregar: ${s.comentarioSucursal}]` : ''}\n\n${gastoPayload.justificacion}`,
             foto_url: publicUrl || null,
             factura_url: publicInvoiceUrl || null,
             status: 'PENDING',
@@ -806,16 +839,20 @@ export default function GastoForm() {
         if (dbError) throw dbError;
 
         // Notificar a los administradores del nuevo gasto
-        const { data: admins } = await supabase.from('usuarios').select('id').eq('rol', 'ADMIN');
-        if (admins && admins.length > 0) {
-          const notifications = admins.map(admin => ({
-            usuario_id: admin.id,
-            titulo: 'Nuevo Gasto Registrado',
-            mensaje: `${currentUser.nombre} ha registrado un gasto de $${totalGasto.toFixed(2)} (${selectedCategoria})`,
-            tipo: 'GASTO_NUEVO',
-            referencia_id: insertedGastos?.[0]?.id,
-          }));
-          await supabase.from('notificaciones').insert(notifications);
+        try {
+          const { data: admins } = await supabase.from('usuarios').select('id').eq('rol', 'ADMIN');
+          if (admins && admins.length > 0) {
+            const notifications = admins.map(admin => ({
+              usuario_id: admin.id,
+              titulo: 'Nuevo Gasto Registrado',
+              mensaje: `${currentUser.nombre} ha registrado un gasto de $${totalGasto.toFixed(2)} (${selectedCategoria})`,
+              tipo: 'GASTO_NUEVO',
+              referencia_id: insertedGastos?.[0]?.id,
+            }));
+            await supabase.from('notificaciones').insert(notifications);
+          }
+        } catch (notifErr) {
+          console.warn('Notificaciones insert skipped or failed:', notifErr);
         }
 
         // Si es combustible, guardar bitácora de gasolina vinculada y sincronizar kilometraje en ambas empresas
@@ -854,7 +891,7 @@ export default function GastoForm() {
               cliente_id: splitCliObj?.id || null,
               sucursal: s.sucursalNombre || null,
               sucursal_id: splitSucObj?.id || null,
-              justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${i + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`,
+              justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${i + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre || s.comentarioSucursal})${s.comentarioSucursal ? `\n[Sucursal a agregar: ${s.comentarioSucursal}]` : ''}\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
               fotoExt: imageExt,
               base64Factura: facturaBase64 || undefined,
@@ -882,9 +919,11 @@ export default function GastoForm() {
         );
       }
 
-      router.replace('/(empleado)/dashboard');
+      router.replace('/(empleado)/gastos' as any);
     } catch (err: any) {
-      showAlert('Error al guardar', err.message || 'No se pudo guardar el gasto.');
+      const errorDetails = err?.message || err?.details || err?.hint || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      console.error('Error al guardar gasto:', errorDetails);
+      showAlert('Error al guardar', errorDetails || 'No se pudo guardar el gasto.');
     } finally {
       setIsSubmitting(false);
     }
@@ -915,7 +954,7 @@ export default function GastoForm() {
       }
 
       if (metodoPago !== 'efectivo' && !tipoTarjeta) {
-        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE).');
+        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX).');
         return;
       }
       if (facturado === null) {
@@ -950,9 +989,7 @@ export default function GastoForm() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/dashboard')} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={styles.backBtn} />
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Registrar Gasto</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -1228,7 +1265,7 @@ export default function GastoForm() {
                             placeholder="0.00"
                             keyboardType="decimal-pad"
                             value={montoPropina}
-                            onChangeText={(val) => setMontoPropina(val.replace(',', '.'))}
+                            onChangeText={(val) => setMontoPropina(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
                             iconName="logo-usd"
                           />
                         </View>
@@ -1269,7 +1306,7 @@ export default function GastoForm() {
                 placeholder="0.00"
                 keyboardType="decimal-pad"
                 value={monto}
-                onChangeText={(val) => setMonto(val.replace(',', '.'))}
+                onChangeText={(val) => setMonto(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
                 iconName="logo-usd"
               />
 
@@ -1646,22 +1683,19 @@ export default function GastoForm() {
 
                                return (
                                  <>
-                                   {sucursalSearch.trim().length > 0 && !existsExact && currentCliente && (
-                                     <TouchableOpacity
-                                       style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
-                                       onPress={() => handleAddNewSucursal(sucursalSearch)}
-                                     >
-                                       <Ionicons name="add-circle-outline" size={24} color={themeColors.accent} />
-                                       <View style={{ flex: 1 }}>
-                                         <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
-                                           {`➕ Agregar "${sucursalSearch.trim().toUpperCase()}"`}
-                                         </Text>
-                                         <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                                           {`Vincular a cliente: ${currentCliente.nombre}`}
-                                         </Text>
-                                       </View>
-                                     </TouchableOpacity>
-                                   )}
+                                   <TouchableOpacity
+                                     style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '10', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                     onPress={() => {
+                                        setSucursal('');
+                                        setSucursalSearch('');
+                                        setShowSucursalDropdown(false);
+                                     }}
+                                   >
+                                     <Ionicons name="close-circle-outline" size={24} color={themeColors.danger} />
+                                     <Text style={{ color: themeColors.danger, fontWeight: '600', fontSize: 13 }}>
+                                       Dejar en blanco (Sin sucursal)
+                                     </Text>
+                                   </TouchableOpacity>
 
                                    {filteredSucursales.map((suc, index, array) => (
                                       <TouchableOpacity
@@ -1692,9 +1726,6 @@ export default function GastoForm() {
                                        <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 4 }}>
                                          No hay sucursales registradas para este cliente.
                                        </Text>
-                                       <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
-                                         Escribe arriba en el buscador para agregar una nueva.
-                                       </Text>
                                      </View>
                                    )}
                                  </>
@@ -1705,6 +1736,23 @@ export default function GastoForm() {
                       </Pressable>
                     )}
                   </View>
+
+                  {/* Campo obligatorio de Sucursal a agregar si no se seleccionó sucursal */}
+                  {!sucursal && selectedCliente ? (
+                    <View style={{ marginBottom: Spacing.three }}>
+                      <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal a agregar *</Text>
+                      <CustomInput
+                        placeholder="Escribe el nombre de la sucursal..."
+                        value={comentarioSucursal}
+                        onChangeText={setComentarioSucursal}
+                        iconName="business-outline"
+                      />
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4, marginLeft: 4 }}>
+                        El administrador se encargará de registrar esta sucursal.
+                      </Text>
+                    </View>
+                  ) : null}
+
                 </>
               ) : (
                 <View style={{ marginBottom: Spacing.three }}>
@@ -1804,6 +1852,7 @@ export default function GastoForm() {
 
                       setNewSplitClienteId('');
                       setNewSplitSucursalNombre('');
+                      setNewSplitComentarioSucursal('');
                       setNewSplitMonto(remainder > 0 ? remainder.toFixed(2) : '');
                       setSplitClienteSearch('');
                       setSplitSucursalSearch('');
@@ -1925,7 +1974,7 @@ export default function GastoForm() {
                   <View>
                     <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13, marginBottom: Spacing.one }]}>Selecciona la Tarjeta *</Text>
                     <View style={styles.paymentSelector}>
-                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE'] as const).map((card) => (
+                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX'] as const).map((card) => (
                         <TouchableOpacity
                           key={card}
                           onPress={() => setTipoTarjeta(card)}
@@ -2476,6 +2525,20 @@ export default function GastoForm() {
 
                               return (
                                 <>
+                                  <TouchableOpacity
+                                    style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '10', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                    onPress={() => {
+                                      setNewSplitSucursalNombre('');
+                                      setSplitSucursalSearch('');
+                                      setShowNewSplitSucDropdown(false);
+                                    }}
+                                  >
+                                    <Ionicons name="close-circle-outline" size={24} color={themeColors.danger} />
+                                    <Text style={{ color: themeColors.danger, fontWeight: '600', fontSize: 13 }}>
+                                      Dejar en blanco (Sin sucursal)
+                                    </Text>
+                                  </TouchableOpacity>
+
                                   {splitSucursalSearch.trim().length > 0 && !existsExact && currentCli && (
                                     <TouchableOpacity
                                       style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
@@ -2536,6 +2599,21 @@ export default function GastoForm() {
                     )}
                   </View>
 
+                  {!newSplitSucursalNombre && newSplitClienteId ? (
+                    <View style={{ marginTop: Spacing.two, zIndex: 105 }}>
+                      <CustomInput
+                        label="Sucursal a agregar *"
+                        placeholder="Escribe el nombre de la sucursal..."
+                        value={newSplitComentarioSucursal}
+                        onChangeText={setNewSplitComentarioSucursal}
+                        iconName="business-outline"
+                      />
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4, marginLeft: 4 }}>
+                        El administrador se encargará de registrar esta sucursal.
+                      </Text>
+                    </View>
+                  ) : null}
+
                   {/* Monto Asignado */}
                   <View style={{ marginTop: Spacing.two, zIndex: 1 }}>
                     <CustomInput
@@ -2585,8 +2663,8 @@ export default function GastoForm() {
                           showAlert('Atención', 'Por favor selecciona un cliente.');
                           return;
                         }
-                        if (!newSplitSucursalNombre.trim()) {
-                          showAlert('Atención', 'Por favor selecciona o agrega una sucursal para el cliente.');
+                        if (!newSplitSucursalNombre.trim() && !newSplitComentarioSucursal.trim()) {
+                          showAlert('Atención', 'Por favor selecciona la sucursal para el cliente o indica una nueva.');
                           return;
                         }
                         if (!newSplitMonto || isNaN(Number(newSplitMonto)) || Number(newSplitMonto) <= 0) {
@@ -2599,7 +2677,7 @@ export default function GastoForm() {
                           showAlert('Atención', `El monto ingresado excede el total del ticket ($${totalGasto.toFixed(2)}). Restante: $${(totalGasto - currentSum).toFixed(2)}`);
                           return;
                         }
-                        setSplits([...splits, { id: Date.now().toString(), clienteId: newSplitClienteId, sucursalNombre: newSplitSucursalNombre, monto: newSplitMonto }]);
+                        setSplits([...splits, { id: Date.now().toString(), clienteId: newSplitClienteId, sucursalNombre: newSplitSucursalNombre, comentarioSucursal: newSplitComentarioSucursal, monto: newSplitMonto }]);
                         setShowSplitModal(false);
                       }}
                       style={{ flex: 1 }}

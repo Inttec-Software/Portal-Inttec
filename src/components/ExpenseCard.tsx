@@ -176,7 +176,18 @@ export default function ExpenseCard({
             <Text style={{fontWeight: '600', color: themeColors.text}}>Sucursal: </Text>
             {sucursalNombre}
           </Text>
-        ) : null}
+        ) : (
+          (() => {
+            const match = gasto.justificacion?.match(/\[Sucursal a agregar:\s*([^\]]+)\]/);
+            const sucSugerida = match ? match[1].trim() : null;
+            return sucSugerida ? (
+              <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
+                <Text style={{fontWeight: '600', color: themeColors.text}}>Sucursal: </Text>
+                <Text style={{ color: themeColors.warning, fontWeight: '500' }}>[Pendiente: {sucSugerida}]</Text>
+              </Text>
+            ) : null;
+          })()
+        )}
       </View>
 
       {/* Footer: Fecha & Monto */}
@@ -188,16 +199,16 @@ export default function ExpenseCard({
         <Text style={[styles.monto, { color: themeColors.text }]}>{montoFormatted}</Text>
       </View>
 
-      {gasto.status === 'ACTION_REQUIRED' && gasto.rejection_feedback && (
-        <View style={[styles.feedbackContainer, { backgroundColor: themeColors.actionRequired + '08' }]}>
-          <Text style={[styles.feedbackTitle, { color: themeColors.actionRequired }]}>
-            Nota de revisión:
+      {gasto.rejection_feedback ? (
+        <View style={[styles.feedbackContainer, { backgroundColor: statusColor + '10' }]}>
+          <Text style={[styles.feedbackTitle, { color: statusColor }]}>
+            {gasto.status === 'APPROVED' ? 'Revisión:' : gasto.status === 'REJECTED' ? 'Motivo de rechazo:' : 'Nota de revisión:'}
           </Text>
-          <Text style={[styles.feedbackText, { color: themeColors.text }]} numberOfLines={2}>
-            {`"${gasto.rejection_feedback}"`}
+          <Text style={[styles.feedbackText, { color: themeColors.text }]} numberOfLines={3}>
+            {gasto.rejection_feedback.startsWith('[') ? gasto.rejection_feedback : `"${gasto.rejection_feedback}"`}
           </Text>
         </View>
-      )}
+      ) : null}
     </TouchableOpacity>
   );
 }

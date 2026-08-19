@@ -76,7 +76,6 @@ export default function NuevaCotizacionScreen() {
     setCotizacion(prev => ({...prev, clienteNombre: text}));
     if (text.length < 2) {
       setClientSearchResults([]);
-      setShowClientResults(false);
       return;
     }
     const { data } = await supabase
@@ -87,10 +86,8 @@ export default function NuevaCotizacionScreen() {
     
     if (data && data.length > 0) {
       setClientSearchResults(data);
-      setShowClientResults(true);
     } else {
       setClientSearchResults([]);
-      setShowClientResults(false);
     }
   };
 
@@ -101,21 +98,9 @@ export default function NuevaCotizacionScreen() {
       clienteRFC: client.rfc || '',
       clienteCorreo: client.correo_electronico || '',
       clienteCP: client.codigo_postal || '',
-      direccionFactura: client.direccion || '',
-      sucursal: '',
+      direccionFactura: client.direccion || ''
     }));
     setShowClientResults(false);
-    
-    // Fetch sucursales for this client
-    const fetchSuc = async () => {
-      const { data } = await supabase.from('sucursales_cliente').select('*').eq('cliente_id', client.id);
-      if (data && data.length > 0) {
-        setSucursales(data);
-      } else {
-        setSucursales([]);
-      }
-    };
-    fetchSuc();
   };
 
   const searchProducts = async (lineId: string, text: string) => {
@@ -126,17 +111,14 @@ export default function NuevaCotizacionScreen() {
       return { ...prev, lineas: newLineas };
     });
 
-    if (text.length < 2) {
-      setProductSearchResults([]);
-      setActiveProductLineId(null);
-      return;
-    }
     setActiveProductLineId(lineId);
-    const { data } = await supabase
-      .from('productos')
-      .select('*')
-      .ilike('nombre_oficial', `%${text}%`)
-      .limit(5);
+
+    let query = supabase.from('productos').select('*').limit(15);
+    if (text.trim().length > 0) {
+      query = query.ilike('nombre_oficial', `%${text}%`);
+    }
+
+    const { data } = await query;
     
     if (data && data.length > 0) {
       setProductSearchResults(data);
@@ -202,18 +184,32 @@ export default function NuevaCotizacionScreen() {
       }
 
       const fetchLastFolio = async () => {
+        // Obtenemos la fecha actual en formato YYYY/MM/DD
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        const datePrefix = `${year}/${month}/${day}/`;
+
         const { data, error } = await supabase
           .from('cotizaciones')
           .select('folio')
+          .ilike('folio', `${datePrefix}%`)
           .order('folio', { ascending: false })
           .limit(1);
         
+        let newSequential = 1;
         if (!error && data && data.length > 0) {
-          const lastFolio = parseInt(data[0].folio, 10);
-          if (!isNaN(lastFolio)) {
-            setCotizacion(prev => ({ ...prev, numeroCotizacion: (lastFolio + 1).toString() }));
+          const lastFolio = data[0].folio;
+          const parts = lastFolio.split('/');
+          const lastNum = parseInt(parts[parts.length - 1], 10);
+          if (!isNaN(lastNum)) {
+            newSequential = lastNum + 1;
           }
         }
+        
+        const nextFolio = `${datePrefix}${String(newSequential).padStart(3, '0')}`;
+        setCotizacion(prev => ({ ...prev, numeroCotizacion: nextFolio }));
       };
       
       fetchLastFolio();
@@ -330,9 +326,15 @@ export default function NuevaCotizacionScreen() {
               clave_facturacion: linea.claveFacturacion || null
             }).eq('id', linea.productoId);
           } else {
-            // Producto nuevo: crear con categoria generica y SKU temporal
             const { data: catData } = await supabase.from('categorias_productos').select('id').limit(1);
             let categoriaId = catData && catData.length > 0 ? catData[0].id : null;
+            
+            if (!categoriaId) {
+              const { data: newCat, error: errCat } = await supabase.from('categorias_productos').insert({ nombre: 'General' }).select('id').single();
+              if (newCat && !errCat) {
+                categoriaId = newCat.id;
+              }
+            }
             
             const tempSku = `TEMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
             
@@ -349,11 +351,15 @@ export default function NuevaCotizacionScreen() {
               
               if (newProd && !prodErr) {
                 linea.productoId = newProd.id;
+              } else if (prodErr) {
+                console.error("Error al crear nuevo producto:", prodErr);
               }
+            } else {
+              console.error("No se pudo obtener ni crear una categoría, el producto no fue guardado.");
             }
           }
         } catch (e) {
-          console.error('No se pudo guardar/actualizar el producto', e);
+          console.error('Excepción al guardar/actualizar producto:', e);
         }
       }
 
@@ -370,7 +376,6 @@ export default function NuevaCotizacionScreen() {
         iva,
         total,
         lineas: lineasClonadas,
-        sucursal: cotizacion.sucursal || null,
         terminos_condiciones: cotizacion.terminosCondiciones,
         estado: cotizacion.estado || 'Borrador'
       };
@@ -564,66 +569,7 @@ export default function NuevaCotizacionScreen() {
                 )}
               </View>
 
-              {/* Sucursal premium */}
-              {sucursales.length > 0 && (
-                <View style={{ zIndex: 2000, marginBottom: Spacing.two }}>
-                  <ThemedText style={{ fontSize: 13, fontWeight: '700', color: themeColors.textSecondary, marginBottom: Spacing.one }}>SUCURSAL DEL CLIENTE</ThemedText>
-                  <TouchableOpacity
-                    onPress={() => {
-                      Keyboard.dismiss();
-                      setShowSucursalDropdown(!showSucursalDropdown);
-                      setShowClientResults(false);
-                    }}
-                    style={{
-                      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-                      backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border,
-                      borderRadius: 12, padding: 14, height: 50,
-                    }}
-                  >
-                    <ThemedText style={{ color: cotizacion.sucursal ? themeColors.text : themeColors.textSecondary }}>
-                      {cotizacion.sucursal || 'Selecciona una sucursal'}
-                    </ThemedText>
-                    <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={20} color={themeColors.textSecondary} />
-                  </TouchableOpacity>
-                  {showSucursalDropdown && (
-                    <View style={{
-                      backgroundColor: themeColors.backgroundElement,
-                      borderWidth: 1, borderColor: themeColors.border,
-                      borderRadius: 16, marginTop: 6,
-                      shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, elevation: 5,
-                    }}>
-                      <CustomInput
-                        placeholder="Buscar sucursal..."
-                        value={sucursalSearch}
-                        onChangeText={setSucursalSearch}
-                        iconName="search-outline"
-                        style={{ margin: Spacing.one, height: 40 }}
-                      />
-                      <ScrollView style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-                        {(() => {
-                          const filteredSucursales = sucursales.filter(s => s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase()));
-                          if (filteredSucursales.length === 0) {
-                            return <ThemedText style={{ padding: Spacing.two, color: themeColors.textSecondary }}>No hay sucursales.</ThemedText>;
-                          }
-                          return filteredSucursales.map((suc, index, array) => (
-                          <TouchableOpacity
-                            key={suc.id}
-                            onPress={() => {
-                              setCotizacion(prev => ({...prev, sucursal: suc.nombre}));
-                              setShowSucursalDropdown(false);
-                            }}
-                            style={{ padding: 12, borderBottomWidth: index === array.length - 1 ? 0 : 0.5, borderBottomColor: themeColors.border,
-                              flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}
-                          >
-                            <Ionicons name="business-outline" size={24} color={themeColors.primary} />
-                            <ThemedText style={{ fontWeight: '600', color: themeColors.text }}>{suc.nombre}</ThemedText>
-                          </TouchableOpacity>
-                        ))})()}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-              )}
+
               <View style={{ flexDirection: 'row', gap: Spacing.two, zIndex: 1, marginTop: Spacing.one }}>
                 <View style={{ flex: 1 }}>
                   <CustomInput 
@@ -748,7 +694,7 @@ export default function NuevaCotizacionScreen() {
                 </View>
 
                 {/* Inputs Producto (Nombre y Descripcion) */}
-                  <View style={{ position: 'relative', zIndex: activeProductLineId === linea.id ? 2 : 1 }}>
+                  <View style={{ position: 'relative', zIndex: activeProductLineId === linea.id ? 9999 : 1 }}>
                     <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Nombre del producto</ThemedText>
                     <TextInput
                       style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
@@ -756,10 +702,16 @@ export default function NuevaCotizacionScreen() {
                       placeholderTextColor={themeColors.textSecondary}
                       value={linea.productoNombre}
                       onChangeText={(t) => searchProducts(linea.id, t)}
+                      onFocus={() => searchProducts(linea.id, linea.productoNombre)}
+                      onBlur={() => {
+                        setTimeout(() => {
+                          setActiveProductLineId((current) => current === linea.id ? null : current);
+                        }, 200);
+                      }}
                     />
                     {activeProductLineId === linea.id && productSearchResults.length > 0 && (
-                      <View style={[styles.autocompleteContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, top: 75, zIndex: 10 }]}>
-                        <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 150 }}>
+                      <View style={[styles.autocompleteContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, top: 75, zIndex: 9999 }]}>
+                        <ScrollView nestedScrollEnabled={true} keyboardShouldPersistTaps="handled" style={{ maxHeight: 200 }}>
                           {productSearchResults.map((prod) => (
                             <TouchableOpacity 
                               key={prod.id} 

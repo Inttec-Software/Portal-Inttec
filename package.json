@@ -11,6 +11,7 @@
     "@supabase/supabase-js": "^2.108.1",
     "expo": "~56.0.16",
     "expo-application": "~56.0.3",
+    "expo-blob": "^57.0.1",
     "expo-camera": "~56.0.8",
     "expo-constants": "~56.0.22",
     "expo-device": "~56.0.4",
@@ -39,6 +40,7 @@
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
     "react-native-gesture-handler": "~2.31.1",
+    "react-native-image-zoom-viewer": "^3.0.1",
     "react-native-maps": "1.27.2",
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
@@ -61,7 +63,11 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "db:logs": "docker compose logs -f"
   },
   "private": true
 }

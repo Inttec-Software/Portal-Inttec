@@ -35,6 +35,7 @@ const TARJETAS = [
   { key: 'AMEX',    label: 'AMEX',     color: '#016FD0' },
   { key: 'MARRIOT', label: 'Marriott', color: '#B5121B' },
   { key: 'BANORTE', label: 'Banorte',  color: '#C8102E' },
+  { key: 'INVEX',   label: 'Invex',    color: '#F48220' },
 ];
 
 const TIPOS_PAGO = [
@@ -68,7 +69,7 @@ const AMOUNT_TOLERANCE = 0.05;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TarjetaKey = 'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE';
+type TarjetaKey = 'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX';
 type MetodoPagoKey = 'tarjeta_credito' | 'tarjeta_debito' | 'tarjeta';
 
 interface MatchedTransaction {
@@ -161,11 +162,21 @@ export default function AuditoriaTarjetaScreen() {
         if (Platform.OS !== 'web') {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const FileSys = require('expo-file-system/legacy');
-          const tempFileName = `temp_${Date.now()}_${asset.name || 'estado.pdf'}`;
-          const targetUri = `${FileSys.cacheDirectory}${tempFileName}`;
-          await FileSys.copyAsync({ from: uri, to: targetUri });
-          const b64 = await FileSys.readAsStringAsync(targetUri, {
-            encoding: FileSys.EncodingType.Base64,
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.onload = () => {
+              try {
+                // Buffer is available globally in React Native / Expo
+                const base64Str = Buffer.from(xhr.response).toString('base64');
+                resolve(base64Str);
+              } catch (e) {
+                reject(e);
+              }
+            };
+            xhr.onerror = reject;
+            xhr.responseType = 'arraybuffer';
+            xhr.open('GET', uri, true);
+            xhr.send(null);
           });
           setFileBase64(b64);
         } else {
@@ -1139,12 +1150,7 @@ export default function AuditoriaTarjetaScreen() {
 
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity
-          onPress={() => router.replace('/(admin)/dashboard' as any)}
-          style={styles.backBtn}
-        >
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        
         <View>
           <Text style={[styles.headerTitle, { color: themeColors.text }]}>Auditoría de Tarjeta</Text>
           <Text style={[styles.headerSub, { color: themeColors.textSecondary }]}>

@@ -368,14 +368,11 @@ export default function CatalogosManager() {
   const parentCatName = categorias.find((c) => c.id === selectedParentCatId)?.nombre;
   const editParentCatName = categorias.find((c) => c.id === editParentCatId)?.nombre;
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <View style={isDesktop ? { maxWidth: 800, width: '100%', alignSelf: 'center', flex: 1, paddingHorizontal: Spacing.two } : { flex: 1 }}>
+  const renderScreenHeader = () => (
+    <View>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-          </TouchableOpacity>
+          
           <Text style={[styles.headerTitle, { color: themeColors.text }]}>Catálogos de Empresa</Text>
           <TouchableOpacity
             onPress={() => {
@@ -556,6 +553,13 @@ export default function CatalogosManager() {
         </View>
       )}
 
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <View style={{ flex: 1 }}>
+      <View style={isDesktop ? { maxWidth: 800, width: '100%', alignSelf: 'center', flex: 1, paddingHorizontal: Spacing.two } : { flex: 1 }}>
       {/* List */}
       {isLoading ? (
         <View style={styles.loaderContainer}>
@@ -563,7 +567,7 @@ export default function CatalogosManager() {
           <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando catálogo...</Text>
         </View>
       ) : (
-        <FlatList
+        <FlatList scrollEnabled={true} style={{ flex: 1 }} ListHeaderComponent={renderScreenHeader}
           data={
             activeCatalog === 'categorias'
               ? categorias
@@ -1019,7 +1023,7 @@ export default function CatalogosManager() {
                 <ActivityIndicator color={themeColors.primary} />
               </View>
             ) : (
-              <FlatList
+              <FlatList scrollEnabled={false}
                 data={clientSucursales}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={{ paddingBottom: Spacing.four }}
@@ -1154,6 +1158,7 @@ export default function CatalogosManager() {
         </View>
       </Modal>
 
+      </View>
     </SafeAreaView>
   );
 }

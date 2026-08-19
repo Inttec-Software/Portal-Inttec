@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
+import { ScrollView,  View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator, Alert  } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -88,7 +88,12 @@ export default function AdminChatIA() {
               gasolinaData,
               auditoriasData,
               clientesData,
-              sucursalesData
+              sucursalesData,
+              productosData,
+              categoriasProductosData,
+              proveedoresData,
+              movimientosData,
+              cotizacionesData
             ] = await Promise.all([
               safeFetch(client, 'gastos'),
               safeFetch(client, 'ventas'),
@@ -99,7 +104,12 @@ export default function AdminChatIA() {
               safeFetch(client, 'registro_gasolina'),
               safeFetch(client, 'auditorias_tarjeta'),
               safeFetch(client, 'clientes'),
-              safeFetch(client, 'sucursales_cliente')
+              safeFetch(client, 'sucursales_cliente'),
+              safeFetch(client, 'productos'),
+              safeFetch(client, 'categorias_productos'),
+              safeFetch(client, 'proveedores'),
+              safeFetch(client, 'movimientos_inventario'),
+              safeFetch(client, 'cotizaciones')
             ]);
 
             const userMap: Record<string, string> = {};
@@ -140,7 +150,12 @@ export default function AdminChatIA() {
               registro_gasolina: gasolina,
               auditorias_tarjeta: auditoriasData.map((aud: any) => ({ ...aud, empresa: companyName })),
               clientes: clientesData,
-              sucursales_cliente: sucursalesData
+              sucursales_cliente: sucursalesData,
+              productos: productosData,
+              categorias_productos: categoriasProductosData,
+              proveedores: proveedoresData,
+              movimientos_inventario: movimientosData,
+              cotizaciones: cotizacionesData
             };
           } catch (e) {
             logger.error(`Error fetching data for ${companyName}:`, e);
@@ -240,15 +255,10 @@ export default function AdminChatIA() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'bottom']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity 
-          onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} 
-          style={styles.backButton}
-        >
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        
         <View style={styles.headerTitleContainer}>
           <Ionicons name="sparkles" size={20} color="#8b5cf6" />
           <View>
@@ -263,8 +273,8 @@ export default function AdminChatIA() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 80}
       >
         {/* Chat Messages */}
         <FlatList
@@ -363,7 +373,7 @@ export default function AdminChatIA() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -6,7 +6,9 @@ const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const FALLBACK_MODELS = [
   'gemini-3.5-flash',
   'gemini-2.5-flash',
-];
+]; 
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export interface GeminiOcrResult {
   monto: number | null;
@@ -163,30 +165,43 @@ async function callGeminiAPI(requestBody: any): Promise<string> {
   let lastErrorMsg = '';
 
   for (const model of FALLBACK_MODELS) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+    let retries = 0;
+    while (retries < 2) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
 
-      if (response.ok) {
-        const resData = await response.json();
-        const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (textResult) {
-          return textResult.trim();
+        if (response.ok) {
+          const resData = await response.json();
+          const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (textResult) {
+            return textResult.trim();
+          }
+          break;
+        } else if (response.status === 429 || response.status === 503) {
+          retries++;
+          const errorText = await response.text();
+          logger.warn(`Modelo Gemini ${model} rate-limited/overloaded (${response.status}). Intento ${retries} de 2...`);
+          await sleep(2000 * retries); // 2s, then 4s
+          lastErrorMsg = `Respuesta ${response.status}`;
+          continue;
+        } else {
+          const errorText = await response.text();
+          logger.warn(`Modelo Gemini ${model} falló con código ${response.status}: ${errorText}`);
+          lastErrorMsg = `Respuesta ${response.status}`;
+          break;
         }
-      } else {
-        const errorText = await response.text();
-        logger.warn(`Modelo Gemini ${model} falló con código ${response.status}: ${errorText}`);
-        lastErrorMsg = `Respuesta ${response.status}`;
+      } catch (err: any) {
+        logger.warn(`Excepción en petición a modelo ${model}:`, err);
+        lastErrorMsg = err.message || 'Error de conexión';
+        break;
       }
-    } catch (err: any) {
-      logger.warn(`Excepción en petición a modelo ${model}:`, err);
-      lastErrorMsg = err.message || 'Error de conexión';
     }
   }
 
@@ -205,24 +220,36 @@ async function callGeminiRaw(requestBody: any): Promise<any> {
   let lastErrorMsg = '';
 
   for (const model of FALLBACK_MODELS) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
+    let retries = 0;
+    while (retries < 2) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
 
-      if (response.ok) {
-        return await response.json();
-      } else {
-        const errorText = await response.text();
-        logger.warn(`Modelo Gemini ${model} falló en callGeminiRaw: ${errorText}`);
-        lastErrorMsg = `Respuesta ${response.status}`;
+        if (response.ok) {
+          return await response.json();
+        } else if (response.status === 429 || response.status === 503) {
+          retries++;
+          const errorText = await response.text();
+          logger.warn(`Modelo Gemini ${model} rate-limited/overloaded en callGeminiRaw (${response.status}). Intento ${retries} de 2...`);
+          await sleep(2000 * retries);
+          lastErrorMsg = `Respuesta ${response.status}`;
+          continue;
+        } else {
+          const errorText = await response.text();
+          logger.warn(`Modelo Gemini ${model} falló en callGeminiRaw: ${errorText}`);
+          lastErrorMsg = `Respuesta ${response.status}`;
+          break;
+        }
+      } catch (err: any) {
+        logger.warn(`Excepción en callGeminiRaw a modelo ${model}:`, err);
+        lastErrorMsg = err.message || 'Error de conexión';
+        break;
       }
-    } catch (err: any) {
-      logger.warn(`Excepción en callGeminiRaw a modelo ${model}:`, err);
-      lastErrorMsg = err.message || 'Error de conexión';
     }
   }
 
@@ -504,6 +531,7 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 
@@ -584,6 +612,7 @@ Formato de Salida: Devuelve strictly un objeto JSON con esta estructura, sin tex
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 
@@ -690,6 +719,7 @@ Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin mark
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 
@@ -734,7 +764,8 @@ REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
    - Presenta una tabla o lista ordenada con: Nombre de Sucursal, Cliente, Total Gastado ($ MXN) y Cantidad de Gastos.
 4. Si un gasto no tiene sucursal especificada, aparecerá clasificado como "Sin sucursal asignada".
 5. Si buscas por cliente, categoría, proveedor o empleado, usa los filtros correspondientes en "buscar_gastos".
-6. Formato de presentación:
+6. Tienes acceso a Inventario, Productos, Proveedores y Cotizaciones. Utiliza las herramientas buscar_productos, buscar_proveedores y buscar_cotizaciones para consultas sobre estos módulos.
+7. Formato de presentación:
    - Usa Markdown estructurado (tablas o viñetas en negrita).
    - Formatea todas las cantidades como moneda MXN con separador de miles y dos decimales (ejemplo: $24,580.50 MXN).
    - Sé claro, profesional, conciso y directo al grano.
@@ -810,6 +841,39 @@ REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
             properties: {
               empleado_nombre: { type: "STRING", description: "Filtra por nombre de empleado" },
               fecha: { type: "STRING", description: "Fecha específica (YYYY-MM-DD)" }
+            }
+          }
+        },
+        {
+          name: "buscar_productos",
+          description: "Busca en el inventario de productos. Retorna el stock actual, precio y detalles. Filtra por nombre, sku, activo, o bajo_stock.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              texto_busqueda: { type: "STRING", description: "Filtra por nombre o sku_interno del producto" },
+              bajo_stock: { type: "BOOLEAN", description: "Si es true, devuelve solo productos con stock = 0" },
+              activo: { type: "BOOLEAN", description: "Filtra por estatus del producto" }
+            }
+          }
+        },
+        {
+          name: "buscar_proveedores",
+          description: "Busca información de los proveedores registrados y sus RFCs.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              nombre: { type: "STRING", description: "Nombre del proveedor a buscar" }
+            }
+          }
+        },
+        {
+          name: "buscar_cotizaciones",
+          description: "Busca cotizaciones generadas. Filtra por folio, cliente, vendedor o estado.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              cliente: { type: "STRING", description: "Filtra por nombre de cliente" },
+              estado: { type: "STRING", description: "Filtra por estado (Borrador, Enviada, Aprobada, Rechazada)" }
             }
           }
         }
@@ -1053,6 +1117,43 @@ REGLAS DE ORO PARA CÁLCULOS Y SUCURSALES:
           total_registros: asist.length,
           asistencias_detalle: minifyData(asist).slice(0, 30)
         };
+      },
+
+      buscar_productos: (args: any) => {
+        let result = (contextData.datos_empresa_actual_autenticada?.productos || []) as any[];
+        if (args.texto_busqueda) {
+          const q = normStr(args.texto_busqueda);
+          result = result.filter(p => normStr(p.nombre_oficial).includes(q) || normStr(p.sku_interno).includes(q));
+        }
+        if (args.bajo_stock === true) {
+          result = result.filter(p => (Number(p.stock_actual) || 0) <= 0);
+        }
+        if (args.activo !== undefined) {
+          result = result.filter(p => p.activo === args.activo);
+        }
+        return { total_resultados: result.length, productos: minifyData(result).slice(0, 50) };
+      },
+
+      buscar_proveedores: (args: any) => {
+        let result = (contextData.datos_empresa_actual_autenticada?.proveedores || []) as any[];
+        if (args.nombre) {
+          const q = normStr(args.nombre);
+          result = result.filter(p => normStr(p.nombre).includes(q));
+        }
+        return { total_resultados: result.length, proveedores: minifyData(result).slice(0, 50) };
+      },
+
+      buscar_cotizaciones: (args: any) => {
+        let result = (contextData.datos_empresa_actual_autenticada?.cotizaciones || []) as any[];
+        if (args.cliente) {
+          const q = normStr(args.cliente);
+          result = result.filter(c => normStr(c.cliente_nombre).includes(q));
+        }
+        if (args.estado) {
+          const q = normStr(args.estado);
+          result = result.filter(c => normStr(c.estado).includes(q));
+        }
+        return { total_resultados: result.length, cotizaciones: minifyData(result).slice(0, 50) };
       }
     };
 

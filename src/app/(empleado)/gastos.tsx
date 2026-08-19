@@ -25,6 +25,7 @@ import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import PendingTasksPopover from '@/components/PendingTasksPopover';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 
@@ -32,11 +33,11 @@ import { useAuth } from '@/context/AuthContext';
 
 
 
-export default function EmpleadoDashboard() {
+export default function EmpleadoGastos() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { setUser: setAuthUser, company, changeCompany } = useAuth();
+  const { setUser: setAuthUser, company, changeCompany, env, changeEnv } = useAuth();
 
   const [user, setUser] = useState<Usuario | null>(null);
   const [gastos, setGastos] = useState<Gasto[]>([]);
@@ -44,6 +45,7 @@ export default function EmpleadoDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showTasksPopover, setShowTasksPopover] = useState(false);
 
   // Modal de Detalles
   const [selectedGasto, setSelectedGasto] = useState<(Gasto & { isOffline?: boolean }) | null>(null);
@@ -364,7 +366,7 @@ export default function EmpleadoDashboard() {
 
     return () => unsubscribe();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company]);
+  }, [company, env]);
 
   useEffect(() => {
     if (!user) return;
@@ -578,20 +580,63 @@ export default function EmpleadoDashboard() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary }]}>Bienvenido de nuevo,</Text>
-          <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
-            {user?.nombre || 'Empleado'}
-          </Text>
+      {/* Header Card Premium */}
+      <View style={[
+        styles.headerCard, 
+        { 
+          backgroundColor: themeColors.backgroundElement, 
+          borderColor: themeColors.border,
+          shadowColor: themeColors.text
+        }
+      ]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: Spacing.two }}>
+          <TouchableOpacity 
+            onPress={handleOpenProfile} 
+            style={[styles.headerAvatar, { backgroundColor: themeColors.primary + '15' }]}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.headerAvatarText, { color: themeColors.primary }]}>
+              {user?.nombre ? user.nombre.charAt(0).toUpperCase() : 'E'}
+            </Text>
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary }]}>¡Hola de nuevo!</Text>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
+              {user?.nombre || 'Empleado'}
+            </Text>
+          </View>
         </View>
+
         <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={() => setShowTasksPopover(true)}
+            style={[styles.headerIconBtn, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)' }]}
+          >
+            <Ionicons name="notifications-outline" size={20} color={themeColors.text} />
+          </TouchableOpacity>
+
+          {user?.rol === 'DEV' && (
+            <View style={{ flexDirection: 'row', gap: 8, marginRight: 8 }}>
+              <TouchableOpacity
+                onPress={() => changeEnv(env === 'cloud' ? 'test' : 'cloud')}
+                style={[styles.headerIconBtn, { backgroundColor: env === 'cloud' ? themeColors.primary + '15' : Colors.light.danger + '15' }]}
+              >
+                <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={20} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.replace('/(admin)/dashboard')}
+                style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
+              >
+                <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
+              </TouchableOpacity>
+            </View>
+          )}
+
           {offlineGastos.length > 0 && (
             <TouchableOpacity
               onPress={handleSyncManual}
               disabled={isSyncing}
-              style={[styles.headerIconBtn, { backgroundColor: themeColors.warning + '20' }]}
+              style={[styles.headerIconBtn, { backgroundColor: themeColors.warning + '15' }]}
             >
               {isSyncing ? (
                 <ActivityIndicator size="small" color={themeColors.warning} />
@@ -600,30 +645,6 @@ export default function EmpleadoDashboard() {
               )}
             </TouchableOpacity>
           )}
-          <TouchableOpacity
-            onPress={() => router.push('/(empleado)/trabajo')}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
-          >
-            <Ionicons name="briefcase-outline" size={20} color={themeColors.accent} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setEmployeeVehiculosModalVisible(true)}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
-          >
-            <Ionicons name="car-outline" size={20} color={themeColors.accent} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleOpenProfile}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
-          >
-            <Ionicons name="person-circle-outline" size={20} color={themeColors.accent} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleLogout}
-            style={[styles.headerIconBtn, { backgroundColor: themeColors.backgroundElement }]}
-          >
-            <Ionicons name="log-out-outline" size={20} color={themeColors.danger} />
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -681,6 +702,11 @@ export default function EmpleadoDashboard() {
           </TouchableOpacity>
         </View>
       </View>
+
+      <PendingTasksPopover 
+        visible={showTasksPopover} 
+        onClose={() => setShowTasksPopover(false)} 
+      />
 
       {/* Resumen Cards */}
       <View style={styles.summaryContainer}>
@@ -769,30 +795,8 @@ export default function EmpleadoDashboard() {
         />
       )}
 
-      {/* IA Button (Left Side) */}
-      <TouchableOpacity
-        activeOpacity={0.8}
-        onPress={() => router.push('/(empleado)/chat-ia')}
-        style={[styles.fabSecondary, { position: 'absolute', bottom: Spacing.four, left: Spacing.four, backgroundColor: '#8b5cf6' }]}
-      >
-        <Ionicons name="sparkles" size={22} color="#ffffff" />
-      </TouchableOpacity>
-
       {/* Floating Action Buttons (Right Side) */}
       <View style={styles.fabContainer}>
-        {/* Auto-Checador */}
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={handleOpenChecador}
-          disabled={isLoadingChecador}
-          style={[styles.fabSecondary, { backgroundColor: themeColors.success }]}
-        >
-          {isLoadingChecador ? (
-            <ActivityIndicator size="small" color="#ffffff" />
-          ) : (
-            <Ionicons name="finger-print" size={22} color="#ffffff" />
-          )}
-        </TouchableOpacity>
         {/* Registrar Gasto */}
         <TouchableOpacity
           activeOpacity={0.8}
@@ -1484,29 +1488,52 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
+  headerCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    marginHorizontal: Spacing.four,
+    marginTop: Spacing.two,
+    marginBottom: Spacing.two,
+    borderRadius: BorderRadius.large,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  headerTitle: {
-    fontSize: 24,
+  headerAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerAvatarText: {
+    fontSize: 22,
     fontWeight: '800',
   },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 2,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    gap: Spacing.one,
   },
   headerIconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.medium,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     justifyContent: 'center',
     alignItems: 'center',
   },

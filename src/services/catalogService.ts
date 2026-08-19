@@ -3,8 +3,8 @@ import {
   CatalogoItem,
   ClienteItem,
   CompanyService,
-  daravisaClient,
-  inttecClient,
+  getDaravisaClient,
+  getInttecClient,
   ProveedorItem,
   SubcategoriaItem,
   SucursalCliente,
@@ -33,8 +33,8 @@ export const CatalogService = {
     uso_cfdi?: string | null;
   }): Promise<ClienteItem> {
     const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? daravisaClient : inttecClient;
-    const secondaryClient = activeComp === 'daravisa' ? inttecClient : daravisaClient;
+    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
+    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
 
     const { data, error } = await primaryClient
       .from('clientes')
@@ -58,15 +58,15 @@ export const CatalogService = {
 
   async actualizarCliente(id: string, updates: Partial<ClienteItem>): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('clientes').update(updates).eq('id', id),
-      daravisaClient.from('clientes').update(updates).eq('id', id),
+      getInttecClient().from('clientes').update(updates).eq('id', id),
+      getDaravisaClient().from('clientes').update(updates).eq('id', id),
     ]);
   },
 
   async eliminarCliente(id: string): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('clientes').delete().eq('id', id),
-      daravisaClient.from('clientes').delete().eq('id', id),
+      getInttecClient().from('clientes').delete().eq('id', id),
+      getDaravisaClient().from('clientes').delete().eq('id', id),
     ]);
   },
 
@@ -78,8 +78,8 @@ export const CatalogService = {
     nombre: string;
   }): Promise<SucursalCliente> {
     const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? daravisaClient : inttecClient;
-    const secondaryClient = activeComp === 'daravisa' ? inttecClient : daravisaClient;
+    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
+    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
 
     const { data, error } = await primaryClient
       .from('sucursales_cliente')
@@ -103,15 +103,15 @@ export const CatalogService = {
 
   async actualizarSucursal(id: string, updates: Partial<SucursalCliente>): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('sucursales_cliente').update(updates).eq('id', id),
-      daravisaClient.from('sucursales_cliente').update(updates).eq('id', id),
+      getInttecClient().from('sucursales_cliente').update(updates).eq('id', id),
+      getDaravisaClient().from('sucursales_cliente').update(updates).eq('id', id),
     ]);
   },
 
   async eliminarSucursal(id: string): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('sucursales_cliente').delete().eq('id', id),
-      daravisaClient.from('sucursales_cliente').delete().eq('id', id),
+      getInttecClient().from('sucursales_cliente').delete().eq('id', id),
+      getDaravisaClient().from('sucursales_cliente').delete().eq('id', id),
     ]);
   },
 
@@ -123,8 +123,8 @@ export const CatalogService = {
     rfc?: string | null;
   }): Promise<ProveedorItem> {
     const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? daravisaClient : inttecClient;
-    const secondaryClient = activeComp === 'daravisa' ? inttecClient : daravisaClient;
+    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
+    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
 
     const { data, error } = await primaryClient
       .from('proveedores')
@@ -148,15 +148,15 @@ export const CatalogService = {
 
   async actualizarProveedor(id: string, updates: Partial<ProveedorItem>): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('proveedores').update(updates).eq('id', id),
-      daravisaClient.from('proveedores').update(updates).eq('id', id),
+      getInttecClient().from('proveedores').update(updates).eq('id', id),
+      getDaravisaClient().from('proveedores').update(updates).eq('id', id),
     ]);
   },
 
   async eliminarProveedor(id: string): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('proveedores').delete().eq('id', id),
-      daravisaClient.from('proveedores').delete().eq('id', id),
+      getInttecClient().from('proveedores').delete().eq('id', id),
+      getDaravisaClient().from('proveedores').delete().eq('id', id),
     ]);
   },
 
@@ -165,8 +165,8 @@ export const CatalogService = {
   // ==========================================
   async crearCategoria(categoriaData: { nombre: string }): Promise<CatalogoItem> {
     const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? daravisaClient : inttecClient;
-    const secondaryClient = activeComp === 'daravisa' ? inttecClient : daravisaClient;
+    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
+    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
 
     const { data, error } = await primaryClient
       .from('categorias')
@@ -187,15 +187,15 @@ export const CatalogService = {
 
   async actualizarCategoria(id: string, updates: { nombre: string }): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('categorias').update(updates).eq('id', id),
-      daravisaClient.from('categorias').update(updates).eq('id', id),
+      getInttecClient().from('categorias').update(updates).eq('id', id),
+      getDaravisaClient().from('categorias').update(updates).eq('id', id),
     ]);
   },
 
   async eliminarCategoria(id: string): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('categorias').delete().eq('id', id),
-      daravisaClient.from('categorias').delete().eq('id', id),
+      getInttecClient().from('categorias').delete().eq('id', id),
+      getDaravisaClient().from('categorias').delete().eq('id', id),
     ]);
   },
 
@@ -207,8 +207,8 @@ export const CatalogService = {
     categoria_id: string;
   }): Promise<SubcategoriaItem> {
     const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? daravisaClient : inttecClient;
-    const secondaryClient = activeComp === 'daravisa' ? inttecClient : daravisaClient;
+    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
+    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
 
     const { data, error } = await primaryClient
       .from('subcategorias')
@@ -229,15 +229,15 @@ export const CatalogService = {
 
   async actualizarSubcategoria(id: string, updates: { nombre?: string; categoria_id?: string }): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('subcategorias').update(updates).eq('id', id),
-      daravisaClient.from('subcategorias').update(updates).eq('id', id),
+      getInttecClient().from('subcategorias').update(updates).eq('id', id),
+      getDaravisaClient().from('subcategorias').update(updates).eq('id', id),
     ]);
   },
 
   async eliminarSubcategoria(id: string): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('subcategorias').delete().eq('id', id),
-      daravisaClient.from('subcategorias').delete().eq('id', id),
+      getInttecClient().from('subcategorias').delete().eq('id', id),
+      getDaravisaClient().from('subcategorias').delete().eq('id', id),
     ]);
   },
 
@@ -248,11 +248,11 @@ export const CatalogService = {
     nombre: string;
     email: string;
     password: string;
-    rol: 'ADMIN' | 'EMPLEADO';
+    rol: 'ADMIN' | 'EMPLEADO' | 'DEV';
     telefono?: string | null;
   }): Promise<Usuario> {
     // Insertar en AMBAS bases con el mismo payload para que el ID sea consistente
-    const { data, error } = await inttecClient
+    const { data, error } = await getInttecClient()
       .from('usuarios')
       .insert([usuarioData])
       .select()
@@ -261,7 +261,7 @@ export const CatalogService = {
     if (error) throw error;
 
     try {
-      await daravisaClient.from('usuarios').upsert([data]);
+      await getDaravisaClient().from('usuarios').upsert([data]);
     } catch (syncErr: any) {
       logger.error('[CatalogService] Error sincronizando usuario en Daravisa:', syncErr);
     }
@@ -277,15 +277,15 @@ export const CatalogService = {
     telefono?: string | null;
   }): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('usuarios').update(updates).eq('id', id),
-      daravisaClient.from('usuarios').update(updates).eq('id', id),
+      getInttecClient().from('usuarios').update(updates).eq('id', id),
+      getDaravisaClient().from('usuarios').update(updates).eq('id', id),
     ]);
   },
 
   async eliminarUsuario(id: string): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('usuarios').delete().eq('id', id),
-      daravisaClient.from('usuarios').delete().eq('id', id),
+      getInttecClient().from('usuarios').delete().eq('id', id),
+      getDaravisaClient().from('usuarios').delete().eq('id', id),
     ]);
   },
 
@@ -294,8 +294,8 @@ export const CatalogService = {
   // ==========================================
   async crearVehiculo(vehiculoData: Omit<Vehiculo, 'id' | 'created_at'>): Promise<Vehiculo> {
     const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? daravisaClient : inttecClient;
-    const secondaryClient = activeComp === 'daravisa' ? inttecClient : daravisaClient;
+    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
+    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
 
     const { data, error } = await primaryClient
       .from('vehiculos')
@@ -316,8 +316,8 @@ export const CatalogService = {
 
   async actualizarVehiculo(id: string, updates: Partial<Vehiculo>): Promise<Vehiculo> {
     const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? daravisaClient : inttecClient;
-    const secondaryClient = activeComp === 'daravisa' ? inttecClient : daravisaClient;
+    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
+    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
 
     const { data, error } = await primaryClient
       .from('vehiculos')
@@ -339,8 +339,8 @@ export const CatalogService = {
 
   async eliminarVehiculo(id: string): Promise<void> {
     await Promise.allSettled([
-      inttecClient.from('vehiculos').delete().eq('id', id),
-      daravisaClient.from('vehiculos').delete().eq('id', id),
+      getInttecClient().from('vehiculos').delete().eq('id', id),
+      getDaravisaClient().from('vehiculos').delete().eq('id', id),
     ]);
   }
 };

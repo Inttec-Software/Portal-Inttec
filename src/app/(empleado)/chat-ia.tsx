@@ -150,15 +150,10 @@ export default function EmployeeChatIA() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'bottom']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity 
-          onPress={() => router.canGoBack() ? router.back() : router.replace('/(empleado)/dashboard')} 
-          style={styles.backButton}
-        >
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
+        <View style={styles.backButton} />
         <View style={styles.headerTitleContainer}>
           <Ionicons name="sparkles" size={20} color="#8b5cf6" />
           <View>
@@ -173,8 +168,8 @@ export default function EmployeeChatIA() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 80}
       >
         {/* Chat Messages */}
         <FlatList
@@ -273,7 +268,7 @@ export default function EmployeeChatIA() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 

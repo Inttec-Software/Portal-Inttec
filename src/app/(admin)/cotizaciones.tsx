@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Platform, TextInput, Alert, useWindowDimensions, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -93,6 +93,13 @@ export default function CotizacionesListScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+
+  // Al volver a esta pantalla, cerrar automáticamente cualquier fila expandida
+  useFocusEffect(
+    useCallback(() => {
+      setExpandedRowId(null);
+    }, [])
+  );
 
   const filteredCotizaciones = cotizaciones.filter((cot) => {
     if (!searchQuery) return true;
@@ -352,13 +359,6 @@ export default function CotizacionesListScreen() {
         </View>
       </View>
       <View style={styles.desktopNavBarRight}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.push('/(admin)/dashboard')}
-        >
-          <Ionicons name="arrow-back" size={16} color="#ffffff" />
-          <Text style={styles.backButtonText}>Regresar al Dashboard</Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -407,9 +407,10 @@ export default function CotizacionesListScreen() {
         <Text style={[styles.tableHeaderCell, { width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>Total</Text>
         
         {/* Acciones Header con iconos pequeños */}
-        <View style={[styles.tableHeaderCell, styles.headerActionsContainer, { width: '16%' }]}>
+        <View style={[styles.tableHeaderCell, styles.headerActionsContainer, { width: '18%' }]}>
           <Ionicons name="eye-outline" size={12} color={themeColors.accent} />
           <Ionicons name="pencil-outline" size={12} color={themeColors.accent} />
+          <Ionicons name="copy-outline" size={12} color={themeColors.accent} />
           <Ionicons name="document-text-outline" size={12} color={themeColors.accent} />
           <Ionicons name="mail-outline" size={12} color={themeColors.accent} />
           <Ionicons name="chatbubble-ellipses-outline" size={12} color={themeColors.accent} />
@@ -448,7 +449,7 @@ export default function CotizacionesListScreen() {
                 <Text style={[styles.tableCell, { width: '10%' }]}>{cot.fecha_creacion}</Text>
                 <Text style={[styles.tableCell, { width: '8%' }]}>{cot.vendedor || 'Admin'}</Text>
                 <Text style={[styles.tableCell, { width: '18%', fontWeight: 'bold', color: themeColors.text }]} numberOfLines={1}>
-                  {cot.cliente_nombre} {cot.sucursal ? `(${cot.sucursal})` : ''}
+                  {cot.cliente_nombre}
                 </Text>
                 <Text style={[styles.tableCell, { width: '13%', color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
                 <View style={[styles.tableCell, { width: '10%' }]}>
@@ -466,8 +467,8 @@ export default function CotizacionesListScreen() {
                 </View>
                 <Text style={[styles.tableCell, { width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>{formatearMoneda(cot.total)}</Text>
                 
-                {/* 7 Iconos de acción */}
-                <View style={[styles.tableCell, styles.rowActionsContainer, { width: '16%' }]}>
+                {/* 8 Iconos de acción */}
+                <View style={[styles.tableCell, styles.rowActionsContainer, { width: '18%' }]}>
                   {/* 1. Ver PDF */}
                   <TouchableOpacity onPress={() => handleDownloadPDF(cot, 'view')} style={styles.rowActionBtn}>
                     <Ionicons name="eye-outline" size={14} color={themeColors.textSecondary} />
@@ -476,27 +477,31 @@ export default function CotizacionesListScreen() {
                   <TouchableOpacity onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} style={styles.rowActionBtn}>
                     <Ionicons name="pencil-outline" size={14} color={themeColors.textSecondary} />
                   </TouchableOpacity>
-                  {/* 3. Descargar PDF */}
+                  {/* 3. Duplicar */}
+                  <TouchableOpacity onPress={() => handleDuplicate(cot)} style={styles.rowActionBtn}>
+                    <Ionicons name="copy-outline" size={14} color={themeColors.textSecondary} />
+                  </TouchableOpacity>
+                  {/* 4. Descargar PDF */}
                   <TouchableOpacity onPress={() => handleDownloadPDF(cot, 'download')} style={styles.rowActionBtn}>
                     <Ionicons name="document-text-outline" size={14} color={themeColors.textSecondary} />
                   </TouchableOpacity>
-                  {/* 4. Enviar Correo */}
+                  {/* 5. Enviar Correo */}
                   <TouchableOpacity onPress={() => handleEmail(cot)} style={styles.rowActionBtn}>
                     <Ionicons name="mail-outline" size={14} color={themeColors.textSecondary} />
                   </TouchableOpacity>
-                  {/* 5. Comentarios */}
+                  {/* 6. Comentarios */}
                   <TouchableOpacity onPress={() => handleComments(cot)} style={styles.rowActionBtn}>
                     <Ionicons name="chatbubble-ellipses-outline" size={14} color={themeColors.textSecondary} />
                   </TouchableOpacity>
-                  {/* 6. Detalles */}
+                  {/* 7. Detalles */}
                   <TouchableOpacity onPress={() => toggleRowExpansion(cot.id)} style={styles.rowActionBtn}>
                     <Ionicons name={expandedRowId === cot.id ? "chevron-up" : "chevron-down"} size={14} color={themeColors.textSecondary} />
                   </TouchableOpacity>
-                  {/* 7. Convertir a Venta */}
+                  {/* 8. Convertir a Venta */}
                   <TouchableOpacity onPress={() => handleConvertirVenta(cot)} style={styles.rowActionBtn}>
                     <Ionicons name="cash-outline" size={14} color={themeColors.primary} />
                   </TouchableOpacity>
-                  {/* 8. Eliminar */}
+                  {/* 9. Eliminar */}
                   <TouchableOpacity onPress={() => handleDelete(cot.id)} style={styles.rowActionBtn}>
                     <Ionicons name="trash-outline" size={14} color={themeColors.danger} />
                   </TouchableOpacity>
@@ -551,12 +556,11 @@ export default function CotizacionesListScreen() {
       ) : (
         // --- DISEÑO MÓVIL/TABLETA ORIGINAL RESPETADO ---
         <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
           {/* HEADER MÓVIL */}
           <View style={styles.header}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <TouchableOpacity onPress={() => router.push('/(admin)/dashboard')} style={{ paddingRight: Spacing.two }}>
-                <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-              </TouchableOpacity>
+              
               <Image
                 source={
                   company === 'daravisa'
@@ -638,7 +642,7 @@ export default function CotizacionesListScreen() {
 
                     {/* Client Name */}
                     <Text style={styles.cardCliente}>
-                      {cot.cliente_nombre || 'Cliente sin nombre'} {cot.sucursal ? `(${cot.sucursal})` : ''}
+                      {cot.cliente_nombre || 'Cliente sin nombre'}
                     </Text>
 
                     {/* Summary of Line Items */}
@@ -702,7 +706,15 @@ export default function CotizacionesListScreen() {
                           <Ionicons name="mail-outline" size={15} color={getActionBtnStyle('email', scheme === 'dark').color} />
                         </TouchableOpacity>
 
-                        {/* 4. Editar */}
+                        {/* 4. Duplicar */}
+                        <TouchableOpacity 
+                          onPress={() => handleDuplicate(cot)}
+                          style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('view', scheme === 'dark').bg }]}
+                        >
+                          <Ionicons name="copy-outline" size={15} color={getActionBtnStyle('view', scheme === 'dark').color} />
+                        </TouchableOpacity>
+
+                        {/* 5. Editar */}
                         <TouchableOpacity 
                           onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('edit', scheme === 'dark').bg }]}
@@ -710,7 +722,7 @@ export default function CotizacionesListScreen() {
                           <Ionicons name="pencil-outline" size={15} color={getActionBtnStyle('edit', scheme === 'dark').color} />
                         </TouchableOpacity>
 
-                        {/* 5. Convertir a Venta */}
+                        {/* 6. Convertir a Venta */}
                         <TouchableOpacity 
                           onPress={() => handleConvertirVenta(cot)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('download', scheme === 'dark').bg }]}
@@ -718,7 +730,7 @@ export default function CotizacionesListScreen() {
                           <Ionicons name="cash-outline" size={15} color={getActionBtnStyle('download', scheme === 'dark').color} />
                         </TouchableOpacity>
 
-                        {/* 6. Eliminar */}
+                        {/* 7. Eliminar */}
                         <TouchableOpacity 
                           onPress={() => handleDelete(cot.id)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('delete', scheme === 'dark').bg }]}
@@ -742,7 +754,8 @@ export default function CotizacionesListScreen() {
               <Ionicons name="add" size={30} color="#fff" />
             </TouchableOpacity>
           )}
-        </SafeAreaView>
+        </ScrollView>
+    </SafeAreaView>
       )}
     </View>
   );
