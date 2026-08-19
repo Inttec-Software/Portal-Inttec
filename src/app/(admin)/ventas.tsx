@@ -632,6 +632,58 @@ export default function VentasScreen() {
       );
     }
   };
+  const handleDuplicateVenta = async (venta?: VentaConPago) => {
+    const targetVenta = venta || selectedVenta;
+    if (!targetVenta) return;
+
+    try {
+      setIsLoadingHistorial(true);
+      setIsDetailModalVisible(false);
+
+      let partidasToCopy: any[] = [];
+      if (venta) {
+        const { data: partData, error: partError } = await supabase
+          .from('ventas_partidas')
+          .select('*')
+          .eq('venta_id', targetVenta.id);
+        if (partError) throw partError;
+        partidasToCopy = partData || [];
+      } else {
+        partidasToCopy = selectedVentaPartidas;
+      }
+
+      const editablePartidas: PartidaEditable[] = partidasToCopy.map(p => ({
+        id: `temp-${Date.now()}-${Math.random()}`,
+        descripcion: p.descripcion,
+        cantidad: String(p.cantidad),
+        unidad: p.unidad,
+        precio_unitario_venta: String(p.precio_unitario_venta),
+        costo_unitario_proveedor: String(p.costo_unitario_proveedor),
+      }));
+
+      const today = new Date();
+      setDateValue(today);
+      setFecha(today.toISOString().split('T')[0]);
+      
+      setCliente(targetVenta.cliente);
+      setSucursal(targetVenta.sucursal || '');
+      setFacturaReferencia('');
+      setDescripcion(`(Copia) ${targetVenta.descripcion || ''}`);
+      setAgregarIva(targetVenta.agregar_iva || false);
+      setTipoProyecto(targetVenta.tipo_proyecto || '');
+      setProveedor(targetVenta.proveedor || '');
+      setNotas(targetVenta.notas || '');
+      setPartidas(editablePartidas);
+      setEditingVentaId(null);
+
+      setActiveTab('registrar');
+      setCurrentStep(2);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo duplicar la venta.');
+    } finally {
+      setIsLoadingHistorial(false);
+    }
+  };
 
   const handleEditVenta = () => {
     if (!selectedVenta) return;
@@ -2400,6 +2452,16 @@ export default function VentasScreen() {
                       >
                         <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
                       </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleDuplicateVenta(item);
+                        }}
+                        style={{ padding: 4 }}
+                      >
+                        <Ionicons name="copy-outline" size={16} color={themeColors.primary} />
+                      </TouchableOpacity>
                     </View>
                   </Pressable>
                 );
@@ -2502,6 +2564,29 @@ export default function VentasScreen() {
                     </Text>
                   </View>
                 </View>
+
+                {/* Botón Duplicar en Móvil */}
+                <TouchableOpacity
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleDuplicateVenta(item);
+                  }}
+                  style={{
+                    backgroundColor: themeColors.primary + '15',
+                    borderColor: themeColors.primary + '40',
+                    borderWidth: 1,
+                    borderRadius: 8,
+                    paddingVertical: 6,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexDirection: 'row',
+                    gap: 6,
+                    marginBottom: 8
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={14} color={themeColors.primary} />
+                  <Text style={{ color: themeColors.primary, fontWeight: '800', fontSize: 12 }}>Duplicar Venta</Text>
+                </TouchableOpacity>
 
                 {/* Botón rápido Agregar Pago en Tarjeta */}
                 <TouchableOpacity
@@ -2620,34 +2705,57 @@ export default function VentasScreen() {
         renderHistorial()
       ) : (
         <>
-          {renderScreenHeader()}
-          {/* Step Indicator */}
-          <StepIndicator 
-            currentStep={currentStep} 
-            steps={['Factura Compra', 'Costos y Precios', 'Resumen']} 
-            onStepPress={(step) => {
-              if (step < currentStep || true) {
-                setCurrentStep(step);
-              }
-            }}
-          />
-
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-          >
-            <ScrollView
+          {Platform.OS === 'web' ? (
+            <View style={{ flex: 1, overflow: 'hidden' }}>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={[styles.scrollContent, { maxWidth: 700, alignSelf: 'center', width: '100%' }]}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={true}
+              >
+                {renderScreenHeader()}
+                <StepIndicator 
+                  currentStep={currentStep} 
+                  steps={['Factura Compra', 'Costos y Precios', 'Resumen']} 
+                  onStepPress={(step) => {
+                    if (step < currentStep || true) {
+                      setCurrentStep(step);
+                    }
+                  }}
+                />
+                {currentStep === 1 && renderStep1()}
+                {currentStep === 2 && renderStep2()}
+                {currentStep === 3 && renderStep3()}
+              </ScrollView>
+            </View>
+          ) : (
+            <KeyboardAvoidingView
               style={{ flex: 1 }}
-              contentContainerStyle={[styles.scrollContent, { maxWidth: 700, alignSelf: 'center', width: '100%' }]}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
-              {currentStep === 1 && renderStep1()}
-              {currentStep === 2 && renderStep2()}
-              {currentStep === 3 && renderStep3()}
-            </ScrollView>
-          </KeyboardAvoidingView>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={[styles.scrollContent, { maxWidth: 700, alignSelf: 'center', width: '100%' }]}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {renderScreenHeader()}
+                <StepIndicator 
+                  currentStep={currentStep} 
+                  steps={['Factura Compra', 'Costos y Precios', 'Resumen']} 
+                  onStepPress={(step) => {
+                    if (step < currentStep || true) {
+                      setCurrentStep(step);
+                    }
+                  }}
+                />
+                {currentStep === 1 && renderStep1()}
+                {currentStep === 2 && renderStep2()}
+                {currentStep === 3 && renderStep3()}
+              </ScrollView>
+            </KeyboardAvoidingView>
+          )}
 
           {/* Footer Navigation */}
           {currentStep < 3 && (
@@ -3225,6 +3333,15 @@ export default function VentasScreen() {
                 >
                   <Ionicons name="create-outline" size={18} color={themeColors.accent} />
                   <Text style={[styles.modalActionText, { color: themeColors.accent, fontSize: 12 }]}>Editar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => handleDuplicateVenta()}
+                  disabled={isSubmitting}
+                  style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
+                >
+                  <Ionicons name="copy-outline" size={18} color={themeColors.primary} />
+                  <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>Duplicar</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity

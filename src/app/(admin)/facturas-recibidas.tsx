@@ -19,6 +19,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/services/supabase';
 import { parseCfdiXml } from '../../../supabase/functions/sync-facturas-recibidas/xmlParser';
+import { exportFacturaCfdiToPdf } from '@/utils/cfdiPdfGenerator';
 
 interface FacturaRecibida {
   id: string;
@@ -324,6 +325,20 @@ export default function FacturasRecibidasScreen() {
     });
   };
 
+  const [exportingPdfId, setExportingPdfId] = useState<string | null>(null);
+
+  const handleExportPdf = async (factura: FacturaRecibida) => {
+    try {
+      setExportingPdfId(factura.id);
+      await exportFacturaCfdiToPdf({ factura });
+    } catch (err: any) {
+      console.error('Error exportando PDF:', err);
+      showAlert('Error al generar PDF', err.message || 'No se pudo generar el documento PDF de la factura.');
+    } finally {
+      setExportingPdfId(null);
+    }
+  };
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(amount || 0);
   };
@@ -571,7 +586,24 @@ export default function FacturasRecibidasScreen() {
                   <Text style={[styles.uuidText, { color: themeColors.textSecondary }]} numberOfLines={1}>
                     UUID: {f.uuid}
                   </Text>
-                  <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <TouchableOpacity
+                      style={styles.cardPdfBtn}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        handleExportPdf(f);
+                      }}
+                      disabled={exportingPdfId === f.id}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      {exportingPdfId === f.id ? (
+                        <ActivityIndicator size="small" color="#e74c3c" />
+                      ) : (
+                        <Ionicons name="document-text" size={18} color="#e74c3c" />
+                      )}
+                    </TouchableOpacity>
+                    <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
+                  </View>
                 </View>
               </TouchableOpacity>
             ))}
@@ -595,6 +627,23 @@ export default function FacturasRecibidasScreen() {
 
             {selectedFactura && (
               <ScrollView style={{ padding: 16 }}>
+                {/* Botón principal de exportación a PDF */}
+                <TouchableOpacity
+                  style={[styles.pdfExportMainBtn, { backgroundColor: '#e74c3c' }]}
+                  onPress={() => handleExportPdf(selectedFactura)}
+                  disabled={exportingPdfId === selectedFactura.id}
+                  activeOpacity={0.8}
+                >
+                  {exportingPdfId === selectedFactura.id ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="document-text-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.pdfExportMainBtnText}>Descargar / Exportar Factura en PDF (Formato SAT)</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
                 {/* Info General */}
                 <View style={[styles.infoSection, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
                   <Text style={[styles.sectionTitle, { color: themeColors.accent }]}>Emisor / Proveedor</Text>
@@ -809,6 +858,25 @@ const styles = StyleSheet.create({
   infoSub: { fontSize: 13, marginTop: 2 },
   xmlLinkBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingVertical: 4 },
   xmlLinkText: { fontSize: 13, fontWeight: '600' },
+  pdfExportMainBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: BorderRadius.medium,
+    marginBottom: 14,
+  },
+  pdfExportMainBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  cardPdfBtn: {
+    padding: 4,
+    borderRadius: 6,
+    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+  },
   dividerLight: { height: 1, backgroundColor: 'rgba(150,150,150,0.2)', marginVertical: 10 },
   montoRow: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 2 },
   conceptoCard: { paddingVertical: 8, borderBottomWidth: 1 },

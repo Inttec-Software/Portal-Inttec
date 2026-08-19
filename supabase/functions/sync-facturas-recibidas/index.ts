@@ -288,6 +288,36 @@ serve(async (req) => {
       }
     }
 
+    // =========================================================================
+    // ACCIÓN: Prueba de Verificación de Solicitud
+    // =========================================================================
+    if (action === "test_verificar") {
+      const idSolicitud = reqData.id_solicitud || "";
+      try {
+        const satClient = new SatSoapClient({
+          rfc: satRfc,
+          cerB64: satCerB64,
+          keyB64: satKeyB64,
+          password: satPassword,
+        });
+
+        const verif = await satClient.verificarSolicitud(idSolicitud);
+        return new Response(
+          JSON.stringify({
+            success: true,
+            idSolicitud,
+            verifResult: verif,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (vErr: any) {
+        return new Response(
+          JSON.stringify({ success: false, error: vErr.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     const satClient = new SatSoapClient({
       rfc: satRfc,
       cerB64: satCerB64,
