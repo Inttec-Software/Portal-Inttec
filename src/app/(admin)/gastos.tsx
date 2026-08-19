@@ -2388,7 +2388,7 @@ export default function AdminGastosScreen() {
               </TouchableOpacity>
             </View>
 
-            <FlatList scrollEnabled={false}
+            <FlatList
               initialNumToRender={8}
               maxToRenderPerBatch={8}
               windowSize={5}
@@ -3282,7 +3282,7 @@ export default function AdminGastosScreen() {
                       </Text>
                     </View>
                   ) : (
-                    <FlatList scrollEnabled={false}
+                    <FlatList
                       data={filteredSalesForLinking}
                       initialNumToRender={5}
                       maxToRenderPerBatch={5}
@@ -4006,7 +4006,7 @@ export default function AdminGastosScreen() {
                 <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando historial...</Text>
               </View>
             ) : (
-              <FlatList scrollEnabled={false}
+              <FlatList
                 data={asistencias}
                 initialNumToRender={8}
                 maxToRenderPerBatch={8}
