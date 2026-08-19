@@ -28,6 +28,7 @@ import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
+import { parseCFDIXML } from '@/utils/cfdiParser';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -1136,17 +1137,133 @@ export default function VentasScreen() {
       console.error('Error timbrando:', err);
       let errorMsg = err.message || 'Error desconocido.';
       
-      // Supabase-js esconde el JSON devuelto en la propiedad 'context' cuando hay un HTTP error
-      if (err.context && typeof err.context.json === 'function') {
+      // Supabase-js FunctionsHttpError contiene la respuesta del servidor en 'context'
+      if (err.context) {
         try {
-          const body = await err.context.json();
-          if (body.error) errorMsg = body.error;
+          if (typeof err.context.json === 'function') {
+            const body = await err.context.json();
+            if (body?.error) errorMsg = body.error;
+            else if (body?.message) errorMsg = body.message;
+          } else if (typeof err.context.text === 'function') {
+            const txt = await err.context.text();
+            if (txt) errorMsg = txt;
+          }
         } catch (e) {
-          // Si no se puede parsear JSON, ignorar
+          try {
+            if (typeof err.context.text === 'function') {
+              const txt = await err.context.text();
+              if (txt) errorMsg = txt;
+            }
+          } catch (e2) {
+            // fallback
+          }
         }
       }
       
+      console.error('Detalle error timbrado:', errorMsg);
       showAlert('Error al timbrar', errorMsg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleViewFacturaPDF = async () => {
+    if (!selectedVenta) return;
+    setIsSubmitting(true);
+    try {
+      const uuid = selectedVenta.cfdi_uuid;
+      if (!uuid) throw new Error('La venta no tiene Folio Fiscal (UUID)');
+
+      // 1. Descargar el XML desde Supabase Storage
+      const { data: fileBlob, error: downloadError } = await supabase.storage
+        .from('facturas')
+        .download(`${uuid}.xml`);
+
+      let xmlText = '';
+      if (!downloadError && fileBlob) {
+        xmlText = await fileBlob.text();
+      } else {
+        // Fallback: si falla el download directo, intentar vía URL pública si existe
+        if (selectedVenta.cfdi_xml_url && selectedVenta.cfdi_xml_url.startsWith('http')) {
+          const resp = await fetch(selectedVenta.cfdi_xml_url);
+          if (resp.ok) xmlText = await resp.text();
+        }
+      }
+
+      if (!xmlText) {
+        throw new Error('No se pudo recuperar el archivo XML timbrado desde Supabase Storage.');
+      }
+
+      // 2. Parsear el XML con timbres SAT
+      const isCanceled = selectedVenta.cfdi_estado === 'CANCELADA';
+      const facturaData = parseCFDIXML(xmlText, isCanceled ? 'canceled' : 'valid');
+
+      // 3. Exportar representación impresa PDF
+      await exportarFacturaOdooPDF(selectedVenta, facturaData, 'download');
+    } catch (err: any) {
+      console.error('Error al generar PDF CFDI:', err);
+      showAlert('Error al generar PDF', err.message || 'No se pudo generar el documento PDF.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDownloadFacturaXML = async () => {
+    if (!selectedVenta) return;
+    setIsSubmitting(true);
+    try {
+      const uuid = selectedVenta.cfdi_uuid;
+      if (!uuid) throw new Error('La venta no tiene Folio Fiscal (UUID)');
+
+      const cliente = (selectedVenta.cliente || 'Cliente').replace(/[^a-z0-9]/gi, '_').substring(0, 20);
+      const folio = uuid.split('-')[0];
+      const fileName = `Factura_${cliente}_${folio}.xml`;
+
+      const { data: fileBlob, error: downloadError } = await supabase.storage
+        .from('facturas')
+        .download(`${uuid}.xml`);
+
+      let xmlText = '';
+      if (!downloadError && fileBlob) {
+        xmlText = await fileBlob.text();
+      } else if (selectedVenta.cfdi_xml_url && selectedVenta.cfdi_xml_url.startsWith('http')) {
+        const resp = await fetch(selectedVenta.cfdi_xml_url);
+        if (resp.ok) xmlText = await resp.text();
+      }
+
+      if (!xmlText) {
+        throw new Error('No se pudo descargar el archivo XML.');
+      }
+
+      if (Platform.OS === 'web') {
+        const blob = new Blob([xmlText], { type: 'application/xml;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } else {
+        const { cacheDirectory, writeAsStringAsync } = await import('expo-file-system/legacy');
+        const { shareAsync, isAvailableAsync } = await import('expo-sharing');
+
+        const fileUri = `${cacheDirectory}${fileName}`;
+        await writeAsStringAsync(fileUri, xmlText, { encoding: 'utf8' as any });
+
+        if (await isAvailableAsync()) {
+          await shareAsync(fileUri, {
+            mimeType: 'application/xml',
+            dialogTitle: 'Compartir XML CFDI 4.0'
+          });
+        } else {
+          showAlert('Éxito', `XML guardado en ${fileUri}`);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error al descargar XML:', err);
+      showAlert('Error al descargar XML', err.message || 'No se pudo descargar el archivo XML.');
     } finally {
       setIsSubmitting(false);
     }
@@ -1159,7 +1276,7 @@ export default function VentasScreen() {
       setIsSubmitting(true);
       try {
         const { data, error } = await supabase.functions.invoke('cancelar-factura', {
-          body: { venta_id: selectedVenta.id }
+          body: { venta_id: selectedVenta.id, motivo: '02' }
         });
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
@@ -1169,7 +1286,7 @@ export default function VentasScreen() {
         loadHistorial();
       } catch (err: any) {
         console.error('Error cancelando factura:', err);
-        showAlert('Error al cancelar', err.message || 'Ocurrió un error al intentar cancelar la factura.');
+        showAlert('Error al cancelar', err.message || 'Ocurrió un error al intentar cancelar la factura ante el SAT.');
       } finally {
         setIsSubmitting(false);
       }
@@ -1181,7 +1298,7 @@ export default function VentasScreen() {
       }
     } else {
       Alert.alert(
-        'Cancelar Factura',
+        'Cancelar Factura ante el SAT',
         '¿Estás seguro de que deseas cancelar esta factura ante el SAT? Esta acción no se puede deshacer.',
         [
           { text: 'No, regresar', style: 'cancel' },
@@ -2764,42 +2881,16 @@ export default function VentasScreen() {
                 {selectedVenta?.cfdi_estado === 'TIMBRADA' ? (
                   <>
                     <TouchableOpacity
-                      onPress={async () => {
-                        if (selectedVenta?.cfdi_facturapi_id) {
-                          try {
-                            const url = `https://etpdebclhaxbpbuwxdmy.supabase.co/functions/v1/descargar-factura?id=${selectedVenta.cfdi_facturapi_id}&format=json`;
-                            const response = await fetch(url);
-                            if (!response.ok) {
-                              const errorText = await response.text();
-                              throw new Error(`Status: ${response.status}. Detalle: ${errorText}`);
-                            }
-                            const facturaData = await response.json();
-                            await exportarFacturaOdooPDF(selectedVenta, facturaData, 'download');
-                          } catch (err: any) {
-                            console.error("Error completo PDF:", err);
-                            showAlert('Error Descarga', err.message || 'No se pudo generar el PDF.');
-                          }
-                        } else {
-                          showAlert('Info', 'El ID de la factura no está disponible');
-                        }
-                      }}
+                      onPress={handleViewFacturaPDF}
+                      disabled={isSubmitting}
                       style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
                     >
                       <Ionicons name="document-text-outline" size={18} color={themeColors.primary} />
                       <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>PDF CFDI</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      onPress={() => {
-                        if (selectedVenta?.cfdi_facturapi_id) {
-                          const cliente = (selectedVenta.cliente || 'Cliente').replace(/[^a-z0-9]/gi, '_').substring(0, 20);
-                          const folio = selectedVenta.cfdi_uuid ? selectedVenta.cfdi_uuid.split('-')[0] : 'Factura';
-                          const fileName = `${cliente}_${folio}`;
-                          const url = `https://etpdebclhaxbpbuwxdmy.supabase.co/functions/v1/descargar-factura?id=${selectedVenta.cfdi_facturapi_id}&format=xml&filename=${fileName}`;
-                          Linking.openURL(url);
-                        } else {
-                          showAlert('Info', 'El ID de la factura no está disponible');
-                        }
-                      }}
+                      onPress={handleDownloadFacturaXML}
+                      disabled={isSubmitting}
                       style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
                     >
                       <Ionicons name="code-outline" size={18} color={themeColors.primary} />
