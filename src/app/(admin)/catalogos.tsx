@@ -368,10 +368,8 @@ export default function CatalogosManager() {
   const parentCatName = categorias.find((c) => c.id === selectedParentCatId)?.nombre;
   const editParentCatName = categorias.find((c) => c.id === editParentCatId)?.nombre;
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
-      <View style={isDesktop ? { maxWidth: 800, width: '100%', alignSelf: 'center', flex: 1, paddingHorizontal: Spacing.two } : { flex: 1 }}>
+  const renderScreenHeader = () => (
+    <View>
         {/* Header */}
         <View style={styles.header}>
           
@@ -555,6 +553,13 @@ export default function CatalogosManager() {
         </View>
       )}
 
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <View style={{ flex: 1 }}>
+      <View style={isDesktop ? { maxWidth: 800, width: '100%', alignSelf: 'center', flex: 1, paddingHorizontal: Spacing.two } : { flex: 1 }}>
       {/* List */}
       {isLoading ? (
         <View style={styles.loaderContainer}>
@@ -562,7 +567,7 @@ export default function CatalogosManager() {
           <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando catálogo...</Text>
         </View>
       ) : (
-        <FlatList scrollEnabled={false}
+        <FlatList scrollEnabled={true} style={{ flex: 1 }} ListHeaderComponent={renderScreenHeader}
           data={
             activeCatalog === 'categorias'
               ? categorias
@@ -1153,7 +1158,7 @@ export default function CatalogosManager() {
         </View>
       </Modal>
 
-    </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }

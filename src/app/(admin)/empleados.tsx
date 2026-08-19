@@ -702,7 +702,7 @@ export default function AdminEmpleadosScreen() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*',
-        copyToCacheDirectory: false,
+        copyToCacheDirectory: true,
       });
 
       if (!result.canceled && result.assets?.[0]) {
@@ -723,19 +723,23 @@ export default function AdminEmpleadosScreen() {
         if (Platform.OS !== 'web') {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const FileSys = require('expo-file-system');
-          const tempFileName = `temp_${Date.now()}_${asset.name || 'factura.pdf'}`;
-          const targetUri = `${FileSys.cacheDirectory}${tempFileName}`;
-
-          await FileSys.copyAsync({
-            from: uri,
-            to: targetUri,
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.onload = () => {
+              try {
+                const base64Str = require('buffer').Buffer.from(xhr.response).toString('base64');
+                resolve(base64Str);
+              } catch (e) {
+                reject(e);
+              }
+            };
+            xhr.onerror = reject;
+            xhr.responseType = 'arraybuffer';
+            xhr.open('GET', uri, true);
+            xhr.send(null);
           });
 
-          const b64 = await FileSys.readAsStringAsync(targetUri, {
-            encoding: FileSys.EncodingType.Base64,
-          });
-
-          await uploadInvoiceToSupabase(targetUri, b64, ext);
+          await uploadInvoiceToSupabase(uri, b64, ext);
         } else {
           const response = await fetch(uri);
           const blob = await response.blob();
@@ -1563,7 +1567,7 @@ export default function AdminEmpleadosScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
+      <View style={{ flex: 1 }}>
       {false && <View>
       {/* Switch de Empresa - Fila Dedicada */}
       <View style={{
@@ -2550,13 +2554,12 @@ export default function AdminEmpleadosScreen() {
 
       </View>}
       {/* MODAL 1 EXTRA: PERSONAL MANAGER */}
-      <View style={{ flex: 1, backgroundColor: themeColors.background, paddingHorizontal: 16 }}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: themeColors.text }]}>Administración de Personal</Text>
-
-            </View>
-
-            <FlatList scrollEnabled={false}
+            <FlatList scrollEnabled={true} style={{ flex: 1 }}
+              ListHeaderComponent={
+                <View style={styles.modalHeader}>
+                  <Text style={[styles.modalTitle, { color: themeColors.text }]}>Administración de Personal</Text>
+                </View>
+              }
               initialNumToRender={8}
               maxToRenderPerBatch={8}
               windowSize={5}
@@ -2608,7 +2611,6 @@ export default function AdminEmpleadosScreen() {
             >
               <Ionicons name="person-add" size={24} color="#ffffff" />
             </TouchableOpacity>
-          </View>
       {/* MODAL 2 EXTRA: REPORTES */}
       <Modal
         animationType="slide"
@@ -4324,7 +4326,7 @@ export default function AdminEmpleadosScreen() {
         }}
       />
       
-    </ScrollView>
+    </View>
     </SafeAreaView>
   );
 }

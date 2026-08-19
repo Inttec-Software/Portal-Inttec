@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  ScrollView,
+  ScrollView, KeyboardAvoidingView,
   Platform,
   TextInput,
   useWindowDimensions,
@@ -43,6 +43,7 @@ interface Producto {
   sku_interno: string;
   nombre_oficial: string;
   categoria_id: string;
+  proveedor_id?: string;
   stock_actual: number;
   activo: boolean;
 }
@@ -71,12 +72,13 @@ export default function InventarioDashboard() {
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
   // Tab activa: 'catalogo' | 'ia-import' | 'consumo' | 'categorias'
-  const [activeTab, setActiveTab] = useState<'catalogo' | 'ia-import' | 'consumo' | 'categorias'>('catalogo');
+  const [activeTab, setActiveTab] = useState<'importacion' | 'categorias' | 'retribuciones'>('importacion');
   
   // Datos maestros de la DB
   const [productos, setProductos] = useState<Producto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
+  const [empleados, setEmpleados] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Filtros de búsqueda
@@ -96,6 +98,7 @@ export default function InventarioDashboard() {
   const [formSku, setFormSku] = useState('');
   const [formNombre, setFormNombre] = useState('');
   const [formCategoriaId, setFormCategoriaId] = useState('');
+  const [formProveedorId, setFormProveedorId] = useState('');
   const [formStock, setFormStock] = useState('0');
   const [isSavingProduct, setIsSavingProduct] = useState(false);
 
@@ -136,16 +139,219 @@ export default function InventarioDashboard() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [stagingItems, setStagingItems] = useState<FacturaItemStaging[]>([]);
   const [isSavingAIImport, setIsSavingAIImport] = useState(false);
+  const [selectedEmpleadoRetribucion, setSelectedEmpleadoRetribucion] = useState('');
+  const [retribucionesData, setRetribucionesData] = useState<any[]>([]);
+  const [verifyModalVisible, setVerifyModalVisible] = useState(false);
+  const [verifyingEvidencia, setVerifyingEvidencia] = useState<any>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  // Inventario de empleado modal
+  const [employeeInventoryModalVisible, setEmployeeInventoryModalVisible] = useState(false);
+  const [employeeInventoryData, setEmployeeInventoryData] = useState<any[]>([]);
+  const [isLoadingEmployeeInventory, setIsLoadingEmployeeInventory] = useState(false);
+  
+  // Devoluciones State
+  const [devolucionesData, setDevolucionesData] = useState<any[]>([]);
+  const [isLoadingDevoluciones, setIsLoadingDevoluciones] = useState(false);
+  const [isApprovingDevolucion, setIsApprovingDevolucion] = useState(false);
+  const [isLoadingRetribuciones, setIsLoadingRetribuciones] = useState(false);
 
   useEffect(() => {
     loadAllData();
   }, []);
 
-  async function loadAllData() {
+    const handleOpenVerifyModal = (evidencia: any) => {
+    setVerifyingEvidencia(evidencia);
+    setVerifyModalVisible(true);
+  };
+
+  const handleConfirmVerification = async () => {
+    if (!verifyingEvidencia) return;
+    setIsVerifying(true);
+    try {
+      await supabase.from('evidencias').update({ 
+         sobrantes_verificados: true
+      }).eq('id', verifyingEvidencia.id);
+
+      Alert.alert('Éxito', 'Evidencia marcada como revisada.');
+      setVerifyModalVisible(false);
+      loadRetribuciones(selectedEmpleadoRetribucion);
+    } catch(err:any) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const loadDevolucionesPendientes = async (empleadoId: string) => {
+    if (!empleadoId) return;
+    setIsLoadingDevoluciones(true);
+    try {
+      const { data, error } = await supabase
+        .from('devoluciones_empleado')
+        .select('*')
+        .eq('empleado_id', empleadoId)
+        .eq('estado', 'PENDIENTE')
+        .order('creado_en', { ascending: false });
+
+      if (error) throw error;
+      setDevolucionesData(data || []);
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setIsLoadingDevoluciones(false);
+    }
+  };
+
+  const executeAprobarDevolucion = async (dev: any) => {
+    setIsApprovingDevolucion(true);
+    try {
+      const materiales = typeof dev.materiales === 'string' ? JSON.parse(dev.materiales || '[]') : dev.materiales;
+      for (const m of materiales) {
+        if (m.devolver > 0) {
+          // 1. Add to central stock
+          const { data: pData } = await supabase.from('productos').select('stock_actual').eq('id', m.productoId).single();
+          if (pData) {
+            await supabase.from('productos').update({ stock_actual: pData.stock_actual + m.devolver }).eq('id', m.productoId);
+            
+            // 2. Insert into movimientos_inventario
+            await supabase.from('movimientos_inventario').insert([{
+              producto_id: m.productoId,
+              tipo: 'ENTRADA',
+              cantidad: m.devolver,
+              folio_factura: `DEVOLUCIÓN MANUAL ${dev.id.substring(0,8)}`,
+              creado_por: null
+            }]);
+          }
+
+          // 3. (REMOVIDO) Ya no descontamos del inventario del empleado aquí.
+          // Ahora se descuenta inmediatamente cuando el empleado envía la solicitud
+          // para bloquear el material y evitar que lo use en otras evidencias.
+        }
+      }
+
+      // 4. Marcar devolución como aprobada
+      await supabase.from('devoluciones_empleado').update({ estado: 'APROBADO', revisado_por: null }).eq('id', dev.id);
+
+      Alert.alert('Éxito', 'Devolución aprobada e integrada al almacén.');
+      loadDevolucionesPendientes(selectedEmpleadoRetribucion);
+    } catch(err:any) {
+      console.error(err);
+      Alert.alert('Error', err.message);
+    } finally {
+      setIsApprovingDevolucion(false);
+    }
+  };
+
+  const handleAprobarDevolucion = async (dev: any) => {
+    if (Platform.OS === 'web') {
+      const confirm = window.confirm('¿Estás seguro de que recibiste físicamente estos materiales? Se sumarán al almacén y se descontarán del empleado.');
+      if (confirm) {
+        await executeAprobarDevolucion(dev);
+      }
+    } else {
+      Alert.alert(
+        'Aprobar Devolución',
+        '¿Estás seguro de que recibiste físicamente estos materiales? Se sumarán al almacén y se descontarán del empleado.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Aprobar', onPress: () => executeAprobarDevolucion(dev) }
+        ]
+      );
+    }
+  };
+
+  const loadRetribuciones = async (empleadoId: string) => {
+    if (!empleadoId) return;
+    setIsLoadingRetribuciones(true);
+    try {
+      const { data: evidencias, error: eviErr } = await supabase
+        .from('evidencias')
+        .select('id, cliente, created_at, descripcion_trabajo, empleado_nombre, sobrantes_verificados')
+        .eq('empleado_id', empleadoId)
+        .order('created_at', { ascending: false });
+
+      if (eviErr) throw eviErr;
+      console.log(`[loadRetribuciones] Fetched ${evidencias?.length} for ${empleadoId}`);
+
+      const parsedData: any[] = [];
+      if (evidencias) {
+        evidencias.forEach((ev: any) => {
+          try {
+            const trabajosArr = JSON.parse(ev.descripcion_trabajo || '[]');
+            const materialesUsadosList: any[] = [];
+            if (Array.isArray(trabajosArr)) {
+              trabajosArr.forEach((t: any) => {
+                if (t.materiales_usados && Array.isArray(t.materiales_usados)) {
+                  t.materiales_usados.forEach((m: any) => {
+                    materialesUsadosList.push(m);
+                  });
+                }
+              });
+            }
+            parsedData.push({
+              id: ev.id,
+              cliente: ev.cliente,
+              fecha: new Date(ev.created_at).toLocaleDateString(),
+              empleado_nombre: ev.empleado_nombre,
+              sobrantes_verificados: ev.sobrantes_verificados,
+              materiales: materialesUsadosList
+            });
+          } catch (e) {
+            // It's an old evidence with plain text descripcion_trabajo, so JSON.parse failed.
+            // We should still show it in the history.
+            parsedData.push({
+              id: ev.id,
+              cliente: ev.cliente,
+              fecha: new Date(ev.created_at).toLocaleDateString(),
+              empleado_nombre: ev.empleado_nombre,
+              sobrantes_verificados: ev.sobrantes_verificados,
+              materiales: [] // No parsed materials
+            });
+          }
+        });
+      }
+
+      console.log(`[loadRetribuciones] Setting retribuciones data length: ${parsedData.length}`);
+      setRetribucionesData(parsedData);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo cargar las retribuciones');
+    } finally {
+      setIsLoadingRetribuciones(false);
+    }
+  };
+
+  const fetchEmployeeInventory = async (empleadoId: string) => {
+    setIsLoadingEmployeeInventory(true);
+    setEmployeeInventoryModalVisible(true);
+    try {
+      const { data: invData, error: invErr } = await supabase
+        .from('inventario_empleados')
+        .select(`
+          id,
+          cantidad_disponible,
+          productos (
+            id,
+            nombre_oficial,
+            sku_interno
+          )
+        `)
+        .eq('empleado_id', empleadoId)
+        .gt('cantidad_disponible', 0);
+      if (invErr) throw invErr;
+      setEmployeeInventoryData(invData || []);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo cargar el inventario del empleado');
+    } finally {
+      setIsLoadingEmployeeInventory(false);
+    }
+  };
+
+async function loadAllData() {
     setIsLoading(true);
     try {
       // Cargar categorías, proveedores, productos, historial de consumo y clientes
-      const [catRes, provRes, prodRes, histRes, cliRes] = await Promise.all([
+      const [catRes, provRes, prodRes, histRes, cliRes, empRes] = await Promise.all([
         supabase.from('categorias_productos').select('*').order('nombre'),
         supabase.from('proveedores').select('*').order('nombre'),
         supabase.from('productos').select('*').order('nombre_oficial'),
@@ -156,18 +362,21 @@ export default function InventarioDashboard() {
           .order('fecha', { ascending: false })
           .limit(50),
         supabase.from('clientes').select('*').order('nombre'),
+        supabase.from('usuarios').select('id, nombre').in('rol', ['EMPLEADO', 'DEV']).order('nombre'),
       ]);
 
       if (catRes.error) throw catRes.error;
       if (provRes.error) throw provRes.error;
       if (prodRes.error) throw prodRes.error;
       if (cliRes.error) throw cliRes.error;
+      if (empRes.error) throw empRes.error;
 
       setCategorias(catRes.data || []);
       setProveedores(provRes.data || []);
       setProductos(prodRes.data || []);
       setHistorialConsumo(histRes.data || []);
       setClientes(cliRes.data || []);
+      setEmpleados(empRes.data || []);
     } catch (err: any) {
       console.error('Error al cargar datos de inventario:', err);
       Alert.alert('Error', err.message || 'No se pudieron recuperar los datos de inventario.');
@@ -231,6 +440,18 @@ export default function InventarioDashboard() {
     setSelectorVisible(true);
   };
 
+  const openFormProveedorSelector = () => {
+    setSelectorTitle('Seleccionar Proveedor');
+    setSelectorSearch('');
+    setSelectorOptions(
+      proveedores.map(p => ({ id: p.id, label: `${p.nombre} (${p.rfc})` }))
+    );
+    setOnSelectOption(() => (id: string) => {
+      setFormProveedorId(id);
+    });
+    setSelectorVisible(true);
+  };
+
   const filteredSelectorOptions = selectorOptions.filter(opt =>
     opt.label.toLowerCase().includes(selectorSearch.toLowerCase())
   );
@@ -241,6 +462,7 @@ export default function InventarioDashboard() {
     setFormSku('');
     setFormNombre('');
     setFormCategoriaId(categorias[0]?.id || '');
+    setFormProveedorId('');
     setFormStock('0');
     setCrudModalVisible(true);
   };
@@ -250,12 +472,13 @@ export default function InventarioDashboard() {
     setFormSku(p.sku_interno);
     setFormNombre(p.nombre_oficial);
     setFormCategoriaId(p.categoria_id);
+    setFormProveedorId(p.proveedor_id || '');
     setFormStock(p.stock_actual.toString());
     setCrudModalVisible(true);
   };
 
   const handleSaveProduct = async () => {
-    if (!formSku.trim() || !formNombre.trim() || !formCategoriaId) {
+    if (!formSku.trim() || !formNombre.trim() || !formCategoriaId || !formProveedorId) {
       Alert.alert('Validación', 'Por favor llena todos los campos obligatorios.');
       return;
     }
@@ -276,6 +499,7 @@ export default function InventarioDashboard() {
             sku_interno: formSku.trim(),
             nombre_oficial: formNombre.trim(),
             categoria_id: formCategoriaId,
+            proveedor_id: formProveedorId || null,
             stock_actual: stockNum,
           })
           .eq('id', editingProduct.id);
@@ -289,6 +513,7 @@ export default function InventarioDashboard() {
             sku_interno: formSku.trim().toUpperCase(),
             nombre_oficial: formNombre.trim(),
             categoria_id: formCategoriaId,
+            proveedor_id: formProveedorId || null,
             stock_actual: stockNum,
             activo: true,
           },
@@ -609,7 +834,7 @@ export default function InventarioDashboard() {
       Alert.alert('Éxito', 'Consumo registrado. Se actualizaron los niveles de stock.');
       setConsumoItems([]);
       setConsumoCliente('');
-      setActiveTab('catalogo');
+      setActiveTab('importacion');
       await loadAllData();
     } catch (err: any) {
       Alert.alert('Error', err.message || 'No se pudo guardar la nota de consumo.');
@@ -625,7 +850,7 @@ export default function InventarioDashboard() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*'],
-        copyToCacheDirectory: false, // Obtener URI content:// original para resolver permisos correctos
+        copyToCacheDirectory: true,
       });
 
       if (result.canceled || !result.assets?.[0]) return;
@@ -665,26 +890,23 @@ export default function InventarioDashboard() {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const FileSystem = require('expo-file-system/legacy');
         
-        // Copiar archivo temporal a la sandbox para evitar restricciones de lectura nativas en Android
-        const tempFileName = `temp_inv_${Date.now()}_${fileAsset.name || 'factura.pdf'}`;
-        const targetUri = `${FileSystem.cacheDirectory}${tempFileName}`;
-        
-        await FileSystem.copyAsync({
-          from: uri,
-          to: targetUri,
-        });
-
-        base64Data = await FileSystem.readAsStringAsync(targetUri, {
-          encoding: FileSystem.EncodingType.Base64,
+        base64Data = await new Promise<string>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = () => {
+            try {
+              const base64Str = require('buffer').Buffer.from(xhr.response).toString('base64');
+              resolve(base64Str);
+            } catch (e) {
+              reject(e);
+            }
+          };
+          xhr.onerror = reject;
+          xhr.responseType = 'arraybuffer';
+          xhr.open('GET', uri, true);
+          xhr.send(null);
         });
         base64Data = base64Data.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, ''); // Safety cleanup
 
-        // Limpiar el archivo temporal
-        try {
-          await FileSystem.deleteAsync(targetUri, { idempotent: true });
-        } catch (cleanErr) {
-          console.log('Error cleaning inventory temp file:', cleanErr);
-        }
       }
 
       // 2. Compilar catálogo maestro JSON
@@ -828,7 +1050,7 @@ export default function InventarioDashboard() {
           // 2. Registrar alias proveedor
           await supabase.from('alias_proveedor_producto').insert([
             {
-              proveedor_id: selectedProveedorId,
+              
               producto_id: finalProductoId,
               nombre_segun_proveedor: item.nombreFactura,
             },
@@ -856,7 +1078,7 @@ export default function InventarioDashboard() {
           if (!aliasExists) {
             await supabase.from('alias_proveedor_producto').insert([
               {
-                proveedor_id: selectedProveedorId,
+                
                 producto_id: finalProductoId,
                 nombre_segun_proveedor: item.nombreFactura,
               },
@@ -872,7 +1094,7 @@ export default function InventarioDashboard() {
               tipo: 'ENTRADA',
               cantidad: item.cantidad,
               folio_factura: folioFactura.trim(),
-              proveedor_id: selectedProveedorId,
+              
               creado_por: currentUserId,
             },
           ]);
@@ -883,7 +1105,7 @@ export default function InventarioDashboard() {
       setStagingItems([]);
       setFolioFactura('');
       setSelectedProveedorId('');
-      setActiveTab('catalogo');
+      setActiveTab('importacion');
       await loadAllData();
     } catch (err: any) {
       Alert.alert('Error', err.message || 'No se pudo guardar la importación.');
@@ -904,11 +1126,11 @@ export default function InventarioDashboard() {
 
   const activeCategoryName = categorias.find(c => c.id === selectedCategoryFilter)?.nombre;
   const activeFormCategoryName = categorias.find(c => c.id === formCategoriaId)?.nombre;
+  const activeFormProveedorName = proveedores.find(p => p.id === formProveedorId)?.nombre;
   const activeProveedorName = proveedores.find(p => p.id === selectedProveedorId)?.nombre;
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
+  const renderScreenHeader = () => (
+    <View>
       {/* Header */}
       <View style={styles.header}>
         
@@ -917,231 +1139,39 @@ export default function InventarioDashboard() {
       </View>
 
       {/* Tabs */}
-      <View style={[
-        styles.selectorsContainer,
-        {
-          paddingHorizontal: isMobile ? Spacing.two : Spacing.four,
-          gap: isMobile ? 6 : Spacing.one,
-        }
-      ]}>
-        <TouchableOpacity
-          onPress={() => setActiveTab('catalogo')}
-          style={[
-            styles.selectorBtn,
-            activeTab === 'catalogo'
-              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
-              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
-          ]}
-        >
-          <Text
-            style={[
-              styles.selectorText,
-              {
-                color: activeTab === 'catalogo' ? '#ffffff' : themeColors.textSecondary,
-                fontSize: isMobile ? 9.5 : 11,
-              }
-            ]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-          >
-            Catálogo
-          </Text>
+      <View style={[styles.selectorsContainer, { paddingHorizontal: isMobile ? Spacing.two : Spacing.four, gap: isMobile ? 6 : Spacing.one }]}>
+        <TouchableOpacity onPress={() => setActiveTab('importacion')} style={[styles.selectorBtn, activeTab === 'importacion' ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent } : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <Text style={[styles.selectorText, { color: activeTab === 'importacion' ? '#ffffff' : themeColors.textSecondary, fontSize: isMobile ? 9.5 : 11 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>Importación y Catálogo</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => setActiveTab('ia-import')}
-          style={[
-            styles.selectorBtn,
-            activeTab === 'ia-import'
-              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
-              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
-          ]}
-        >
-          <Text
-            style={[
-              styles.selectorText,
-              {
-                color: activeTab === 'ia-import' ? '#ffffff' : themeColors.textSecondary,
-                fontSize: isMobile ? 9.5 : 11,
-              }
-            ]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-          >
-            Importación IA
-          </Text>
+        <TouchableOpacity onPress={() => setActiveTab('categorias')} style={[styles.selectorBtn, activeTab === 'categorias' ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent } : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <Text style={[styles.selectorText, { color: activeTab === 'categorias' ? '#ffffff' : themeColors.textSecondary, fontSize: isMobile ? 9.5 : 11 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>Categorías</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => setActiveTab('consumo')}
-          style={[
-            styles.selectorBtn,
-            activeTab === 'consumo'
-              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
-              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
-          ]}
-        >
-          <Text
-            style={[
-              styles.selectorText,
-              {
-                color: activeTab === 'consumo' ? '#ffffff' : themeColors.textSecondary,
-                fontSize: isMobile ? 9.5 : 11,
-              }
-            ]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-          >
-            Consumo
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => setActiveTab('categorias')}
-          style={[
-            styles.selectorBtn,
-            activeTab === 'categorias'
-              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
-              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
-          ]}
-        >
-          <Text
-            style={[
-              styles.selectorText,
-              {
-                color: activeTab === 'categorias' ? '#ffffff' : themeColors.textSecondary,
-                fontSize: isMobile ? 9.5 : 11,
-              }
-            ]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-          >
-            Categorías
-          </Text>
+        <TouchableOpacity onPress={() => setActiveTab('retribuciones')} style={[styles.selectorBtn, activeTab === 'retribuciones' ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent } : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <Text style={[styles.selectorText, { color: activeTab === 'retribuciones' ? '#ffffff' : themeColors.textSecondary, fontSize: isMobile ? 9.5 : 11 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>Retribuciones</Text>
         </TouchableOpacity>
       </View>
+    </View>
+  );
 
-      {/* VISTA 1: CATÁLOGO */}
-      {activeTab === 'catalogo' && (
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <View style={{ flex: 1 }}>
+        {renderScreenHeader()}
+      {/* VISTA 1 & 2 COMBINED: IMPORTACIÓN Y CATÁLOGO */}
+      {activeTab === 'importacion' && (
         <View style={{ flex: 1 }}>
-          <View style={styles.filterSection}>
-            <CustomInput
-              placeholder="Buscar por nombre o SKU..."
-              value={searchTerm}
-              onChangeText={setSearchTerm}
-              iconName="search-outline"
-              style={{ marginBottom: Spacing.one }}
-            />
-
-            {/* Selector de Categoría */}
-            <View style={styles.customDropdownContainer}>
-              <TouchableOpacity
-                style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                onPress={openCategoryFilter}
-              >
-                <Text style={{ color: selectedCategoryFilter ? themeColors.text : themeColors.textSecondary }}>
-                  {activeCategoryName || 'Filtrar por Categoría'}
-                </Text>
-                <Ionicons name="chevron-down" size={18} color={themeColors.text} />
-              </TouchableOpacity>
-            </View>
-          </View>
-
           {isLoading ? (
             <View style={styles.loaderContainer}>
               <ActivityIndicator size="large" color={themeColors.accent} />
               <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando catálogo...</Text>
             </View>
           ) : (
-            <FlatList scrollEnabled={false}
-              data={filteredProducts}
-              initialNumToRender={10}
-              maxToRenderPerBatch={10}
-              windowSize={5}
-              removeClippedSubviews={true}
-              keyExtractor={item => item.id}
-              contentContainerStyle={styles.listContent}
-              renderItem={({ item }) => {
-                const cat = categorias.find(c => c.id === item.categoria_id);
-                return (
-                  <View style={[styles.listItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <Text style={styles.skuText}>{item.sku_interno}</Text>
-                      <Text style={[styles.itemText, { color: themeColors.text }]}>{item.nombre_oficial}</Text>
-                      <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>
-                        {cat ? cat.nombre : 'Sin Categoría'}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.stockText,
-                          { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success },
-                        ]}
-                      >
-                        Stock: {item.stock_actual} piezas
-                      </Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: Spacing.two, alignItems: 'center' }}>
-                      {/* Ajuste rápido de stock */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 4, gap: 4 }}>
-                        <TextInput
-                          style={[
-                            styles.quickStockInput,
-                            { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background },
-                          ]}
-                          placeholder="+"
-                          placeholderTextColor={themeColors.textSecondary}
-                          keyboardType="numeric"
-                          value={quickStockAdjustments[item.id] || ''}
-                          onChangeText={txt => setQuickStockAdjustments(prev => ({ ...prev, [item.id]: txt }))}
-                        />
-                        <TouchableOpacity
-                          activeOpacity={0.7}
-                          onPress={() => handleQuickAddStock(item)}
-                          style={[styles.quickStockBtn, { backgroundColor: themeColors.success }]}
-                        >
-                          <Ionicons name="add" size={14} color="#ffffff" />
-                        </TouchableOpacity>
-                      </View>
-
-                      <TouchableOpacity onPress={() => handleOpenEditModal(item)}>
-                        <Ionicons name="create-outline" size={20} color={themeColors.accent} />
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleSoftDeleteProduct(item)}>
-                        <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                );
-              }}
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="cube-outline" size={48} color={themeColors.textSecondary} />
-                  <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-                    No hay productos en inventario que coincidan.
-                  </Text>
-                </View>
-              }
-              refreshing={isLoading}
-              onRefresh={loadAllData}
-            />
-          )}
-
-          {/* FAB agregar */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={handleOpenCreateModal}
-            style={[styles.fab, { backgroundColor: themeColors.accent }]}
-          >
-            <Ionicons name="add" size={28} color="#ffffff" />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* VISTA 2: IMPORTACIÓN POR IA */}
-       {activeTab === 'ia-import' && (
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Extraer Factura con IA</Text>
+            <FlatList
+              ListHeaderComponent={
+                <>
+                  {/* VISTA 2: IMPORTACIÓN POR IA */}
+       <View style={{ padding: 16, backgroundColor: themeColors.backgroundElement, borderBottomWidth: 1, borderColor: themeColors.border, marginBottom: 16 }}>
+<Text style={[styles.sectionTitle, { color: themeColors.text }]}>Extraer Factura con IA</Text>
           <Text style={[styles.description, { color: themeColors.textSecondary }]}>
             Sube un PDF de factura o imagen de recibo para extraer los productos, su cantidad y mapear su SKU en tu catálogo oficial mediante IA.
           </Text>
@@ -1168,19 +1198,6 @@ export default function InventarioDashboard() {
           ) : (
             <View style={{ gap: Spacing.two }}>
               <View style={[styles.metadataCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                {/* Seleccionar Proveedor */}
-                <View style={styles.customDropdownContainer}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor *</Text>
-                  <TouchableOpacity
-                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
-                    onPress={openProveedorSelector}
-                  >
-                    <Text style={{ color: selectedProveedorId ? themeColors.text : themeColors.textSecondary }}>
-                      {activeProveedorName || 'Selecciona el emisor'}
-                    </Text>
-                    <Ionicons name="chevron-down" size={18} color={themeColors.text} />
-                  </TouchableOpacity>
-                </View>
 
                 {/* Folio Factura */}
                 <CustomInput
@@ -1328,14 +1345,117 @@ export default function InventarioDashboard() {
               </View>
             </View>
           )}
-        </ScrollView>
+        </View>
+                  <View style={styles.filterSection}>
+            <CustomInput
+              placeholder="Buscar por nombre o SKU..."
+              value={searchTerm}
+              onChangeText={setSearchTerm}
+              iconName="search-outline"
+              style={{ marginBottom: Spacing.one }}
+            />
+
+            {/* Selector de Categoría */}
+            <View style={styles.customDropdownContainer}>
+              <TouchableOpacity
+                style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                onPress={openCategoryFilter}
+              >
+                <Text style={{ color: selectedCategoryFilter ? themeColors.text : themeColors.textSecondary }}>
+                  {activeCategoryName || 'Filtrar por Categoría'}
+                </Text>
+                <Ionicons name="chevron-down" size={18} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+          </View>
+          <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+            <CustomButton
+              title="➕ Agregar Producto Manualmente"
+              onPress={handleOpenCreateModal}
+              style={{ backgroundColor: themeColors.primary }}
+            />
+          </View>
+                </>
+              }
+              scrollEnabled={true} style={{ flex: 1 }} data={filteredProducts}
+              initialNumToRender={10}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              removeClippedSubviews={true}
+              keyExtractor={item => item.id}
+              contentContainerStyle={styles.listContent}
+              renderItem={({ item }) => {
+                const cat = categorias.find(c => c.id === item.categoria_id);
+                return (
+                  <View style={[styles.listItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={styles.skuText}>{item.sku_interno}</Text>
+                      <Text style={[styles.itemText, { color: themeColors.text }]}>{item.nombre_oficial}</Text>
+                      <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>
+                        {cat ? cat.nombre : 'Sin Categoría'}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.stockText,
+                          { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success },
+                        ]}
+                      >
+                        Stock: {item.stock_actual} piezas
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: Spacing.two, alignItems: 'center' }}>
+                      {/* Ajuste rápido de stock */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 4, gap: 4 }}>
+                        <TextInput
+                          style={[
+                            styles.quickStockInput,
+                            { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background },
+                          ]}
+                          placeholder="+"
+                          placeholderTextColor={themeColors.textSecondary}
+                          keyboardType="numeric"
+                          value={quickStockAdjustments[item.id] || ''}
+                          onChangeText={txt => setQuickStockAdjustments(prev => ({ ...prev, [item.id]: txt }))}
+                        />
+                        <TouchableOpacity
+                          activeOpacity={0.7}
+                          onPress={() => handleQuickAddStock(item)}
+                          style={[styles.quickStockBtn, { backgroundColor: themeColors.success }]}
+                        >
+                          <Ionicons name="add" size={14} color="#ffffff" />
+                        </TouchableOpacity>
+                      </View>
+
+                      <TouchableOpacity onPress={() => handleOpenEditModal(item)}>
+                        <Ionicons name="create-outline" size={20} color={themeColors.accent} />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleSoftDeleteProduct(item)}>
+                        <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="cube-outline" size={48} color={themeColors.textSecondary} />
+                  <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
+                    No hay productos en inventario que coincidan.
+                  </Text>
+                </View>
+              }
+              refreshing={isLoading}
+              onRefresh={loadAllData}
+            />
+          )}
+        </View>
       )}
 
       {/* VISTA 3: CATEGORÍAS */}
       {activeTab === 'categorias' && (
         <View style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 80 }]} keyboardShouldPersistTaps="handled">
-            <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Categorías de Productos</Text>
+<Text style={[styles.sectionTitle, { color: themeColors.text }]}>Categorías de Productos</Text>
             <Text style={[styles.description, { color: themeColors.textSecondary }]}>
               Visualiza el catálogo de categorías de productos y el volumen total de artículos asociados a cada una.
             </Text>
@@ -1371,21 +1491,14 @@ export default function InventarioDashboard() {
             >
               <Text style={styles.floatingActionBtnText}>➕ Categoría</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => setNewProvModalVisible(true)}
-              style={[styles.floatingActionBtn, { backgroundColor: themeColors.accent }]}
-            >
-              <Text style={styles.floatingActionBtnText}>➕ Proveedor</Text>
-            </TouchableOpacity>
           </View>
         </View>
       )}
 
       {/* VISTA 4: REGISTRAR CONSUMO */}
-      {activeTab === 'consumo' && (
+      {false && (
         <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]} keyboardShouldPersistTaps="handled">
-          <Pressable onPress={() => { setShowCliDropdown(false); setClienteSearch(''); }} style={{ flex: 1 }}>
+<Pressable onPress={() => { setShowCliDropdown(false); setClienteSearch(''); }} style={{ flex: 1 }}>
             <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Registrar Consumo de Materiales</Text>
             <Text style={[styles.description, { color: themeColors.textSecondary }]}>
               Genera un ticket de consumo para restar del inventario los productos y cantidades utilizados en un trabajo o servicio.
@@ -1575,15 +1688,189 @@ export default function InventarioDashboard() {
       </ScrollView>
     )}
 
+      {/* VISTA 5: RETRIBUCIONES */}
+      {activeTab === 'retribuciones' && (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+          <View style={{ backgroundColor: themeColors.backgroundElement, borderRadius: 12, padding: 16, marginBottom: 16, borderColor: themeColors.border, borderWidth: 1 }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginBottom: 8 }}>Dashboard de Retribuciones y Devoluciones</Text>
+            <Text style={{ color: themeColors.textSecondary, marginBottom: 16 }}>Selecciona un empleado para revisar sus evidencias reportadas y aprobar sus devoluciones de material al almacén.</Text>
+            <Text style={{ color: themeColors.text, fontWeight: '600', marginBottom: 4 }}>Empleado</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: themeColors.background, borderColor: themeColors.border, borderWidth: 1, padding: 12, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between' }} onPress={() => { setSelectorTitle('Seleccionar Empleado'); setSelectorSearch(''); setSelectorOptions(empleados.map(e => ({ id: e.id, label: e.nombre }))); setOnSelectOption(() => (id: string) => { setSelectedEmpleadoRetribucion(id); loadRetribuciones(id); loadDevolucionesPendientes(id); }); setSelectorVisible(true); }}>
+                <Text style={{ color: selectedEmpleadoRetribucion ? themeColors.text : themeColors.textSecondary }}>{empleados.find(e => e.id === selectedEmpleadoRetribucion)?.nombre || 'Seleccionar un empleado...'}</Text>
+              </TouchableOpacity>
+              {!!selectedEmpleadoRetribucion && (
+                <TouchableOpacity onPress={() => fetchEmployeeInventory(selectedEmpleadoRetribucion)} style={{ backgroundColor: themeColors.primary, padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }}>
+                  <Ionicons name="cube-outline" size={20} color="#fff" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+          
+          {isLoadingRetribuciones ? (
+            <ActivityIndicator size="large" color={themeColors.primary} style={{ marginTop: 40 }} />
+          ) : !!selectedEmpleadoRetribucion && (
+            <View style={{ flex: 1 }}>
+              
+              {/* SECCIÓN DE DEVOLUCIONES PENDIENTES */}
+              {devolucionesData.length > 0 && (
+                <View style={{ marginBottom: 24 }}>
+                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.primary, marginBottom: 12 }}>Solicitudes de Devolución Pendientes</Text>
+                  {devolucionesData.map(dev => {
+                    const mats = JSON.parse(dev.materiales || '[]');
+                    return (
+                      <View key={dev.id} style={{ backgroundColor: themeColors.backgroundElement, padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 2, borderColor: themeColors.primary }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text }}>Solicitud del: {new Date(dev.creado_en).toLocaleDateString()}</Text>
+                        </View>
+                        {dev.observaciones ? <Text style={{ color: themeColors.textSecondary, marginBottom: 8 }}>Obs: {dev.observaciones}</Text> : null}
+                        
+                        <View style={{ backgroundColor: themeColors.background, padding: 10, borderRadius: 8, marginBottom: 12 }}>
+                          {mats.map((m: any, idx: number) => (
+                            <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                              <Text style={{ color: themeColors.text }}>{m.nombre}</Text>
+                              <Text style={{ color: themeColors.text, fontWeight: 'bold' }}>+ {m.devolver} un.</Text>
+                            </View>
+                          ))}
+                        </View>
+
+                        <CustomButton
+                          title="Aprobar Devolución (Ingresar al Almacén)"
+                          variant="primary"
+                          onPress={() => handleAprobarDevolucion(dev)}
+                          loading={isApprovingDevolucion}
+                        />
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* SECCIÓN DE EVIDENCIAS */}
+              <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text, marginBottom: 12 }}>Historial de Evidencias</Text>
+              
+              {retribucionesData.length === 0 ? (
+                <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginTop: 20 }}>No hay evidencias reportadas.</Text>
+              ) : (
+                retribucionesData.map(evidencia => (
+                  <View key={evidencia.id} style={{ backgroundColor: themeColors.backgroundElement, padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: themeColors.border }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text }}>{evidencia.cliente || 'Sin Cliente'}</Text>
+                      <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>{evidencia.fecha}</Text>
+                    </View>
+                    
+                    {evidencia.materiales.length === 0 && (
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 13, fontStyle: 'italic', marginBottom: 8 }}>
+                        No se reportó uso de materiales del inventario de la camioneta.
+                      </Text>
+                    )}
+
+                    {evidencia.materiales.map((m: any, idx: number) => (
+                      <View key={idx} style={{ backgroundColor: themeColors.background, padding: 10, borderRadius: 8, marginBottom: 8 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: themeColors.text, marginBottom: 4 }}>{m.nombre}</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Usado: <Text style={{ color: themeColors.text, fontWeight: 'bold' }}>{m.usado}</Text></Text>
+                          <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Queda en Camioneta: <Text style={{ color: m.sobrante > 0 ? themeColors.warning : themeColors.success, fontWeight: 'bold' }}>{m.sobrante}</Text></Text>
+                        </View>
+                      </View>
+                    ))}
+                    
+                    {evidencia.sobrantes_verificados ? (
+                      <View style={{ marginTop: 8, padding: 8, backgroundColor: themeColors.success + '20', borderRadius: 8, alignItems: 'center' }}>
+                        <Text style={{ color: themeColors.success, fontWeight: 'bold' }}>✓ Evidencia Revisada</Text>
+                      </View>
+                    ) : (
+                      <CustomButton
+                        title="Marcar Evidencia como Revisada"
+                        variant="secondary"
+                        onPress={() => handleOpenVerifyModal(evidencia)}
+                        style={{ marginTop: 8 }}
+                      />
+                    )}
+                  </View>
+                ))
+              )}
+              {retribucionesData.length > 0 && <View style={{ height: 100 }} />}
+            </View>
+          )}
+          
+          {/* Modal de Verificación Simple */}
+          <Modal visible={verifyModalVisible} animationType="fade" transparent={true} onRequestClose={() => setVerifyModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement }]}>
+                <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text }}>Confirmar Revisión</Text>
+                  <TouchableOpacity onPress={() => setVerifyModalVisible(false)}>
+                    <Ionicons name="close" size={24} color={themeColors.text} />
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={{ padding: Spacing.three }}>
+                  <Text style={{ color: themeColors.textSecondary }}>
+                    ¿Confirmas que has revisado esta evidencia y las cantidades reportadas como "Usadas" tienen sentido con el trabajo realizado?
+                  </Text>
+                </View>
+                
+                <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
+                  <CustomButton title="Cancelar" variant="secondary" onPress={() => setVerifyModalVisible(false)} style={{ flex: 1, marginRight: Spacing.one }} />
+                  <CustomButton title="Confirmar Revisión" variant="primary" onPress={handleConfirmVerification} loading={isVerifying} style={{ flex: 1 }} />
+                </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Modal de Inventario del Empleado */}
+          <Modal visible={employeeInventoryModalVisible} animationType="fade" transparent={true} onRequestClose={() => setEmployeeInventoryModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, maxHeight: '80%', width: '90%' }]}>
+                <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text }}>Inventario en Camioneta</Text>
+                  <TouchableOpacity onPress={() => setEmployeeInventoryModalVisible(false)}>
+                    <Ionicons name="close" size={24} color={themeColors.text} />
+                  </TouchableOpacity>
+                </View>
+                
+                {isLoadingEmployeeInventory ? (
+                  <View style={{ padding: 40, alignItems: 'center' }}>
+                    <ActivityIndicator size="large" color={themeColors.primary} />
+                  </View>
+                ) : (
+                  <ScrollView style={{ padding: Spacing.three }}>
+                    {employeeInventoryData.length === 0 ? (
+                      <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginTop: 20, marginBottom: 20 }}>El empleado no tiene material registrado en su inventario.</Text>
+                    ) : (
+                      employeeInventoryData.map((item, idx) => (
+                        <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: themeColors.border }}>
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <Text style={{ color: themeColors.text, fontWeight: 'bold', fontSize: 14 }}>{item.productos?.nombre_oficial || 'Producto desconocido'}</Text>
+                            <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>SKU: {item.productos?.sku_interno || '-'}</Text>
+                          </View>
+                          <View style={{ backgroundColor: themeColors.primary + '20', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
+                            <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 14 }}>{item.cantidad_disponible} pzas</Text>
+                          </View>
+                        </View>
+                      ))
+                    )}
+                  </ScrollView>
+                )}
+                
+                <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
+                  <CustomButton title="Cerrar" variant="secondary" onPress={() => setEmployeeInventoryModalVisible(false)} style={{ flex: 1 }} />
+                </View>
+              </View>
+            </View>
+          </Modal>
+        </ScrollView>
+      )}
+
       {/* ========== MODAL CRUD MANUAL ========== */}
-      <Modal
-        animationType="slide"
+      <Modal animationType="fade"
         transparent={true}
         visible={crudModalVisible}
         onRequestClose={() => setCrudModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '70%' }]}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: themeColors.text }]}>
                 {editingProduct ? 'Modificar Producto' : 'Nuevo Producto'}
@@ -1621,13 +1908,30 @@ export default function InventarioDashboard() {
                   </Text>
                   <Ionicons name="chevron-down" size={18} color={themeColors.text} />
                 </TouchableOpacity>
+                <TouchableOpacity onPress={() => setNewProvModalVisible(true)} style={{ alignSelf: 'flex-start', marginTop: 4 }}>
+                  <Text style={{ color: themeColors.primary, fontSize: 13, fontWeight: 'bold' }}>+ Crear nuevo proveedor</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Selector de Proveedor en Formulario */}
+              <View style={styles.customDropdownContainer}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor *</Text>
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                  onPress={openFormProveedorSelector}
+                >
+                  <Text style={{ color: formProveedorId ? themeColors.text : themeColors.textSecondary }}>
+                    {activeFormProveedorName || 'Selecciona el proveedor'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={18} color={themeColors.text} />
+                </TouchableOpacity>
               </View>
 
               <CustomInput
                 label="Stock Inicial *"
                 keyboardType="numeric"
                 value={formStock}
-                onChangeText={setFormStock}
+                onChangeText={(val) => setFormStock(val.replace(/[^0-9]/g, ''))}
               />
 
               <CustomButton
@@ -1649,7 +1953,7 @@ export default function InventarioDashboard() {
         onRequestClose={() => setSelectorVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '60%' }]}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: themeColors.text }]}>{selectorTitle}</Text>
               <TouchableOpacity onPress={() => setSelectorVisible(false)}>
@@ -1665,8 +1969,7 @@ export default function InventarioDashboard() {
               style={{ marginBottom: Spacing.two }}
             />
 
-            <FlatList scrollEnabled={false}
-              data={filteredSelectorOptions}
+            <FlatList scrollEnabled={true} style={{ flex: 1 }} data={filteredSelectorOptions}
               initialNumToRender={10}
               maxToRenderPerBatch={10}
               windowSize={5}
@@ -1688,9 +1991,20 @@ export default function InventarioDashboard() {
               )}
               ListEmptyComponent={
                 <View style={{ alignItems: 'center', padding: Spacing.four }}>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 13, marginBottom: Spacing.two }}>
                     No se encontraron opciones.
                   </Text>
+                  {selectorTitle === 'Seleccionar Proveedor' && selectorSearch.trim().length > 0 && (
+                    <TouchableOpacity 
+                      onPress={() => {
+                        setSelectorVisible(false);
+                        setNewProvNombre(selectorSearch.trim());
+                        setNewProvModalVisible(true);
+                      }} 
+                    >
+                      <Text style={{ color: themeColors.primary, fontWeight: 'bold' }}>+ Agregar "{selectorSearch}" como proveedor</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               }
             />
@@ -1699,14 +2013,13 @@ export default function InventarioDashboard() {
       </Modal>
 
       {/* ========== MODAL NUEVA CATEGORÍA ========== */}
-      <Modal
-        animationType="slide"
+      <Modal animationType="fade"
         transparent={true}
         visible={newCatModalVisible}
         onRequestClose={() => setNewCatModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '55%' }]}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, borderRadius: 16, width: '100%', maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: themeColors.text }]}>Nueva Categoría</Text>
               <TouchableOpacity onPress={() => setNewCatModalVisible(false)}>
@@ -1740,14 +2053,13 @@ export default function InventarioDashboard() {
       </Modal>
 
       {/* ========== MODAL NUEVO PROVEEDOR ========== */}
-      <Modal
-        animationType="slide"
+      <Modal animationType="fade"
         transparent={true}
         visible={newProvModalVisible}
         onRequestClose={() => setNewProvModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '55%' }]}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, borderRadius: 16, width: '100%', maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: themeColors.text }]}>Nuevo Proveedor</Text>
               <TouchableOpacity onPress={() => setNewProvModalVisible(false)}>
@@ -1766,7 +2078,7 @@ export default function InventarioDashboard() {
                 label="RFC (Opcional)"
                 placeholder="Ej. MEN120415XYZ"
                 value={newProvRfc}
-                onChangeText={setNewProvRfc}
+                onChangeText={(val) => setNewProvRfc(val.toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 13))}
                 autoCapitalize="characters"
               />
 
@@ -1780,12 +2092,17 @@ export default function InventarioDashboard() {
           </View>
         </View>
       </Modal>
-    </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  modalFooter: {
+    flexDirection: 'row',
+    padding: 24,
+    borderTopWidth: 1,
+  },
   container: {
     flex: 1,
   },
@@ -2135,12 +2452,15 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
   },
   modalContent: {
-    borderTopLeftRadius: BorderRadius.large,
-    borderTopRightRadius: BorderRadius.large,
+    borderRadius: BorderRadius.large,
     padding: Spacing.four,
+    width: '100%',
+    maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',

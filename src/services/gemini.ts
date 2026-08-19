@@ -6,7 +6,9 @@ const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const FALLBACK_MODELS = [
   'gemini-3.5-flash',
   'gemini-2.5-flash',
-];
+]; 
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export interface GeminiOcrResult {
   monto: number | null;
@@ -163,30 +165,43 @@ async function callGeminiAPI(requestBody: any): Promise<string> {
   let lastErrorMsg = '';
 
   for (const model of FALLBACK_MODELS) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+    let retries = 0;
+    while (retries < 2) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
 
-      if (response.ok) {
-        const resData = await response.json();
-        const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (textResult) {
-          return textResult.trim();
+        if (response.ok) {
+          const resData = await response.json();
+          const textResult = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (textResult) {
+            return textResult.trim();
+          }
+          break;
+        } else if (response.status === 429 || response.status === 503) {
+          retries++;
+          const errorText = await response.text();
+          logger.warn(`Modelo Gemini ${model} rate-limited/overloaded (${response.status}). Intento ${retries} de 2...`);
+          await sleep(2000 * retries); // 2s, then 4s
+          lastErrorMsg = `Respuesta ${response.status}`;
+          continue;
+        } else {
+          const errorText = await response.text();
+          logger.warn(`Modelo Gemini ${model} falló con código ${response.status}: ${errorText}`);
+          lastErrorMsg = `Respuesta ${response.status}`;
+          break;
         }
-      } else {
-        const errorText = await response.text();
-        logger.warn(`Modelo Gemini ${model} falló con código ${response.status}: ${errorText}`);
-        lastErrorMsg = `Respuesta ${response.status}`;
+      } catch (err: any) {
+        logger.warn(`Excepción en petición a modelo ${model}:`, err);
+        lastErrorMsg = err.message || 'Error de conexión';
+        break;
       }
-    } catch (err: any) {
-      logger.warn(`Excepción en petición a modelo ${model}:`, err);
-      lastErrorMsg = err.message || 'Error de conexión';
     }
   }
 
@@ -205,24 +220,36 @@ async function callGeminiRaw(requestBody: any): Promise<any> {
   let lastErrorMsg = '';
 
   for (const model of FALLBACK_MODELS) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
+    let retries = 0;
+    while (retries < 2) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
 
-      if (response.ok) {
-        return await response.json();
-      } else {
-        const errorText = await response.text();
-        logger.warn(`Modelo Gemini ${model} falló en callGeminiRaw: ${errorText}`);
-        lastErrorMsg = `Respuesta ${response.status}`;
+        if (response.ok) {
+          return await response.json();
+        } else if (response.status === 429 || response.status === 503) {
+          retries++;
+          const errorText = await response.text();
+          logger.warn(`Modelo Gemini ${model} rate-limited/overloaded en callGeminiRaw (${response.status}). Intento ${retries} de 2...`);
+          await sleep(2000 * retries);
+          lastErrorMsg = `Respuesta ${response.status}`;
+          continue;
+        } else {
+          const errorText = await response.text();
+          logger.warn(`Modelo Gemini ${model} falló en callGeminiRaw: ${errorText}`);
+          lastErrorMsg = `Respuesta ${response.status}`;
+          break;
+        }
+      } catch (err: any) {
+        logger.warn(`Excepción en callGeminiRaw a modelo ${model}:`, err);
+        lastErrorMsg = err.message || 'Error de conexión';
+        break;
       }
-    } catch (err: any) {
-      logger.warn(`Excepción en callGeminiRaw a modelo ${model}:`, err);
-      lastErrorMsg = err.message || 'Error de conexión';
     }
   }
 
@@ -504,6 +531,7 @@ Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown a
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 
@@ -584,6 +612,7 @@ Formato de Salida: Devuelve strictly un objeto JSON con esta estructura, sin tex
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 
@@ -690,6 +719,7 @@ Devuelve ÚNICAMENTE un objeto JSON válido con esta estructura exacta (sin mark
       ],
       generationConfig: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     };
 

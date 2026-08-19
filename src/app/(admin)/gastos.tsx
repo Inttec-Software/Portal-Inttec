@@ -702,7 +702,7 @@ export default function AdminGastosScreen() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: '*/*',
-        copyToCacheDirectory: false,
+        copyToCacheDirectory: true,
       });
 
       if (!result.canceled && result.assets?.[0]) {
@@ -723,19 +723,23 @@ export default function AdminGastosScreen() {
         if (Platform.OS !== 'web') {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const FileSys = require('expo-file-system');
-          const tempFileName = `temp_${Date.now()}_${asset.name || 'factura.pdf'}`;
-          const targetUri = `${FileSys.cacheDirectory}${tempFileName}`;
-
-          await FileSys.copyAsync({
-            from: uri,
-            to: targetUri,
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.onload = () => {
+              try {
+                const base64Str = require('buffer').Buffer.from(xhr.response).toString('base64');
+                resolve(base64Str);
+              } catch (e) {
+                reject(e);
+              }
+            };
+            xhr.onerror = reject;
+            xhr.responseType = 'arraybuffer';
+            xhr.open('GET', uri, true);
+            xhr.send(null);
           });
-
-          const b64 = await FileSys.readAsStringAsync(targetUri, {
-            encoding: FileSys.EncodingType.Base64,
-          });
-
-          await uploadInvoiceToSupabase(targetUri, b64, ext);
+          
+          await uploadInvoiceToSupabase(uri, b64, ext);
         } else {
           const response = await fetch(uri);
           const blob = await response.blob();
@@ -1561,9 +1565,8 @@ export default function AdminGastosScreen() {
     return { alerta, proveedorSugerido, justificacion: remaining.trim() };
   };
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
+  const renderScreenHeader = () => (
+    <View>
       {/* Switch de Empresa - Fila Dedicada */}
       <View style={{
         flexDirection: 'row',
@@ -1729,6 +1732,12 @@ export default function AdminGastosScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+      <View style={{ flex: 1 }}>
 
       {/* Contents based on tab */}
       {isLoading ? (
@@ -1742,6 +1751,7 @@ export default function AdminGastosScreen() {
           {activeTab === 'pendientes' && (
             isDesktop ? (
               <ScrollView style={{ flex: 1 }}>
+                {renderScreenHeader()}
                 <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
                   <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
                     <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
@@ -1837,7 +1847,8 @@ export default function AdminGastosScreen() {
                 </View>
               </ScrollView>
             ) : (
-              <FlatList scrollEnabled={false}
+              <FlatList scrollEnabled={true} style={{ flex: 1 }}
+                ListHeaderComponent={renderScreenHeader}
                 data={pendingGastos}
                 initialNumToRender={8}
                 maxToRenderPerBatch={8}
@@ -1900,6 +1911,7 @@ export default function AdminGastosScreen() {
               </View>
               {isDesktop ? (
                 <ScrollView style={{ flex: 1 }}>
+                  {renderScreenHeader()}
                   <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
                     <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
                       <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
@@ -1992,7 +2004,8 @@ export default function AdminGastosScreen() {
                   </View>
                 </ScrollView>
               ) : (
-                <FlatList scrollEnabled={false}
+              <FlatList scrollEnabled={true} style={{ flex: 1 }}
+                ListHeaderComponent={renderScreenHeader}
                   data={historyGastos}
                   initialNumToRender={8}
                   maxToRenderPerBatch={8}
@@ -4146,7 +4159,7 @@ export default function AdminGastosScreen() {
         }}
       />
       
-    </ScrollView>
+    </View>
     </SafeAreaView>
   );
 }

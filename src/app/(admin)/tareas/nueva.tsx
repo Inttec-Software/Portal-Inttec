@@ -223,6 +223,11 @@ export default function NuevaTareaScreen() {
             <input 
               type="date"
               value={fechaCompromiso.toISOString().split('T')[0]}
+              onClick={(e: any) => {
+                try {
+                  e.target.showPicker();
+                } catch (err) {}
+              }}
               onChange={(e: any) => {
                 if(e.target.value) setFechaCompromiso(new Date(e.target.value + 'T12:00:00Z'));
               }}
@@ -236,7 +241,8 @@ export default function NuevaTareaScreen() {
                 fontSize: 15,
                 outline: 'none',
                 width: '100%',
-                boxSizing: 'border-box'
+                boxSizing: 'border-box',
+                cursor: 'pointer'
               }}
             />
           ) : (

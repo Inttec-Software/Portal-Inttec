@@ -49,6 +49,8 @@ export default function EmpleadoLayout() {
     { route: '/(empleado)/gastos', icon: 'cash-outline', color: '#feca57', name: 'Gastos' },
     { route: '/(empleado)/asistencia', icon: 'time-outline', color: '#1dd1a1', name: 'Asistencia' },
     { route: '/(empleado)/evidencia', icon: 'briefcase-outline', color: '#ff5252', name: 'Evidencias' },
+    { route: '/(empleado)/retiro-material', icon: 'cart-outline', color: '#ff7f50', name: 'Retiro Material' },
+    { route: '/(empleado)/devoluciones', icon: 'return-up-back-outline', color: '#2ed573', name: 'Devoluciones' },
     { route: '/(empleado)/vehiculos', icon: 'car-outline', color: '#ff9ff3', name: 'Vehículos' },
     { route: '/(empleado)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
     { route: '/(empleado)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },

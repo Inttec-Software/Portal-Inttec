@@ -319,7 +319,7 @@ export default function EditarGastoForm() {
           }
         } catch {
           showAlert('Error', 'No se pudo cargar el gasto a editar.');
-          router.replace('/(admin)/dashboard');
+          router.replace('/(admin)/gastos');
         } finally {
           setIsLoadingGasto(false);
         }
@@ -439,8 +439,20 @@ export default function EditarGastoForm() {
              reader.readAsDataURL(blob);
            });
         } else {
-           base64Str = await FileSystem.readAsStringAsync(file.uri, {
-             encoding: FileSystem.EncodingType.Base64,
+           base64Str = await new Promise<string>((resolve, reject) => {
+             const xhr = new XMLHttpRequest();
+             xhr.onload = () => {
+               try {
+                 const b64 = require('buffer').Buffer.from(xhr.response).toString('base64');
+                 resolve(b64);
+               } catch (e) {
+                 reject(e);
+               }
+             };
+             xhr.onerror = reject;
+             xhr.responseType = 'arraybuffer';
+             xhr.open('GET', file.uri, true);
+             xhr.send(null);
            });
         }
         setImageBase64(base64Str);
@@ -800,7 +812,7 @@ export default function EditarGastoForm() {
 
       showAlert('Éxito', 'Gasto modificado correctamente y enviado a revisión.');
 
-      router.replace('/(admin)/dashboard');
+      router.replace('/(admin)/gastos');
     } catch (err: any) {
       showAlert('Error al guardar', err.message || 'No se pudo guardar el gasto.');
     } finally {
@@ -1176,7 +1188,7 @@ export default function EditarGastoForm() {
                 2. Detalles de la Compra
               </Text>
 
-              {(alertaPolitica || alertaLocal) && (
+              {!!(alertaPolitica || alertaLocal) && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}>
                   <Ionicons name="warning-outline" size={22} color={themeColors.danger} style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
@@ -1983,7 +1995,7 @@ export default function EditarGastoForm() {
                 3. Categorización e Información de Negocio
               </Text>
 
-              {(alertaPolitica || alertaLocal) && (
+              {!!(alertaPolitica || alertaLocal) && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}>
                   <Ionicons name="warning-outline" size={22} color={themeColors.danger} style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
@@ -2035,7 +2047,7 @@ export default function EditarGastoForm() {
               </View>
 
               {/* Selector de Subcategorías (Filtrado dependiente) */}
-              {selectedCategoria && (
+              {!!selectedCategoria && (
                 <View style={styles.customDropdownContainer}>
                   <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Subcategoría *</Text>
                   <TouchableOpacity

@@ -133,13 +133,19 @@ export default function TaskDetailScreen() {
     }
   };
 
+  const parseLocalDate = (dateString: string) => {
+    if (!dateString) return new Date();
+    const [year, month, day] = dateString.split('T')[0].split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
   const getSemaforoColor = (fechaCompromiso: string, status: string) => {
     if (status === 'Completada') return '#3498db';
     if (status === 'Cancelada') return '#95a5a6';
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const target = new Date(fechaCompromiso);
+    const target = parseLocalDate(fechaCompromiso);
     target.setHours(0, 0, 0, 0);
 
     const diffTime = target.getTime() - today.getTime();
@@ -206,7 +212,7 @@ export default function TaskDetailScreen() {
                 <View>
                   <Text style={[styles.metaLabel, { color: themeColors.textSecondary }]}>Vencimiento</Text>
                   <Text style={[styles.metaValue, { color: themeColors.text }]}>
-                    {new Date(task.fecha_compromiso).toLocaleDateString()}
+                    {parseLocalDate(task.fecha_compromiso).toLocaleDateString()}
                   </Text>
                 </View>
               </View>

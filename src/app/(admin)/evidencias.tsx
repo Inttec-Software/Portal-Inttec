@@ -65,11 +65,10 @@ export default function AdminEvidenciasScreen() {
     }
 
     try {
-      // 1. Obtener todas las evidencias
       const { data: evidencesData, error: evidencesErr } = await supabase
         .from('evidencias')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('creado_en', { ascending: false });
 
       if (evidencesErr) throw evidencesErr;
       setEvidencias(evidencesData || []);
@@ -185,65 +184,7 @@ export default function AdminEvidenciasScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
-      {/* Header */}
-      <View style={styles.header}>
-        
-        <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      {/* Buscador */}
-      <View style={styles.searchContainer}>
-        <CustomInput
-          placeholder="Buscar por cliente, descripción, material o técnico..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          iconName="search-outline"
-        />
-      </View>
-
-      {/* Filtro horizontal de Empleados */}
-      <View style={styles.filterSection}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScrollContent}
-        >
-          <TouchableOpacity
-            onPress={() => setSelectedEmployeeId(null)}
-            style={[
-              styles.filterPill,
-              {
-                backgroundColor: selectedEmployeeId === null ? themeColors.accent : themeColors.backgroundElement,
-                borderColor: selectedEmployeeId === null ? themeColors.accent : themeColors.border,
-              },
-            ]}
-          >
-            <Text style={[styles.filterPillText, { color: selectedEmployeeId === null ? '#ffffff' : themeColors.textSecondary }]}>
-              Todos
-            </Text>
-          </TouchableOpacity>
-
-          {employees.map((emp) => (
-            <TouchableOpacity
-              key={emp.id}
-              onPress={() => setSelectedEmployeeId(emp.id)}
-              style={[
-                styles.filterPill,
-                {
-                  backgroundColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.backgroundElement,
-                  borderColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.border,
-                },
-              ]}
-            >
-              <Text style={[styles.filterPillText, { color: selectedEmployeeId === emp.id ? '#ffffff' : themeColors.textSecondary }]}>
-                {emp.nombre.split(' ')[0]}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
+      <View style={{ flex: 1 }}>
 
       {/* Listado de Reportes */}
       {isLoading ? (
@@ -255,6 +196,58 @@ export default function AdminEvidenciasScreen() {
         </View>
       ) : isDesktop ? (
         <ScrollView style={{ flex: 1 }}>
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
+            <View style={{ width: 40 }} />
+          </View>
+          <View style={styles.searchContainer}>
+            <CustomInput
+              placeholder="Buscar por cliente, descripción, material o técnico..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              iconName="search-outline"
+            />
+          </View>
+          <View style={styles.filterSection}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterScrollContent}
+            >
+              <TouchableOpacity
+                onPress={() => setSelectedEmployeeId(null)}
+                style={[
+                  styles.filterPill,
+                  {
+                    backgroundColor: selectedEmployeeId === null ? themeColors.accent : themeColors.backgroundElement,
+                    borderColor: selectedEmployeeId === null ? themeColors.accent : themeColors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.filterPillText, { color: selectedEmployeeId === null ? '#ffffff' : themeColors.textSecondary }]}>
+                  Todos
+                </Text>
+              </TouchableOpacity>
+              {employees.map((emp) => (
+                <TouchableOpacity
+                  key={emp.id}
+                  onPress={() => setSelectedEmployeeId(emp.id)}
+                  style={[
+                    styles.filterPill,
+                    {
+                      backgroundColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.backgroundElement,
+                      borderColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.filterPillText, { color: selectedEmployeeId === emp.id ? '#ffffff' : themeColors.textSecondary }]}>
+                    {emp.nombre.split(' ')[0]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
           <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
             <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Fecha de Reg.</Text>
@@ -305,7 +298,62 @@ export default function AdminEvidenciasScreen() {
           </View>
         </ScrollView>
       ) : (
-        <FlatList scrollEnabled={false}
+        <FlatList scrollEnabled={true} style={{ flex: 1 }}
+          ListHeaderComponent={
+            <View>
+              <View style={styles.header}>
+                <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
+                <View style={{ width: 40 }} />
+              </View>
+              <View style={styles.searchContainer}>
+                <CustomInput
+                  placeholder="Buscar por cliente, descripción, material o técnico..."
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  iconName="search-outline"
+                />
+              </View>
+              <View style={styles.filterSection}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.filterScrollContent}
+                >
+                  <TouchableOpacity
+                    onPress={() => setSelectedEmployeeId(null)}
+                    style={[
+                      styles.filterPill,
+                      {
+                        backgroundColor: selectedEmployeeId === null ? themeColors.accent : themeColors.backgroundElement,
+                        borderColor: selectedEmployeeId === null ? themeColors.accent : themeColors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.filterPillText, { color: selectedEmployeeId === null ? '#ffffff' : themeColors.textSecondary }]}>
+                      Todos
+                    </Text>
+                  </TouchableOpacity>
+                  {employees.map((emp) => (
+                    <TouchableOpacity
+                      key={emp.id}
+                      onPress={() => setSelectedEmployeeId(emp.id)}
+                      style={[
+                        styles.filterPill,
+                        {
+                          backgroundColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.backgroundElement,
+                          borderColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.border,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.filterPillText, { color: selectedEmployeeId === emp.id ? '#ffffff' : themeColors.textSecondary }]}>
+                        {emp.nombre.split(' ')[0]}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          }
           initialNumToRender={8}
           maxToRenderPerBatch={8}
           windowSize={5}
@@ -614,7 +662,7 @@ export default function AdminEvidenciasScreen() {
         imageUrl={selectedPhoto}
         onClose={() => setViewerVisible(false)}
       />
-    </ScrollView>
+    </View>
     </SafeAreaView>
   );
 }

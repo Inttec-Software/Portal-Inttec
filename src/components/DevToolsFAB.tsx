@@ -70,7 +70,7 @@ export default function DevToolsFAB() {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: Platform.OS === 'web' ? 20 : 40,
+    bottom: Platform.OS === 'web' ? 20 : 170,
     right: 20,
     zIndex: 9999,
     alignItems: 'flex-end',
