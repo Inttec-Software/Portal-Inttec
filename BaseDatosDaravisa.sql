@@ -506,3 +506,5 @@ CREATE TABLE IF NOT EXISTS public.tarea_reprogramaciones (
 -- Políticas RLS opcionales (Si tienen RLS activado)
 -- Para asegurar el acceso y modificación
 
+
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS proveedor_id UUID REFERENCES public.proveedores(id);

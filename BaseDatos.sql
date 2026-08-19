@@ -506,3 +506,39 @@ CREATE TABLE IF NOT EXISTS public.tarea_reprogramaciones (
 -- Políticas RLS opcionales (Si tienen RLS activado)
 -- Para asegurar el acceso y modificación
 
+
+-- =========================================================================
+-- MIGRACIÃ“N: SISTEMA DE INVENTARIO PERSONAL Y DEVOLUCIONES
+-- =========================================================================
+
+-- 1. Tabla de Inventario de Camioneta (Personal por Empleado)
+CREATE TABLE IF NOT EXISTS public.inventario_empleados (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empleado_id UUID REFERENCES public.usuarios(id) NOT NULL,
+  producto_id UUID REFERENCES public.productos(id) NOT NULL,
+  cantidad_disponible INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT inventario_empleados_unique UNIQUE(empleado_id, producto_id)
+);
+
+-- 2. ModificaciÃ³n a Evidencias (Para auditorÃ­a de sobrantes)
+ALTER TABLE public.evidencias 
+ADD COLUMN IF NOT EXISTS sobrantes_verificados BOOLEAN NOT NULL DEFAULT false;
+
+-- 3. Tabla de Solicitudes de DevoluciÃ³n
+CREATE TABLE IF NOT EXISTS public.devoluciones_empleado (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empleado_id UUID REFERENCES public.usuarios(id) NOT NULL,
+  empleado_nombre TEXT NOT NULL,
+  estado VARCHAR NOT NULL CHECK (estado IN ('PENDIENTE', 'APROBADO', 'RECHAZADO')) DEFAULT 'PENDIENTE',
+  materiales JSONB NOT NULL,
+  observaciones TEXT,
+  creado_en TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  revisado_por UUID REFERENCES public.usuarios(id)
+);
+
+
+-- 4. Agregar proveedor principal a productos
+ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS proveedor_id UUID REFERENCES public.proveedores(id);

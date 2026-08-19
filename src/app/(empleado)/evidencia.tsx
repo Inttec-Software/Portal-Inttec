@@ -27,6 +27,7 @@ import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import MaterialesSelector from '@/components/MaterialesSelector';
 
 export default function EvidenciaForm() {
   const router = useRouter();
@@ -56,16 +57,18 @@ export default function EvidenciaForm() {
   const [selectedSucursal, setSelectedSucursal] = useState<string>('');
   const [sucursalSearch, setSucursalSearch] = useState('');
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
+  const [productos, setProductos] = useState<any[]>([]);
 
   const [trabajos, setTrabajos] = useState<{
     descripcion: string;
     materiales: string;
+    materiales_usados?: { productoId: string; nombre: string; retirado: number; usado: number; sobrante: number }[];
     solucion: string;
     antesImg?: { uri: string; base64: string | null };
     despuesImg?: { uri: string; base64: string | null };
     fotosAdicionales?: { uri: string; base64: string | null }[];
   }[]>([
-    { descripcion: '', materiales: '', solucion: '', fotosAdicionales: [] }
+    { descripcion: '', materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [] }
   ]);
 
   // Modal de imagen a pantalla completa
@@ -80,14 +83,25 @@ export default function EvidenciaForm() {
   };
 
 
-  const loadCatalogos = async () => {
+  const loadCatalogos = async (userId?: string) => {
     try {
-      const [cliRes, sucRes] = await Promise.all([
+      const uId = userId || currentUser?.id;
+      const [cliRes, sucRes, prodRes] = await Promise.all([
         supabase.from('clientes').select('*').order('nombre'),
         supabase.from('sucursales_cliente').select('*').order('nombre'),
+        uId ? supabase.from('inventario_empleados').select('cantidad_disponible, producto_id, productos(sku_interno, nombre_oficial)').eq('empleado_id', uId).gt('cantidad_disponible', 0) : Promise.resolve({ data: [] }),
       ]);
       if (cliRes.data) setClientes(cliRes.data);
       if (sucRes.data) setSucursalesCliente(sucRes.data);
+      if (prodRes && prodRes.data) {
+        const formattedProductos = prodRes.data.map((item: any) => ({
+          id: item.producto_id,
+          sku_interno: item.productos?.sku_interno || '',
+          nombre_oficial: item.productos?.nombre_oficial || '',
+          stock_actual: item.cantidad_disponible
+        }));
+        setProductos(formattedProductos);
+      }
     } catch (err) {
       console.error('Error loading catalogs:', err);
     }
@@ -101,7 +115,7 @@ export default function EvidenciaForm() {
         return;
       }
       setCurrentUser(user);
-      await loadCatalogos();
+      await loadCatalogos(user.id);
     };
     init();
   }, [router]);
@@ -329,6 +343,7 @@ export default function EvidenciaForm() {
         descripcion_trabajo: JSON.stringify(trabajos.map(t => ({
           descripcion: t.descripcion.trim(),
           materiales: t.materiales.trim() || null,
+          materiales_usados: t.materiales_usados || [],
           solucion: t.solucion.trim() || null,
           antesImg: t.antesImg?.uri || (t.antesImg?.base64 ? `data:image/jpeg;base64,${t.antesImg.base64}` : null),
           despuesImg: t.despuesImg?.uri || (t.despuesImg?.base64 ? `data:image/jpeg;base64,${t.despuesImg.base64}` : null),
@@ -449,6 +464,7 @@ export default function EvidenciaForm() {
         trabajosPayload.push({
           descripcion: t.descripcion.trim(),
           materiales: t.materiales.trim() || null,
+          materiales_usados: t.materiales_usados || [],
           solucion: t.solucion.trim() || null,
           antesImg: antesUrl || t.antesImg?.uri || null,
           despuesImg: despuesUrl || t.despuesImg?.uri || null,
@@ -485,6 +501,32 @@ export default function EvidenciaForm() {
           fotos_adicionales_urls: allFotosAdicionalesUrls.length > 0 ? allFotosAdicionalesUrls : null,
         },
       ]);
+
+      if (!dbError) {
+        // Descontar del inventario personal del empleado
+        for (const t of trabajosPayload) {
+          for (const m of (t.materiales_usados || [])) {
+            if (m.usado > 0) {
+              const { data: invEmp } = await supabase
+                .from('inventario_empleados')
+                .select('id, cantidad_disponible')
+                .eq('empleado_id', currentUser.id)
+                .eq('producto_id', m.productoId)
+                .maybeSingle();
+                
+              if (invEmp) {
+                await supabase
+                  .from('inventario_empleados')
+                  .update({ 
+                    cantidad_disponible: Math.max(0, invEmp.cantidad_disponible - m.usado), 
+                    updated_at: new Date().toISOString() 
+                  })
+                  .eq('id', invEmp.id);
+              }
+            }
+          }
+        }
+      }
 
       if (dbError) {
         throw new Error(
@@ -839,22 +881,14 @@ export default function EvidenciaForm() {
                     iconName="construct-outline"
                   />
 
-                  <CustomInput
-                    label="Materiales Utilizados *"
-                    placeholder="Ej. ৹ 2 metros cable UTP&#10;৹ 4 conectores RJ45..."
-                    value={trabajo.materiales}
-                    onChangeText={(val) => {
-                      let formatted = val;
-                      if (formatted.length > 0 && !formatted.startsWith('৹ ') && !formatted.startsWith('৹')) {
-                        formatted = '৹ ' + formatted;
-                      }
-                      formatted = formatted.replace(/\n([^৹\n])/g, '\n৹ $1');
-                      setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, materiales: formatted } : t));
+                  {/* Selector de Materiales Estructurado */}
+                  <MaterialesSelector
+                    productos={productos}
+                    materiales={trabajo.materiales_usados || []}
+                    onChange={(nuevosMateriales) => {
+                      const textoMateriales = nuevosMateriales.map(m => `৹ ${m.usado}x ${m.nombre} (Sobrante: ${m.sobrante})`).join('\n');
+                      setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, materiales_usados: nuevosMateriales, materiales: textoMateriales } : t));
                     }}
-                    multiline
-                    numberOfLines={2}
-                    style={{ minHeight: 60 }}
-                    iconName="build-outline"
                   />
 
                   <CustomInput
