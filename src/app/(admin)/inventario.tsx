@@ -56,6 +56,7 @@ interface FacturaItemStaging {
   productoIdSugerido?: string; // ID del producto asociado en catálogo
   esNuevoProducto: boolean;
   categoriaSeleccionadaId?: string; // Si es nuevo, categoría asignada
+  skuSugerido?: string; // SKU que se asignará si es un producto nuevo
 }
 
 interface ConsumoItem {
@@ -70,6 +71,14 @@ export default function InventarioDashboard() {
   const isMobile = windowWidth < 600;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}: ${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
 
   // Tab activa: 'catalogo' | 'ia-import' | 'consumo' | 'categorias'
   const [activeTab, setActiveTab] = useState<'importacion' | 'categorias' | 'retribuciones'>('importacion');
@@ -983,6 +992,7 @@ async function loadAllData() {
             productoIdSugerido: suggestedProd?.id,
             esNuevoProducto: esNuevo,
             categoriaSeleccionadaId: suggestedCat?.id || categorias[0]?.id,
+            skuSugerido: esNuevo ? 'SKU-AI-' + Math.random().toString(36).substring(3, 8).toUpperCase() : undefined,
           };
         });
 
@@ -1006,39 +1016,45 @@ async function loadAllData() {
 
   const handleSaveAIImport = async () => {
     if (!selectedProveedorId) {
-      Alert.alert('Validación', 'Por favor selecciona un Proveedor.');
+      showAlert('Validación', 'Por favor selecciona un Proveedor de la lista (icono de búsqueda 🔍 junto a Proveedor Asignado).');
       return;
     }
     if (!folioFactura.trim()) {
-      Alert.alert('Validación', 'Por favor ingresa el Folio de la Factura.');
+      showAlert('Validación', 'Por favor ingresa el Folio de la Factura.');
       return;
     }
     if (stagingItems.length === 0) {
-      Alert.alert('Validación', 'No hay ítems para procesar.');
+      showAlert('Validación', 'No hay ítems para procesar.');
       return;
     }
 
     setIsSavingAIImport(true);
+    console.log('Iniciando handleSaveAIImport...');
+    console.log('Folio Factura:', folioFactura);
+    console.log('Proveedor ID:', selectedProveedorId);
+    console.log('Items a procesar:', stagingItems.length);
     try {
       const { data: userData } = await supabase.auth.getUser();
       const currentUserId = userData?.user?.id || null;
 
       // Procesar cada ítem del staging
       for (const item of stagingItems) {
+        console.log(`Procesando item: ${item.nombreFactura} (esNuevo: ${item.esNuevoProducto})`);
         let finalProductoId = item.productoIdSugerido;
 
         if (item.esNuevoProducto) {
           // 1. Crear nuevo producto en DB
-          const generatedSku = 'SKU-AI-' + Math.random().toString(36).substring(3, 8).toUpperCase();
+          const finalSku = item.skuSugerido && item.skuSugerido.trim() !== '' ? item.skuSugerido.trim() : 'SKU-AI-' + Math.random().toString(36).substring(3, 8).toUpperCase();
           const { data: newProd, error: newProdErr } = await supabase
             .from('productos')
             .insert([
               {
-                sku_interno: generatedSku,
+                sku_interno: finalSku,
                 nombre_oficial: item.nombreFactura,
                 categoria_id: item.categoriaSeleccionadaId || categorias[0]?.id,
                 stock_actual: item.cantidad,
                 activo: true,
+                proveedor_id: selectedProveedorId,
               },
             ])
             .select()
@@ -1048,13 +1064,14 @@ async function loadAllData() {
           finalProductoId = newProd.id;
 
           // 2. Registrar alias proveedor
-          await supabase.from('alias_proveedor_producto').insert([
+          const { error: aliasErr1 } = await supabase.from('alias_proveedor_producto').insert([
             {
-              
+              proveedor_id: selectedProveedorId,
               producto_id: finalProductoId,
               nombre_segun_proveedor: item.nombreFactura,
             },
           ]);
+          if (aliasErr1) throw aliasErr1;
         } else if (finalProductoId) {
           // 1. Actualizar el stock del producto existente
           const prodObj = productos.find(p => p.id === finalProductoId);
@@ -1076,39 +1093,45 @@ async function loadAllData() {
             .maybeSingle();
 
           if (!aliasExists) {
-            await supabase.from('alias_proveedor_producto').insert([
+            const { error: aliasErr2 } = await supabase.from('alias_proveedor_producto').insert([
               {
-                
+                proveedor_id: selectedProveedorId,
                 producto_id: finalProductoId,
                 nombre_segun_proveedor: item.nombreFactura,
               },
             ]);
+            if (aliasErr2) throw aliasErr2;
           }
         }
 
         // 3. Crear movimiento de inventario (ENTRADA)
         if (finalProductoId) {
-          await supabase.from('movimientos_inventario').insert([
+          const { error: movErr } = await supabase.from('movimientos_inventario').insert([
             {
               producto_id: finalProductoId,
               tipo: 'ENTRADA',
               cantidad: item.cantidad,
               folio_factura: folioFactura.trim(),
-              
+              proveedor_id: selectedProveedorId,
               creado_por: currentUserId,
             },
           ]);
+          if (movErr) throw movErr;
+        } else {
+          throw new Error(`El producto "${item.nombreFactura}" no ha sido mapeado a ningún producto del catálogo y no está marcado como "NUEVO PRODUCTO".`);
         }
       }
 
-      Alert.alert('Éxito', 'Inventario actualizado correctamente.');
+      console.log('Todos los ítems procesados correctamente.');
+      showAlert('Éxito', 'Inventario actualizado correctamente.');
       setStagingItems([]);
       setFolioFactura('');
       setSelectedProveedorId('');
       setActiveTab('importacion');
       await loadAllData();
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo guardar la importación.');
+      console.error('Error crítico en handleSaveAIImport:', err);
+      showAlert('Error', err.message || 'No se pudo guardar la importación.');
     } finally {
       setIsSavingAIImport(false);
     }
@@ -1199,6 +1222,20 @@ async function loadAllData() {
             <View style={{ gap: Spacing.two }}>
               <View style={[styles.metadataCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
 
+                {/* Proveedor */}
+                <View style={[styles.customDropdownContainer, { marginBottom: 16 }]}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor Asignado *</Text>
+                  <TouchableOpacity
+                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                    onPress={openProveedorSelector}
+                  >
+                    <Text style={{ color: selectedProveedorId ? themeColors.text : themeColors.textSecondary }}>
+                      {activeProveedorName || 'Selecciona el proveedor'}
+                    </Text>
+                    <Ionicons name="search" size={18} color={themeColors.text} />
+                  </TouchableOpacity>
+                </View>
+
                 {/* Folio Factura */}
                 <CustomInput
                   label="Folio de Factura *"
@@ -1215,7 +1252,11 @@ async function loadAllData() {
                   key={item.id}
                   style={[styles.stagingItemCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                 >
-                  <Text style={[styles.stagingName, { color: themeColors.text }]}>{item.nombreFactura}</Text>
+                  <CustomInput
+                    label="Nombre Extraído"
+                    value={item.nombreFactura}
+                    onChangeText={txt => handleUpdateStagingItem(item.id, { nombreFactura: txt })}
+                  />
                   
                   <View style={styles.stagingFieldsRow}>
                     <View style={{ flex: 1 }}>
@@ -1241,6 +1282,13 @@ async function loadAllData() {
                       <View style={styles.newProductContainer}>
                         <View style={styles.badgeNew}>
                           <Text style={styles.badgeNewText}>NUEVO PRODUCTO</Text>
+                        </View>
+                        <View style={{ marginTop: Spacing.one }}>
+                          <CustomInput
+                            label="SKU Sugerido (editable)"
+                            value={item.skuSugerido || ''}
+                            onChangeText={txt => handleUpdateStagingItem(item.id, { skuSugerido: txt })}
+                          />
                         </View>
                         {/* Dropdown de Categoría */}
                         <View style={{ marginTop: Spacing.one }}>
