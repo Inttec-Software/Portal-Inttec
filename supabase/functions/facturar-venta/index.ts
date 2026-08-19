@@ -19,20 +19,23 @@ serve(async (req) => {
     )
 
     // Leer payload
-    const { venta_id } = await req.json()
+    const body = await req.json()
+    const { venta_id, custom_receptor, custom_condiciones, custom_partidas } = body
     if (!venta_id) throw new Error('venta_id es requerido')
 
     // 1. Obtener la venta
-    const { data: venta, error: ventaError } = await supabaseClient
+    const { data: ventaDB, error: ventaError } = await supabaseClient
       .from('ventas')
       .select('*')
       .eq('id', venta_id)
       .single()
 
-    if (ventaError || !venta) throw new Error('Venta no encontrada')
-    if (venta.cfdi_estado === 'TIMBRADA') throw new Error('La venta ya se encuentra timbrada')
+    if (ventaError || !ventaDB) throw new Error('Venta no encontrada')
+    if (ventaDB.cfdi_estado === 'TIMBRADA') throw new Error('La venta ya se encuentra timbrada')
 
-    // 2. Obtener cliente (ignorando mayúsculas/minúsculas y espacios extras)
+    let venta = { ...ventaDB, ...(custom_condiciones || {}) }
+
+    // 2. Obtener cliente (o usar custom_receptor)
     let cliente = null;
     if (venta.cliente) {
       const { data: clienteData } = await supabaseClient
@@ -58,14 +61,24 @@ serve(async (req) => {
       }
     }
 
-    // 3. Obtener partidas
-    const { data: partidas, error: partidasError } = await supabaseClient
-      .from('ventas_partidas')
-      .select('*')
-      .eq('venta_id', venta_id)
+    if (custom_receptor) {
+      cliente = { ...cliente, ...custom_receptor };
+    }
 
-    if (partidasError || !partidas || partidas.length === 0) {
-      throw new Error('La venta no tiene partidas o productos para facturar')
+    // 3. Obtener partidas (o usar custom_partidas editadas en la UI)
+    let partidas = [];
+    if (custom_partidas && Array.isArray(custom_partidas) && custom_partidas.length > 0) {
+      partidas = custom_partidas;
+    } else {
+      const { data: partidasDB, error: partidasError } = await supabaseClient
+        .from('ventas_partidas')
+        .select('*')
+        .eq('venta_id', venta_id)
+
+      if (partidasError || !partidasDB || partidasDB.length === 0) {
+        throw new Error('La venta no tiene partidas o productos para facturar')
+      }
+      partidas = partidasDB;
     }
 
     // Configurar Finkok
