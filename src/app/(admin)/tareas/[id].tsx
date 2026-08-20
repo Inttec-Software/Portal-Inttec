@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/services/supabase';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -29,6 +30,9 @@ export default function TaskDetailScreen() {
   const [task, setTask] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
   const [newNote, setNewNote] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [isUpdatingFecha, setIsUpdatingFecha] = useState(false);
+  const dateInputRef = useRef<any>(null);
 
   useEffect(() => {
     fetchTaskDetails();
@@ -139,6 +143,79 @@ export default function TaskDetailScreen() {
     return new Date(year, month - 1, day);
   };
 
+  const handleUpdateFechaEntrega = async (newDate: Date) => {
+    if (!newDate || isNaN(newDate.getTime()) || !task) return;
+    setIsUpdatingFecha(true);
+    try {
+      const isoDate = newDate.toISOString();
+      const { error } = await supabase
+        .from('tareas')
+        .update({ fecha_compromiso: isoDate })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setTask((prev: any) => (prev ? { ...prev, fecha_compromiso: isoDate } : prev));
+
+      const formattedNewDate = newDate.toLocaleDateString('es-MX', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+
+      const note = {
+        tarea_id: id,
+        usuario_id: user?.id,
+        comentario: `📅 Fecha de entrega actualizada al ${formattedNewDate}`,
+      };
+
+      const { data: noteData, error: noteError } = await supabase
+        .from('tarea_notas')
+        .insert(note)
+        .select('*, usuario:usuarios!tarea_notas_usuario_id_fkey(nombre)')
+        .single();
+
+      if (!noteError && noteData) {
+        setNotes((prevNotes) => [
+          {
+            ...noteData,
+            usuario_nombre: Array.isArray(noteData.usuario) ? noteData.usuario[0]?.nombre : noteData.usuario?.nombre
+          },
+          ...prevNotes
+        ]);
+      }
+
+      if (Platform.OS !== 'web') {
+        Alert.alert('Éxito', `Fecha de entrega actualizada al ${formattedNewDate}`);
+      }
+    } catch (error: any) {
+      console.error('Error al actualizar fecha de entrega:', error);
+      if (Platform.OS === 'web') {
+        window.alert('Error al actualizar fecha de entrega: ' + (error.message || ''));
+      } else {
+        Alert.alert('Error', error.message || 'No se pudo actualizar la fecha de entrega.');
+      }
+    } finally {
+      setIsUpdatingFecha(false);
+      setShowDatePicker(false);
+    }
+  };
+
+  const openDatePicker = () => {
+    if (Platform.OS === 'web') {
+      if (dateInputRef.current) {
+        try {
+          dateInputRef.current.showPicker();
+        } catch {
+          dateInputRef.current.focus();
+          dateInputRef.current.click();
+        }
+      }
+    } else {
+      setShowDatePicker(true);
+    }
+  };
+
   const getSemaforoColor = (fechaCompromiso: string, status: string) => {
     if (status === 'Completada') return '#3498db';
     if (status === 'Cancelada') return '#95a5a6';
@@ -176,7 +253,24 @@ export default function TaskDetailScreen() {
           <Ionicons name="arrow-back" size={24} color={themeColors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Detalle de Tarea</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity
+          onPress={openDatePicker}
+          activeOpacity={0.7}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 5,
+            backgroundColor: themeColors.accent + '20',
+            borderColor: themeColors.accent + '50',
+            borderWidth: 1,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: 8
+          }}
+        >
+          <Ionicons name="calendar-outline" size={16} color={themeColors.accent} />
+          <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 12 }}>Editar Fecha</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -198,25 +292,114 @@ export default function TaskDetailScreen() {
               {task.descripcion}
             </Text>
 
+            {/* SECCIÓN DESTACADA: FECHA DE ENTREGA */}
+            <View style={{
+              backgroundColor: themeColors.accent + '12',
+              borderColor: themeColors.accent + '40',
+              borderWidth: 1.5,
+              borderRadius: BorderRadius.medium,
+              padding: Spacing.three,
+              marginBottom: Spacing.four,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: Spacing.two
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+                <View style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  backgroundColor: themeColors.accent + '25',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Ionicons name="calendar" size={20} color={themeColors.accent} />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.textSecondary, textTransform: 'uppercase' }}>
+                    Fecha de Entrega (Compromiso)
+                  </Text>
+                  <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.text, marginTop: 2 }}>
+                    {parseLocalDate(task.fecha_compromiso).toLocaleDateString('es-MX', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
+                  </Text>
+                </View>
+              </View>
+
+              {isUpdatingFecha ? (
+                <ActivityIndicator size="small" color={themeColors.accent} />
+              ) : (
+                <TouchableOpacity
+                  onPress={openDatePicker}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    backgroundColor: themeColors.accent,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: 0.15,
+                    shadowRadius: 2,
+                    elevation: 2
+                  }}
+                >
+                  <Ionicons name="create-outline" size={16} color="#fff" />
+                  <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>Editar Fecha</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
             <View style={styles.metaContainer}>
-              <View style={styles.metaItem}>
+              <View style={[styles.metaItem, { flex: 1 }]}>
                 <Ionicons name="person" size={16} color={themeColors.textSecondary} />
                 <View>
                   <Text style={[styles.metaLabel, { color: themeColors.textSecondary }]}>Responsable</Text>
                   <Text style={[styles.metaValue, { color: themeColors.text }]}>{task.responsable_nombre}</Text>
                 </View>
               </View>
-              
-              <View style={styles.metaItem}>
-                <Ionicons name="calendar" size={16} color={themeColors.textSecondary} />
-                <View>
-                  <Text style={[styles.metaLabel, { color: themeColors.textSecondary }]}>Vencimiento</Text>
-                  <Text style={[styles.metaValue, { color: themeColors.text }]}>
-                    {parseLocalDate(task.fecha_compromiso).toLocaleDateString()}
-                  </Text>
-                </View>
-              </View>
             </View>
+
+            {Platform.OS === 'web' && (
+              // @ts-ignore
+              <input
+                ref={dateInputRef}
+                type="date"
+                style={{
+                  position: 'absolute',
+                  opacity: 0,
+                  width: 0,
+                  height: 0,
+                  pointerEvents: 'none'
+                }}
+                value={task?.fecha_compromiso ? new Date(task.fecha_compromiso).toISOString().split('T')[0] : ''}
+                onChange={(e: any) => {
+                  if (e.target.value) {
+                    const [y, m, d] = e.target.value.split('-').map(Number);
+                    const newD = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+                    handleUpdateFechaEntrega(newD);
+                  }
+                }}
+              />
+            )}
+
+            {showDatePicker && (
+              <DateTimePicker
+                value={task?.fecha_compromiso ? parseLocalDate(task.fecha_compromiso) : new Date()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, selectedDate) => {
+                  setShowDatePicker(false);
+                  if (event.type !== 'dismissed' && selectedDate) {
+                    handleUpdateFechaEntrega(selectedDate);
+                  }
+                }}
+              />
+            )}
 
             <View style={styles.metaContainer}>
               <View style={styles.metaItem}>

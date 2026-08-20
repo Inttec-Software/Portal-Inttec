@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,8 @@ import {
   ScrollView,
   useWindowDimensions,
   Platform,
-  Switch
+  Switch,
+  Alert
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/services/supabase';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function TareasScreen() {
   const router = useRouter();
@@ -31,6 +33,12 @@ export default function TareasScreen() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Date Editing state
+  const [editingTaskForDate, setEditingTaskForDate] = useState<any | null>(null);
+  const [showDatePickerModal, setShowDatePickerModal] = useState(false);
+  const [isUpdatingCardDate, setIsUpdatingCardDate] = useState<string | null>(null);
+  const webDateInputRef = useRef<any>(null);
+
   // Nuevos Filtros
   const [showCompleted, setShowCompleted] = useState(false);
   const [dateRange, setDateRange] = useState<'30days' | 'all'>('30days');
@@ -196,9 +204,70 @@ export default function TareasScreen() {
   const myTasks = sortTasks(filtered.filter(t => t.responsable_id === user?.id));
   const otherTasks = sortTasks(filtered.filter(t => t.responsable_id !== user?.id));
 
+  const handleUpdateTaskDate = async (taskItem: any, newDate: Date) => {
+    if (!taskItem || !newDate || isNaN(newDate.getTime())) return;
+    setIsUpdatingCardDate(taskItem.id);
+    try {
+      const isoDate = newDate.toISOString();
+      const { error } = await supabase
+        .from('tareas')
+        .update({ fecha_compromiso: isoDate })
+        .eq('id', taskItem.id);
+
+      if (error) throw error;
+
+      setTasks(prevTasks => prevTasks.map(t => t.id === taskItem.id ? { ...t, fecha_compromiso: isoDate } : t));
+
+      const formattedDate = newDate.toLocaleDateString('es-MX', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+
+      const logNote = {
+        tarea_id: taskItem.id,
+        usuario_id: user?.id,
+        comentario: `📅 Fecha de entrega actualizada al ${formattedDate}`,
+      };
+      await supabase.from('tarea_notas').insert(logNote);
+
+      if (Platform.OS !== 'web') {
+        Alert.alert('Éxito', `Fecha de entrega de "${taskItem.titulo}" actualizada al ${formattedDate}`);
+      }
+    } catch (err: any) {
+      console.error('Error al actualizar fecha:', err);
+      if (Platform.OS === 'web') {
+        window.alert('No se pudo actualizar la fecha: ' + (err.message || ''));
+      } else {
+        Alert.alert('Error', 'No se pudo actualizar la fecha de entrega.');
+      }
+    } finally {
+      setIsUpdatingCardDate(null);
+      setEditingTaskForDate(null);
+      setShowDatePickerModal(false);
+    }
+  };
+
+  const handleOpenDateEdit = (taskItem: any) => {
+    setEditingTaskForDate(taskItem);
+    if (Platform.OS === 'web') {
+      if (webDateInputRef.current) {
+        try {
+          webDateInputRef.current.showPicker();
+        } catch {
+          webDateInputRef.current.focus();
+          webDateInputRef.current.click();
+        }
+      }
+    } else {
+      setShowDatePickerModal(true);
+    }
+  };
+
   const renderTask = (item: any) => {
     const semaforoColor = getSemaforoColor(item.fecha_compromiso, item.status);
     const itemWidth = isWeb ? '32%' : '100%';
+    const isUpdatingThis = isUpdatingCardDate === item.id;
     
     return (
       <TouchableOpacity 
@@ -250,12 +319,37 @@ export default function TareasScreen() {
           )}
           
           <View style={styles.cardFooter}>
-            <View style={styles.footerItem}>
-              <Ionicons name="calendar-outline" size={14} color={themeColors.textSecondary} style={{ marginRight: 4 }} />
-              <Text style={[styles.footerText, { color: themeColors.textSecondary }]}>
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                handleOpenDateEdit(item);
+              }}
+              activeOpacity={0.7}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: themeColors.accent + '18',
+                borderColor: themeColors.accent + '40',
+                borderWidth: 1,
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                borderRadius: 6,
+                gap: 5
+              }}
+            >
+              {isUpdatingThis ? (
+                <ActivityIndicator size="small" color={themeColors.accent} style={{ transform: [{ scale: 0.7 }] }} />
+              ) : (
+                <Ionicons name="calendar-outline" size={13} color={themeColors.accent} />
+              )}
+              <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>
                 {parseLocalDate(item.fecha_compromiso).toLocaleDateString()}
               </Text>
-            </View>
+              <View style={{ backgroundColor: themeColors.accent, paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4, marginLeft: 2 }}>
+                <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>EDITAR</Text>
+              </View>
+            </TouchableOpacity>
+
             <View style={styles.footerItem}>
               <Ionicons name="person-outline" size={14} color={themeColors.textSecondary} style={{ marginRight: 4 }} />
               <Text style={[styles.footerText, { color: themeColors.textSecondary }]} numberOfLines={1}>
@@ -413,6 +507,43 @@ export default function TareasScreen() {
           )}
           
         </ScrollView>
+      )}
+
+      {Platform.OS === 'web' && (
+        // @ts-ignore
+        <input
+          ref={webDateInputRef}
+          type="date"
+          style={{
+            position: 'absolute',
+            opacity: 0,
+            width: 0,
+            height: 0,
+            pointerEvents: 'none'
+          }}
+          value={editingTaskForDate?.fecha_compromiso ? new Date(editingTaskForDate.fecha_compromiso).toISOString().split('T')[0] : ''}
+          onChange={(e: any) => {
+            if (e.target.value && editingTaskForDate) {
+              const [y, m, d] = e.target.value.split('-').map(Number);
+              const newD = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+              handleUpdateTaskDate(editingTaskForDate, newD);
+            }
+          }}
+        />
+      )}
+
+      {showDatePickerModal && editingTaskForDate && (
+        <DateTimePicker
+          value={editingTaskForDate.fecha_compromiso ? parseLocalDate(editingTaskForDate.fecha_compromiso) : new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(event, selectedDate) => {
+            setShowDatePickerModal(false);
+            if (event.type !== 'dismissed' && selectedDate) {
+              handleUpdateTaskDate(editingTaskForDate, selectedDate);
+            }
+          }}
+        />
       )}
     </SafeAreaView>
   );
