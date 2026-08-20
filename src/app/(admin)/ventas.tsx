@@ -322,7 +322,7 @@ export default function VentasScreen() {
     try {
       const { data: ventasData, error } = await supabase
         .from('ventas')
-        .select('*')
+        .select('*, cotizaciones(folio), usuarios!ventas_registrado_por_fkey(nombre)')
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -1129,10 +1129,30 @@ export default function VentasScreen() {
 
         if (deletePartidasError) throw deletePartidasError;
       } else {
+        // Generar folio secuencial
+        const { data: lastVenta } = await supabase
+          .from('ventas')
+          .select('folio')
+          .not('folio', 'is', null)
+          .ilike('folio', 'A4%')
+          .order('folio', { ascending: false })
+          .limit(1);
+
+        let nextFolio = 'A4000';
+        if (lastVenta && lastVenta.length > 0 && lastVenta[0].folio) {
+          const lastNumStr = lastVenta[0].folio.substring(2);
+          const lastNum = parseInt(lastNumStr, 10);
+          if (!isNaN(lastNum)) {
+            nextFolio = `A${lastNum + 1}`;
+          }
+        }
+
+        const ventaPayloadWithFolio = { ...ventaPayload, folio: nextFolio };
+
         // INSERTAR NUEVA VENTA
         const { data: ventaData, error: ventaError } = await supabase
           .from('ventas')
-          .insert([ventaPayload])
+          .insert([ventaPayloadWithFolio])
           .select()
           .single();
 
@@ -3255,29 +3275,63 @@ export default function VentasScreen() {
                 <TouchableOpacity
                   onPress={async () => {
                     if (selectedVenta) {
+                      const { data: clientData } = await supabase
+                        .from('clientes')
+                        .select('*')
+                        .eq('nombre', selectedVenta.cliente)
+                        .single();
+
+                      let cotizacionLineas: any[] = [];
+                      if (selectedVenta.cotizacion_id) {
+                        const { data: cotData } = await supabase
+                          .from('cotizaciones')
+                          .select('lineas')
+                          .eq('id', selectedVenta.cotizacion_id)
+                          .single();
+                        if (cotData?.lineas) cotizacionLineas = cotData.lineas;
+                      }
+
                       const cotData = {
-                        numeroCotizacion: selectedVenta.id.toString().slice(-6),
+                        numeroCotizacion: selectedVenta.folio || selectedVenta.id.toString().slice(-6),
+                        cotizacionRelacionada: selectedVenta.cotizaciones?.folio,
                         clienteNombre: selectedVenta.cliente,
-                        fechaCreacion: selectedVenta.created_at || new Date().toISOString(),
-                        vendedor: 'Portal-Inttec',
+                        clienteRFC: clientData?.rfc || '',
+                        clienteCP: clientData?.codigo_postal || '',
+                        direccionFactura: clientData?.direccion || '',
+                        clienteCorreo: clientData?.correo_electronico || '',
+                        fechaCreacion: selectedVenta.fecha || selectedVenta.created_at || new Date().toISOString(),
+                        vendedor: selectedVenta.usuarios?.nombre || 'Portal-Inttec',
                         moneda: 'MXN',
-                        lineas: selectedVentaPartidas.map(p => ({
-                          id: p.id.toString(),
-                          productoNombre: p.descripcion,
-                          productoDescripcion: p.descripcion,
-                          tiempoEntrega: 'Inmediato',
-                          cantidad: Number(p.cantidad) || 1,
-                          unidad: p.unidad || 'PZA',
-                          precioUnitario: Number(p.precio_unitario_venta) || 0,
-                          impuestoPorcentaje: 16,
-                          importe: (Number(p.cantidad) || 1) * (Number(p.precio_unitario_venta) || 0)
-                        })),
+                        lineas: selectedVentaPartidas.map((p, idx) => {
+                          const descParts = p.descripcion.split(' - ');
+                          const prodName = descParts[0] || '';
+                          const prodDesc = descParts.slice(1).join(' - ') || '';
+                          
+                          let tEntrega = 'Inmediato';
+                          const matchedLine = cotizacionLineas.find(cl => cl.productoNombre === prodName) || cotizacionLineas[idx];
+                          if (matchedLine && matchedLine.tiempoEntrega) {
+                            tEntrega = matchedLine.tiempoEntrega;
+                          }
+
+                          return {
+                            id: p.id.toString(),
+                            productoNombre: prodName,
+                            productoDescripcion: prodDesc,
+                            tiempoEntrega: tEntrega,
+                            cantidad: Number(p.cantidad) || 1,
+                            unidad: p.unidad || 'PZA',
+                            precioUnitario: Number(p.precio_unitario_venta) || 0,
+                            impuestoPorcentaje: 16,
+                            importe: (Number(p.cantidad) || 1) * (Number(p.precio_unitario_venta) || 0)
+                          };
+                        }),
                         subtotal: Number(selectedVenta.precio_total_facturado) || 0,
                         iva: (Number(selectedVenta.precio_total_facturado) || 0) * 0.16,
-                        total: (Number(selectedVenta.precio_total_facturado) || 0) * 1.16
+                        total: (Number(selectedVenta.precio_total_facturado) || 0) * 1.16,
+                        terminosCondiciones: 'https://inttec.odoo.com/terms'
                       };
                       try {
-                        await exportarCotizacionOdooPDF(cotData, 'download');
+                        await exportarCotizacionOdooPDF(cotData, 'download', 'venta');
                       } catch (err: any) {
                         showAlert('Error', 'No se pudo generar el PDF de Venta: ' + err.message);
                       }

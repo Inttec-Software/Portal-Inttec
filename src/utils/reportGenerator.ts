@@ -2045,9 +2045,33 @@ export const ReportGenerator = {
   },
 };
 
-export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 'view' | 'download' = 'view') {
+export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 'view' | 'download' = 'view', tipoDocumento: 'cotizacion' | 'venta' = 'cotizacion') {
   const branding = await getCompanyBranding();
-  const title = `Cotizacion - ${cotizacion.numeroCotizacion}`;
+  
+  let folioPDF = cotizacion.numeroCotizacion || '';
+  const folioParts = folioPDF.split('/');
+  if (folioParts.length === 4) {
+    const year = folioParts[0].slice(-2);
+    const month = folioParts[1];
+    const day = folioParts[2];
+    const f = folioParts[3].slice(-2);
+    folioPDF = `${year}${month}${day}${f}`;
+  }
+
+  let refCotizacionFormat = cotizacion.cotizacionRelacionada || '';
+  if (refCotizacionFormat) {
+    const refParts = refCotizacionFormat.split('/');
+    if (refParts.length === 4) {
+      const year = refParts[0].slice(-2);
+      const month = refParts[1];
+      const day = refParts[2];
+      const f = refParts[3].slice(-2);
+      refCotizacionFormat = `${year}${month}${day}${f}`;
+    }
+  }
+
+  const titleStr = tipoDocumento === 'venta' ? 'Orden de venta' : 'Cotizacion';
+  const title = `${titleStr} - ${folioPDF}`;
   
   const renderDescription = (name: string, description: string) => {
     const fullText = (name || '') + (description ? '\n' + description : '');
@@ -2057,7 +2081,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
       if (clean_part === '') return '<br/>';
       
       if (part_index === 0) {
-        const innerHtml = `<strong style="color: #111; font-size: 12.5px;">${clean_part.replace(/\*/g, '')}</strong>`;
+        const innerHtml = `<span style="font-size: 10.5px; color: #555;">${clean_part.replace(/\*/g, '')}</span>`;
         return `<div style="display: block; margin-bottom: 4px;">${innerHtml}</div>`;
       } else {
         const chunks = clean_part.split('*');
@@ -2199,8 +2223,9 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
               <div class="col-6">
               </div>
               <div class="col-6 text-end">
-                  <h1 class="inttec-red fw-bold" style="font-size: 26px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">COTIZACIÓN</h1>
-                  <h2 class="text-muted" style="font-size: 20px; font-weight: normal; margin-top: 0;">${cotizacion.numeroCotizacion}</h2>
+                  <h1 class="inttec-red fw-bold" style="font-size: 26px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">${tipoDocumento === 'venta' ? 'ORDEN DE VENTA' : 'COTIZACIÓN'}</h1>
+                  <h2 class="text-muted" style="font-size: 20px; font-weight: normal; margin-top: 0;">${folioPDF}</h2>
+                  ${refCotizacionFormat ? `<h3 class="text-muted" style="font-size: 14px; font-weight: normal; margin-top: 4px; margin-bottom: 0;">Cotización: ${refCotizacionFormat}</h3>` : ''}
               </div>
           </div>
 
@@ -2361,12 +2386,12 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
         // Para "descargar", generamos el archivo físico y abrimos el menú de compartir/guardar
         const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
         
-        const customNameUri = `${cacheDirectory}Cotizacion - ${cotizacion.numeroCotizacion}.pdf`;
+        const customNameUri = `${cacheDirectory}${titleStr} - ${folioPDF}.pdf`;
         await writeAsStringAsync(customNameUri, base64 || '', {
           encoding: EncodingType.Base64,
         });
 
-        await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: 'Compartir Cotización' });
+        await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: `Compartir ${titleStr}` });
       }
     }
   } catch (error: any) {
