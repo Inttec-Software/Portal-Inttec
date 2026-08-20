@@ -22,6 +22,7 @@ module.exports = {
         monochromeImage: "./assets/images/android-icon-monochrome.png"
       },
       predictiveBackGestureEnabled: false,
+      softwareKeyboardLayoutMode: "pan",
       package: "com.alexisef23.appmovil",
       config: {
         googleMaps: {

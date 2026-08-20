@@ -68,7 +68,7 @@ export default function AdminEvidenciasScreen() {
       const { data: evidencesData, error: evidencesErr } = await supabase
         .from('evidencias')
         .select('*')
-        .order('creado_en', { ascending: false });
+        .order('created_at', { ascending: false });
 
       if (evidencesErr) throw evidencesErr;
       setEvidencias(evidencesData || []);

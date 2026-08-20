@@ -72,7 +72,11 @@ export default function AdminLayout() {
             style={styles.headerTitleContainer}
             onPress={() => {
               setIsMenuOpen(false);
-              router.replace('/(admin)/dashboard');
+              if (pathname.includes('editar-gasto') || pathname.includes('formulario') || pathname.includes('nueva-cotizacion')) {
+                router.back();
+              } else {
+                router.replace('/(admin)/dashboard');
+              }
             }}
             // @ts-ignore
             onMouseEnter={() => setIsHoveringHeader(true)}

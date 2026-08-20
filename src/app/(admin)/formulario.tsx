@@ -936,7 +936,7 @@ export default function GastoForm() {
         );
       }
 
-      router.replace('/(admin)/dashboard');
+      router.replace('/(admin)/gastos');
     } catch (err: any) {
       const errorDetails = err?.message || err?.details || err?.hint || (typeof err === 'object' ? JSON.stringify(err) : String(err));
       console.error('Error al guardar gasto:', errorDetails);
@@ -1009,7 +1009,8 @@ export default function GastoForm() {
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
         style={{ flex: 1 }}
       >
         <ScrollView
