@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: "Portal Inttec & Daravisa",
     slug: "portal-inttec",
-    version: "1.3.3",
+    version: "1.3.4",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "appmovil",
@@ -14,7 +14,7 @@ module.exports = {
       }
     },
     android: {
-      versionCode: 58,
+      versionCode: 59,
       adaptiveIcon: {
         backgroundColor: "#E6F4FE",
         foregroundImage: "./assets/images/android-icon-foreground.png",
