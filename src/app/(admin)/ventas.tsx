@@ -2210,6 +2210,83 @@ export default function VentasScreen() {
     );
   };
 
+  const renderScreenHeader = () => (
+    <View>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
+        
+        <Text style={[styles.headerTitle, { color: themeColors.text }]}>
+          {editingVentaId ? 'Editar Venta' : 'Registro de Ventas'}
+        </Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      {/* Tabs / Banner de edición */}
+      {editingVentaId ? (
+        <View style={[styles.editingBanner, { backgroundColor: themeColors.accent + '20', borderBottomColor: themeColors.border }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}>
+            <Ionicons name="create" size={20} color={themeColors.accent} />
+            <Text style={[styles.editingBannerText, { color: themeColors.text }]}>
+              Editando Venta de: <Text style={{ fontWeight: '800' }}>{cliente}</Text>
+            </Text>
+          </View>
+          <TouchableOpacity 
+            onPress={cancelEditing} 
+            style={[styles.cancelEditBtn, { borderColor: themeColors.danger + '40', backgroundColor: themeColors.danger + '15' }]}
+          >
+            <Text style={{ color: themeColors.danger, fontWeight: '700', fontSize: 13 }}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={[styles.tabsContainer, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
+          <TouchableOpacity
+            onPress={() => setActiveTab('registrar')}
+            style={[
+              styles.tab,
+              activeTab === 'registrar'
+                ? {
+                    backgroundColor: themeColors.accent,
+                    ...Platform.select({
+                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                      android: { elevation: 2 },
+                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                    })
+                  }
+                : { backgroundColor: 'transparent' },
+            ]}
+          >
+            <Text style={[styles.tabText, { color: activeTab === 'registrar' ? '#fff' : themeColors.textSecondary }]}>
+              Registrar Venta
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => {
+              setActiveTab('historial');
+              loadHistorial();
+            }}
+            style={[
+              styles.tab,
+              activeTab === 'historial'
+                ? {
+                    backgroundColor: themeColors.accent,
+                    ...Platform.select({
+                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                      android: { elevation: 2 },
+                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                    })
+                  }
+                : { backgroundColor: 'transparent' },
+            ]}
+          >
+            <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#fff' : themeColors.textSecondary }]}>
+              Historial
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+
   const renderHistorial = () => (
     <View style={{ flex: 1 }}>
       {/* Buscador */}
@@ -2409,7 +2486,7 @@ export default function VentasScreen() {
         </ScrollView>
       ) : (
         <FlatList scrollEnabled={true} style={{ flex: 1 }}
-          ListHeaderComponent={renderScreenHeader}
+          ListHeaderComponent={renderScreenHeader()}
           data={ventasFiltradas}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
@@ -2530,83 +2607,6 @@ export default function VentasScreen() {
           refreshing={isLoadingHistorial}
           onRefresh={loadHistorial}
         />
-      )}
-    </View>
-  );
-
-  const renderScreenHeader = () => (
-    <View>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        
-        <Text style={[styles.headerTitle, { color: themeColors.text }]}>
-          {editingVentaId ? 'Editar Venta' : 'Registro de Ventas'}
-        </Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      {/* Tabs / Banner de edición */}
-      {editingVentaId ? (
-        <View style={[styles.editingBanner, { backgroundColor: themeColors.accent + '20', borderBottomColor: themeColors.border }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}>
-            <Ionicons name="create" size={20} color={themeColors.accent} />
-            <Text style={[styles.editingBannerText, { color: themeColors.text }]}>
-              Editando Venta de: <Text style={{ fontWeight: '800' }}>{cliente}</Text>
-            </Text>
-          </View>
-          <TouchableOpacity 
-            onPress={cancelEditing} 
-            style={[styles.cancelEditBtn, { borderColor: themeColors.danger + '40', backgroundColor: themeColors.danger + '15' }]}
-          >
-            <Text style={{ color: themeColors.danger, fontWeight: '700', fontSize: 13 }}>Cancelar</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={[styles.tabsContainer, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
-          <TouchableOpacity
-            onPress={() => setActiveTab('registrar')}
-            style={[
-              styles.tab,
-              activeTab === 'registrar'
-                ? {
-                    backgroundColor: themeColors.accent,
-                    ...Platform.select({
-                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-                      android: { elevation: 2 },
-                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
-                    })
-                  }
-                : { backgroundColor: 'transparent' },
-            ]}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'registrar' ? '#fff' : themeColors.textSecondary }]}>
-              Registrar Venta
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => {
-              setActiveTab('historial');
-              loadHistorial();
-            }}
-            style={[
-              styles.tab,
-              activeTab === 'historial'
-                ? {
-                    backgroundColor: themeColors.accent,
-                    ...Platform.select({
-                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-                      android: { elevation: 2 },
-                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
-                    })
-                  }
-                : { backgroundColor: 'transparent' },
-            ]}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#fff' : themeColors.textSecondary }]}>
-              Historial
-            </Text>
-          </TouchableOpacity>
-        </View>
       )}
     </View>
   );
