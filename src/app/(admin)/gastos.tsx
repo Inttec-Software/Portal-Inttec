@@ -1848,7 +1848,7 @@ export default function AdminGastosScreen() {
               </ScrollView>
             ) : (
               <FlatList scrollEnabled={true} style={{ flex: 1 }}
-                ListHeaderComponent={renderScreenHeader}
+                ListHeaderComponent={renderScreenHeader()}
                 data={pendingGastos}
                 initialNumToRender={8}
                 maxToRenderPerBatch={8}
@@ -2005,7 +2005,7 @@ export default function AdminGastosScreen() {
                 </ScrollView>
               ) : (
               <FlatList scrollEnabled={true} style={{ flex: 1 }}
-                ListHeaderComponent={renderScreenHeader}
+                ListHeaderComponent={renderScreenHeader()}
                   data={historyGastos}
                   initialNumToRender={8}
                   maxToRenderPerBatch={8}

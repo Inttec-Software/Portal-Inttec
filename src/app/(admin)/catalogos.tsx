@@ -567,7 +567,7 @@ export default function CatalogosManager() {
           <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando catálogo...</Text>
         </View>
       ) : (
-        <FlatList scrollEnabled={true} style={{ flex: 1 }} ListHeaderComponent={renderScreenHeader}
+        <FlatList scrollEnabled={true} style={{ flex: 1 }} ListHeaderComponent={renderScreenHeader()}
           data={
             activeCatalog === 'categorias'
               ? categorias

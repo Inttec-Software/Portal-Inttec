@@ -658,12 +658,16 @@ export interface Venta {
   notas?: string | null;
   descripcion?: string | null;
   agregar_iva?: boolean;
+  folio?: string | null;
   created_at?: string;
   cfdi_uuid?: string | null;
   cfdi_facturapi_id?: string | null;
   cfdi_estado?: string | null;
   cfdi_xml_url?: string | null;
   sucursal?: string | null;
+  cotizaciones?: { folio: string } | null;
+  usuarios?: { nombre: string } | null;
+  cotizacion_id?: string | null;
 }
 
 export interface VentaPartida {

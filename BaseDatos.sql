@@ -1,4 +1,4 @@
-﻿-- Extensiones necesarias para UUIDs y Hashes de Contraseña
+-- Extensiones necesarias para UUIDs y Hashes de Contraseña
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS public.ventas (
   total_pagado numeric DEFAULT 0,
   saldo_pendiente numeric DEFAULT 0,
   estado_pago text DEFAULT 'PENDIENTE DE PAGO'::text,
+  folio text,
   CONSTRAINT ventas_pkey PRIMARY KEY (id),
   CONSTRAINT ventas_cotizacion_id_fkey FOREIGN KEY (cotizacion_id) REFERENCES public.cotizaciones(id),
   CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)

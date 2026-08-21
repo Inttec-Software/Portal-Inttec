@@ -109,6 +109,7 @@ export default function InventarioDashboard() {
   const [formCategoriaId, setFormCategoriaId] = useState('');
   const [formProveedorId, setFormProveedorId] = useState('');
   const [formStock, setFormStock] = useState('0');
+  const [formPrecio, setFormPrecio] = useState('');
   const [isSavingProduct, setIsSavingProduct] = useState(false);
 
   // Creador de Categorías y Proveedores
@@ -473,6 +474,7 @@ async function loadAllData() {
     setFormCategoriaId(categorias[0]?.id || '');
     setFormProveedorId('');
     setFormStock('0');
+    setFormPrecio('');
     setCrudModalVisible(true);
   };
 
@@ -483,6 +485,7 @@ async function loadAllData() {
     setFormCategoriaId(p.categoria_id);
     setFormProveedorId(p.proveedor_id || '');
     setFormStock(p.stock_actual.toString());
+    setFormPrecio(p.precio_unitario?.toString() || '0');
     setCrudModalVisible(true);
   };
 
@@ -510,6 +513,7 @@ async function loadAllData() {
             categoria_id: formCategoriaId,
             proveedor_id: formProveedorId || null,
             stock_actual: stockNum,
+            precio_unitario: parseFloat(formPrecio) || 0,
           })
           .eq('id', editingProduct.id);
 
@@ -524,6 +528,7 @@ async function loadAllData() {
             categoria_id: formCategoriaId,
             proveedor_id: formProveedorId || null,
             stock_actual: stockNum,
+            precio_unitario: parseFloat(formPrecio) || 0,
             activo: true,
           },
         ]);
@@ -1053,6 +1058,7 @@ async function loadAllData() {
                 nombre_oficial: item.nombreFactura,
                 categoria_id: item.categoriaSeleccionadaId || categorias[0]?.id,
                 stock_actual: item.cantidad,
+                precio_unitario: item.precioUnitario || 0,
                 activo: true,
                 proveedor_id: selectedProveedorId,
               },
@@ -1273,6 +1279,14 @@ async function loadAllData() {
                         keyboardType="numeric"
                         value={item.precioUnitario.toString()}
                         onChangeText={txt => handleUpdateStagingItem(item.id, { precioUnitario: parseFloat(txt) || 0 })}
+                      />
+                    </View>
+                    <View style={{ flex: 1.2 }}>
+                      <CustomInput
+                        label="Precio con IVA"
+                        value={new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(item.precioUnitario * 1.16)}
+                        editable={false}
+                        style={{ backgroundColor: themeColors.background }}
                       />
                     </View>
                   </View>
@@ -1981,6 +1995,26 @@ async function loadAllData() {
                 value={formStock}
                 onChangeText={(val) => setFormStock(val.replace(/[^0-9]/g, ''))}
               />
+
+              <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Precio Unitario"
+                    value={formPrecio}
+                    onChangeText={setFormPrecio}
+                    keyboardType="numeric"
+                    placeholder="0.00"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Precio con IVA (16%)"
+                    value={new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format((parseFloat(formPrecio) || 0) * 1.16)}
+                    editable={false}
+                    style={{ backgroundColor: themeColors.background }}
+                  />
+                </View>
+              </View>
 
               <CustomButton
                 title={editingProduct ? 'Guardar Cambios' : 'Dar de Alta'}

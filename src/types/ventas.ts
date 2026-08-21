@@ -15,6 +15,7 @@ export interface CotizacionLinea {
 export interface Cotizacion {
   id?: string;
   numeroCotizacion: string; // Folio único autogenerado o secuencial. Ej: '26070701'
+  cotizacionRelacionada?: string; // Folio de la cotización relacionada (para órdenes de venta)
   clienteNombre: string;
   clienteRFC?: string;
   clienteCorreo?: string;

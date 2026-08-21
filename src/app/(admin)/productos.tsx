@@ -314,12 +314,24 @@ export default function ProductosScreen() {
                     />
                   </View>
                 </View>
-                <CustomInput
-                  label="Código SAT (Clave Facturación)"
-                  value={satCode}
-                  onChangeText={setSatCode}
-                  placeholder="Ej. 43211500"
-                />
+                <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+                  <View style={{ flex: 1 }}>
+                    <CustomInput
+                      label="Código SAT (Clave Facturación)"
+                      value={satCode}
+                      onChangeText={setSatCode}
+                      placeholder="Ej. 43211500"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <CustomInput
+                      label="Precio con IVA (16%)"
+                      value={formatearMoneda((parseFloat(precio) || 0) * 1.16)}
+                      editable={false}
+                      style={{ backgroundColor: themeColors.background }}
+                    />
+                  </View>
+                </View>
               </ScrollView>
 
               <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
