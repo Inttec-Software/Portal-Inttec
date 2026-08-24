@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { tenantMiddleware } from './middlewares/tenant.middleware';
 import authRoutes from './modules/auth/auth.routes';
+import tareasRoutes from './modules/tareas/tareas.routes';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -21,6 +22,7 @@ app.use(tenantMiddleware);
 
 // Rutas de la API
 app.use('/api/auth', authRoutes);
+app.use('/api/tareas', tareasRoutes);
 
 // Ruta base
 app.get('/', (req, res) => {

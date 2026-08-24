@@ -17,6 +17,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/services/supabase';
+import { TareasService } from '@/services/tareasService';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function TaskDetailScreen() {
@@ -41,44 +42,10 @@ export default function TaskDetailScreen() {
   const fetchTaskDetails = async () => {
     setLoading(true);
     try {
-      const { data: taskData, error: taskError } = await supabase
-        .from('tareas')
-        .select(`
-          *,
-          creador:usuarios!tareas_creado_por_fkey(nombre),
-          responsable:usuarios!tareas_responsable_id_fkey(nombre)
-        `)
-        .eq('id', id)
-        .single();
+      const taskData = await TareasService.getTareaById(id as string);
       
-      if (taskError) throw taskError;
-
-      const { data: notesData } = await supabase
-        .from('tarea_notas')
-        .select('*, usuario:usuarios!tarea_notas_usuario_id_fkey(nombre)')
-        .eq('tarea_id', id)
-        .order('created_at', { ascending: false });
-
-      let vinculo_nombre = '';
-      if (taskData.vinculo_tipo === 'Cliente' && taskData.vinculo_id) {
-        const { data: clientData } = await supabase.from('clientes').select('nombre').eq('id', taskData.vinculo_id).single();
-        if (clientData) vinculo_nombre = clientData.nombre;
-      } else if (taskData.vinculo_tipo === 'Venta' && taskData.vinculo_id) {
-        const { data: ventaData } = await supabase.from('ventas').select('cliente, factura_referencia').eq('id', taskData.vinculo_id).single();
-        if (ventaData) vinculo_nombre = `${ventaData.cliente} - ${ventaData.factura_referencia}`;
-      }
-
-      setTask({
-        ...taskData,
-        creado_por_nombre: Array.isArray(taskData.creador) ? taskData.creador[0]?.nombre : taskData.creador?.nombre,
-        responsable_nombre: Array.isArray(taskData.responsable) ? taskData.responsable[0]?.nombre : taskData.responsable?.nombre,
-        vinculo_nombre
-      });
-
-      setNotes((notesData || []).map((n: any) => ({
-        ...n,
-        usuario_nombre: Array.isArray(n.usuario) ? n.usuario[0]?.nombre : n.usuario?.nombre
-      })));
+      setTask(taskData);
+      setNotes(taskData.notas || []);
     } catch (error) {
       console.error(error);
     } finally {
@@ -89,19 +56,12 @@ export default function TaskDetailScreen() {
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     
-    const note = {
-      tarea_id: id,
-      usuario_id: user?.id,
-      comentario: newNote,
-    };
-    
     try {
-      const { data, error } = await supabase.from('tarea_notas').insert(note).select('*, usuario:usuarios!tarea_notas_usuario_id_fkey(nombre)').single();
-      if (error) throw error;
+      const data = await TareasService.addNota(id as string, newNote);
       
       setNotes([{
         ...data,
-        usuario_nombre: Array.isArray(data.usuario) ? data.usuario[0]?.nombre : data.usuario?.nombre
+        usuario_nombre: data.usuario?.nombre || data.usuario_nombre
       }, ...notes]);
       setNewNote('');
     } catch (error) {
@@ -128,8 +88,7 @@ export default function TaskDetailScreen() {
 
   const completeTaskAction = async () => {
     try {
-      const { error } = await supabase.from('tareas').update({ status: 'Completada' }).eq('id', id);
-      if (error) throw error;
+      await TareasService.updateTarea(id as string, { status: 'Completada' });
       setTask({ ...task, status: 'Completada' });
     } catch (error) {
       console.error(error);
@@ -148,42 +107,20 @@ export default function TaskDetailScreen() {
     setIsUpdatingFecha(true);
     try {
       const isoDate = newDate.toISOString();
-      const { error } = await supabase
-        .from('tareas')
-        .update({ fecha_compromiso: isoDate })
-        .eq('id', id);
+      const formattedNewDate = newDate.toLocaleDateString('es-MX', {
+        day: '2-digit', month: '2-digit', year: 'numeric'
+      });
 
-      if (error) throw error;
+      await TareasService.updateTarea(id as string, {
+        fecha_compromiso: isoDate,
+        nota_texto: `📅 Fecha de entrega actualizada al ${formattedNewDate}`
+      });
 
       setTask((prev: any) => (prev ? { ...prev, fecha_compromiso: isoDate } : prev));
 
-      const formattedNewDate = newDate.toLocaleDateString('es-MX', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-      });
-
-      const note = {
-        tarea_id: id,
-        usuario_id: user?.id,
-        comentario: `📅 Fecha de entrega actualizada al ${formattedNewDate}`,
-      };
-
-      const { data: noteData, error: noteError } = await supabase
-        .from('tarea_notas')
-        .insert(note)
-        .select('*, usuario:usuarios!tarea_notas_usuario_id_fkey(nombre)')
-        .single();
-
-      if (!noteError && noteData) {
-        setNotes((prevNotes) => [
-          {
-            ...noteData,
-            usuario_nombre: Array.isArray(noteData.usuario) ? noteData.usuario[0]?.nombre : noteData.usuario?.nombre
-          },
-          ...prevNotes
-        ]);
-      }
+      // As we rely on the backend to insert the note, we fetch the notes again or just mock it locally
+      // For simplicity and accurate mapping, let's fetch task details again
+      fetchTaskDetails();
 
       if (Platform.OS !== 'web') {
         Alert.alert('Éxito', `Fecha de entrega actualizada al ${formattedNewDate}`);

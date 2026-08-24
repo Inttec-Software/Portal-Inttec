@@ -19,6 +19,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/services/supabase';
+import { TareasService } from '@/services/tareasService';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function TareasScreen() {
@@ -52,55 +53,7 @@ export default function TareasScreen() {
     const fetchTasks = async () => {
       setLoading(true);
       try {
-        let query = supabase
-          .from('tareas')
-          .select(`
-            *,
-            creador:usuarios!tareas_creado_por_fkey(nombre),
-            responsable:usuarios!tareas_responsable_id_fkey(nombre)
-          `)
-          .order('fecha_compromiso', { ascending: true });
-
-        if (user?.rol === 'EMPLEADO') {
-          query = query.or(`responsable_id.eq.${user.id},creado_por.eq.${user.id}`);
-        }
-
-        const { data, error } = await query;
-        if (error) throw error;
-
-        // FETCH LINKED ENTITIES (CLIENTS AND SALES)
-        const clientIds = (data || []).filter(t => t.vinculo_tipo === 'Cliente' && t.vinculo_id).map(t => t.vinculo_id);
-        const ventaIds = (data || []).filter(t => t.vinculo_tipo === 'Venta' && t.vinculo_id).map(t => t.vinculo_id);
-
-        let clientsMap: any = {};
-        let ventasMap: any = {};
-
-        if (clientIds.length > 0) {
-          const { data: clientsData } = await supabase.from('clientes').select('id, nombre').in('id', clientIds);
-          (clientsData || []).forEach(c => clientsMap[c.id] = c.nombre);
-        }
-        
-        if (ventaIds.length > 0) {
-          const { data: ventasData } = await supabase.from('ventas').select('id, cliente, factura_referencia').in('id', ventaIds);
-          (ventasData || []).forEach(v => ventasMap[v.id] = { cliente: v.cliente, referencia: v.factura_referencia });
-        }
-
-        const formattedTasks = (data || []).map(t => {
-          let vinculo_nombre = '';
-          if (t.vinculo_tipo === 'Cliente' && clientsMap[t.vinculo_id]) {
-            vinculo_nombre = clientsMap[t.vinculo_id];
-          } else if (t.vinculo_tipo === 'Venta' && ventasMap[t.vinculo_id]) {
-            vinculo_nombre = `${ventasMap[t.vinculo_id].cliente} - ${ventasMap[t.vinculo_id].referencia}`;
-          }
-
-          return {
-            ...t,
-            creado_por: Array.isArray(t.creador) ? t.creador[0]?.nombre : t.creador?.nombre,
-            responsable_nombre: Array.isArray(t.responsable) ? t.responsable[0]?.nombre : t.responsable?.nombre,
-            vinculo_nombre
-          };
-        });
-
+        const formattedTasks = await TareasService.getTareas();
         setTasks(formattedTasks);
       } catch (error) {
         console.error('Error al obtener tareas', error);
@@ -209,27 +162,16 @@ export default function TareasScreen() {
     setIsUpdatingCardDate(taskItem.id);
     try {
       const isoDate = newDate.toISOString();
-      const { error } = await supabase
-        .from('tareas')
-        .update({ fecha_compromiso: isoDate })
-        .eq('id', taskItem.id);
-
-      if (error) throw error;
-
-      setTasks(prevTasks => prevTasks.map(t => t.id === taskItem.id ? { ...t, fecha_compromiso: isoDate } : t));
-
       const formattedDate = newDate.toLocaleDateString('es-MX', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
+        day: '2-digit', month: '2-digit', year: 'numeric'
       });
 
-      const logNote = {
-        tarea_id: taskItem.id,
-        usuario_id: user?.id,
-        comentario: `📅 Fecha de entrega actualizada al ${formattedDate}`,
-      };
-      await supabase.from('tarea_notas').insert(logNote);
+      await TareasService.updateTarea(taskItem.id, {
+        fecha_compromiso: isoDate,
+        nota_texto: `📅 Fecha de entrega actualizada al ${formattedDate}`
+      });
+
+      setTasks(prevTasks => prevTasks.map(t => t.id === taskItem.id ? { ...t, fecha_compromiso: isoDate } : t));
 
       if (Platform.OS !== 'web') {
         Alert.alert('Éxito', `Fecha de entrega de "${taskItem.titulo}" actualizada al ${formattedDate}`);
