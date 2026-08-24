@@ -218,13 +218,17 @@ export default function AdminGastosScreen() {
 
   const filteredSalesForLinking = useMemo(() => {
     if (!linkSaleSearch.trim()) return salesForLinking;
-    const query = linkSaleSearch.toLowerCase();
-    return salesForLinking.filter(
-      (s) =>
-        s.cliente.toLowerCase().includes(query) ||
-        (s.factura_referencia && s.factura_referencia.toLowerCase().includes(query)) ||
-        (s.tipo_proyecto && s.tipo_proyecto.toLowerCase().includes(query))
-    );
+    const normalize = (str?: any) => {
+      if (!str) return '';
+      return String(str).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    };
+    const tokens = normalize(linkSaleSearch).split(/\s+/).filter(Boolean);
+    return salesForLinking.filter((s) => {
+      const combined = normalize(
+        `${s.cliente || ''} ${s.sucursal || ''} ${s.factura_referencia || ''} ${s.tipo_proyecto || ''} ${s.descripcion || ''} ${s.folio || ''} ${s.fecha || ''} ${s.proveedor || ''}`
+      );
+      return tokens.every((t) => combined.includes(t));
+    });
   }, [salesForLinking, linkSaleSearch]);
 
   const filteredClientsForQuickSale = useMemo(() => {
@@ -493,7 +497,7 @@ export default function AdminGastosScreen() {
     setIsLoadingSalesForLinking(true);
     try {
       const [ventasRes, cliRes, sucRes] = await Promise.all([
-        supabase.from('ventas').select('*').order('fecha', { ascending: false }).limit(50),
+        supabase.from('ventas').select('*').order('created_at', { ascending: false }).limit(500),
         supabase.from('clientes').select('*').order('nombre'),
         supabase.from('sucursales_cliente').select('*').order('nombre'),
       ]);
