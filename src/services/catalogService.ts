@@ -12,12 +12,44 @@ import {
   Vehiculo
 } from './supabase';
 
+import Constants from 'expo-constants';
+import { AuthService, EnvService } from './supabase';
+
 /**
  * Servicio Centralizado de Catálogos con Sincronización Dual (INTTEC & DARAVISA)
  * Garantiza que cuando se crea, edita o elimina un catálogo (cliente, sucursal,
  * proveedor, categoría, subcategoría, usuario o vehículo), los cambios se repliquen
  * automáticamente en ambas bases de datos.
  */
+
+const resolveLocalhost = (url: string) => {
+  if (__DEV__ && url && (url.includes('localhost') || url.includes('127.0.0.1'))) {
+    const debuggerHost = Constants.expoConfig?.hostUri || (Constants.manifest as any)?.debuggerHost;
+    if (debuggerHost) {
+      const ip = debuggerHost.split(':')[0];
+      return url.replace(/localhost|127\.0\.0\.1/, ip);
+    }
+  }
+  return url;
+};
+
+const getApiHeaders = async () => {
+  const token = await AuthService.getToken();
+  const company = CompanyService.getActiveCompany();
+  const env = EnvService.getActiveEnv();
+  
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+    'x-company': company,
+    'x-env': env
+  };
+};
+
+const getApiUrl = () => {
+  const rawApiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000';
+  return resolveLocalhost(rawApiUrl);
+};
 export const CatalogService = {
   // ==========================================
   // CLIENTES
@@ -244,6 +276,13 @@ export const CatalogService = {
   // ==========================================
   // USUARIOS
   // ==========================================
+  async getUsuarios(): Promise<Usuario[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/usuarios`, { headers });
+    if (!res.ok) throw new Error('Error obteniendo usuarios');
+    return res.json();
+  },
+
   async crearUsuario(usuarioData: {
     nombre: string;
     email: string;
@@ -251,21 +290,14 @@ export const CatalogService = {
     rol: 'ADMIN' | 'EMPLEADO' | 'DEV';
     telefono?: string | null;
   }): Promise<Usuario> {
-    // Insertar en AMBAS bases con el mismo payload para que el ID sea consistente
-    const { data, error } = await getInttecClient()
-      .from('usuarios')
-      .insert([usuarioData])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    try {
-      await getDaravisaClient().from('usuarios').upsert([data]);
-    } catch (syncErr: any) {
-      logger.error('[CatalogService] Error sincronizando usuario en Daravisa:', syncErr);
-    }
-
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/usuarios`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(usuarioData)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error creando usuario');
     return data as Usuario;
   },
 
@@ -276,53 +308,28 @@ export const CatalogService = {
     rol?: 'ADMIN' | 'EMPLEADO' | 'DEV';
     telefono?: string | null;
   }): Promise<void> {
-    let userEmail = updates.email?.trim().toLowerCase();
-    if (!userEmail) {
-      const { data: uInttec } = await getInttecClient().from('usuarios').select('email').eq('id', id).maybeSingle();
-      const { data: uDaravisa } = await getDaravisaClient().from('usuarios').select('email').eq('id', id).maybeSingle();
-      userEmail = (uInttec?.email || uDaravisa?.email)?.trim().toLowerCase();
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/usuarios/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates)
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Error actualizando usuario');
     }
-
-    const updateInttec = async () => {
-      await getInttecClient().from('usuarios').update(updates).eq('id', id);
-      if (userEmail) {
-        await getInttecClient().from('usuarios').update(updates).eq('email', userEmail);
-      }
-    };
-
-    const updateDaravisa = async () => {
-      await getDaravisaClient().from('usuarios').update(updates).eq('id', id);
-      if (userEmail) {
-        await getDaravisaClient().from('usuarios').update(updates).eq('email', userEmail);
-      }
-    };
-
-    await Promise.allSettled([updateInttec(), updateDaravisa()]);
   },
 
   async eliminarUsuario(id: string, email?: string): Promise<void> {
-    let userEmail = email?.trim().toLowerCase();
-    if (!userEmail) {
-      const { data: uInttec } = await getInttecClient().from('usuarios').select('email').eq('id', id).maybeSingle();
-      const { data: uDaravisa } = await getDaravisaClient().from('usuarios').select('email').eq('id', id).maybeSingle();
-      userEmail = (uInttec?.email || uDaravisa?.email)?.trim().toLowerCase();
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/usuarios/${id}`, {
+      method: 'DELETE',
+      headers
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Error eliminando usuario');
     }
-
-    const deleteInttec = async () => {
-      await getInttecClient().from('usuarios').delete().eq('id', id);
-      if (userEmail) {
-        await getInttecClient().from('usuarios').delete().eq('email', userEmail);
-      }
-    };
-
-    const deleteDaravisa = async () => {
-      await getDaravisaClient().from('usuarios').delete().eq('id', id);
-      if (userEmail) {
-        await getDaravisaClient().from('usuarios').delete().eq('email', userEmail);
-      }
-    };
-
-    await Promise.allSettled([deleteInttec(), deleteDaravisa()]);
   },
 
   // ==========================================
