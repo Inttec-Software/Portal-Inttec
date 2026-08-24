@@ -50,14 +50,18 @@ export default function VentaSelectModal({
 
   const sucursalesUnicas = Array.from(new Set(data.map(v => v.sucursal).filter(Boolean))) as string[];
 
+  const normalize = (str?: any) => {
+    if (!str) return '';
+    return String(str).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  };
+
   const filteredData = data.filter(item => {
     let matchSearch = true;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      matchSearch = 
-        String(item.factura_referencia || '').toLowerCase().includes(q) ||
-        String(item.sucursal || '').toLowerCase().includes(q) ||
-        String(item.fecha || '').toLowerCase().includes(q);
+    if (searchQuery.trim()) {
+      const q = normalize(searchQuery);
+      const tokens = q.split(/\s+/).filter(Boolean);
+      const combined = normalize(`${item.cliente || ''} ${item.factura_referencia || ''} ${item.sucursal || ''} ${item.fecha || ''} ${item.descripcion || ''} ${item.folio || ''}`);
+      matchSearch = tokens.every(t => combined.includes(t));
     }
 
     let matchSucursal = true;

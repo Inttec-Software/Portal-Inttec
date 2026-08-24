@@ -123,6 +123,103 @@ const getTimestampFileName = (userId: string, ext: string) => {
   return `ventas/${userId}/${Date.now()}_factura.${ext}`;
 };
 
+const MESES_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+];
+
+const MESES_ABR = [
+  'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+  'jul', 'ago', 'sep', 'oct', 'nov', 'dic'
+];
+
+// Helper para normalizar texto (sin acentos/tildes y en minúsculas)
+const normalizeSearchText = (str?: string | number | null): string => {
+  if (str === undefined || str === null) return '';
+  return String(str)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+};
+
+// Extrae múltiples formatos de texto a partir de una fecha ISO o YYYY-MM-DD
+const getDateSearchStrings = (dateStr?: string | null): string[] => {
+  if (!dateStr) return [];
+  const variations: string[] = [dateStr];
+  try {
+    const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+    const parts = cleanDate.split('-');
+    if (parts.length === 3) {
+      const year = parts[0];
+      const monthIdx = parseInt(parts[1], 10) - 1;
+      const day = parts[2];
+      const dayNum = parseInt(day, 10);
+
+      variations.push(`${day}/${parts[1]}/${year}`);
+      variations.push(`${day}-${parts[1]}-${year}`);
+      variations.push(`${dayNum}/${monthIdx + 1}/${year}`);
+      variations.push(`${parts[1]}/${year}`);
+      variations.push(year);
+
+      if (monthIdx >= 0 && monthIdx < 12) {
+        const mesNombre = MESES_ES[monthIdx];
+        const mesAbr = MESES_ABR[monthIdx];
+        variations.push(mesNombre);
+        variations.push(mesAbr);
+        variations.push(`${mesNombre} ${year}`);
+        variations.push(`${dayNum} de ${mesNombre}`);
+        variations.push(`${dayNum} de ${mesNombre} de ${year}`);
+        variations.push(`${dayNum} ${mesAbr} ${year}`);
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return variations;
+};
+
+// Genera un texto consolidado con todos los campos de la venta para búsqueda universal
+const buildVentaSearchableText = (v: VentaConPago): string => {
+  const parts: string[] = [
+    v.cliente || '',
+    v.sucursal || '',
+    v.factura_referencia || '',
+    v.folio || '',
+    v.cotizaciones?.folio || '',
+    v.descripcion || '',
+    v.tipo_proyecto || '',
+    v.proveedor || '',
+    v.notas || '',
+    v.usuarios?.nombre || '',
+    v.estado_pago || '',
+    v.cfdi_estado || '',
+    v.cfdi_uuid || '',
+    v.precio_total_facturado !== undefined ? String(v.precio_total_facturado) : '',
+    v.precio_total_facturado !== undefined ? formatCurrency(v.precio_total_facturado) : '',
+    v.total_pagado !== undefined ? String(v.total_pagado) : '',
+    v.total_pagado !== undefined ? formatCurrency(v.total_pagado) : '',
+    v.saldo_pendiente !== undefined ? String(v.saldo_pendiente) : '',
+    v.saldo_pendiente !== undefined ? formatCurrency(v.saldo_pendiente) : '',
+    v.costo_total !== undefined ? String(v.costo_total) : '',
+    v.costo_total !== undefined ? formatCurrency(v.costo_total) : '',
+    v.utilidad_bruta !== undefined ? String(v.utilidad_bruta) : '',
+    v.utilidad_bruta !== undefined ? formatCurrency(v.utilidad_bruta) : '',
+    ...getDateSearchStrings(v.fecha),
+    ...getDateSearchStrings(v.fecha_ultimo_pago),
+    ...getDateSearchStrings(v.created_at),
+  ];
+
+  if (v.ventas_partidas && Array.isArray(v.ventas_partidas)) {
+    v.ventas_partidas.forEach((p) => {
+      if (p.descripcion) parts.push(p.descripcion);
+      if (p.unidad) parts.push(p.unidad);
+    });
+  }
+
+  return normalizeSearchText(parts.join(' '));
+};
+
 export default function VentasScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -322,9 +419,9 @@ export default function VentasScreen() {
     try {
       const { data: ventasData, error } = await supabase
         .from('ventas')
-        .select('*, cotizaciones(folio), usuarios!ventas_registrado_por_fkey(nombre)')
+        .select('*, cotizaciones(folio), usuarios!ventas_registrado_por_fkey(nombre), ventas_partidas(descripcion, unidad)')
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(300);
 
       if (error) throw error;
 
@@ -759,17 +856,15 @@ export default function VentasScreen() {
       filtradas = filtradas.filter(v => v.fecha?.startsWith(formattedFilterDate));
     }
 
-    const q = historialSearch.trim().toLowerCase();
-    if (q) {
-      filtradas = filtradas.filter(v =>
-        v.cliente?.toLowerCase().includes(q) ||
-        v.factura_referencia?.toLowerCase().includes(q) ||
-        v.descripcion?.toLowerCase().includes(q) ||
-        v.fecha?.toLowerCase().includes(q) ||
-        v.tipo_proyecto?.toLowerCase().includes(q) ||
-        v.proveedor?.toLowerCase().includes(q) ||
-        v.estado_pago?.toLowerCase().includes(q)
-      );
+    const rawQuery = normalizeSearchText(historialSearch);
+    if (rawQuery) {
+      const queryTokens = rawQuery.split(/\s+/).filter(Boolean);
+
+      filtradas = filtradas.filter(v => {
+        const itemText = buildVentaSearchableText(v);
+        // Cada término de búsqueda debe estar presente en los datos consolidados de la venta
+        return queryTokens.every(token => itemText.includes(token));
+      });
     }
     
     return filtradas;
@@ -2372,7 +2467,7 @@ export default function VentasScreen() {
         <Ionicons name="search" size={18} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
         <TextInput
           style={[styles.searchInput, { color: themeColors.text }]}
-          placeholder="Buscar por cliente, PO, descripción, fecha..."
+          placeholder="Buscar por cliente, sucursal, fecha, referencia, monto, vendedor..."
           placeholderTextColor={themeColors.textSecondary}
           value={historialSearch}
           onChangeText={setHistorialSearch}
@@ -2451,6 +2546,22 @@ export default function VentasScreen() {
           <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
             No hay ventas registradas aún.
           </Text>
+        </View>
+      ) : ventasFiltradas.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="search-outline" size={48} color={themeColors.textSecondary} />
+          <Text style={[styles.emptyText, { color: themeColors.textSecondary, marginTop: Spacing.one }]}>
+            No se encontraron ventas que coincidan con los criterios de búsqueda.
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              setHistorialSearch('');
+              setFilterDate(null);
+            }}
+            style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}
+          >
+            <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>Limpiar búsqueda</Text>
+          </TouchableOpacity>
         </View>
       ) : isDesktop ? (
         <ScrollView style={{ flex: 1 }}>

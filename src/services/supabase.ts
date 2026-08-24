@@ -668,6 +668,7 @@ export interface Venta {
   cotizaciones?: { folio: string } | null;
   usuarios?: { nombre: string } | null;
   cotizacion_id?: string | null;
+  ventas_partidas?: { descripcion: string; unidad?: string }[] | null;
 }
 
 export interface VentaPartida {
