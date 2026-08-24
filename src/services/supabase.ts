@@ -387,33 +387,45 @@ export interface ProveedorItem {
  */
 export const AuthService = {
   async login(email: string, password: string): Promise<Usuario> {
-    const { data, error } = await supabase
-      .rpc('login_usuario', {
-        email_param: email.trim().toLowerCase(),
-        password_param: password,
-      })
-      .maybeSingle();
+    const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000';
+    const company = CompanyService.getActiveCompany();
+    const env = EnvService.getActiveEnv();
 
-    if (error) {
+    try {
+      const response = await fetch(`${apiUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-company': company,
+          'x-env': env
+        },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Error al iniciar sesión');
+      }
+
+      if (isBrowser) {
+        // Guardamos tanto el usuario como el token
+        await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(data.usuario));
+        await AsyncStorage.setItem(`jwt_token_${company}`, data.token);
+      }
+
+      return data.usuario as Usuario;
+    } catch (error: any) {
       throw new Error(`Error de conexión: ${error.message}`);
     }
-
-    if (!data) {
-      throw new Error('Credenciales incorrectas');
-    }
-
-    // Guardar usuario en almacenamiento local
-    if (isBrowser) {
-      const company = CompanyService.getActiveCompany();
-      await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(data));
-    }
-    return data as Usuario;
   },
 
   async logout(): Promise<void> {
     if (isBrowser) {
       await AsyncStorage.removeItem('logged_user_inttec');
       await AsyncStorage.removeItem('logged_user_daravisa');
+      await AsyncStorage.removeItem('jwt_token_inttec');
+      await AsyncStorage.removeItem('jwt_token_daravisa');
     }
   },
 
@@ -427,6 +439,14 @@ export const AuthService = {
       } catch {
         return null;
       }
+    }
+    return null;
+  },
+
+  async getToken(): Promise<string | null> {
+    if (isBrowser) {
+      const company = CompanyService.getActiveCompany();
+      return await AsyncStorage.getItem(`jwt_token_${company}`);
     }
     return null;
   }
