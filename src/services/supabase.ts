@@ -387,7 +387,8 @@ export interface ProveedorItem {
  */
 export const AuthService = {
   async login(email: string, password: string): Promise<Usuario> {
-    const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000';
+    const rawApiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000';
+    const apiUrl = resolveLocalhost(rawApiUrl);
     const company = CompanyService.getActiveCompany();
     const env = EnvService.getActiveEnv();
 
