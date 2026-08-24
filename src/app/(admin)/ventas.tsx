@@ -1776,7 +1776,7 @@ export default function VentasScreen() {
                   value={dateValue}
                   mode="date"
                   display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={(event: any, selectedDate?: Date) => {
+                  onValueChange={(event: any, selectedDate?: Date) => {
                     if (Platform.OS === 'android') {
                       setShowDatePicker(false);
                     }
@@ -1788,6 +1788,7 @@ export default function VentasScreen() {
                       setFecha(`${yyyy}-${mm}-${dd}`);
                     }
                   }}
+                  onDismiss={() => setShowDatePicker(false)}
                   maximumDate={new Date()}
                 />
                 {Platform.OS === 'ios' && (
@@ -2430,10 +2431,11 @@ export default function VentasScreen() {
           value={filterDate || new Date()}
           mode="date"
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={(event: any, selectedDate?: Date) => {
+          onValueChange={(event: any, selectedDate?: Date) => {
             if (Platform.OS === 'android') setShowFilterDatePicker(false);
             if (selectedDate) setFilterDate(selectedDate);
           }}
+          onDismiss={() => setShowFilterDatePicker(false)}
           maximumDate={new Date()}
         />
       )}
@@ -2588,54 +2590,81 @@ export default function VentasScreen() {
               <TouchableOpacity
                 onPress={() => handleSelectVenta(item)}
                 style={[styles.historialCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                activeOpacity={0.7}
               >
+                {/* 1. Header: Categoría / Tipo e Icono a la izquierda, y Badges de Estado a la derecha */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                    <Ionicons name="bar-chart-sharp" size={16} color={themeColors.primary} />
-                    <Text style={[styles.cardTitle, { color: themeColors.text }]} numberOfLines={1}>
-                      {item.cliente} {item.sucursal ? `(${item.sucursal})` : ''}
-                    </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+                    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: themeColors.primary + '18', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="cart-outline" size={15} color={themeColors.primary} />
+                    </View>
+                    {item.tipo_proyecto ? (
+                      <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 7, borderRadius: 10 }]}>
+                        <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
+                      </View>
+                    ) : null}
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-                    <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }}>
-                      <Text style={{ color: styleCfg.text, fontSize: 10, fontWeight: '800' }}>{estadoPago}</Text>
+
+                  {/* Badges de Estado */}
+                  <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 1 }}>
+                    <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10 }}>
+                      <Text style={{ color: styleCfg.text, fontSize: 9, fontWeight: '800' }}>{estadoPago}</Text>
                     </View>
                     {(() => {
                       const cfdiCfg = getEstadoCfdiStyle(item.cfdi_estado);
                       return (
-                        <View style={{ backgroundColor: cfdiCfg.bg, borderColor: cfdiCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }}>
-                          <Text style={{ color: cfdiCfg.text, fontSize: 9, fontWeight: '800' }}>{cfdiCfg.label}</Text>
+                        <View style={{ backgroundColor: cfdiCfg.bg, borderColor: cfdiCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10 }}>
+                          <Text style={{ color: cfdiCfg.text, fontSize: 8, fontWeight: '800' }}>{cfdiCfg.label}</Text>
                         </View>
                       );
                     })()}
-                    {item.tipo_proyecto && (
-                      <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }]}>
-                        <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
-                      </View>
-                    )}
                   </View>
                 </View>
-                
-                <View style={{ gap: 2, marginBottom: 8 }}>
-                  {item.factura_referencia ? (
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
-                      <Text style={{ fontWeight: '600', color: themeColors.text }}>Factura/PO: </Text>
-                      {item.factura_referencia}
-                    </Text>
-                  ) : null}
-                  {item.descripcion ? (
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 12 }} numberOfLines={1}>
-                      <Text style={{ fontWeight: '600', color: themeColors.text }}>Detalle: </Text>
-                      {item.descripcion}
-                    </Text>
+
+                {/* 2. Nombre del Cliente (Fila dedicada de ancho completo para evitar que se empalme) */}
+                <View style={{ marginBottom: 6 }}>
+                  <Text style={[styles.cardTitle, { color: themeColors.text, fontSize: 15, fontWeight: '800', lineHeight: 20 }]}>
+                    {item.cliente || 'Cliente sin nombre'}
+                  </Text>
+                  {item.sucursal ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                      <Ionicons name="business-outline" size={13} color={themeColors.textSecondary} />
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+                        {item.sucursal}
+                      </Text>
+                    </View>
                   ) : null}
                 </View>
+                
+                {/* 3. Metadatos: Factura/PO y Descripción */}
+                {(item.factura_referencia || item.descripcion) ? (
+                  <View style={{ gap: 3, marginBottom: 8, backgroundColor: themeColors.background, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border + '40' }}>
+                    {item.factura_referencia ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Ionicons name="document-text-outline" size={13} color={themeColors.textSecondary} />
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+                          <Text style={{ fontWeight: '700', color: themeColors.text }}>Ref / PO: </Text>
+                          {item.factura_referencia}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {item.descripcion ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 4 }}>
+                        <Ionicons name="information-circle-outline" size={13} color={themeColors.textSecondary} style={{ marginTop: 1 }} />
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 12, flex: 1 }} numberOfLines={2}>
+                          <Text style={{ fontWeight: '700', color: themeColors.text }}>Detalle: </Text>
+                          {item.descripcion}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
 
-                {/* Totales y Saldos de Pago */}
-                <View style={[styles.historialTotals, { marginBottom: 8 }]}>
+                {/* 4. Totales y Saldos de Pago */}
+                <View style={[styles.historialTotals, { marginBottom: 8, backgroundColor: themeColors.background, borderColor: themeColors.border + '40', borderWidth: 1, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8 }]}>
                   <View style={{ alignItems: 'flex-start', flex: 1 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FECHA</Text>
-                    <Text style={[styles.historialFecha, { color: themeColors.text, fontSize: 11, fontWeight: '600' }]}>{item.fecha}</Text>
+                    <Text style={[styles.historialFecha, { color: themeColors.text, fontSize: 11, fontWeight: '700', marginTop: 1 }]}>{item.fecha}</Text>
                     {item.fecha_ultimo_pago && (
                       <Text style={{ color: themeColors.textSecondary, fontSize: 9, marginTop: 2 }}>
                         Pago: {item.fecha_ultimo_pago}
@@ -2644,7 +2673,7 @@ export default function VentasScreen() {
                   </View>
                   <View style={{ alignItems: 'center', flex: 1 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FACTURADO</Text>
-                    <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '800' }}>
+                    <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '800', marginTop: 1 }}>
                       {formatCurrency(item.precio_total_facturado)}
                     </Text>
                     <Text style={{ color: themeColors.success, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
@@ -2653,7 +2682,7 @@ export default function VentasScreen() {
                   </View>
                   <View style={{ alignItems: 'flex-end', flex: 1 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>SALDO PEND.</Text>
-                    <Text style={{ color: saldoPen > 0 ? themeColors.danger : themeColors.success, fontSize: 12, fontWeight: '800' }}>
+                    <Text style={{ color: saldoPen > 0 ? themeColors.danger : themeColors.success, fontSize: 12, fontWeight: '800', marginTop: 1 }}>
                       {formatCurrency(saldoPen)}
                     </Text>
                     <Text style={{ color: isProfit ? themeColors.success : themeColors.danger, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
@@ -2662,50 +2691,52 @@ export default function VentasScreen() {
                   </View>
                 </View>
 
-                {/* Botón Duplicar en Móvil */}
-                <TouchableOpacity
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleDuplicateVenta(item);
-                  }}
-                  style={{
-                    backgroundColor: themeColors.primary + '15',
-                    borderColor: themeColors.primary + '40',
-                    borderWidth: 1,
-                    borderRadius: 8,
-                    paddingVertical: 6,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexDirection: 'row',
-                    gap: 6,
-                    marginBottom: 8
-                  }}
-                >
-                  <Ionicons name="copy-outline" size={14} color={themeColors.primary} />
-                  <Text style={{ color: themeColors.primary, fontWeight: '800', fontSize: 12 }}>Duplicar Venta</Text>
-                </TouchableOpacity>
+                {/* 5. Botones de Acción */}
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleDuplicateVenta(item);
+                    }}
+                    style={{
+                      flex: 1,
+                      backgroundColor: themeColors.primary + '15',
+                      borderColor: themeColors.primary + '40',
+                      borderWidth: 1,
+                      borderRadius: 8,
+                      paddingVertical: 6,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexDirection: 'row',
+                      gap: 4
+                    }}
+                  >
+                    <Ionicons name="copy-outline" size={13} color={themeColors.primary} />
+                    <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 11 }}>Duplicar</Text>
+                  </TouchableOpacity>
 
-                {/* Botón rápido Agregar Pago en Tarjeta */}
-                <TouchableOpacity
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleOpenPagoModal(item);
-                  }}
-                  style={{
-                    backgroundColor: themeColors.success + '15',
-                    borderColor: themeColors.success + '40',
-                    borderWidth: 1,
-                    borderRadius: 8,
-                    paddingVertical: 6,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexDirection: 'row',
-                    gap: 6
-                  }}
-                >
-                  <Ionicons name="cash-outline" size={14} color={themeColors.success} />
-                  <Text style={{ color: themeColors.success, fontWeight: '800', fontSize: 12 }}>+ Registrar Pago / Parcialidad</Text>
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleOpenPagoModal(item);
+                    }}
+                    style={{
+                      flex: 1.4,
+                      backgroundColor: themeColors.success + '15',
+                      borderColor: themeColors.success + '40',
+                      borderWidth: 1,
+                      borderRadius: 8,
+                      paddingVertical: 6,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexDirection: 'row',
+                      gap: 4
+                    }}
+                  >
+                    <Ionicons name="cash-outline" size={13} color={themeColors.success} />
+                    <Text style={{ color: themeColors.success, fontWeight: '700', fontSize: 11 }}>+ Reg. Pago</Text>
+                  </TouchableOpacity>
+                </View>
               </TouchableOpacity>
             );
           }}
@@ -4512,16 +4543,20 @@ const styles = StyleSheet.create({
   modalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingVertical: 4,
+    gap: 8,
   },
   modalLabel: {
     fontSize: 13,
     fontWeight: '600',
+    flexShrink: 0,
   },
   modalValue: {
     fontSize: 13,
     fontWeight: '700',
+    flex: 1,
+    textAlign: 'right',
   },
   modalDivider: {
     height: 1,

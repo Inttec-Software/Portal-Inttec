@@ -678,64 +678,75 @@ export default function CotizacionesListScreen() {
                       </View>
                     </View>
 
-                    {/* Action buttons (Row of 5 circular buttons) */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, borderTopWidth: 1, borderTopColor: themeColors.border + '50', paddingTop: 10 }}>
-                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, fontWeight: 'bold' }}>Acciones</Text>
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {/* Action buttons */}
+                    <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: themeColors.border + '50', paddingTop: 10 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <Text style={{ fontSize: 10, color: themeColors.textSecondary, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                          Acciones
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                         {/* 1. Ver PDF */}
                         <TouchableOpacity 
                           onPress={() => handleDownloadPDF(cot, 'view')}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('view', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="eye-outline" size={15} color={getActionBtnStyle('view', scheme === 'dark').color} />
+                          <Ionicons name="eye-outline" size={16} color={getActionBtnStyle('view', scheme === 'dark').color} />
                         </TouchableOpacity>
                         
                         {/* 2. Descargar PDF */}
                         <TouchableOpacity 
                           onPress={() => handleDownloadPDF(cot, 'download')}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('download', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="download-outline" size={15} color={getActionBtnStyle('download', scheme === 'dark').color} />
+                          <Ionicons name="download-outline" size={16} color={getActionBtnStyle('download', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 3. Enviar Correo */}
                         <TouchableOpacity 
                           onPress={() => handleEmail(cot)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('email', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="mail-outline" size={15} color={getActionBtnStyle('email', scheme === 'dark').color} />
+                          <Ionicons name="mail-outline" size={16} color={getActionBtnStyle('email', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 4. Duplicar */}
                         <TouchableOpacity 
                           onPress={() => handleDuplicate(cot)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('view', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="copy-outline" size={15} color={getActionBtnStyle('view', scheme === 'dark').color} />
+                          <Ionicons name="copy-outline" size={16} color={getActionBtnStyle('view', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 5. Editar */}
                         <TouchableOpacity 
                           onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('edit', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="pencil-outline" size={15} color={getActionBtnStyle('edit', scheme === 'dark').color} />
+                          <Ionicons name="pencil-outline" size={16} color={getActionBtnStyle('edit', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 6. Convertir a Venta */}
                         <TouchableOpacity 
                           onPress={() => handleConvertirVenta(cot)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('download', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="cash-outline" size={15} color={getActionBtnStyle('download', scheme === 'dark').color} />
+                          <Ionicons name="cash-outline" size={16} color={getActionBtnStyle('download', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 7. Eliminar */}
                         <TouchableOpacity 
                           onPress={() => handleDelete(cot.id)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('delete', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="trash-outline" size={15} color={getActionBtnStyle('delete', scheme === 'dark').color} />
+                          <Ionicons name="trash-outline" size={16} color={getActionBtnStyle('delete', scheme === 'dark').color} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -1182,9 +1193,10 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     fontWeight: 'bold',
   },
   circularActionBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    flex: 1,
+    maxWidth: 42,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },

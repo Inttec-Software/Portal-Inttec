@@ -631,7 +631,8 @@ export default function NuevaCotizacionScreen() {
                       value={currentDate}
                       mode="date"
                       display="default"
-                      onChange={onDateChange}
+                      onValueChange={onDateChange}
+                      onDismiss={() => setShowDatePicker(false)}
                     />
                   )}
                 </View>

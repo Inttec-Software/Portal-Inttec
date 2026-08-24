@@ -273,20 +273,56 @@ export const CatalogService = {
     nombre?: string;
     email?: string;
     password?: string;
-    rol?: 'ADMIN' | 'EMPLEADO';
+    rol?: 'ADMIN' | 'EMPLEADO' | 'DEV';
     telefono?: string | null;
   }): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('usuarios').update(updates).eq('id', id),
-      getDaravisaClient().from('usuarios').update(updates).eq('id', id),
-    ]);
+    let userEmail = updates.email?.trim().toLowerCase();
+    if (!userEmail) {
+      const { data: uInttec } = await getInttecClient().from('usuarios').select('email').eq('id', id).maybeSingle();
+      const { data: uDaravisa } = await getDaravisaClient().from('usuarios').select('email').eq('id', id).maybeSingle();
+      userEmail = (uInttec?.email || uDaravisa?.email)?.trim().toLowerCase();
+    }
+
+    const updateInttec = async () => {
+      await getInttecClient().from('usuarios').update(updates).eq('id', id);
+      if (userEmail) {
+        await getInttecClient().from('usuarios').update(updates).eq('email', userEmail);
+      }
+    };
+
+    const updateDaravisa = async () => {
+      await getDaravisaClient().from('usuarios').update(updates).eq('id', id);
+      if (userEmail) {
+        await getDaravisaClient().from('usuarios').update(updates).eq('email', userEmail);
+      }
+    };
+
+    await Promise.allSettled([updateInttec(), updateDaravisa()]);
   },
 
-  async eliminarUsuario(id: string): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('usuarios').delete().eq('id', id),
-      getDaravisaClient().from('usuarios').delete().eq('id', id),
-    ]);
+  async eliminarUsuario(id: string, email?: string): Promise<void> {
+    let userEmail = email?.trim().toLowerCase();
+    if (!userEmail) {
+      const { data: uInttec } = await getInttecClient().from('usuarios').select('email').eq('id', id).maybeSingle();
+      const { data: uDaravisa } = await getDaravisaClient().from('usuarios').select('email').eq('id', id).maybeSingle();
+      userEmail = (uInttec?.email || uDaravisa?.email)?.trim().toLowerCase();
+    }
+
+    const deleteInttec = async () => {
+      await getInttecClient().from('usuarios').delete().eq('id', id);
+      if (userEmail) {
+        await getInttecClient().from('usuarios').delete().eq('email', userEmail);
+      }
+    };
+
+    const deleteDaravisa = async () => {
+      await getDaravisaClient().from('usuarios').delete().eq('id', id);
+      if (userEmail) {
+        await getDaravisaClient().from('usuarios').delete().eq('email', userEmail);
+      }
+    };
+
+    await Promise.allSettled([deleteInttec(), deleteDaravisa()]);
   },
 
   // ==========================================

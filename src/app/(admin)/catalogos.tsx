@@ -397,60 +397,113 @@ export default function CatalogosManager() {
         </View>
 
       {/* Catalog Selectors */}
-      <View style={styles.selectorsContainer}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingHorizontal: Spacing.four,
+          gap: Spacing.one,
+          alignItems: 'center',
+          paddingVertical: 4,
+        }}
+        style={{ marginBottom: Spacing.two }}
+      >
         <TouchableOpacity
           onPress={() => setActiveCatalog('categorias')}
           style={[
-            styles.selectorBtn,
+            styles.selectorChip,
             activeCatalog === 'categorias'
               ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
               : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
           ]}
         >
-          <Text style={[styles.selectorText, { color: activeCatalog === 'categorias' ? '#ffffff' : themeColors.textSecondary }]}>
-            Categorías
+          <Ionicons
+            name="folder-outline"
+            size={14}
+            color={activeCatalog === 'categorias' ? '#ffffff' : themeColors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.selectorChipText,
+              { color: activeCatalog === 'categorias' ? '#ffffff' : themeColors.text },
+            ]}
+          >
+            Categorías ({categorias.length})
           </Text>
         </TouchableOpacity>
+
         <TouchableOpacity
           onPress={() => setActiveCatalog('subcategorias')}
           style={[
-            styles.selectorBtn,
+            styles.selectorChip,
             activeCatalog === 'subcategorias'
               ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
               : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
           ]}
         >
-          <Text style={[styles.selectorText, { color: activeCatalog === 'subcategorias' ? '#ffffff' : themeColors.textSecondary }]}>
-            Subcategorías
+          <Ionicons
+            name="pricetags-outline"
+            size={14}
+            color={activeCatalog === 'subcategorias' ? '#ffffff' : themeColors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.selectorChipText,
+              { color: activeCatalog === 'subcategorias' ? '#ffffff' : themeColors.text },
+            ]}
+          >
+            Subcategorías ({subcategorias.length})
           </Text>
         </TouchableOpacity>
+
         <TouchableOpacity
           onPress={() => setActiveCatalog('clientes')}
           style={[
-            styles.selectorBtn,
+            styles.selectorChip,
             activeCatalog === 'clientes'
               ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
               : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
           ]}
         >
-          <Text style={[styles.selectorText, { color: activeCatalog === 'clientes' ? '#ffffff' : themeColors.textSecondary }]}>
-            Clientes
+          <Ionicons
+            name="business-outline"
+            size={14}
+            color={activeCatalog === 'clientes' ? '#ffffff' : themeColors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.selectorChipText,
+              { color: activeCatalog === 'clientes' ? '#ffffff' : themeColors.text },
+            ]}
+          >
+            Clientes ({clientes.length})
           </Text>
         </TouchableOpacity>
+
         <TouchableOpacity
           onPress={() => setActiveCatalog('proveedores')}
           style={[
-            styles.selectorBtn,
+            styles.selectorChip,
             activeCatalog === 'proveedores'
               ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
               : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
           ]}
         >
-          <Text style={[styles.selectorText, { color: activeCatalog === 'proveedores' ? '#ffffff' : themeColors.textSecondary }]}>
-            Proveedores
+          <Ionicons
+            name="cart-outline"
+            size={14}
+            color={activeCatalog === 'proveedores' ? '#ffffff' : themeColors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.selectorChipText,
+              { color: activeCatalog === 'proveedores' ? '#ffffff' : themeColors.text },
+            ]}
+          >
+            Proveedores ({proveedores.length})
           </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
       {/* Search Clientes */}
       {activeCatalog === 'clientes' && (
@@ -1181,27 +1234,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
   },
-  selectorsContainer: {
+  selectorChip: {
     flexDirection: 'row',
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.one,
-    marginBottom: Spacing.two,
-  },
-  selectorBtn: {
-    flex: 1,
-    height: 40,
-    borderRadius: BorderRadius.small,
-    borderWidth: 1,
-    borderColor: '#eee',
-    justifyContent: 'center',
     alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
   },
-  selectorActive: {
-    backgroundColor: '#0d1b2a',
-    borderColor: '#0d1b2a',
-  },
-  selectorText: {
-    fontSize: 12,
+  selectorChipText: {
+    fontSize: 13,
     fontWeight: '700',
   },
   listContent: {

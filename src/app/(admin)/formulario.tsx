@@ -1382,7 +1382,8 @@ export default function GastoForm() {
                     value={dateValue}
                     mode="date"
                     display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={onChangeDate}
+                    onValueChange={onChangeDate}
+                    onDismiss={() => setShowDatePicker(false)}
                     maximumDate={new Date()}
                   />
                   {Platform.OS === 'ios' && (

@@ -1627,26 +1627,37 @@ export default function AdminVehiculosScreen() {
       {/* Resumen Cards */}
       <View style={styles.summaryContainer}>
         <View style={[styles.summaryCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
-            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: themeColors.warning + '15', alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="time" size={20} color={themeColors.warning} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: themeColors.warning + '18', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="time" size={14} color={themeColors.warning} />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>PENDIENTES</Text>
-              <Text style={[styles.summaryValue, { color: themeColors.warning }]} numberOfLines={1}>{formatCurrency(totalPendientes)}</Text>
-            </View>
+            <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>PENDIENTES</Text>
           </View>
+          <Text
+            style={[styles.summaryValue, { color: themeColors.warning }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.75}
+          >
+            {formatCurrency(totalPendientes)}
+          </Text>
         </View>
+
         <View style={[styles.summaryCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
-            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: themeColors.success + '15', alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="checkmark-circle" size={20} color={themeColors.success} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: themeColors.success + '18', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="checkmark-circle" size={14} color={themeColors.success} />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>APROBADO</Text>
-              <Text style={[styles.summaryValue, { color: themeColors.success }]} numberOfLines={1}>{formatCurrency(totalAprobados)}</Text>
-            </View>
+            <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>APROBADO</Text>
           </View>
+          <Text
+            style={[styles.summaryValue, { color: themeColors.success }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.75}
+          >
+            {formatCurrency(totalAprobados)}
+          </Text>
         </View>
       </View>
 
@@ -2315,10 +2326,10 @@ export default function AdminVehiculosScreen() {
                     borderWidth: 1,
                     borderColor: themeColors.border,
                   }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.two }}>
-                      <View>
-                        <Text style={{ fontSize: 16, fontWeight: '700', color: themeColors.text }}>Parque Vehicular</Text>
-                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Gestión de vehículos de la empresa</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.two, gap: 8 }}>
+                      <View style={{ flex: 1, marginRight: 6 }}>
+                        <Text style={{ fontSize: 16, fontWeight: '700', color: themeColors.text }} numberOfLines={1}>Parque Vehicular</Text>
+                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }} numberOfLines={1}>Gestión de vehículos de la empresa</Text>
                       </View>
                       <TouchableOpacity
                         onPress={() => {
@@ -2335,9 +2346,10 @@ export default function AdminVehiculosScreen() {
                           alignItems: 'center',
                           backgroundColor: themeColors.accent,
                           paddingHorizontal: 12,
-                          paddingVertical: 6,
-                          borderRadius: 15,
+                          paddingVertical: 7,
+                          borderRadius: 18,
                           gap: 4,
+                          flexShrink: 0,
                         }}
                       >
                         <Ionicons name="add" size={16} color="#ffffff" />
@@ -2363,12 +2375,13 @@ export default function AdminVehiculosScreen() {
                               borderRadius: BorderRadius.small,
                               borderWidth: 1,
                               borderColor: themeColors.border,
+                              gap: 8,
                             }}
                           >
-                            <View style={{ flex: 1 }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <View style={{ flex: 1, paddingRight: 4 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                                 <Ionicons name="car" size={18} color={veh.activo ? themeColors.primary : themeColors.textSecondary} />
-                                <Text style={{ fontWeight: 'bold', color: themeColors.text, fontSize: 14 }}>
+                                <Text style={{ fontWeight: 'bold', color: themeColors.text, fontSize: 14, flexShrink: 1 }}>
                                   {veh.marca} {veh.modelo} ({veh.anio})
                                 </Text>
                                 {!veh.activo && (
@@ -2382,14 +2395,14 @@ export default function AdminVehiculosScreen() {
                                 {veh.numero_economico ? ` • Eco: ${veh.numero_economico}` : ''}
                               </Text>
                             </View>
-                            <View style={{ flexDirection: 'row', gap: 10 }}>
-                              <TouchableOpacity onPress={() => handleToggleVehiculoActivo(veh)} style={{ padding: 4 }}>
+                            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                              <TouchableOpacity onPress={() => handleToggleVehiculoActivo(veh)} style={{ padding: 4 }} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
                                 <Ionicons name={veh.activo ? "eye-outline" : "eye-off-outline"} size={18} color={veh.activo ? themeColors.success : themeColors.textSecondary} />
                               </TouchableOpacity>
-                              <TouchableOpacity onPress={() => handleEditVehiculo(veh)} style={{ padding: 4 }}>
+                              <TouchableOpacity onPress={() => handleEditVehiculo(veh)} style={{ padding: 4 }} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
                                 <Ionicons name="create-outline" size={18} color={themeColors.accent} />
                               </TouchableOpacity>
-                              <TouchableOpacity onPress={() => handleDeleteVehiculo(veh.id, veh.placas)} style={{ padding: 4 }}>
+                              <TouchableOpacity onPress={() => handleDeleteVehiculo(veh.id, veh.placas)} style={{ padding: 4 }} hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}>
                                 <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
                               </TouchableOpacity>
                             </View>
@@ -4395,30 +4408,31 @@ const styles = StyleSheet.create({
   },
   summaryContainer: {
     flexDirection: 'row',
-    paddingHorizontal: Spacing.four,
+    paddingHorizontal: Spacing.three,
     gap: Spacing.two,
-    marginBottom: Spacing.three,
+    marginBottom: Spacing.two,
   },
   summaryCard: {
     flex: 1,
-    padding: Spacing.three,
-    borderRadius: BorderRadius.large,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    borderRadius: BorderRadius.medium,
     borderWidth: 1,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 2,
   },
   summaryLabel: {
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    letterSpacing: 0.5,
   },
   summaryValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
-    marginTop: 2,
+    marginTop: 1,
   },
   tabsSegmentedContainer: {
     flexDirection: 'row',

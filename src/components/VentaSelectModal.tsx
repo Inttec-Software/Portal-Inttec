@@ -213,15 +213,16 @@ export default function VentaSelectModal({
                             value={filterFecha ? new Date(filterFecha + 'T12:00:00') : new Date()}
                             mode="date"
                             display="default"
-                            onChange={(event, selectedDate) => {
+                            onValueChange={(event, selectedDate) => {
                               setShowDatePicker(false);
-                              if (selectedDate && event.type !== 'dismissed') {
+                              if (selectedDate) {
                                 const yyyy = selectedDate.getFullYear();
                                 const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
                                 const dd = String(selectedDate.getDate()).padStart(2, '0');
                                 setFilterFecha(`${yyyy}-${mm}-${dd}`);
                               }
                             }}
+                            onDismiss={() => setShowDatePicker(false)}
                           />
                         )}
                       </>

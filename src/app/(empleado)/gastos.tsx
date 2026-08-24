@@ -711,12 +711,41 @@ export default function EmpleadoGastos() {
       {/* Resumen Cards */}
       <View style={styles.summaryContainer}>
         <View style={[styles.summaryCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>PENDIENTE / OFFLINE</Text>
-          <Text style={[styles.summaryValue, { color: themeColors.text }]}>{formatCurrency(saldoPendiente)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: themeColors.warning + '18', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="time" size={14} color={themeColors.warning} />
+            </View>
+            <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>
+              PENDIENTE / OFFLINE
+            </Text>
+          </View>
+          <Text
+            style={[styles.summaryValue, { color: themeColors.text }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.75}
+          >
+            {formatCurrency(saldoPendiente)}
+          </Text>
         </View>
+
         <View style={[styles.summaryCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>TOTAL APROBADO</Text>
-          <Text style={[styles.summaryValue, { color: themeColors.success }]}>{formatCurrency(totalAprobado)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: themeColors.success + '18', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="checkmark-circle" size={14} color={themeColors.success} />
+            </View>
+            <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>
+              TOTAL APROBADO
+            </Text>
+          </View>
+          <Text
+            style={[styles.summaryValue, { color: themeColors.success }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.75}
+          >
+            {formatCurrency(totalAprobado)}
+          </Text>
         </View>
       </View>
 
@@ -1539,25 +1568,31 @@ const styles = StyleSheet.create({
   },
   summaryContainer: {
     flexDirection: 'row',
-    paddingHorizontal: Spacing.four,
+    paddingHorizontal: Spacing.three,
     gap: Spacing.two,
-    marginBottom: Spacing.three,
+    marginBottom: Spacing.two,
   },
   summaryCard: {
     flex: 1,
-    padding: Spacing.three,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.two,
     borderRadius: BorderRadius.medium,
     borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   summaryLabel: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0.5,
   },
   summaryValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    marginTop: 4,
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 1,
   },
   tabsContainer: {
     flexDirection: 'row',

@@ -54,6 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       const currentEmail = user?.email;
+      const currentRole = user?.rol;
       await CompanyService.setActiveCompany(newCompany);
       setCompanyState(newCompany);
       
@@ -69,6 +70,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .maybeSingle();
 
         if (dbUser && !error) {
+          // Si el rol en la sesión activa es diferente al de la base de datos (por falta de sincronización previa),
+          // mantenemos el rol activo y lo sincronizamos en la base de datos de la nueva empresa
+          if (currentRole && dbUser.rol !== currentRole) {
+            try {
+              await supabase
+                .from('usuarios')
+                .update({ rol: currentRole })
+                .eq('id', dbUser.id);
+              dbUser.rol = currentRole;
+            } catch (syncErr) {
+              console.warn('Could not sync user role across company:', syncErr);
+            }
+          }
+
           await AsyncStorage.setItem(`logged_user_${newCompany}`, JSON.stringify(dbUser));
           currentUser = dbUser as Usuario;
         } else {

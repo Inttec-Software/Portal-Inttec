@@ -537,12 +537,13 @@ export default function TareasScreen() {
           value={editingTaskForDate.fecha_compromiso ? parseLocalDate(editingTaskForDate.fecha_compromiso) : new Date()}
           mode="date"
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={(event, selectedDate) => {
+          onValueChange={(event, selectedDate) => {
             setShowDatePickerModal(false);
-            if (event.type !== 'dismissed' && selectedDate) {
+            if (selectedDate) {
               handleUpdateTaskDate(editingTaskForDate, selectedDate);
             }
           }}
+          onDismiss={() => setShowDatePickerModal(false)}
         />
       )}
     </SafeAreaView>

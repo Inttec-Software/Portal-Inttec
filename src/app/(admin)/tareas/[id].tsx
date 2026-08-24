@@ -392,12 +392,13 @@ export default function TaskDetailScreen() {
                 value={task?.fecha_compromiso ? parseLocalDate(task.fecha_compromiso) : new Date()}
                 mode="date"
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event, selectedDate) => {
+                onValueChange={(event, selectedDate) => {
                   setShowDatePicker(false);
-                  if (event.type !== 'dismissed' && selectedDate) {
+                  if (selectedDate) {
                     handleUpdateFechaEntrega(selectedDate);
                   }
                 }}
+                onDismiss={() => setShowDatePicker(false)}
               />
             )}
 

@@ -261,10 +261,11 @@ export default function NuevaTareaScreen() {
                   value={fechaCompromiso}
                   mode="date"
                   display="default"
-                  onChange={(event, selectedDate) => {
+                  onValueChange={(event, selectedDate) => {
                     setShowDatePicker(Platform.OS === 'ios');
                     if (selectedDate) setFechaCompromiso(selectedDate);
                   }}
+                  onDismiss={() => setShowDatePicker(false)}
                 />
               )}
             </>
