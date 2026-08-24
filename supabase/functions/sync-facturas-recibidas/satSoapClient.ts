@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Cliente SOAP para el Web Service Oficial de Descarga Masiva del SAT
  * Implementa autenticación WS-Security X.509 y firmado digital con e.firma (node-forge)

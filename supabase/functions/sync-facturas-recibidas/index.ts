@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 import JSZip from "https://esm.sh/jszip@3.10.1";
@@ -68,7 +69,7 @@ async function saveFacturaToDb(supabase: any, parsed: FacturaParsed, xmlUrl: str
   return data;
 }
 
-serve(async (req) => {
+serve(async (req: any) => {
   // Manejo de preflight CORS
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
