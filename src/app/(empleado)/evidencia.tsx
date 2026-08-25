@@ -20,6 +20,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Usuario, AuthService, inttecClient, daravisaClient } from '@/services/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
+import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import { optimizeImage } from '@/utils/imageOptimizer';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import StepIndicator from '@/components/StepIndicator';
@@ -86,16 +87,15 @@ export default function EvidenciaForm() {
 
   const loadCatalogos = async (userId?: string) => {
     try {
-      const uId = userId || currentUser?.id;
-      const [cliRes, sucRes, prodRes] = await Promise.all([
-        supabase.from('clientes').select('*').order('nombre'),
-        supabase.from('sucursales_cliente').select('*').order('nombre'),
-        uId ? supabase.from('inventario_empleados').select('cantidad_disponible, producto_id, productos(sku_interno, nombre_oficial)').eq('empleado_id', uId).gt('cantidad_disponible', 0) : Promise.resolve({ data: [] }),
-      ]);
-      if (cliRes.data) setClientes(cliRes.data);
-      if (sucRes.data) setSucursalesCliente(sucRes.data);
-      if (prodRes && prodRes.data) {
-        const formattedProductos = prodRes.data.map((item: any) => ({
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/evidencias/catalogos`, { headers });
+      if (!res.ok) throw new Error('Error al cargar catálogos de evidencias');
+      const data = await res.json();
+      
+      if (data.clientes) setClientes(data.clientes);
+      if (data.sucursales) setSucursalesCliente(data.sucursales);
+      if (data.inventario) {
+        const formattedProductos = data.inventario.map((item: any) => ({
           id: item.producto_id,
           sku_interno: item.productos?.sku_interno || '',
           nombre_oficial: item.productos?.nombre_oficial || '',
@@ -489,10 +489,11 @@ export default function EvidenciaForm() {
       const sucObj = sucursalesCliente.find(s => s.id === selectedSucursal);
       const clienteStr = clienteObj ? (clienteObj.nombre + (sucObj ? ' - ' + sucObj.nombre : '')) : '';
 
-      const { error: dbError } = await supabase.from('evidencias').insert([
-        {
-          empleado_id: currentUser.id,
-          empleado_nombre: currentUser.nombre,
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/evidencias`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
           cliente: clienteStr,
           descripcion_trabajo: JSON.stringify(trabajosPayload),
           materiales_usados: allMateriales || null,
@@ -500,41 +501,12 @@ export default function EvidenciaForm() {
           foto_antes_url: fotoAntesUrl,
           foto_despues_url: fotoDespuesUrl,
           fotos_adicionales_urls: allFotosAdicionalesUrls.length > 0 ? allFotosAdicionalesUrls : null,
-        },
-      ]);
+        })
+      });
 
-      if (!dbError) {
-        // Descontar del inventario personal del empleado
-        for (const t of trabajosPayload) {
-          for (const m of (t.materiales_usados || [])) {
-            if (m.usado > 0) {
-              const { data: invEmp } = await supabase
-                .from('inventario_empleados')
-                .select('id, cantidad_disponible')
-                .eq('empleado_id', currentUser.id)
-                .eq('producto_id', m.productoId)
-                .maybeSingle();
-                
-              if (invEmp) {
-                await supabase
-                  .from('inventario_empleados')
-                  .update({ 
-                    cantidad_disponible: Math.max(0, invEmp.cantidad_disponible - m.usado), 
-                    updated_at: new Date().toISOString() 
-                  })
-                  .eq('id', invEmp.id);
-              }
-            }
-          }
-        }
-      }
-
-      if (dbError) {
-        throw new Error(
-          dbError.code === '42P01' 
-            ? 'La tabla "evidencias" no existe en Supabase. Corre el script SQL en BaseDatos.sql' 
-            : dbError.message
-        );
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Error al guardar evidencia en el servidor');
       }
 
       setLoadingModalVisible(false);
