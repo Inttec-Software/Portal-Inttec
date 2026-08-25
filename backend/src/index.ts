@@ -7,6 +7,7 @@ import tareasRoutes from './modules/tareas/tareas.routes';
 import usuariosRoutes from './modules/usuarios/usuarios.routes';
 import vehiculosRoutes from './modules/vehiculos/vehiculos.routes';
 import evidenciasRoutes from './modules/evidencias/evidencias.routes';
+import inventarioRoutes from './modules/inventario/inventario.routes';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -29,6 +30,7 @@ app.use('/api/tareas', tareasRoutes);
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/vehiculos', vehiculosRoutes);
 app.use('/api/evidencias', evidenciasRoutes);
+app.use('/api/inventario', inventarioRoutes);
 
 // Ruta base
 app.get('/', (req, res) => {
