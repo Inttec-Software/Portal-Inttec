@@ -307,54 +307,33 @@ export const CatalogService = {
   // VEHICULOS
   // ==========================================
   async crearVehiculo(vehiculoData: Omit<Vehiculo, 'id' | 'created_at'>): Promise<Vehiculo> {
-    const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
-    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
-
-    const { data, error } = await primaryClient
-      .from('vehiculos')
-      .insert([vehiculoData])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    try {
-      await secondaryClient.from('vehiculos').upsert([data]);
-    } catch (syncErr: any) {
-      logger.error('[CatalogService] Error sincronizando vehiculo:', syncErr);
-    }
-
-    return data as Vehiculo;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(vehiculoData)
+    });
+    if (!res.ok) throw new Error('Error al crear vehículo en el servidor');
+    return res.json();
   },
 
   async actualizarVehiculo(id: string, updates: Partial<Vehiculo>): Promise<Vehiculo> {
-    const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
-    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
-
-    const { data, error } = await primaryClient
-      .from('vehiculos')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    try {
-      await secondaryClient.from('vehiculos').update(updates).eq('id', id);
-    } catch (syncErr: any) {
-      logger.error('[CatalogService] Error actualizando vehiculo en base secundaria:', syncErr);
-    }
-
-    return data as Vehiculo;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates)
+    });
+    if (!res.ok) throw new Error('Error al actualizar vehículo en el servidor');
+    return res.json();
   },
 
   async eliminarVehiculo(id: string): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('vehiculos').delete().eq('id', id),
-      getDaravisaClient().from('vehiculos').delete().eq('id', id),
-    ]);
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
+      method: 'DELETE',
+      headers
+    });
+    if (!res.ok) throw new Error('Error al eliminar vehículo en el servidor');
   }
 };
