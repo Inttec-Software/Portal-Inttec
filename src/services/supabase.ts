@@ -1063,3 +1063,253 @@ export const AuditoriaService = {
   }
 };
 
+export interface Documento {
+  id: string;
+  titulo: string;
+  descripcion?: string | null;
+  contenido_html: string;
+  archivo_pdf_url?: string | null;
+  tipo_documento?: 'TEXTO' | 'PDF';
+  posicion_firma?: string | null;
+  creador_id?: string | null;
+  creador_nombre: string;
+  requiere_todos: boolean;
+  estado: 'BORRADOR' | 'PUBLICADO' | 'ARCHIVADO';
+  created_at?: string;
+  updated_at?: string;
+  total_asignados?: number;
+  total_firmados?: number;
+}
+
+export interface DocumentoFirmado {
+  id: string;
+  documento_id: string;
+  empleado_id: string;
+  empleado_nombre: string;
+  empleado_email?: string | null;
+  estado: 'PENDIENTE' | 'FIRMADO' | 'RECHAZADO';
+  firma_base64?: string | null;
+  firma_url?: string | null;
+  pdf_firmado_url?: string | null;
+  ip_registro?: string | null;
+  ubicacion_gps?: string | null;
+  dispositivo_info?: string | null;
+  hash_sha256?: string | null;
+  motivo_rechazo?: string | null;
+  firmado_at?: string | null;
+  created_at?: string;
+  documentos?: Documento;
+}
+
+export const DocumentoService = {
+  async obtenerDocumentosAdmin(): Promise<Documento[]> {
+    const { data: docs, error } = await supabase
+      .from('documentos')
+      .select('*, documentos_firmados(id, estado)')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      logger.error('Error al obtener documentos (Admin):', error);
+      throw error;
+    }
+
+    return (docs || []).map((doc: any) => {
+      const firmadosList = doc.documentos_firmados || [];
+      return {
+        ...doc,
+        total_asignados: firmadosList.length,
+        total_firmados: firmadosList.filter((f: any) => f.estado === 'FIRMADO').length,
+      };
+    }) as Documento[];
+  },
+
+  async crearDocumento(
+    doc: Omit<Documento, 'id' | 'created_at' | 'updated_at'>,
+    empleadosIds: string[]
+  ): Promise<Documento> {
+    let { data: newDoc, error: docError } = await supabase
+      .from('documentos')
+      .insert([doc])
+      .select()
+      .single();
+
+    if (docError) {
+      if (
+        docError.message?.includes('posicion_firma') ||
+        docError.code === 'PGRST204' ||
+        docError.details?.includes('posicion_firma')
+      ) {
+        const { posicion_firma, ...docSinPosicion } = doc;
+        const { data: retryDoc, error: retryErr } = await supabase
+          .from('documentos')
+          .insert([docSinPosicion])
+          .select()
+          .single();
+
+        if (retryErr) {
+          logger.error('Error al crear documento (reintento sin posicion_firma):', retryErr);
+          throw retryErr;
+        }
+        newDoc = retryDoc;
+      } else {
+        logger.error('Error al crear documento:', docError);
+        throw docError;
+      }
+    }
+
+    let targetEmpleados: Usuario[] = [];
+    if (doc.requiere_todos || empleadosIds.length === 0) {
+      const { data: users } = await supabase.from('usuarios').select('*');
+      targetEmpleados = users || [];
+    } else {
+      const { data: users } = await supabase.from('usuarios').select('*').in('id', empleadosIds);
+      targetEmpleados = users || [];
+    }
+
+    if (targetEmpleados.length > 0) {
+      const asignaciones = targetEmpleados.map((emp) => ({
+        documento_id: newDoc.id,
+        empleado_id: emp.id,
+        empleado_nombre: emp.nombre,
+        empleado_email: emp.email,
+        estado: 'PENDIENTE',
+      }));
+
+      const { error: asigError } = await supabase
+        .from('documentos_firmados')
+        .insert(asignaciones);
+
+      if (asigError) {
+        logger.error('Error al asignar empleados al documento:', asigError);
+      }
+    }
+
+    return newDoc as Documento;
+  },
+
+  async obtenerMisDocumentosEmpleado(empleadoId: string): Promise<DocumentoFirmado[]> {
+    const { data, error } = await supabase
+      .from('documentos_firmados')
+      .select('*, documentos(*)')
+      .eq('empleado_id', empleadoId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      logger.error('Error al obtener documentos del empleado:', error);
+      throw error;
+    }
+    return (data || []) as DocumentoFirmado[];
+  },
+
+  async obtenerFirmasDeDocumento(documentoId: string): Promise<DocumentoFirmado[]> {
+    const { data, error } = await supabase
+      .from('documentos_firmados')
+      .select('*')
+      .eq('documento_id', documentoId)
+      .order('empleado_nombre', { ascending: true });
+
+    if (error) {
+      logger.error('Error al obtener detalle de firmas:', error);
+      throw error;
+    }
+    return (data || []) as DocumentoFirmado[];
+  },
+
+  async registrarFirma(
+    idAsignacion: string,
+    params: {
+      firmaBase64: string;
+      pdfUrl?: string;
+      ipRegistro?: string;
+      ubicacionGps?: string;
+      dispositivoInfo?: string;
+      hashSha256?: string;
+    }
+  ): Promise<DocumentoFirmado> {
+    const { data, error } = await supabase
+      .from('documentos_firmados')
+      .update({
+        estado: 'FIRMADO',
+        firma_base64: params.firmaBase64,
+        pdf_firmado_url: params.pdfUrl,
+        ip_registro: params.ipRegistro,
+        ubicacion_gps: params.ubicacionGps,
+        dispositivo_info: params.dispositivoInfo,
+        hash_sha256: params.hashSha256,
+        firmado_at: new Date().toISOString(),
+      })
+      .eq('id', idAsignacion)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      logger.error('Error al registrar firma:', error);
+      throw error;
+    }
+    return (data || { id: idAsignacion, estado: 'FIRMADO' }) as DocumentoFirmado;
+  },
+
+  async eliminarDocumento(id: string): Promise<void> {
+    const { error } = await supabase.from('documentos').delete().eq('id', id);
+    if (error) {
+      logger.error('Error al eliminar documento:', error);
+      throw error;
+    }
+  },
+
+  async subirPdfOriginal(fileUri: string, fileName: string): Promise<string> {
+    try {
+      const response = await fetch(fileUri);
+      const blob = await response.blob();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `originales/${Date.now()}_${cleanFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documentos-firmados')
+        .upload(filePath, blob, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        logger.error('Error al subir PDF original:', uploadError);
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (e) {
+      logger.error('Fallo la subida de PDF original:', e);
+      throw e;
+    }
+  },
+
+  async subirPdfFirmado(fileUri: string, fileName: string): Promise<string> {
+    try {
+      const response = await fetch(fileUri);
+      const blob = await response.blob();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `firmados/${Date.now()}_${cleanFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documentos-firmados')
+        .upload(filePath, blob, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        logger.error('Error al subir PDF firmado:', uploadError);
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (e) {
+      logger.error('Fallo la subida de PDF firmado:', e);
+      throw e;
+    }
+  }
+};
+
+
