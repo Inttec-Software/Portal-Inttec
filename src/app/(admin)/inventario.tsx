@@ -45,6 +45,7 @@ interface Producto {
   categoria_id: string;
   proveedor_id?: string;
   stock_actual: number;
+  precio_unitario?: number;
   activo: boolean;
 }
 

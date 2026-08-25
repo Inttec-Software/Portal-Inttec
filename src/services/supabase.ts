@@ -1,6 +1,8 @@
 import { logger } from '@/utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+
+import { getApiHeaders, getApiUrl } from './apiHelper';
 import { Platform } from 'react-native';
 
 import Constants from 'expo-constants';
@@ -854,171 +856,69 @@ export interface RegistroGasolina {
 
 export const VehiculoService = {
   async getVehiculos(soloActivos = true): Promise<Vehiculo[]> {
-    let query = supabase.from('vehiculos').select('*');
-    if (soloActivos) {
-      query = query.eq('activo', true);
-    }
-    const { data, error } = await query.order('marca', { ascending: true });
-    if (error) throw error;
-    return (data || []) as Vehiculo[];
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos?soloActivos=${soloActivos}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener vehículos');
+    return res.json();
   },
 
   async crearVehiculo(vehiculo: Omit<Vehiculo, 'id' | 'created_at'>): Promise<Vehiculo> {
-    const { data, error } = await supabase
-      .from('vehiculos')
-      .insert([vehiculo])
-      .select()
-      .single();
-    if (error) throw error;
-    return data as Vehiculo;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(vehiculo)
+    });
+    if (!res.ok) throw new Error('Error al crear vehículo');
+    return res.json();
   },
 
   async actualizarVehiculo(id: string, updates: Partial<Vehiculo>): Promise<Vehiculo> {
-    const { data, error } = await supabase
-      .from('vehiculos')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data as Vehiculo;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates)
+    });
+    if (!res.ok) throw new Error('Error al actualizar vehículo');
+    return res.json();
   },
 
   async eliminarVehiculo(id: string): Promise<void> {
-    const { error } = await supabase.from('vehiculos').delete().eq('id', id);
-    if (error) throw error;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
+      method: 'DELETE',
+      headers
+    });
+    if (!res.ok) throw new Error('Error al eliminar vehículo');
   },
 
-  /**
-   * Sincroniza el kilometraje actual de un vehículo en AMBAS bases de datos (Inttec y Daravisa)
-   */
   async syncVehiculoKilometraje(placas: string | undefined | null, nuevoKilometraje: number): Promise<void> {
-    if (!placas || !nuevoKilometraje || isNaN(nuevoKilometraje)) return;
-    try {
-      await Promise.allSettled([
-        inttecClient.from('vehiculos').update({ kilometraje_actual: nuevoKilometraje }).eq('placas', placas),
-        daravisaClient.from('vehiculos').update({ kilometraje_actual: nuevoKilometraje }).eq('placas', placas),
-      ]);
-    } catch (e) {
-      console.warn('Error sincronizando kilometraje entre empresas:', e);
-    }
+    // This is handled automatically by the backend now, but we'll leave it as a no-op just in case it's called manually somewhere
   },
 
-  /**
-   * Obtiene la bitácora unificada de consumo de gasolina combinando registros de Inttec y Daravisa
-   * para trazabilidad 100% coherente y cálculo exacto de rendimiento km/L sin importar en qué portal se registró.
-   */
   async getRegistrosGasolina(filtros?: { vehiculoId?: string; empleadoId?: string; placas?: string }): Promise<RegistroGasolina[]> {
-    let targetPlacas = filtros?.placas;
-
-    // Si se pasa vehiculoId pero no placas, buscar las placas
-    if (filtros?.vehiculoId && !targetPlacas) {
-      try {
-        const { data: v } = await supabase.from('vehiculos').select('placas').eq('id', filtros.vehiculoId).single();
-        if (v?.placas) targetPlacas = v.placas;
-      } catch {}
-    }
-
-    const fetchFromClient = async (client: typeof supabase, empresaNombre: string) => {
-      try {
-        let query = client
-          .from('registro_gasolina')
-          .select(`
-            *,
-            vehiculo:vehiculo_id (marca, modelo, placas),
-            empleado:empleado_id (nombre)
-          `);
-
-        if (filtros?.empleadoId) {
-          query = query.eq('empleado_id', filtros.empleadoId);
-        }
-
-        const { data, error } = await query;
-        if (error || !data) return [];
-        return data.map((row: any) => ({
-          ...row,
-          vehiculo_marca: row.vehiculo?.marca,
-          vehiculo_modelo: row.vehiculo?.modelo,
-          vehiculo_placas: row.vehiculo?.placas,
-          empleado_nombre: row.empleado?.nombre,
-          empresa_origen: empresaNombre,
-        }));
-      } catch {
-        return [];
-      }
-    };
-
-    const [inttecLogs, daravisaLogs] = await Promise.all([
-      fetchFromClient(inttecClient, 'INTTEC'),
-      fetchFromClient(daravisaClient, 'DARAVISA'),
-    ]);
-
-    // Combinar sin duplicados
-    const logMap = new Map<string, any>();
-    [...inttecLogs, ...daravisaLogs].forEach(item => {
-      if (item && item.id) {
-        logMap.set(item.id, item);
-      }
-    });
-
-    let allLogs = Array.from(logMap.values());
-
-    // Filtrar por placas si aplica
-    if (targetPlacas) {
-      const cleanTarget = targetPlacas.toLowerCase().trim();
-      allLogs = allLogs.filter(item => (item.vehiculo_placas || '').toLowerCase().trim() === cleanTarget);
-    }
-
-    // Ordenar de más antiguo a más reciente para trazar el kilometraje en orden cronológico
-    allLogs.sort((a, b) => {
-      const timeA = new Date(a.fecha || a.created_at).getTime();
-      const timeB = new Date(b.fecha || b.created_at).getTime();
-      if (timeA !== timeB) return timeA - timeB;
-      return Number(a.kilometraje_actual || 0) - Number(b.kilometraje_actual || 0);
-    });
-
-    // Trazar el rendimiento real entre cargas consecutivas sin importar la empresa
-    for (let i = 0; i < allLogs.length; i++) {
-      if (i > 0) {
-        const prev = allLogs[i - 1];
-        const kmAnterior = Number(prev.kilometraje_actual || 0);
-        const kmActual = Number(allLogs[i].kilometraje_actual || 0);
-        const litros = Number(allLogs[i].litros || 0);
-        const kmRecorridos = Math.max(0, kmActual - kmAnterior);
-
-        allLogs[i].kilometraje_anterior = kmAnterior;
-        allLogs[i].distancia_recorrida = kmRecorridos;
-        allLogs[i].rendimiento_km_l = litros > 0 && kmRecorridos > 0 ? Number((kmRecorridos / litros).toFixed(2)) : 0;
-      } else {
-        allLogs[i].kilometraje_anterior = null;
-        allLogs[i].distancia_recorrida = 0;
-        allLogs[i].rendimiento_km_l = 0;
-      }
-    }
-
-    // Retornar de más reciente a más antiguo para vista de lista / reporte
-    return allLogs.reverse() as RegistroGasolina[];
+    const headers = await getApiHeaders();
+    
+    let url = `${getApiUrl()}/api/vehiculos/gasolina?`;
+    if (filtros?.vehiculoId) url += `vehiculoId=${filtros.vehiculoId}&`;
+    if (filtros?.empleadoId) url += `empleadoId=${filtros.empleadoId}&`;
+    if (filtros?.placas) url += `placas=${filtros.placas}&`;
+    
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error('Error al obtener registros de gasolina');
+    return res.json();
   },
 
   async crearRegistroGasolina(registro: Omit<RegistroGasolina, 'id' | 'created_at'>): Promise<RegistroGasolina> {
-    const { data, error } = await supabase
-      .from('registro_gasolina')
-      .insert([registro])
-      .select()
-      .single();
-    if (error) throw error;
-
-    // Sincronizar kilometraje actual en vehículos de ambas empresas
-    if (registro.vehiculo_id && registro.kilometraje_actual) {
-      try {
-        const { data: v } = await supabase.from('vehiculos').select('placas').eq('id', registro.vehiculo_id).single();
-        if (v?.placas) {
-          await VehiculoService.syncVehiculoKilometraje(v.placas, registro.kilometraje_actual);
-        }
-      } catch {}
-    }
-
-    return data as RegistroGasolina;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/gasolina`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(registro)
+    });
+    if (!res.ok) throw new Error('Error al crear registro de gasolina');
+    return res.json();
   },
 };
 
