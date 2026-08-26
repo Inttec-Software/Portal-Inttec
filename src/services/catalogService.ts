@@ -3,8 +3,8 @@ import {
   CatalogoItem,
   ClienteItem,
   CompanyService,
-  getDaravisaClient,
-  getInttecClient,
+  
+  
   ProveedorItem,
   SubcategoriaItem,
   SucursalCliente,
@@ -22,6 +22,46 @@ import { getApiHeaders, getApiUrl } from './apiHelper';
  * automáticamente en ambas bases de datos.
  */
 export const CatalogService = {
+  // Helper interno
+  async _postCatalogo(table: string, data: any) {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/catalogos`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ table, data })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Error creando elemento en ${table}`);
+    }
+    return res.json();
+  },
+
+  async _putCatalogo(table: string, id: string, updates: any) {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/catalogos`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ table, id, updates })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Error actualizando elemento en ${table}`);
+    }
+  },
+
+  async _deleteCatalogo(table: string, id: string) {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/catalogos/${table}/${id}`, {
+      method: 'DELETE',
+      headers
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Error eliminando elemento en ${table}`);
+    }
+  },
+
   // ==========================================
   // CLIENTES
   // ==========================================
@@ -35,42 +75,15 @@ export const CatalogService = {
     regimen_fiscal?: string | null;
     uso_cfdi?: string | null;
   }): Promise<ClienteItem> {
-    const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
-    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
-
-    const { data, error } = await primaryClient
-      .from('clientes')
-      .insert([clienteData])
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('[CatalogService] Error creando cliente en base activa:', error);
-      throw error;
-    }
-
-    try {
-      await secondaryClient.from('clientes').upsert([data]);
-    } catch (syncErr: any) {
-      logger.error('[CatalogService] Error sincronizando cliente en base secundaria:', syncErr);
-    }
-
-    return data as ClienteItem;
+    return this._postCatalogo('clientes', clienteData) as Promise<ClienteItem>;
   },
 
   async actualizarCliente(id: string, updates: Partial<ClienteItem>): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('clientes').update(updates).eq('id', id),
-      getDaravisaClient().from('clientes').update(updates).eq('id', id),
-    ]);
+    return this._putCatalogo('clientes', id, updates);
   },
 
   async eliminarCliente(id: string): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('clientes').delete().eq('id', id),
-      getDaravisaClient().from('clientes').delete().eq('id', id),
-    ]);
+    return this._deleteCatalogo('clientes', id);
   },
 
   // ==========================================
@@ -80,42 +93,15 @@ export const CatalogService = {
     cliente_id: string;
     nombre: string;
   }): Promise<SucursalCliente> {
-    const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
-    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
-
-    const { data, error } = await primaryClient
-      .from('sucursales_cliente')
-      .insert([sucursalData])
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('[CatalogService] Error creando sucursal en base activa:', error);
-      throw error;
-    }
-
-    try {
-      await secondaryClient.from('sucursales_cliente').upsert([data]);
-    } catch (syncErr: any) {
-      logger.error('[CatalogService] Error sincronizando sucursal en base secundaria:', syncErr);
-    }
-
-    return data as SucursalCliente;
+    return this._postCatalogo('sucursales_cliente', sucursalData) as Promise<SucursalCliente>;
   },
 
   async actualizarSucursal(id: string, updates: Partial<SucursalCliente>): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('sucursales_cliente').update(updates).eq('id', id),
-      getDaravisaClient().from('sucursales_cliente').update(updates).eq('id', id),
-    ]);
+    return this._putCatalogo('sucursales_cliente', id, updates);
   },
 
   async eliminarSucursal(id: string): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('sucursales_cliente').delete().eq('id', id),
-      getDaravisaClient().from('sucursales_cliente').delete().eq('id', id),
-    ]);
+    return this._deleteCatalogo('sucursales_cliente', id);
   },
 
   // ==========================================
@@ -125,81 +111,30 @@ export const CatalogService = {
     nombre: string;
     rfc?: string | null;
   }): Promise<ProveedorItem> {
-    const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
-    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
-
-    const { data, error } = await primaryClient
-      .from('proveedores')
-      .insert([proveedorData])
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('[CatalogService] Error creando proveedor en base activa:', error);
-      throw error;
-    }
-
-    try {
-      await secondaryClient.from('proveedores').upsert([data]);
-    } catch (syncErr: any) {
-      logger.error('[CatalogService] Error sincronizando proveedor en base secundaria:', syncErr);
-    }
-
-    return data as ProveedorItem;
+    return this._postCatalogo('proveedores', proveedorData) as Promise<ProveedorItem>;
   },
 
   async actualizarProveedor(id: string, updates: Partial<ProveedorItem>): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('proveedores').update(updates).eq('id', id),
-      getDaravisaClient().from('proveedores').update(updates).eq('id', id),
-    ]);
+    return this._putCatalogo('proveedores', id, updates);
   },
 
   async eliminarProveedor(id: string): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('proveedores').delete().eq('id', id),
-      getDaravisaClient().from('proveedores').delete().eq('id', id),
-    ]);
+    return this._deleteCatalogo('proveedores', id);
   },
 
   // ==========================================
   // CATEGORIAS
   // ==========================================
   async crearCategoria(categoriaData: { nombre: string }): Promise<CatalogoItem> {
-    const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
-    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
-
-    const { data, error } = await primaryClient
-      .from('categorias')
-      .insert([categoriaData])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    try {
-      await secondaryClient.from('categorias').upsert([data]);
-    } catch (syncErr: any) {
-      logger.error('[CatalogService] Error sincronizando categoria:', syncErr);
-    }
-
-    return data as CatalogoItem;
+    return this._postCatalogo('categorias', categoriaData) as Promise<CatalogoItem>;
   },
 
   async actualizarCategoria(id: string, updates: { nombre: string }): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('categorias').update(updates).eq('id', id),
-      getDaravisaClient().from('categorias').update(updates).eq('id', id),
-    ]);
+    return this._putCatalogo('categorias', id, updates);
   },
 
   async eliminarCategoria(id: string): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('categorias').delete().eq('id', id),
-      getDaravisaClient().from('categorias').delete().eq('id', id),
-    ]);
+    return this._deleteCatalogo('categorias', id);
   },
 
   // ==========================================
@@ -209,39 +144,15 @@ export const CatalogService = {
     nombre: string;
     categoria_id: string;
   }): Promise<SubcategoriaItem> {
-    const activeComp = CompanyService.getActiveCompany();
-    const primaryClient = activeComp === 'daravisa' ? getDaravisaClient() : getInttecClient();
-    const secondaryClient = activeComp === 'daravisa' ? getInttecClient() : getDaravisaClient();
-
-    const { data, error } = await primaryClient
-      .from('subcategorias')
-      .insert([subcategoriaData])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    try {
-      await secondaryClient.from('subcategorias').upsert([data]);
-    } catch (syncErr: any) {
-      logger.error('[CatalogService] Error sincronizando subcategoria:', syncErr);
-    }
-
-    return data as SubcategoriaItem;
+    return this._postCatalogo('subcategorias', subcategoriaData) as Promise<SubcategoriaItem>;
   },
 
   async actualizarSubcategoria(id: string, updates: { nombre?: string; categoria_id?: string }): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('subcategorias').update(updates).eq('id', id),
-      getDaravisaClient().from('subcategorias').update(updates).eq('id', id),
-    ]);
+    return this._putCatalogo('subcategorias', id, updates);
   },
 
   async eliminarSubcategoria(id: string): Promise<void> {
-    await Promise.allSettled([
-      getInttecClient().from('subcategorias').delete().eq('id', id),
-      getDaravisaClient().from('subcategorias').delete().eq('id', id),
-    ]);
+    return this._deleteCatalogo('subcategorias', id);
   },
 
   // ==========================================
