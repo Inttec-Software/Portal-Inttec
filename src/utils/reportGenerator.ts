@@ -1405,6 +1405,7 @@ export const ReportGenerator = {
     consumos.forEach((c) => {
       const fecha = c.fecha ? c.fecha.split('T')[0] : '';
       const productoNombre = c.producto?.nombre_oficial || 'Producto Eliminado';
+      const empleadoNombre = c.usuario?.nombre || (c.creado_por ? 'Empleado Registrado' : 'No especificado / Admin');
       const cantidad = c.cantidad || 0;
       const referencia = c.folio_factura || 'N/A';
 
@@ -1412,6 +1413,7 @@ export const ReportGenerator = {
         <tr>
           <td>${fecha}</td>
           <td style="font-weight: bold;">${productoNombre}</td>
+          <td style="color: #2b2d42; font-weight: 500;">${empleadoNombre}</td>
           <td style="text-align: right; font-weight: bold; color: #F44336;">-${cantidad} pzas</td>
           <td>${referencia}</td>
         </tr>
@@ -1574,10 +1576,11 @@ export const ReportGenerator = {
         <table>
           <thead>
             <tr>
-              <th style="width: 15%">Fecha</th>
-              <th style="width: 45%">Producto</th>
-              <th style="width: 15%; text-align: right;">Cantidad</th>
-              <th style="width: 25%">Referencia/Trabajo</th>
+              <th style="width: 12%">Fecha</th>
+              <th style="width: 32%">Producto</th>
+              <th style="width: 24%">Empleado</th>
+              <th style="width: 12%; text-align: right;">Cantidad</th>
+              <th style="width: 20%">Referencia/Trabajo</th>
             </tr>
           </thead>
           <tbody>
@@ -1655,11 +1658,12 @@ export const ReportGenerator = {
     }
 
     let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Movimiento,Fecha,Producto,Cantidad,Referencia/Trabajo\n';
+    csvContent += 'ID Movimiento,Fecha,Producto,Empleado,Cantidad,Referencia/Trabajo\n';
 
     consumos.forEach((c) => {
       const fecha = c.fecha ? c.fecha.split('T')[0] : '';
       const productoNombre = c.producto?.nombre_oficial || 'Producto Eliminado';
+      const empleadoNombre = c.usuario?.nombre || (c.creado_por ? 'Empleado Registrado' : 'No especificado / Admin');
       const escape = (text?: string | null) => {
         if (!text) return '';
         const cleaned = text.replace(/"/g, '""');
@@ -1670,6 +1674,7 @@ export const ReportGenerator = {
         c.id,
         fecha,
         escape(productoNombre),
+        escape(empleadoNombre),
         c.cantidad,
         escape(c.folio_factura),
       ].join(',');

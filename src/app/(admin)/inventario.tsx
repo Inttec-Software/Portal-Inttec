@@ -367,7 +367,7 @@ async function loadAllData() {
         supabase.from('productos').select('*').order('nombre_oficial'),
         supabase
           .from('movimientos_inventario')
-          .select('*, producto:productos(nombre_oficial)')
+          .select('*, producto:productos(nombre_oficial), usuario:usuarios!creado_por(nombre)')
           .eq('tipo', 'SALIDA')
           .order('fecha', { ascending: false })
           .limit(50),
@@ -1732,7 +1732,7 @@ async function loadAllData() {
                           {item.producto ? item.producto.nombre_oficial : 'Producto Eliminado'}
                         </Text>
                         <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4 }}>
-                          Ref: {item.folio_factura || 'N/A'} | Fecha: {dateStr}
+                          Ref: {item.folio_factura || 'N/A'}{item.usuario?.nombre ? ` | Empleado: ${item.usuario.nombre}` : ''} | Fecha: {dateStr}
                         </Text>
                       </View>
                       <View style={{ backgroundColor: themeColors.danger + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: BorderRadius.small }}>
