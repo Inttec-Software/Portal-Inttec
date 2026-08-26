@@ -309,9 +309,9 @@ export default function EvidenciaForm() {
       Alert.alert('Validación', 'Por favor llena el nombre del cliente.');
       return;
     }
-    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim() || !t.materiales.trim());
+    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim());
     if (hasEmptyFields) {
-      Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
+      Alert.alert('Validación', 'Por favor llena la situación y la solución para todos los trabajos.');
       return;
     }
 
@@ -373,9 +373,9 @@ export default function EvidenciaForm() {
       Alert.alert('Validación', 'Por favor llena el nombre del cliente.');
       return;
     }
-    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim() || !t.materiales.trim());
+    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim());
     if (hasEmptyFields) {
-      Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
+      Alert.alert('Validación', 'Por favor llena la situación y la solución para todos los trabajos.');
       return;
     }
 
@@ -559,9 +559,9 @@ export default function EvidenciaForm() {
         Alert.alert('Validación', 'Por favor selecciona el cliente.');
         return;
       }
-      const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim() || !t.materiales.trim());
+      const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim());
       if (hasEmptyFields) {
-        Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
+        Alert.alert('Validación', 'Por favor llena la situación y la solución para todos los trabajos.');
         return;
       }
       setCurrentStep(2);
