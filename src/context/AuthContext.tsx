@@ -85,9 +85,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           await AsyncStorage.setItem(`logged_user_${newCompany}`, JSON.stringify(dbUser));
+          
+          // Copiar también el token JWT al nuevo entorno
+          const currentToken = await AsyncStorage.getItem(`jwt_token_${company}`);
+          if (currentToken) {
+            await AsyncStorage.setItem(`jwt_token_${newCompany}`, currentToken);
+          }
+          
           currentUser = dbUser as Usuario;
         } else {
           await AsyncStorage.removeItem(`logged_user_${newCompany}`);
+          await AsyncStorage.removeItem(`jwt_token_${newCompany}`);
           currentUser = null;
         }
       }

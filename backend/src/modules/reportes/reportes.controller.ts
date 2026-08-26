@@ -210,7 +210,17 @@ export const updateGasto = async (req: Request, res: Response) => {
     const client = getSupabaseClient(company, env);
 
     const { id } = req.params;
-    const payload = req.body;
+    const { updatePayload, gasolinaPayload, ...restPayload } = req.body;
+    
+    // Support both new {updatePayload} format and old direct payload format
+    const payload = updatePayload || restPayload;
+
+    // Get old gasto to see if it's linked to a sale
+    const { data: oldGasto } = await client
+      .from('gastos')
+      .select('venta_id')
+      .eq('id', id)
+      .single();
 
     const { error: updateError } = await client
       .from('gastos')
@@ -219,10 +229,71 @@ export const updateGasto = async (req: Request, res: Response) => {
 
     if (updateError) throw updateError;
 
+    if (gasolinaPayload) {
+      if (gasolinaPayload.action === 'upsert') {
+        const { error: gasError } = await client
+          .from('registro_gasolina')
+          .upsert([{ ...gasolinaPayload.data, gasto_id: id }], { onConflict: 'gasto_id' });
+        if (gasError) throw gasError;
+      } else if (gasolinaPayload.action === 'delete') {
+        const { error: gasError } = await client
+          .from('registro_gasolina')
+          .delete()
+          .eq('gasto_id', id);
+        if (gasError) throw gasError;
+      }
+    }
+
+    if (oldGasto && oldGasto.venta_id) {
+      await recalculateVentaTotalsInternal(client, oldGasto.venta_id);
+    }
+
     return res.json({ success: true });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
+};
+
+export const recalculateVentaTotalsInternal = async (client: any, id: string) => {
+  const { data: venta, error: ventaErr } = await client
+    .from('ventas')
+    .select('precio_total_facturado')
+    .eq('id', id)
+    .single();
+  if (ventaErr || !venta) throw ventaErr || new Error('Sale not found');
+
+  const { data: partidas, error: partidasErr } = await client
+    .from('ventas_partidas')
+    .select('costo_total_proveedor')
+    .eq('venta_id', id);
+  if (partidasErr) throw partidasErr;
+
+  const costoPartidas = (partidas || []).reduce((sum: number, p: any) => sum + (Number(p.costo_total_proveedor) || 0), 0);
+
+  const { data: gastos, error: gastosErr } = await client
+    .from('gastos')
+    .select('monto')
+    .eq('venta_id', id)
+    .eq('status', 'APPROVED');
+  if (gastosErr) throw gastosErr;
+
+  const costoGastos = (gastos || []).reduce((sum: number, g: any) => sum + (Number(g.monto) || 0), 0);
+
+  const costoTotal = Math.round((costoPartidas + costoGastos) * 100) / 100;
+  const precioTotal = Number(venta.precio_total_facturado) || 0;
+  const utilidadBruta = Math.round((precioTotal - costoTotal) * 100) / 100;
+  const margenPorcentual = precioTotal > 0 ? Math.round((utilidadBruta / precioTotal) * 10000) / 10000 : 0;
+
+  const { error: updateErr } = await client
+    .from('ventas')
+    .update({
+      costo_total: costoTotal,
+      utilidad_bruta: utilidadBruta,
+      margen_porcentual: margenPorcentual
+    })
+    .eq('id', id);
+  
+  if (updateErr) throw updateErr;
 };
 
 export const recalculateVentaTotals = async (req: Request, res: Response) => {
@@ -233,47 +304,9 @@ export const recalculateVentaTotals = async (req: Request, res: Response) => {
     const client = getSupabaseClient(company, env);
 
     const { id } = req.params;
-
-    const { data: venta, error: ventaErr } = await client
-      .from('ventas')
-      .select('precio_total_facturado')
-      .eq('id', id)
-      .single();
-    if (ventaErr || !venta) throw ventaErr || new Error('Sale not found');
-
-    const { data: partidas, error: partidasErr } = await client
-      .from('ventas_partidas')
-      .select('costo_total_proveedor')
-      .eq('venta_id', id);
-    if (partidasErr) throw partidasErr;
-
-    const costoPartidas = (partidas || []).reduce((sum: number, p: any) => sum + (Number(p.costo_total_proveedor) || 0), 0);
-
-    const { data: gastos, error: gastosErr } = await client
-      .from('gastos')
-      .select('monto')
-      .eq('venta_id', id)
-      .eq('status', 'APPROVED');
-    if (gastosErr) throw gastosErr;
-
-    const costoGastos = (gastos || []).reduce((sum: number, g: any) => sum + (Number(g.monto) || 0), 0);
-
-    const costoTotal = Math.round((costoPartidas + costoGastos) * 100) / 100;
-    const precioTotal = Number(venta.precio_total_facturado) || 0;
-    const utilidadBruta = Math.round((precioTotal - costoTotal) * 100) / 100;
-    const margenPorcentual = precioTotal > 0 ? Math.round((utilidadBruta / precioTotal) * 10000) / 10000 : 0;
-
-    const { error: updateErr } = await client
-      .from('ventas')
-      .update({
-        costo_total: costoTotal,
-        utilidad_bruta: utilidadBruta,
-        margen_porcentual: margenPorcentual
-      })
-      .eq('id', id);
+    await recalculateVentaTotalsInternal(client, id as string);
     
-    if (updateErr) throw updateErr;
-    return res.json({ success: true, costoTotal, utilidadBruta, margenPorcentual });
+    return res.json({ success: true });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -328,3 +361,67 @@ export const saveQuickSale = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+export const getFormCatalogs = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+
+    const [catRes, subRes, cliRes, usersRes, sucRes, provRes] = await Promise.all([
+      client.from('categorias').select('*').order('nombre'),
+      client.from('subcategorias').select('*').order('nombre'),
+      client.from('clientes').select('*').order('nombre'),
+      client.from('usuarios').select('*').order('nombre'),
+      client.from('sucursales_cliente').select('*').order('nombre'),
+      client.from('proveedores').select('*').order('nombre'),
+    ]);
+
+    if (catRes.error) throw catRes.error;
+
+    return res.json({
+      categorias: catRes.data || [],
+      subcategorias: subRes.data || [],
+      clientes: cliRes.data || [],
+      usuarios: usersRes.data || [],
+      sucursales: sucRes.data || [],
+      proveedores: provRes.data || [],
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const createGastos = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+
+    const { payloadsToInsert, gasolinaPayload } = req.body;
+
+    const { data: insertedGastos, error: dbError } = await client
+      .from('gastos')
+      .insert(payloadsToInsert)
+      .select();
+
+    if (dbError) throw dbError;
+
+    if (gasolinaPayload && insertedGastos && insertedGastos.length > 0) {
+      gasolinaPayload.gasto_id = insertedGastos[0].id;
+      const { error: gasError } = await client
+        .from('registro_gasolina')
+        .insert([gasolinaPayload]);
+
+      if (gasError) throw gasError;
+    }
+
+    return res.json({ success: true, insertedGastos });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+

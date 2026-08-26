@@ -36,6 +36,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { PushNotificationService } from '@/services/pushNotifications';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 
 interface PartidaEditable {
   id: string;
@@ -296,55 +297,18 @@ export default function AdminGastosScreen() {
       setRegistrosGasolina([]);
     }
     try {
-      const [gastosRes, usersRes, vehList, gasLogs, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
-        supabase.from('gastos').select(`
-          *,
-          subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-          proveedor_rel:proveedores(id, nombre),
-          cliente_rel:clientes(id, nombre),
-          sucursal_rel:sucursales_cliente(id, nombre)
-        `).order('created_at', { ascending: false }),
-        supabase.from('usuarios').select('*').order('nombre'),
-        VehiculoService.getVehiculos(false),
-        VehiculoService.getRegistrosGasolina(),
-        supabase.from('categorias').select('*'),
-        supabase.from('subcategorias').select('*'),
-        supabase.from('proveedores').select('*'),
-        supabase.from('clientes').select('*'),
-        supabase.from('sucursales_cliente').select('*'),
-      ]);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/all`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
 
-      let rawGastos = gastosRes.data || [];
-      if (gastosRes.error) {
-        console.warn('Relational gastos query failed, attempting basic select:', gastosRes.error.message);
-        const fallbackRes = await supabase.from('gastos').select('*').order('created_at', { ascending: false });
-        rawGastos = fallbackRes.data || [];
-      }
-
-      const enrichedGastos = GastoService.enrichGastosWithCatalogs(
-        rawGastos,
-        catRes.data || [],
-        subRes.data || [],
-        provRes.data || [],
-        cliRes.data || [],
-        sucRes.data || []
-      );
-
-      if (usersRes.error) throw usersRes.error;
-
-      setGastos(enrichedGastos);
-      setPersonal(usersRes.data || []);
-      setVehiculos(vehList);
-      setRegistrosGasolina(gasLogs);
+      setGastos(data.gastos || []);
+      setPersonal(data.usuarios || []);
+      setVehiculos(data.vehiculos || []);
+      setRegistrosGasolina(data.gasLogs || []);
     } catch (err: any) {
       logger.error('Error loading admin data:', err);
-      // Emergency fallback
-      try {
-        const emergency = await supabase.from('gastos').select('*').order('created_at', { ascending: false });
-        if (emergency.data && emergency.data.length > 0) {
-          setGastos(emergency.data);
-        }
-      } catch {}
+      // No se usa supabase directo en frontend
       if (!silent) {
         Alert.alert('Error', err.message || 'No se pudieron recuperar los datos.');
       }
@@ -442,28 +406,23 @@ export default function AdminGastosScreen() {
         }
       }
 
-      const { error } = await supabase
-        .from('gastos')
-        .update(updatePayload)
-        .eq('id', selectedGasto.id);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}/status`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          status,
+          payload: updatePayload,
+          actor_id: adminUser.id,
+          monto: selectedGasto.monto
+        })
+      });
 
-      if (error) throw error;
+      if (!res.ok) throw new Error('Error al actualizar el estado del gasto');
 
       if (oldVentaId) {
         await recalculateVentaTotals(oldVentaId);
       }
-
-      // Generar registro de auditoría
-      await supabase.from('audit_logs').insert([
-        {
-          action: status === 'APPROVED' ? 'APPROVE' : status === 'REJECTED' ? 'REJECT' : status === 'PENDING' ? 'REVERT' : 'UPDATE',
-          actor_id: adminUser.id,
-          target_id: selectedGasto.id,
-          details: status === 'PENDING' 
-            ? `Gasto por ${selectedGasto.monto} devuelto a revisión por Admin.` 
-            : `Gasto por ${selectedGasto.monto} revisado por Admin. Estado final: ${status}`,
-        },
-      ]);
 
       let friendlyStatus = 'Acción Requerida';
       if (status === 'APPROVED') friendlyStatus = 'Aprobado';
@@ -492,15 +451,13 @@ export default function AdminGastosScreen() {
   const loadSalesForLinking = async () => {
     setIsLoadingSalesForLinking(true);
     try {
-      const [ventasRes, cliRes, sucRes] = await Promise.all([
-        supabase.from('ventas').select('*').order('fecha', { ascending: false }).limit(50),
-        supabase.from('clientes').select('*').order('nombre'),
-        supabase.from('sucursales_cliente').select('*').order('nombre'),
-      ]);
-      if (ventasRes.error) throw ventasRes.error;
-      setSalesForLinking(ventasRes.data || []);
-      setClientesCatalog(cliRes.data || []);
-      setSucursalesCatalog(sucRes.data || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/ventas`, { headers });
+      if (!res.ok) throw new Error('Error al cargar ventas para vinculación');
+      const data = await res.json();
+      setSalesForLinking(data.ventas || []);
+      setClientesCatalog(data.clientes || []);
+      setSucursalesCatalog(data.sucursales || []);
     } catch (err) {
       logger.error('Error loading sales for linking:', err);
     } finally {
@@ -544,26 +501,24 @@ export default function AdminGastosScreen() {
         rejection_feedback: `[Aprobado por ${adminUser.nombre}]`,
       };
 
-      const { error } = await supabase
-        .from('gastos')
-        .update(updatePayload)
-        .eq('id', selectedGasto.id);
+      const headers = await getApiHeaders();
+      const dbRes = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}/status`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          status: 'APPROVED',
+          payload: updatePayload,
+          actor_id: adminUser.id,
+          monto: selectedGasto.monto,
+          audit_details: `Gasto por ${selectedGasto.monto} aprobado por Admin.${ventaId ? ` Vinculado a venta ID: ${ventaId}.` : ''}`
+        })
+      });
 
-      if (error) throw error;
+      if (!dbRes.ok) throw new Error('Error al aprobar gasto en la BD');
 
       if (ventaId) {
         await recalculateVentaTotals(ventaId);
       }
-
-      // Generar registro de auditoría
-      await supabase.from('audit_logs').insert([
-        {
-          action: 'APPROVE',
-          actor_id: adminUser.id,
-          target_id: selectedGasto.id,
-          details: `Gasto por ${selectedGasto.monto} aprobado por Admin.${ventaId ? ` Vinculado a venta ID: ${ventaId}.` : ''}`,
-        },
-      ]);
 
       PushNotificationService.sendPushNotification(
         selectedGasto.empleado_id,
@@ -601,17 +556,19 @@ export default function AdminGastosScreen() {
       const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
       const publicInvoiceUrl = urlData.publicUrl;
 
-      // Actualizar en base de datos
-      const { error: dbError } = await supabase
-        .from('gastos')
-        .update({
+      // Actualizar en base de datos a través de la API
+      const headers = await getApiHeaders();
+      const dbRes = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
           facturado: true,
           factura_url: publicInvoiceUrl,
           motivo_sin_factura: null
         })
-        .eq('id', selectedGasto.id);
+      });
 
-      if (dbError) throw dbError;
+      if (!dbRes.ok) throw new Error('Error actualizando gasto en la BD');
 
       // Actualizar estado local
       const updatedGasto = {
@@ -821,12 +778,13 @@ export default function AdminGastosScreen() {
         setLocalMotivo('');
       }
 
-      const { error: dbError } = await supabase
-        .from('gastos')
-        .update(updateObj)
-        .eq('id', selectedGasto.id);
-
-      if (dbError) throw dbError;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(updateObj)
+      });
+      if (!res.ok) throw new Error('Error al actualizar facturación');
 
       const updatedGasto = {
         ...selectedGasto,
@@ -842,14 +800,13 @@ export default function AdminGastosScreen() {
   const handleUpdateAdminMotivoSinFactura = async (motivo: string) => {
     if (!selectedGasto) return;
     try {
-      const { error: dbError } = await supabase
-        .from('gastos')
-        .update({
-          motivo_sin_factura: motivo.trim() || null
-        })
-        .eq('id', selectedGasto.id);
-
-      if (dbError) throw dbError;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ motivo_sin_factura: motivo.trim() || null })
+      });
+      if (!res.ok) throw new Error('Error al actualizar motivo');
 
       const updatedGasto = {
         ...selectedGasto,
@@ -948,22 +905,12 @@ export default function AdminGastosScreen() {
         notas: quickSaleNotas.trim() || null,
       };
 
-      const { data: ventaData, error: ventaError } = await supabase
-        .from('ventas')
-        .insert([ventaPayload])
-        .select()
-        .single();
-
-      if (ventaError) throw ventaError;
-
-      // 2. Insertar partidas
       const partidasPayload = quickSalePartidas.map(p => {
         const cant = Number(p.cantidad) || 0;
         const precioUV = Number(p.precio_unitario_venta) || 0;
         const costoUP = Number(p.costo_unitario_proveedor) || 0;
 
         return {
-          venta_id: ventaData.id,
           descripcion: p.descripcion.trim(),
           cantidad: cant,
           unidad: p.unidad || 'PZA',
@@ -974,16 +921,20 @@ export default function AdminGastosScreen() {
         };
       });
 
-      const { error: partidasError } = await supabase
-        .from('ventas_partidas')
-        .insert(partidasPayload);
-
-      if (partidasError) throw partidasError;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/ventas/quick`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ventaPayload, partidasPayload })
+      });
+      if (!res.ok) throw new Error('Error al guardar la venta rápida');
+      const data = await res.json();
+      const ventaId = data.ventaId;
 
       // 3. Aprobar y vincular gasto
       setIsQuickSaleFormVisible(false);
       setIsLinkSaleModalVisible(false);
-      await executeApproveGasto(ventaData.id);
+      await executeApproveGasto(ventaId);
     } catch (err: any) {
       showAlert('Error al guardar venta rápida', err.message || 'No se pudo crear la venta.');
     } finally {
@@ -1223,8 +1174,12 @@ export default function AdminGastosScreen() {
     const performDelete = async () => {
       setIsProcessingAction(true);
       try {
-        const { error } = await supabase.from('gastos').delete().eq('id', id);
-        if (error) throw error;
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${id}`, {
+          method: 'DELETE',
+          headers
+        });
+        if (!res.ok) throw new Error('Error al eliminar el gasto');
         setGastos(prev => prev.filter(g => g.id !== id));
         setReviewModalVisible(false);
         setSelectedGasto(null);
@@ -1298,11 +1253,10 @@ export default function AdminGastosScreen() {
   const handleExportAsistenciasPDF = async () => {
     setIsFetchingAsistencias(true);
     try {
-      const { data, error } = await supabase
-        .from('asistencias')
-        .select('*')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/asistencias`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
       await ReportGenerator.exportAsistenciasToPDF(data || [], personal, 'Reporte de Asistencia General');
     } catch (err: any) {
       showAlert('Error PDF Asistencia', err.message || 'No se pudo generar el reporte.');
@@ -1314,11 +1268,10 @@ export default function AdminGastosScreen() {
   const handleExportAsistenciasCSV = async () => {
     setIsFetchingAsistencias(true);
     try {
-      const { data, error } = await supabase
-        .from('asistencias')
-        .select('*')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/asistencias`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
       await ReportGenerator.exportAsistenciasToCSV(data || [], personal, 'reporte_asistencia_general.csv');
     } catch (err: any) {
       showAlert('Error CSV Asistencia', err.message || 'No se pudo generar el reporte.');
@@ -1330,13 +1283,11 @@ export default function AdminGastosScreen() {
   const handleExportInventarioPDF = async () => {
     setIsFetchingInventario(true);
     try {
-      const [prodRes, catRes] = await Promise.all([
-        supabase.from('productos').select('*').order('nombre_oficial'),
-        supabase.from('categorias_productos').select('*').order('nombre'),
-      ]);
-      if (prodRes.error) throw prodRes.error;
-      if (catRes.error) throw catRes.error;
-      await ReportGenerator.exportInventarioToPDF(prodRes.data || [], catRes.data || [], 'Reporte de Inventario de Materiales');
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/inventario`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
+      await ReportGenerator.exportInventarioToPDF(data.productos || [], data.categorias || [], 'Reporte de Inventario de Materiales');
     } catch (err: any) {
       showAlert('Error PDF Inventario', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -1347,13 +1298,11 @@ export default function AdminGastosScreen() {
   const handleExportInventarioCSV = async () => {
     setIsFetchingInventario(true);
     try {
-      const [prodRes, catRes] = await Promise.all([
-        supabase.from('productos').select('*').order('nombre_oficial'),
-        supabase.from('categorias_productos').select('*').order('nombre'),
-      ]);
-      if (prodRes.error) throw prodRes.error;
-      if (catRes.error) throw catRes.error;
-      await ReportGenerator.exportInventarioToCSV(prodRes.data || [], catRes.data || [], 'reporte_inventario_general.csv');
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/inventario`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
+      await ReportGenerator.exportInventarioToCSV(data.productos || [], data.categorias || [], 'reporte_inventario_general.csv');
     } catch (err: any) {
       showAlert('Error CSV Inventario', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -1364,12 +1313,10 @@ export default function AdminGastosScreen() {
   const handleExportConsumosPDF = async () => {
     setIsFetchingConsumos(true);
     try {
-      const { data, error } = await supabase
-        .from('movimientos_inventario')
-        .select('*, producto:productos(nombre_oficial)')
-        .eq('tipo', 'SALIDA')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
       await ReportGenerator.exportConsumosToPDF(data || [], 'Reporte de Consumos de Materiales');
     } catch (err: any) {
       showAlert('Error PDF Consumos', err.message || 'No se pudo generar el reporte.');
@@ -1381,13 +1328,11 @@ export default function AdminGastosScreen() {
   const handleExportConsumosCSV = async () => {
     setIsFetchingConsumos(true);
     try {
-      const { data, error } = await supabase
-        .from('movimientos_inventario')
-        .select('*, producto:productos(nombre_oficial)')
-        .eq('tipo', 'SALIDA')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
-      await ReportGenerator.exportConsumosToCSV(data || [], 'reporte_consumos_general.csv');
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
+      await ReportGenerator.exportConsumosToCSV(data || [], 'reporte_consumos_materiales.csv');
     } catch (err: any) {
       showAlert('Error CSV Consumos', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -1398,11 +1343,10 @@ export default function AdminGastosScreen() {
   const handleExportVentasPDF = async () => {
     setIsFetchingVentas(true);
     try {
-      const { data, error } = await supabase
-        .from('ventas')
-        .select('*')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/ventas`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
       await ReportGenerator.exportVentasToPDF(data || [], 'Reporte de Control de Ventas');
     } catch (err: any) {
       showAlert('Error PDF Ventas', err.message || 'No se pudo generar el reporte de ventas.');
@@ -1414,11 +1358,10 @@ export default function AdminGastosScreen() {
   const handleExportVentasCSV = async () => {
     setIsFetchingVentas(true);
     try {
-      const { data, error } = await supabase
-        .from('ventas')
-        .select('*')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/ventas`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
       await ReportGenerator.exportVentasToCSV(data || [], 'reporte_ventas_general.csv');
     } catch (err: any) {
       showAlert('Error CSV Ventas', err.message || 'No se pudo generar el reporte de ventas.');
@@ -2757,8 +2700,13 @@ export default function AdminGastosScreen() {
                               onPress={async () => {
                                 try {
                                   const updateObj = { facturado: false, motivo_sin_factura: 'PENDIENTE_ENTREGA', factura_url: null };
-                                  const { error: dbError } = await supabase.from('gastos').update(updateObj).eq('id', selectedGasto.id);
-                                  if (dbError) throw dbError;
+                                  const headers = await getApiHeaders();
+                                  const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}`, {
+                                    method: 'PUT',
+                                    headers,
+                                    body: JSON.stringify(updateObj)
+                                  });
+                                  if (!res.ok) throw new Error('Error al actualizar');
                                   const updated = { ...selectedGasto, ...updateObj };
                                   setSelectedGasto(updated);
                                   setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updated : g));
