@@ -508,20 +508,10 @@ export const AsistenciaService = {
    */
   async getRegistroHoy(empleadoId: string): Promise<Asistencia | null> {
     const fechaJornada = this.getFechaJornada();
-    const { data, error } = await supabase
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleadoId)
-      .eq('fecha', fechaJornada)
-      .order('creado_en', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      logger.error('Error al obtener registro de la jornada actual:', error);
-      throw error;
-    }
-    return data as Asistencia | null;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/hoy/${empleadoId}?fecha=${fechaJornada}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener registro de asistencia');
+    return await res.json();
   },
 
   /**
@@ -538,9 +528,11 @@ export const AsistenciaService = {
     const horaStr = this.getHoraLocal(ahora);
     const fechaStr = this.getFechaJornada(ahora);
 
-    const { data, error } = await supabase
-      .from('asistencias')
-      .insert([{
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/entrada`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
         empleado_id: empleadoId,
         fecha: fechaStr,
         hora_entrada: horaStr,
@@ -548,12 +540,10 @@ export const AsistenciaService = {
         latitud_entrada: latitud,
         longitud_entrada: longitud,
         direccion_entrada: direccion,
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data as Asistencia;
+      })
+    });
+    if (!res.ok) throw new Error('Error al registrar entrada');
+    return await res.json();
   },
 
   /**
@@ -569,35 +559,31 @@ export const AsistenciaService = {
     const ahora = new Date();
     const horaStr = this.getHoraLocal(ahora);
 
-    const { data, error } = await supabase
-      .from('asistencias')
-      .update({
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/salida`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        id: asistenciaId,
         hora_salida: horaStr,
         foto_salida_url: fotoUrl,
         latitud_salida: latitud,
         longitud_salida: longitud,
         direccion_salida: direccion,
       })
-      .eq('id', asistenciaId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data as Asistencia;
+    });
+    if (!res.ok) throw new Error('Error al registrar salida');
+    return await res.json();
   },
 
   /**
-   * Obtiene el historial de asistencia de un empleado (para vista de admin).
+   * Obtiene el historial de asistencias de un empleado.
    */
   async getHistorialEmpleado(empleadoId: string): Promise<Asistencia[]> {
-    const { data, error } = await supabase
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleadoId)
-      .order('fecha', { ascending: false });
-
-    if (error) throw error;
-    return (data || []) as Asistencia[];
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/historial/${empleadoId}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener historial de asistencia');
+    return await res.json();
   },
 
   /**
@@ -731,51 +717,14 @@ export function calcularEstadoPago(precioTotalFacturado: number, totalPagado: nu
 
 export async function recalculateVentaTotals(ventaId: string): Promise<void> {
   try {
-    // 1. Obtener la venta
-    const { data: venta, error: ventaErr } = await supabase
-      .from('ventas')
-      .select('precio_total_facturado')
-      .eq('id', ventaId)
-      .single();
-    if (ventaErr || !venta) throw ventaErr || new Error('Sale not found');
-
-    // 2. Obtener la suma del costo de las partidas de la venta
-    const { data: partidas, error: partidasErr } = await supabase
-      .from('ventas_partidas')
-      .select('costo_total_proveedor')
-      .eq('venta_id', ventaId);
-    if (partidasErr) throw partidasErr;
-
-    const costoPartidas = (partidas || []).reduce((sum, p) => sum + (Number(p.costo_total_proveedor) || 0), 0);
-
-    // 3. Obtener la suma de los montos de los gastos aprobados vinculados a la venta
-    const { data: gastos, error: gastosErr } = await supabase
-      .from('gastos')
-      .select('monto')
-      .eq('venta_id', ventaId)
-      .eq('status', 'APPROVED');
-    if (gastosErr) throw gastosErr;
-
-    const costoGastos = (gastos || []).reduce((sum, g) => sum + (Number(g.monto) || 0), 0);
-
-    // 4. Calcular nuevos totales
-    const costoTotal = Math.round((costoPartidas + costoGastos) * 100) / 100;
-    const precioTotal = Number(venta.precio_total_facturado) || 0;
-    const utilidadBruta = Math.round((precioTotal - costoTotal) * 100) / 100;
-    const margenPorcentual = precioTotal > 0 ? Math.round((utilidadBruta / precioTotal) * 10000) / 10000 : 0;
-
-    // 5. Actualizar la venta
-    const { error: updateErr } = await supabase
-      .from('ventas')
-      .update({
-        costo_total: costoTotal,
-        utilidad_bruta: utilidadBruta,
-        margen_porcentual: margenPorcentual
-      })
-      .eq('id', ventaId);
-    
-    if (updateErr) throw updateErr;
-    logger.error(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Partidas: ${costoPartidas}, Costo Gastos: ${costoGastos}, Costo Total: ${costoTotal}`);
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/reportes/ventas/${ventaId}/recalculate`, {
+      method: 'POST',
+      headers
+    });
+    if (!res.ok) throw new Error('Error recalculating venta totals via API');
+    const data = await res.json();
+    logger.error(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Total: ${data.costoTotal}`);
   } catch (err) {
     logger.error('[Recalculate] Error recalculating venta totals:', err);
   }

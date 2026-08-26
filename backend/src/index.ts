@@ -9,6 +9,8 @@ import vehiculosRoutes from './modules/vehiculos/vehiculos.routes';
 import evidenciasRoutes from './modules/evidencias/evidencias.routes';
 import inventarioRoutes from './modules/inventario/inventario.routes';
 import catalogosRoutes from './modules/catalogos/catalogos.routes';
+import reportesRoutes from './modules/reportes/reportes.routes';
+import asistenciasRoutes from './modules/asistencias/asistencias.routes';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -33,6 +35,8 @@ app.use('/api/vehiculos', vehiculosRoutes);
 app.use('/api/evidencias', evidenciasRoutes);
 app.use('/api/inventario', inventarioRoutes);
 app.use('/api/catalogos', catalogosRoutes);
+app.use('/api/reportes', reportesRoutes);
+app.use('/api/asistencias', asistenciasRoutes);
 
 // Ruta base
 app.get('/', (req, res) => {
