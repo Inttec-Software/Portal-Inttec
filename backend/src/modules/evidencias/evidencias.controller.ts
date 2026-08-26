@@ -117,3 +117,29 @@ export const crearEvidencia = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+// 3. GET /api/evidencias/admin/all
+export const getAdminEvidencias = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+
+    const [evidencesRes, employeesRes] = await Promise.all([
+      client.from('evidencias').select('*').order('created_at', { ascending: false }),
+      client.from('usuarios').select('*').eq('rol', 'EMPLEADO').order('nombre'),
+    ]);
+
+    if (evidencesRes.error) throw evidencesRes.error;
+    if (employeesRes.error) throw employeesRes.error;
+
+    return res.json({
+      evidencias: evidencesRes.data || [],
+      employees: employeesRes.data || []
+    });
+
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
