@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAdminReportes, updateGastoStatus, getSalesForLinking, getExportData, updateGasto, recalculateVentaTotals, deleteGasto, saveQuickSale, getFormCatalogs, createGastos } from './reportes.controller';
+import { getAdminReportes, updateGastoStatus, getSalesForLinking, getExportData, updateGasto, recalculateVentaTotals, deleteGasto, saveQuickSale, getFormCatalogs, createGastos, getEmpleadoGastos, getGastoById } from './reportes.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
 
@@ -11,6 +11,8 @@ router.use(tenantMiddleware);
 router.get('/admin/all', getAdminReportes);
 router.get('/admin/ventas', getSalesForLinking);
 router.get('/admin/export/:type', getExportData);
+router.get('/empleado', getEmpleadoGastos);
+router.get('/gastos/:id', getGastoById);
 router.post('/ventas/quick', saveQuickSale);
 router.put('/gastos/:id/status', updateGastoStatus);
 router.put('/gastos/:id', updateGasto);

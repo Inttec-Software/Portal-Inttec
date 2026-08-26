@@ -9,7 +9,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const client = getSupabaseClient(company, env);
 
-    const [gastosRes, usersRes, vehListRes, gasLogsRes, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
+    const [gastosRes, usersRes, vehiculosRes, gasolinaRes, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
       client.from('gastos').select(`
         *,
         subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
@@ -97,9 +97,153 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     return res.json({
       gastos: enrichedGastos,
       usuarios: usersRes.data || [],
-      vehiculos: vehListRes.data || [],
-      registrosGasolina: gasLogsRes.data || []
+      vehiculos: vehiculosRes.data || [],
+      registrosGasolina: gasolinaRes.data || []
     });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const getEmpleadoGastos = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+    
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'No autorizado' });
+
+    const [gastosRes, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
+      client.from('gastos').select(`
+        *,
+        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
+        proveedor_rel:proveedores(id, nombre),
+        cliente_rel:clientes(id, nombre),
+        sucursal_rel:sucursales_cliente(id, nombre)
+      `).eq('empleado_id', userId).order('created_at', { ascending: false }),
+      client.from('categorias').select('*'),
+      client.from('subcategorias').select('*'),
+      client.from('proveedores').select('*'),
+      client.from('clientes').select('*'),
+      client.from('sucursales_cliente').select('*'),
+    ]);
+
+    const rawGastos = gastosRes.data || [];
+    const categorias = catRes.data || [];
+    const subcategorias = subRes.data || [];
+    const proveedores = provRes.data || [];
+    const clientes = cliRes.data || [];
+    const sucursales = sucRes.data || [];
+
+    const gastosEnriquecidos = rawGastos.map(g => {
+      let cat = '';
+      let subcat = '';
+      let prov = '';
+      let cli = '';
+      let suc = '';
+      
+      let subRel = g.subcategoria_rel;
+      let catRel = null;
+      let provRel = g.proveedor_rel;
+      let cliRel = g.cliente_rel;
+      let sucRel = g.sucursal_rel;
+
+      if (g.subcategoria_rel) {
+        subcat = g.subcategoria_rel.nombre;
+        if (g.subcategoria_rel.categorias) {
+          cat = g.subcategoria_rel.categorias.nombre;
+        }
+      } else if (g.subcategoria_id) {
+        const s = subcategorias.find((x: any) => x.id === g.subcategoria_id);
+        if (s) {
+          subcat = s.nombre;
+          subRel = { id: s.id, nombre: s.nombre, categoria_id: s.categoria_id };
+          const c = categorias.find((x: any) => x.id === s.categoria_id);
+          if (c) {
+            cat = c.nombre;
+            subRel.categoria_rel = { id: c.id, nombre: c.nombre };
+            catRel = subRel.categoria_rel;
+          }
+        }
+      } else {
+        cat = 'Sin clasificar';
+        subcat = 'Sin clasificar';
+      }
+
+      if (g.proveedor_rel) prov = g.proveedor_rel.nombre;
+      else if (g.proveedor_id) {
+        const p = proveedores.find((x: any) => x.id === g.proveedor_id);
+        if (p) {
+          prov = p.nombre;
+          provRel = { id: p.id, nombre: p.nombre };
+        }
+      }
+
+      if (g.cliente_rel) cli = g.cliente_rel.nombre;
+      else if (g.cliente_id) {
+        const c = clientes.find((x: any) => x.id === g.cliente_id);
+        if (c) {
+          cli = c.nombre;
+          cliRel = { id: c.id, nombre: c.nombre };
+        }
+      }
+
+      if (g.sucursal_rel) suc = g.sucursal_rel.nombre;
+      else if (g.sucursal_id) {
+        const s = sucursales.find((x: any) => x.id === g.sucursal_id);
+        if (s) {
+          suc = s.nombre;
+          sucRel = { id: s.id, nombre: s.nombre };
+        }
+      }
+
+      return {
+        ...g,
+        categoria_nombre: cat,
+        subcategoria_nombre: subcat,
+        proveedor_nombre: prov,
+        cliente_nombre: cli,
+        sucursal_nombre: suc,
+        subcategoria_rel: subRel,
+        categoria_rel: catRel,
+        proveedor_rel: provRel,
+        cliente_rel: cliRel,
+        sucursal_rel: sucRel
+      };
+    });
+
+    return res.json({ gastos: gastosEnriquecidos });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const getGastoById = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+
+    const { id } = req.params;
+
+    const { data, error } = await client
+      .from('gastos')
+      .select(`
+        *,
+        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
+        proveedor_rel:proveedores(id, nombre),
+        cliente_rel:clientes(id, nombre),
+        sucursal_rel:sucursales_cliente(id, nombre)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+
+    return res.json({ gasto: data });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -416,6 +560,25 @@ export const createGastos = async (req: Request, res: Response) => {
         .insert([gasolinaPayload]);
 
       if (gasError) throw gasError;
+    }
+
+    const { createNotifications, employeeName, totalGasto, categoriaNombre } = req.body;
+    if (createNotifications && insertedGastos && insertedGastos.length > 0) {
+      try {
+        const { data: admins } = await client.from('usuarios').select('id').eq('rol', 'ADMIN');
+        if (admins && admins.length > 0) {
+          const notifications = admins.map((admin: any) => ({
+            usuario_id: admin.id,
+            titulo: 'Nuevo Gasto Registrado',
+            mensaje: `${employeeName || 'Un empleado'} ha registrado un gasto de $${Number(totalGasto || 0).toFixed(2)} (${categoriaNombre || 'Sin categoría'})`,
+            tipo: 'GASTO_NUEVO',
+            referencia_id: insertedGastos[0].id,
+          }));
+          await client.from('notificaciones').insert(notifications);
+        }
+      } catch (notifErr) {
+        console.warn('Error inserting notifications:', notifErr);
+      }
     }
 
     return res.json({ success: true, insertedGastos });

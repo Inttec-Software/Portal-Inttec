@@ -21,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import {
   supabase,
@@ -215,23 +216,19 @@ export default function GastoForm() {
 
   const loadCatalogos = async () => {
     try {
-      const [catRes, subRes, cliRes, usrRes, vehList, sucRes, provRes] = await Promise.all([
-        supabase.from('categorias').select('*').order('nombre'),
-        supabase.from('subcategorias').select('*').order('nombre'),
-        supabase.from('clientes').select('*').order('nombre'),
-        supabase.from('usuarios').select('*').order('nombre'),
-        VehiculoService.getVehiculos(true),
-        supabase.from('sucursales_cliente').select('*').order('nombre'),
-        supabase.from('proveedores').select('*').order('nombre'),
-      ]);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/form-catalogs`, { headers });
+      if (!res.ok) throw new Error('Error al cargar catálogos del formulario');
+      const data = await res.json();
+      const vehList = await VehiculoService.getVehiculos(true);
 
-      if (catRes.data) setCategorias(catRes.data);
-      if (subRes.data) setSubcategorias(subRes.data);
-      if (cliRes.data) setClientes(cliRes.data);
-      if (usrRes.data) setAllUsers(usrRes.data);
+      if (data.categorias) setCategorias(data.categorias);
+      if (data.subcategorias) setSubcategorias(data.subcategorias);
+      if (data.clientes) setClientes(data.clientes);
+      if (data.usuarios) setAllUsers(data.usuarios);
       if (vehList) setVehiculos(vehList);
-      if (sucRes.data) setSucursalesCliente(sucRes.data);
-      if (provRes.data) setProveedores(provRes.data);
+      if (data.sucursales) setSucursalesCliente(data.sucursales);
+      if (data.proveedores) setProveedores(data.proveedores);
     } catch (err) {
       console.error('Error loading catalogos:', err);
     }
@@ -831,48 +828,39 @@ export default function GastoForm() {
           }
         ];
 
-        const { data: insertedGastos, error: dbError } = await supabase
-          .from('gastos')
-          .insert(payloadsToInsert)
-          .select();
+        const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
+        let gasolinaPayload = null;
 
-        if (dbError) throw dbError;
-
-        // Notificar a los administradores del nuevo gasto
-        try {
-          const { data: admins } = await supabase.from('usuarios').select('id').eq('rol', 'ADMIN');
-          if (admins && admins.length > 0) {
-            const notifications = admins.map(admin => ({
-              usuario_id: admin.id,
-              titulo: 'Nuevo Gasto Registrado',
-              mensaje: `${currentUser.nombre} ha registrado un gasto de $${totalGasto.toFixed(2)} (${selectedCategoria})`,
-              tipo: 'GASTO_NUEVO',
-              referencia_id: insertedGastos?.[0]?.id,
-            }));
-            await supabase.from('notificaciones').insert(notifications);
-          }
-        } catch (notifErr) {
-          console.warn('Notificaciones insert skipped or failed:', notifErr);
+        if (esGasolina) {
+          gasolinaPayload = {
+            vehiculo_id: selectedVehiculoId,
+            empleado_id: currentUser.id,
+            fecha: dbFecha,
+            kilometraje_actual: Number(kilometrajeActual),
+            litros: Number(litrosGasolina),
+            costo_total: Number(totalGasto),
+            ticket_foto_url: publicUrl || null,
+            observaciones: `Registro automático desde formulario de gastos. Proveedor: ${proveedor || 'N/A'}`,
+          };
         }
 
-        // Si es combustible, guardar bitácora de gasolina vinculada y sincronizar kilometraje en ambas empresas
-        const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
-        if (esGasolina && insertedGastos && insertedGastos.length > 0) {
-          try {
-            await VehiculoService.crearRegistroGasolina({
-              gasto_id: insertedGastos[0].id,
-              vehiculo_id: selectedVehiculoId,
-              empleado_id: currentUser.id,
-              fecha: dbFecha,
-              kilometraje_actual: Number(kilometrajeActual),
-              litros: Number(litrosGasolina),
-              costo_total: Number(totalGasto),
-              ticket_foto_url: publicUrl || undefined,
-              observaciones: `Registro automático desde formulario de gastos. Proveedor: ${proveedor || 'N/A'}`,
-            });
-          } catch (gasError) {
-            console.error('Error al registrar combustible:', gasError);
-          }
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/reportes/gastos`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ 
+            payloadsToInsert, 
+            gasolinaPayload,
+            createNotifications: true,
+            employeeName: currentUser.nombre,
+            totalGasto: totalGasto,
+            categoriaNombre: selectedCategoria
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Error al guardar el gasto');
         }
 
         showAlert('Éxito', 'Gasto registrado correctamente en el servidor.');
