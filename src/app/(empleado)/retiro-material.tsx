@@ -16,6 +16,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CustomButton from '@/components/CustomButton';
@@ -61,14 +62,11 @@ export default function RetiroMaterialScreen() {
       }
       setCurrentUser(user);
 
-      const { data, error } = await supabase
-        .from('productos')
-        .select('id, sku_interno, nombre_oficial, stock_actual')
-        .eq('activo', true)
-        .gt('stock_actual', 0)
-        .order('nombre_oficial');
-
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/retiro-material/productos`, { headers });
+      if (!res.ok) throw new Error('Error de red al cargar productos');
+      
+      const { productos: data } = await res.json();
       setProductos(data || []);
     } catch (err) {
       console.error('Error loading products:', err);
@@ -128,60 +126,20 @@ export default function RetiroMaterialScreen() {
 
     setIsSubmitting(true);
     try {
-      // Registrar en movimientos_inventario y descontar stock
-      for (const item of cart) {
-        const prod = productos.find(p => p.id === item.producto.id);
-        if (!prod) continue;
-        
-        const newStock = prod.stock_actual - item.cantidad;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/retiro-material/confirmar`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          cart,
+          motivoRetiro,
+          currentUser
+        })
+      });
 
-        // 1. Descontar del inventario
-        const { error: stockErr } = await supabase
-          .from('productos')
-          .update({ stock_actual: newStock })
-          .eq('id', item.producto.id);
-
-        if (stockErr) throw stockErr;
-
-        // 2. Registrar movimiento de salida
-        const { error: moveErr } = await supabase
-          .from('movimientos_inventario')
-          .insert([
-            {
-              producto_id: item.producto.id,
-              tipo: 'SALIDA',
-              cantidad: item.cantidad,
-              folio_factura: `RETIRO: ${motivoRetiro.trim()}`,
-              creado_por: currentUser.id,
-            },
-          ]);
-
-        if (moveErr) {
-          console.warn('No se pudo registrar histórico:', moveErr.message);
-        }
-
-        // 3. Agregar al inventario del empleado
-        const { data: invEmp, error: invErr1 } = await supabase
-          .from('inventario_empleados')
-          .select('id, cantidad_disponible')
-          .eq('empleado_id', currentUser.id)
-          .eq('producto_id', item.producto.id)
-          .maybeSingle();
-
-        if (invEmp) {
-          await supabase
-            .from('inventario_empleados')
-            .update({ cantidad_disponible: invEmp.cantidad_disponible + item.cantidad, updated_at: new Date().toISOString() })
-            .eq('id', invEmp.id);
-        } else {
-          await supabase
-            .from('inventario_empleados')
-            .insert([{
-              empleado_id: currentUser.id,
-              producto_id: item.producto.id,
-              cantidad_disponible: item.cantidad
-            }]);
-        }
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Error al procesar el retiro en el servidor');
       }
 
       Alert.alert('Éxito', 'Material retirado correctamente.');
