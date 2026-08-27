@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase } from '@/services/supabase';
+import { TareasService } from '@/services/tareasService';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'expo-router';
 
@@ -42,15 +42,7 @@ export default function PendingTasksPopover({ visible, onClose }: PendingTasksPo
     const fetchPendingTasks = async () => {
       setLoading(true);
       try {
-        const { data, error } = await supabase
-          .from('tareas')
-          .select('id, titulo, fecha_compromiso, status')
-          .or(`responsable_id.eq.${user?.id},creado_por.eq.${user?.id}`)
-          .neq('status', 'Completada')
-          .order('fecha_compromiso', { ascending: true })
-          .limit(5);
-          
-        if (error) throw error;
+        const data = await TareasService.getTareas();
 
         const getSemaforoColor = (fechaCompromiso: string, status: string) => {
           if (status === 'Completada') return '#3498db';
@@ -69,7 +61,11 @@ export default function PendingTasksPopover({ visible, onClose }: PendingTasksPo
           return '#e74c3c';
         };
 
-        const formattedTasks = (data || []).map((t: any) => ({
+        const pending = (data || [])
+          .filter((t: any) => t.status !== 'Completada' && t.status !== 'Cancelada')
+          .slice(0, 5);
+
+        const formattedTasks = pending.map((t: any) => ({
           id: t.id,
           titulo: t.titulo,
           fecha_compromiso: t.fecha_compromiso,
