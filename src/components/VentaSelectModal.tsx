@@ -109,7 +109,7 @@ export default function VentaSelectModal({
         <Ionicons name="chevron-down" size={20} color={themeColors.textSecondary} />
       </TouchableOpacity>
 
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={modalVisible}
         animationType="slide"
         transparent={true}

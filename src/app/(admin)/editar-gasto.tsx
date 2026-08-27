@@ -2138,7 +2138,7 @@ export default function EditarGastoForm() {
       />
 
       {/* Modal Crear Proveedor (Admin Directo) */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={modalNuevoProveedorVisible}

@@ -254,7 +254,7 @@ export default function ImageViewerModal({
   };
 
   return (
-    <Modal
+    <Modal statusBarTranslucent={true}
       visible={visible}
       transparent={true}
       animationType="fade"

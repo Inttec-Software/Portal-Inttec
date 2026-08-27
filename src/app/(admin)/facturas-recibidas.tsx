@@ -259,7 +259,6 @@ export default function FacturasRecibidasScreen() {
       if (error) {
         console.error(`❌ [SAT SYNC] Error retornado por Supabase Functions:`, error);
         
-        // Intentar obtener más detalles del error si viene en el contexto
         let errorDetail = error.message || 'Error desconocido';
         try {
           if ((error as any).context) {
@@ -271,9 +270,14 @@ export default function FacturasRecibidasScreen() {
           // Ignorar error al leer contexto
         }
 
+        let userFriendlyMsg = `Hubo un problema al conectar con el servicio de sincronización.\n\nDetalle: ${errorDetail}`;
+        if (errorDetail.includes('IDLE_TIMEOUT') || errorDetail.includes('timeout')) {
+          userFriendlyMsg = 'El servidor del SAT tardó más de 2.5 minutos en responder debido a saturación en sus servicios web.\n\nTe sugerimos reintentar en unos momentos o subir tus archivos al instante usando el botón "+ Importar XML".';
+        }
+
         showAlert(
-          'Error al Sincronizar',
-          `Hubo un problema al conectar con el servicio de sincronización.\n\nDetalle: ${errorDetail}`
+          'Tiempo de Espera del SAT Agotado',
+          userFriendlyMsg
         );
         return;
       }
@@ -612,7 +616,7 @@ export default function FacturasRecibidasScreen() {
       </ScrollView>
 
       {/* Modal de Detalle de Factura */}
-      <Modal visible={showDetailModal} animationType="slide" transparent={true} onRequestClose={() => setShowDetailModal(false)}>
+      <Modal statusBarTranslucent={true} visible={showDetailModal} animationType="slide" transparent={true} onRequestClose={() => setShowDetailModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContainer, { backgroundColor: themeColors.backgroundElement }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -727,7 +731,7 @@ export default function FacturasRecibidasScreen() {
       </Modal>
 
       {/* Modal de Importación Manual de XML */}
-      <Modal visible={showImportModal} animationType="fade" transparent={true} onRequestClose={() => setShowImportModal(false)}>
+      <Modal statusBarTranslucent={true} visible={showImportModal} animationType="fade" transparent={true} onRequestClose={() => setShowImportModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContainer, { backgroundColor: themeColors.backgroundElement }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
