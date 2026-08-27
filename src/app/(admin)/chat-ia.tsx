@@ -5,7 +5,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase, inttecClient, daravisaClient } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { GeminiService } from '@/services/gemini';
 import { logger } from '@/utils/logger';
 
@@ -43,149 +43,21 @@ export default function AdminChatIA() {
       try {
         setIsLoadingContext(true);
 
-        const safeFetch = async (client: any, table: string) => {
-          try {
-            let query = table === 'gastos'
-              ? client.from('gastos').select(`
-                  *,
-                  subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-                  proveedor_rel:proveedores(id, nombre),
-                  cliente_rel:clientes(id, nombre),
-                  sucursal_rel:sucursales_cliente(id, nombre)
-                `)
-              : client.from(table).select('*');
-
-            if (['gastos', 'ventas', 'asistencias', 'registro_gasolina'].includes(table)) {
-              query = query.order('created_at', { ascending: false }).limit(1000);
-            } else {
-              query = query.limit(500);
-            }
-            const { data, error } = await query;
-            if (error) {
-              const fallback = await client.from(table).select('*').limit(500);
-              if (fallback.error) {
-                logger.warn(`[ChatIA] Error en tabla ${table}:`, fallback.error.message);
-                return [];
-              }
-              return fallback.data || [];
-            }
-            return data || [];
-          } catch (e: any) {
-            logger.warn(`[ChatIA] Excepción en tabla ${table}:`, e?.message);
-            return [];
-          }
-        };
-
-        const fetchCompanyData = async (client: any, companyName: string) => {
-          try {
-            const [
-              gastosData,
-              ventasData,
-              ventasPartidasData,
-              usuariosData,
-              asistenciasData,
-              vehiculosData,
-              gasolinaData,
-              auditoriasData,
-              clientesData,
-              sucursalesData,
-              productosData,
-              categoriasProductosData,
-              proveedoresData,
-              movimientosData,
-              cotizacionesData
-            ] = await Promise.all([
-              safeFetch(client, 'gastos'),
-              safeFetch(client, 'ventas'),
-              safeFetch(client, 'ventas_partidas'),
-              safeFetch(client, 'usuarios'),
-              safeFetch(client, 'asistencias'),
-              safeFetch(client, 'vehiculos'),
-              safeFetch(client, 'registro_gasolina'),
-              safeFetch(client, 'auditorias_tarjeta'),
-              safeFetch(client, 'clientes'),
-              safeFetch(client, 'sucursales_cliente'),
-              safeFetch(client, 'productos'),
-              safeFetch(client, 'categorias_productos'),
-              safeFetch(client, 'proveedores'),
-              safeFetch(client, 'movimientos_inventario'),
-              safeFetch(client, 'cotizaciones')
-            ]);
-
-            const userMap: Record<string, string> = {};
-            usuariosData.forEach((u: any) => { userMap[u.id] = u.nombre || u.email || 'Desconocido'; });
-
-            const vehiculoMap: Record<string, string> = {};
-            vehiculosData.forEach((v: any) => { vehiculoMap[v.id] = `${v.marca || ''} ${v.modelo || ''} (${v.placas || ''})`.trim(); });
-
-            const gastos = gastosData.map((g: any) => ({
-              ...g,
-              empresa: companyName,
-              empleado_nombre: userMap[g.empleado_id || g.usuario_id] || 'Desconocido'
-            }));
-
-            const asistencias = asistenciasData.map((a: any) => ({
-              ...a,
-              empresa: companyName,
-              empleado_nombre: userMap[a.usuario_id || a.empleado_id] || 'Desconocido'
-            }));
-
-            const gasolina = gasolinaData.map((reg: any) => ({
-              ...reg,
-              empresa: companyName,
-              empleado_nombre: userMap[reg.empleado_id || reg.usuario_id] || 'Desconocido',
-              vehiculo_info: vehiculoMap[reg.vehiculo_id] || 'Desconocido'
-            }));
-
-            return {
-              empresa: companyName,
-              total_registros_gastos: gastos.length,
-              total_registros_ventas: ventasData.length,
-              usuarios: usuariosData.map((u: any) => ({ id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, empresa: companyName })),
-              gastos,
-              ventas: ventasData.map((v: any) => ({ ...v, empresa: companyName })),
-              ventas_partidas: ventasPartidasData,
-              asistencias,
-              vehiculos: vehiculosData.map((v: any) => ({ ...v, empresa: companyName })),
-              registro_gasolina: gasolina,
-              auditorias_tarjeta: auditoriasData.map((aud: any) => ({ ...aud, empresa: companyName })),
-              clientes: clientesData,
-              sucursales_cliente: sucursalesData,
-              productos: productosData,
-              categorias_productos: categoriasProductosData,
-              proveedores: proveedoresData,
-              movimientos_inventario: movimientosData,
-              cotizaciones: cotizacionesData
-            };
-          } catch (e) {
-            logger.error(`Error fetching data for ${companyName}:`, e);
-            return null;
-          }
-        };
-
-        // 1. Cargar la empresa ACTIVA usando el cliente autenticado principal (supabase)
-        const activeData = await fetchCompanyData(supabase, 'Empresa Activa');
-
-        // 2. Intentar cargar Inttec y Daravisa si difieren
-        const [inttecData, daravisaData] = await Promise.all([
-          fetchCompanyData(inttecClient, 'Inttec'),
-          fetchCompanyData(daravisaClient, 'Daravisa')
-        ]);
-
-        const context = {
-          fecha_actual_sistema: new Date().toISOString(),
-          datos_empresa_actual_autenticada: activeData,
-          datos_empresa_inttec: inttecData,
-          datos_empresa_daravisa: daravisaData
-        };
-
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/chat-ia/context`, { headers });
+        if (!res.ok) {
+          throw new Error('Error en API chat-ia/context');
+        }
+        
+        const data = await res.json();
+        
         logger.info('[ChatIA] Contexto cargado con éxito:', {
-          gastos_activa: activeData?.gastos?.length || 0,
-          ventas_activa: activeData?.ventas?.length || 0,
-          usuarios_activa: activeData?.usuarios?.length || 0,
+          gastos_activa: data.context?.datos_empresa_actual_autenticada?.gastos?.length || 0,
+          ventas_activa: data.context?.datos_empresa_actual_autenticada?.ventas?.length || 0,
+          usuarios_activa: data.context?.datos_empresa_actual_autenticada?.usuarios?.length || 0,
         });
 
-        setDbContext(context);
+        setDbContext(data.context);
       } catch (err) {
         logger.error('Error fetching full chat context:', err);
         Alert.alert('Advertencia', 'No se pudieron cargar todos los módulos de la base de datos.');
