@@ -287,8 +287,8 @@ export const PdfDocumentoService = {
               <div class="audit-value">${firmado.empleado_email || 'N/A'}</div>
             </div>
             <div class="audit-item">
-              <div class="audit-label">Fecha y Hora UTC</div>
-              <div class="audit-value">${fechaActual.toISOString()}</div>
+              <div class="audit-label">Fecha y Hora (Hora de México)</div>
+              <div class="audit-value">${fechaFormateada}</div>
             </div>
             <div class="audit-item">
               <div class="audit-label">Dirección IP</div>
@@ -456,7 +456,17 @@ export const PdfDocumentoService = {
 
         const folioText = 'Folio Documento: ' + documento.id.substring(0, 8).toUpperCase();
         const firmanteText = 'Firmante: ' + (firmado.empleado_nombre || 'Empleado') + ' (' + (firmado.empleado_email || 'N/A') + ')';
-        const fechaText = 'Fecha y Hora UTC: ' + fechaActual.toISOString();
+        const fechaLocalMexico = (firmado.firmado_at ? new Date(firmado.firmado_at) : fechaActual).toLocaleString('es-MX', {
+          timeZone: 'America/Mexico_City',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true,
+        });
+        const fechaText = 'Fecha y Hora (Hora de Mexico): ' + fechaLocalMexico;
         const ipText = 'IP Registro: ' + (ipRegistro || 'No registrada');
         const gpsText = 'Ubicacion GPS: ' + (ubicacionGps || 'No proporcionada');
         const devText = 'Dispositivo: ' + (dispositivoInfo || Platform.OS);

@@ -769,7 +769,7 @@ export async function recalculateVentaTotals(ventaId: string): Promise<void> {
       .eq('id', ventaId);
     
     if (updateErr) throw updateErr;
-    logger.error(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Partidas: ${costoPartidas}, Costo Gastos: ${costoGastos}, Costo Total: ${costoTotal}`);
+    logger.info(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Partidas: ${costoPartidas}, Costo Gastos: ${costoGastos}, Costo Total: ${costoTotal}`);
   } catch (err) {
     logger.error('[Recalculate] Error recalculating venta totals:', err);
   }

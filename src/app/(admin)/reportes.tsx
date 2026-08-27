@@ -669,7 +669,6 @@ export default function ReportesScreen() {
 
       const updatePayload: any = {
         proveedor_id: prov ? prov.id : null,
-        proveedor: prov ? prov.nombre : null,
         justificacion: cleanJust || null,
       };
 
@@ -4471,6 +4470,33 @@ export default function ReportesScreen() {
                     variant="primary"
                   />
                 </View>
+
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: scheme === 'dark' ? '#0f2b48' : '#e0f2fe',
+                    paddingVertical: 10,
+                    paddingHorizontal: 14,
+                    borderRadius: BorderRadius.medium,
+                    borderWidth: 1,
+                    borderColor: scheme === 'dark' ? '#0284c7' : '#bae6fd',
+                    marginTop: Spacing.two,
+                  }}
+                  onPress={() => {
+                    setProfileModalVisible(false);
+                    router.push('/(admin)/documentos?tab=mis_documentos' as any);
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="pencil" size={16} color="#0284c7" />
+                    <Text style={{ color: '#0284c7', fontWeight: 'bold', fontSize: 13 }}>
+                      Mis Documentos por Firmar
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#0284c7" />
+                </TouchableOpacity>
               </View>
             </ScrollView>
           </View>
