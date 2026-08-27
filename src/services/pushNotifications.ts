@@ -95,12 +95,12 @@ export class PushNotificationService {
         body: { targetUserId, title, body, data }
       });
       if (error) {
-        console.error('Error al invocar send-push:', error);
+        console.warn('[PushNotification] No se pudo enviar notificación push:', error.message || error);
       } else {
-        console.log('Notificación push enviada:', result);
+        console.log('[PushNotification] Notificación push enviada:', result);
       }
-    } catch (e) {
-      console.error('Excepción al enviar push:', e);
+    } catch (e: any) {
+      console.warn('[PushNotification] Excepción controlada al enviar push:', e?.message || e);
     }
   }
 }
