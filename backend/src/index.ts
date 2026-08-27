@@ -19,17 +19,64 @@ import facturasRecibidasRoutes from './modules/facturas-recibidas/facturas-recib
 import retiroMaterialRoutes from './modules/retiro-material/retiro-material.routes';
 import devolucionesRoutes from './modules/devoluciones/devoluciones.routes';
 
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+
 // Cargar variables de entorno
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Configuración de CORS temporalmente abierta (Fase 1)
-app.use(cors());
+// 1. HTTP Security Headers (Helmet)
+app.use(helmet());
+
+// 2. Rate Limiting (Protección contra DDoS y Brute Force)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 1000, // Límite de 1000 peticiones por ventana por IP
+  message: { error: 'Demasiadas peticiones desde esta IP. Inténtelo más tarde.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', apiLimiter);
+
+// 3. Configuración estricta de CORS (Fase 4)
+const allowedOrigins = [
+  'http://localhost:8081',
+  'http://localhost:19006',
+  'http://localhost:3000',
+  'https://portal-inttec.netlify.app'
+];
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    // Permitir peticiones de apps móviles nativas o server-to-server (sin origin)
+    if (!origin) {
+      return callback(null, true);
+    }
+    // Permitir peticiones de la lista blanca o dominios *.netlify.app dinámicos (deploy previews)
+    if (allowedOrigins.includes(origin) || origin.endsWith('.netlify.app')) {
+      return callback(null, true);
+    }
+    return callback(new Error('Bloqueado por política CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'x-company',
+    'x-env',
+    'x-tenant-company',
+    'x-tenant-env'
+  ]
+};
+
+app.use(cors(corsOptions));
 
 // Parsear JSON
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Middleware para inyectar configuración multi-tenant en req
 app.use(tenantMiddleware);

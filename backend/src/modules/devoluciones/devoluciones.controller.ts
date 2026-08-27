@@ -21,9 +21,42 @@ export const getInventarioEmpleado = async (req: Request, res: Response) => {
       .gt('cantidad_disponible', 0)
       .order('updated_at', { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error('[getInventarioEmpleado] Supabase Error:', error);
+      // Fallback query if relation fails
+      const { data: fallbackData, error: fallbackError } = await client
+        .from('inventario_empleados')
+        .select('id, producto_id, cantidad_disponible')
+        .eq('empleado_id', userId)
+        .gt('cantidad_disponible', 0);
+
+      if (fallbackError) {
+        console.error('[getInventarioEmpleado] Fallback Error:', fallbackError);
+        return res.status(500).json({ error: error.message || fallbackError.message });
+      }
+
+      // Fetch products manually if relation syntax fails
+      const prodIds = (fallbackData || []).map((item: any) => item.producto_id);
+      let prodMap: Record<string, any> = {};
+      if (prodIds.length > 0) {
+        const { data: prods } = await client
+          .from('productos')
+          .select('id, nombre_oficial, sku_interno')
+          .in('id', prodIds);
+        (prods || []).forEach((p: any) => { prodMap[p.id] = p; });
+      }
+
+      const merged = (fallbackData || []).map((item: any) => ({
+        ...item,
+        producto: prodMap[item.producto_id] || { nombre_oficial: 'Desconocido', sku_interno: '' }
+      }));
+
+      return res.json({ inventario: merged });
+    }
+
     return res.json({ inventario: data || [] });
   } catch (error: any) {
+    console.error('[getInventarioEmpleado] Unexpected error:', error);
     return res.status(500).json({ error: error.message });
   }
 };

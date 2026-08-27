@@ -74,7 +74,9 @@ export default function DevolucionesEmpleadoScreen() {
       const headers = await getApiHeaders();
       const res = await fetch(`${getApiUrl()}/api/devoluciones/inventario?userId=${userId}`, { headers });
       if (!res.ok) {
-        throw new Error('Error al cargar inventario');
+        const errorText = await res.text();
+        console.error('[loadInventario Error]', res.status, errorText);
+        throw new Error(errorText || 'Error al cargar inventario');
       }
       const json = await res.json();
       const data = json.inventario;
