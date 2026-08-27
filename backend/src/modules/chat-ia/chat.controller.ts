@@ -149,3 +149,49 @@ export const getChatContext = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+// === GET /api/chat-ia/employee-context ===
+export const getEmployeeChatContext = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const client = getSupabaseClient(tenant.company, tenant.env);
+
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: 'Falta userId' });
+    }
+
+    const safeQuery = async (queryPromise: any) => {
+      try {
+        const { data, error } = await queryPromise;
+        if (error) return [];
+        return data || [];
+      } catch {
+        return [];
+      }
+    };
+
+    const [misGastos, misAsistencias, misGasolinas] = await Promise.all([
+      safeQuery(client.from('gastos').select(`
+        *,
+        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
+        proveedor_rel:proveedores(id, nombre),
+        cliente_rel:clientes(id, nombre),
+        sucursal_rel:sucursales_cliente(id, nombre)
+      `).eq('empleado_id', userId).order('created_at', { ascending: false }).limit(500)),
+      safeQuery(client.from('asistencias').select('*').eq('usuario_id', userId).order('fecha', { ascending: false }).limit(100)),
+      safeQuery(client.from('registro_gasolina').select('*').eq('empleado_id', userId).order('fecha', { ascending: false }).limit(100))
+    ]);
+
+    const context = {
+      mis_gastos_registrados: misGastos,
+      mis_asistencias: misAsistencias,
+      mis_cargas_gasolina: misGasolinas
+    };
+
+    return res.json({ context });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
