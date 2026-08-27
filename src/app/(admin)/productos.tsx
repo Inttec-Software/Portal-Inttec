@@ -271,7 +271,7 @@ export default function ProductosScreen() {
         )}
 
         {/* MODAL CREAR/EDITAR PRODUCTO */}
-        <Modal
+        <Modal statusBarTranslucent={true}
           visible={modalVisible}
           animationType="slide"
           transparent={true}

@@ -155,6 +155,45 @@ export default function PerfilScreen() {
             />
           </View>
         </View>
+
+        {/* Apartado de Firma de Documentos para Administradores */}
+        <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, marginTop: Spacing.three }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: Spacing.two }}>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: scheme === 'dark' ? '#0f2b48' : '#e0f2fe', justifyContent: 'center', alignItems: 'center' }}>
+              <Ionicons name="create-outline" size={24} color="#0284c7" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text }}>Documentos y Firmas</Text>
+              <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
+                Revisa y firma digitalmente las cartas responsivas, comunicados y acuerdos asignados.
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: scheme === 'dark' ? '#0f2b48' : '#e0f2fe',
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: BorderRadius.medium,
+              borderWidth: 1,
+              borderColor: scheme === 'dark' ? '#0284c7' : '#bae6fd',
+              marginTop: 4,
+            }}
+            onPress={() => router.push('/(admin)/documentos?tab=mis_documentos' as any)}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="pencil" size={18} color="#0284c7" />
+              <Text style={{ color: '#0284c7', fontWeight: 'bold', fontSize: 14 }}>
+                Ir a Mis Documentos por Firmar
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#0284c7" />
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

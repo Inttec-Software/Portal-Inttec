@@ -2353,7 +2353,7 @@ export default function GastoForm() {
           setActivePreviewUrl(null);
         }}
       />
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={showSplitModal}
         transparent={true}
         animationType="slide"

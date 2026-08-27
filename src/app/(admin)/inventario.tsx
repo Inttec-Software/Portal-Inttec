@@ -1601,7 +1601,7 @@ async function loadAllData() {
                           {item.producto ? item.producto.nombre_oficial : 'Producto Eliminado'}
                         </Text>
                         <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4 }}>
-                          Ref: {item.folio_factura || 'N/A'} | Fecha: {dateStr}
+                          Ref: {item.folio_factura || 'N/A'}{item.usuario?.nombre ? ` | Empleado: ${item.usuario.nombre}` : ''} | Fecha: {dateStr}
                         </Text>
                       </View>
                       <View style={{ backgroundColor: themeColors.danger + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: BorderRadius.small }}>
@@ -1726,7 +1726,7 @@ async function loadAllData() {
           )}
           
           {/* Modal de Verificación Simple */}
-          <Modal visible={verifyModalVisible} animationType="fade" transparent={true} onRequestClose={() => setVerifyModalVisible(false)}>
+          <Modal statusBarTranslucent={true} visible={verifyModalVisible} animationType="fade" transparent={true} onRequestClose={() => setVerifyModalVisible(false)}>
             <View style={styles.modalOverlay}>
               <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement }]}>
                 <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -1751,7 +1751,7 @@ async function loadAllData() {
           </Modal>
 
           {/* Modal de Inventario del Empleado */}
-          <Modal visible={employeeInventoryModalVisible} animationType="fade" transparent={true} onRequestClose={() => setEmployeeInventoryModalVisible(false)}>
+          <Modal statusBarTranslucent={true} visible={employeeInventoryModalVisible} animationType="fade" transparent={true} onRequestClose={() => setEmployeeInventoryModalVisible(false)}>
             <View style={styles.modalOverlay}>
               <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, maxHeight: '80%', width: '90%' }]}>
                 <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -1795,7 +1795,7 @@ async function loadAllData() {
       )}
 
       {/* ========== MODAL CRUD MANUAL ========== */}
-      <Modal animationType="fade"
+      <Modal statusBarTranslucent={true} animationType="fade"
         transparent={true}
         visible={crudModalVisible}
         onRequestClose={() => setCrudModalVisible(false)}
@@ -1897,7 +1897,7 @@ async function loadAllData() {
       </Modal>
 
       {/* ========== CENTRALIZED SELECTOR MODAL ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="fade"
         transparent={true}
         visible={selectorVisible}
@@ -1964,7 +1964,7 @@ async function loadAllData() {
       </Modal>
 
       {/* ========== MODAL NUEVA CATEGORÍA ========== */}
-      <Modal animationType="fade"
+      <Modal statusBarTranslucent={true} animationType="fade"
         transparent={true}
         visible={newCatModalVisible}
         onRequestClose={() => setNewCatModalVisible(false)}
@@ -2004,7 +2004,7 @@ async function loadAllData() {
       </Modal>
 
       {/* ========== MODAL NUEVO PROVEEDOR ========== */}
-      <Modal animationType="fade"
+      <Modal statusBarTranslucent={true} animationType="fade"
         transparent={true}
         visible={newProvModalVisible}
         onRequestClose={() => setNewProvModalVisible(false)}

@@ -111,7 +111,7 @@ export default function PendingTasksPopover({ visible, onClose }: PendingTasksPo
   if (!visible) return null;
 
   return (
-    <Modal
+    <Modal statusBarTranslucent={true}
       transparent
       visible={visible}
       animationType="fade"

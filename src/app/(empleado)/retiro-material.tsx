@@ -218,7 +218,7 @@ export default function RetiroMaterialScreen() {
       )}
 
       {/* MODAL DE CARRITO */}
-      <Modal visible={cartModalVisible} animationType="slide" transparent={true} onRequestClose={() => setCartModalVisible(false)}>
+      <Modal statusBarTranslucent={true} visible={cartModalVisible} animationType="slide" transparent={true} onRequestClose={() => setCartModalVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>

@@ -799,7 +799,7 @@ export default function EmpleadoGastos() {
       </View>
 
       {/* ========== MODAL: Instrucciones del Checador ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={checadorInstructionVisible}
@@ -849,7 +849,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* ========== MODAL: Cámara con Marca de Agua ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="fade"
         transparent={false}
         visible={checadorCameraVisible}
@@ -954,7 +954,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* ========== MODAL: Resultado del Checador ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={checadorResultVisible}
@@ -1030,7 +1030,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* Modal de Detalle */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={modalVisible}
@@ -1234,7 +1234,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* Modal de Vehículos y Gasolina (Empleado) */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={employeeVehiculosModalVisible}
@@ -1386,7 +1386,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* Modal de Mi Perfil */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={profileModalVisible}

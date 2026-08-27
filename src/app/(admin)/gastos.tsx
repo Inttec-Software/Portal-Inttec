@@ -16,13 +16,14 @@ import {
   useWindowDimensions,
   Pressable,
   Keyboard,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
+import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import ExpenseCard from '@/components/ExpenseCard';
@@ -115,6 +116,15 @@ export default function AdminGastosScreen() {
     setPrevSelectedGastoId(selectedGasto?.id);
     setLocalMotivo(selectedGasto?.motivo_sin_factura || '');
   }
+
+  // Selector Rápido de Proveedor en Menú de Gasto
+  const [proveedoresCatalog, setProveedoresCatalog] = useState<ProveedorItem[]>([]);
+  const [quickEditProvModalVisible, setQuickEditProvModalVisible] = useState(false);
+  const [quickEditProvSearch, setQuickEditProvSearch] = useState('');
+  const [isSavingQuickProv, setIsSavingQuickProv] = useState(false);
+  const [showNewProvInQuickModal, setShowNewProvInQuickModal] = useState(false);
+  const [newQuickProvName, setNewQuickProvName] = useState('');
+  const [newQuickProvRfc, setNewQuickProvRfc] = useState('');
 
   // Registro y Edición de Usuario (Personal)
   const [addUserModalVisible, setAddUserModalVisible] = useState(false);
@@ -219,13 +229,17 @@ export default function AdminGastosScreen() {
 
   const filteredSalesForLinking = useMemo(() => {
     if (!linkSaleSearch.trim()) return salesForLinking;
-    const query = linkSaleSearch.toLowerCase();
-    return salesForLinking.filter(
-      (s) =>
-        s.cliente.toLowerCase().includes(query) ||
-        (s.factura_referencia && s.factura_referencia.toLowerCase().includes(query)) ||
-        (s.tipo_proyecto && s.tipo_proyecto.toLowerCase().includes(query))
-    );
+    const normalize = (str?: any) => {
+      if (!str) return '';
+      return String(str).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    };
+    const tokens = normalize(linkSaleSearch).split(/\s+/).filter(Boolean);
+    return salesForLinking.filter((s) => {
+      const combined = normalize(
+        `${s.cliente || ''} ${s.sucursal || ''} ${s.factura_referencia || ''} ${s.tipo_proyecto || ''} ${s.descripcion || ''} ${s.folio || ''} ${s.fecha || ''} ${s.proveedor || ''}`
+      );
+      return tokens.every((t) => combined.includes(t));
+    });
   }, [salesForLinking, linkSaleSearch]);
 
   const filteredClientsForQuickSale = useMemo(() => {
@@ -303,7 +317,8 @@ export default function AdminGastosScreen() {
       const data = await res.json();
 
       setGastos(data.gastos || []);
-      setPersonal(data.usuarios || []);
+      setProveedoresCatalog(data.proveedores || []);
+      setPersonal(sortUsuariosByRoleAndName(data.usuarios || []));
       setVehiculos(data.vehiculos || []);
       setRegistrosGasolina(data.gasLogs || []);
     } catch (err: any) {
@@ -586,6 +601,95 @@ export default function AdminGastosScreen() {
       showAlert('Error', err.message || 'No se pudo subir la factura.');
     } finally {
       setIsUploadingInvoice(false);
+    }
+  };
+
+  // Manejo de Edición Rápida de Proveedor desde el Menú de Gasto
+  const handleOpenQuickEditProveedor = (gasto: Gasto | null) => {
+    if (!gasto) return;
+    setSelectedGasto(gasto);
+    setQuickEditProvSearch('');
+    setShowNewProvInQuickModal(false);
+    setNewQuickProvName('');
+    setNewQuickProvRfc('');
+    setQuickEditProvModalVisible(true);
+  };
+
+  const handleSelectQuickProveedor = async (prov: ProveedorItem | null) => {
+    if (!selectedGasto) return;
+    setIsSavingQuickProv(true);
+    try {
+      let cleanJust = selectedGasto.justificacion || '';
+      if (prov && cleanJust) {
+        cleanJust = cleanJust.replace(/\[Proveedor a agregar:\s*[^\]]+\]\s*\n?/, '').trim();
+      }
+
+      const updatePayload: any = {
+        proveedor_id: prov ? prov.id : null,
+        justificacion: cleanJust || null,
+      };
+
+      const { error: dbError } = await supabase
+        .from('gastos')
+        .update(updatePayload)
+        .eq('id', selectedGasto.id);
+
+      if (dbError) throw dbError;
+
+      const updatedGasto: Gasto = {
+        ...selectedGasto,
+        proveedor_id: prov ? prov.id : null,
+        proveedor: prov ? prov.nombre : null,
+        proveedor_rel: prov ? { id: prov.id, nombre: prov.nombre } : null,
+        justificacion: cleanJust || null,
+      };
+
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
+
+      if (adminUser) {
+        // Audit log handled by backend
+      }
+
+      setQuickEditProvModalVisible(false);
+      showAlert('Éxito', prov ? `Proveedor asignado: "${prov.nombre}"` : 'Proveedor removido.');
+    } catch (err: any) {
+      logger.error('Error al actualizar proveedor:', err);
+      showAlert('Error', err.message || 'No se pudo actualizar el proveedor.');
+    } finally {
+      setIsSavingQuickProv(false);
+    }
+  };
+
+  const handleQuickCreateProveedorAndAssign = async (nombreToCreate?: string, rfcToCreate?: string) => {
+    if (!selectedGasto) return;
+    const name = (nombreToCreate || newQuickProvName || quickEditProvSearch).trim();
+    if (!name) {
+      showAlert('Validación', 'Por favor ingresa el nombre del proveedor.');
+      return;
+    }
+
+    setIsSavingQuickProv(true);
+    try {
+      const existing = proveedoresCatalog.find(
+        p => p.nombre && p.nombre.trim().toLowerCase() === name.toLowerCase()
+      );
+      if (existing) {
+        await handleSelectQuickProveedor(existing);
+        return;
+      }
+
+      const created = await CatalogService.crearProveedor({
+        nombre: name,
+        rfc: (rfcToCreate || newQuickProvRfc).trim() || null,
+      });
+
+      setProveedoresCatalog(prev => [...prev, created].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      await handleSelectQuickProveedor(created);
+    } catch (err: any) {
+      logger.error('Error al crear proveedor rápido:', err);
+      showAlert('Error', err.message || 'No se pudo crear el proveedor.');
+      setIsSavingQuickProv(false);
     }
   };
 
@@ -1332,7 +1436,6 @@ export default function AdminGastosScreen() {
       const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportConsumosToCSV(data || [], 'reporte_consumos_materiales.csv');
     } catch (err: any) {
       showAlert('Error CSV Consumos', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -1999,7 +2102,7 @@ export default function AdminGastosScreen() {
 
 
       {/* MODAL 1.5 EXTRA: GESTIÓN DE VEHÍCULOS Y BITÁCORA */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={vehiculosManagerModalVisible}
@@ -2329,7 +2432,7 @@ export default function AdminGastosScreen() {
       </Modal>
 
       {/* MODAL 1 EXTRA: PERSONAL MANAGER */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={personalModalVisible}
@@ -2363,8 +2466,26 @@ export default function AdminGastosScreen() {
                     {!!item.telefono && <Text style={[styles.userEmail, { color: themeColors.textSecondary }]}>{item.telefono}</Text>}
                   </View>
                   <View style={styles.userMetaActions}>
-                    <View style={[styles.roleBadge, { backgroundColor: item.rol === 'ADMIN' ? themeColors.danger + '15' : themeColors.accent + '15' }]}>
-                      <Text style={[styles.roleText, { color: item.rol === 'ADMIN' ? themeColors.danger : themeColors.accent }]}>
+                    <View style={[
+                      styles.roleBadge, 
+                      { 
+                        backgroundColor: item.rol === 'ADMIN' 
+                          ? themeColors.danger + '18' 
+                          : item.rol === 'DEV' 
+                            ? '#8b5cf6' + '20' 
+                            : themeColors.accent + '18' 
+                      }
+                    ]}>
+                      <Text style={[
+                        styles.roleText, 
+                        { 
+                          color: item.rol === 'ADMIN' 
+                            ? themeColors.danger 
+                            : item.rol === 'DEV' 
+                              ? '#8b5cf6' 
+                              : themeColors.accent 
+                        }
+                      ]}>
                         {item.rol}
                       </Text>
                     </View>
@@ -2401,7 +2522,7 @@ export default function AdminGastosScreen() {
       </Modal>
 
       {/* MODAL 2 EXTRA: REPORTES */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={reportsModalVisible}
@@ -2507,7 +2628,7 @@ export default function AdminGastosScreen() {
       </Modal>
 
       {/* Modal de Detalle/Revisión de Gasto */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={reviewModalVisible}
@@ -2579,11 +2700,32 @@ export default function AdminGastosScreen() {
                     </View>
                   )}
 
-                  <View style={styles.detailItem}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Proveedor</Text>
-                    <Text style={[styles.detailValue, { color: GastoHelper.getProveedor(selectedGasto) ? themeColors.text : themeColors.danger, fontWeight: GastoHelper.getProveedor(selectedGasto) ? 'normal' : '700' }]}>
-                      {GastoHelper.getProveedor(selectedGasto) || '⚠️ En blanco (Requiere indicar proveedor para aprobar)'}
-                    </Text>
+                  <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                    <View style={{ flex: 1, marginRight: Spacing.two }}>
+                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Proveedor</Text>
+                      <Text style={[styles.detailValue, { color: GastoHelper.getProveedor(selectedGasto) ? themeColors.text : themeColors.danger, fontWeight: '700', fontSize: 15 }]}>
+                        {GastoHelper.getProveedor(selectedGasto) || '⚠️ En blanco (Sin asignar)'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        paddingVertical: 7,
+                        paddingHorizontal: 12,
+                        borderRadius: BorderRadius.medium,
+                        backgroundColor: themeColors.accent + '20',
+                        borderWidth: 1,
+                        borderColor: themeColors.accent,
+                      }}
+                    >
+                      <Ionicons name="pencil" size={15} color={themeColors.accent} />
+                      <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                        {GastoHelper.getProveedor(selectedGasto) ? 'Cambiar' : 'Asignar'}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
 
                   {(!GastoHelper.getProveedor(selectedGasto) || !GastoHelper.getProveedor(selectedGasto).trim()) && (
@@ -2592,7 +2734,7 @@ export default function AdminGastosScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.alertTitle, { color: themeColors.warning, fontSize: 14, fontWeight: '700', marginBottom: 2 }]}>Proveedor Pendiente de Asignar</Text>
                         <Text style={[styles.alertText, { color: themeColors.text, fontSize: 13 }]}>
-                          El empleado dejó el proveedor en blanco. Para aprobar este gasto, primero haz clic en &quot;Editar Gasto&quot; y asigna el proveedor.
+                          El empleado dejó el proveedor en blanco. Puedes asignarlo rápidamente aquí para poder aprobar el gasto.
                         </Text>
                         {(() => {
                           const parsed = parseJustificacion(selectedGasto.justificacion);
@@ -2602,13 +2744,59 @@ export default function AdminGastosScreen() {
                                 <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>
                                   📝 Proveedor a agregar indicado por el empleado:
                                 </Text>
-                                <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.primary, marginTop: 2 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.primary, marginTop: 2, marginBottom: 6 }}>
                                   {parsed.proveedorSugerido}
                                 </Text>
+                                <TouchableOpacity
+                                  onPress={() => handleQuickCreateProveedorAndAssign(parsed.proveedorSugerido!)}
+                                  disabled={isSavingQuickProv}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 6,
+                                    backgroundColor: themeColors.primary,
+                                    paddingVertical: 8,
+                                    paddingHorizontal: 12,
+                                    borderRadius: BorderRadius.small,
+                                    marginTop: 4,
+                                  }}
+                                >
+                                  {isSavingQuickProv ? (
+                                    <ActivityIndicator size="small" color="#fff" />
+                                  ) : (
+                                    <>
+                                      <Ionicons name="flash-outline" size={16} color="#fff" />
+                                      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>
+                                        ⚡ Asignar &quot;{parsed.proveedorSugerido}&quot;
+                                      </Text>
+                                    </>
+                                  )}
+                                </TouchableOpacity>
                               </View>
                             );
                           }
-                          return null;
+                          return (
+                            <TouchableOpacity
+                              onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 6,
+                                backgroundColor: themeColors.warning,
+                                paddingVertical: 8,
+                                paddingHorizontal: 12,
+                                borderRadius: BorderRadius.small,
+                                marginTop: 8,
+                              }}
+                            >
+                              <Ionicons name="business-outline" size={16} color="#fff" />
+                              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>
+                                Asignar Proveedor Ahora
+                              </Text>
+                            </TouchableOpacity>
+                          );
                         })()}
                       </View>
                     </View>
@@ -3009,8 +3197,331 @@ export default function AdminGastosScreen() {
         </View>
       </Modal>
 
-      {/* MODAL DE FILTRO DE FECHAS Y CALENDARIO */}
+      {/* MODAL DE EDICIÓN / ASIGNACIÓN RÁPIDA DE PROVEEDOR */}
       <Modal
+        animationType="fade"
+        transparent={true}
+        statusBarTranslucent={true}
+        visible={quickEditProvModalVisible}
+        onRequestClose={() => {
+          if (!isSavingQuickProv) setQuickEditProvModalVisible(false);
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.65)', justifyContent: 'center', alignItems: 'center', padding: Spacing.three }}>
+            <View style={{
+              backgroundColor: themeColors.background,
+              width: '100%',
+              maxWidth: 500,
+              height: '82%',
+              maxHeight: 650,
+              borderRadius: BorderRadius.large,
+              padding: Spacing.three,
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.3,
+              shadowRadius: 20,
+              elevation: 10,
+              flexDirection: 'column',
+            }}>
+              {/* Header */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: Spacing.two, borderBottomWidth: 1, borderBottomColor: themeColors.border }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: themeColors.accent + '20', justifyContent: 'center', alignItems: 'center' }}>
+                    <Ionicons name="business" size={18} color={themeColors.accent} />
+                  </View>
+                  <View>
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: themeColors.text }}>Asignar Proveedor</Text>
+                    <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>Gasto: {selectedGasto ? formatCurrency(selectedGasto.monto) : ''}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setQuickEditProvModalVisible(false)}
+                  disabled={isSavingQuickProv}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="close-circle" size={24} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Sugerencia del empleado (si existe) */}
+              {(() => {
+                const parsed = parseJustificacion(selectedGasto?.justificacion);
+                if (parsed.proveedorSugerido) {
+                  return (
+                    <View style={{
+                      backgroundColor: themeColors.accent + '15',
+                      borderColor: themeColors.accent + '40',
+                      borderWidth: 1,
+                      borderRadius: BorderRadius.medium,
+                      padding: Spacing.two,
+                      marginTop: Spacing.two,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                    }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.accent, textTransform: 'uppercase' }}>
+                          💡 Sugerido por empleado:
+                        </Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.text, marginTop: 1 }}>
+                          {parsed.proveedorSugerido}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => handleQuickCreateProveedorAndAssign(parsed.proveedorSugerido!)}
+                        disabled={isSavingQuickProv}
+                        style={{
+                          backgroundColor: themeColors.accent,
+                          paddingVertical: 6,
+                          paddingHorizontal: 10,
+                          borderRadius: BorderRadius.small,
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>
+                          ⚡ Usar este
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                }
+                return null;
+              })()}
+
+              {/* Buscador */}
+              <View style={{ marginTop: Spacing.two, marginBottom: Spacing.two }}>
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: themeColors.backgroundElement,
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  borderRadius: BorderRadius.medium,
+                  paddingHorizontal: Spacing.two,
+                  height: 44,
+                  gap: 8,
+                }}>
+                  <Ionicons name="search-outline" size={18} color={themeColors.textSecondary} />
+                  <TextInput
+                    style={{ flex: 1, color: themeColors.text, fontSize: 14 }}
+                    placeholder="Buscar o escribir nombre de proveedor..."
+                    placeholderTextColor={themeColors.textSecondary + '90'}
+                    value={quickEditProvSearch}
+                    onChangeText={setQuickEditProvSearch}
+                    autoCapitalize="words"
+                  />
+                  {quickEditProvSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setQuickEditProvSearch('')} style={{ padding: 4 }}>
+                      <Ionicons name="close" size={18} color={themeColors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              {/* Botón de Crear Nuevo Proveedor si no existe */}
+              {quickEditProvSearch.trim().length > 0 &&
+                !proveedoresCatalog.some(p => p.nombre && p.nombre.toLowerCase() === quickEditProvSearch.trim().toLowerCase()) && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setNewQuickProvName(quickEditProvSearch.trim());
+                      setShowNewProvInQuickModal(true);
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                      backgroundColor: themeColors.success + '15',
+                      borderWidth: 1,
+                      borderColor: themeColors.success + '40',
+                      borderRadius: BorderRadius.medium,
+                      padding: Spacing.two,
+                      marginBottom: Spacing.two,
+                    }}
+                  >
+                    <Ionicons name="add-circle" size={22} color={themeColors.success} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: themeColors.success, fontWeight: '800', fontSize: 13 }}>
+                        + Registrar y asignar &quot;{quickEditProvSearch.trim()}&quot;
+                      </Text>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                        Se agregará al catálogo maestro y se asignará al gasto
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+
+              {/* Mini formulario para agregar nuevo proveedor con RFC */}
+              {showNewProvInQuickModal && (
+                <View style={{
+                  backgroundColor: themeColors.backgroundElement,
+                  borderRadius: BorderRadius.medium,
+                  padding: Spacing.two,
+                  borderWidth: 1,
+                  borderColor: themeColors.primary,
+                  marginBottom: Spacing.two,
+                  gap: Spacing.one,
+                }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>
+                    Nuevo Proveedor
+                  </Text>
+                  <CustomInput
+                    placeholder="Nombre comercial / Razón Social *"
+                    value={newQuickProvName}
+                    onChangeText={setNewQuickProvName}
+                    style={{ height: 40 }}
+                  />
+                  <CustomInput
+                    placeholder="RFC (Opcional)"
+                    value={newQuickProvRfc}
+                    onChangeText={t => setNewQuickProvRfc(t.toUpperCase())}
+                    autoCapitalize="characters"
+                    style={{ height: 40 }}
+                  />
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                    <CustomButton
+                      title="Cancelar"
+                      variant="secondary"
+                      onPress={() => setShowNewProvInQuickModal(false)}
+                      style={{ flex: 1, height: 36 }}
+                    />
+                    <CustomButton
+                      title="Guardar y Asignar"
+                      variant="primary"
+                      loading={isSavingQuickProv}
+                      onPress={() => handleQuickCreateProveedorAndAssign(newQuickProvName, newQuickProvRfc)}
+                      style={{ flex: 1.5, height: 36 }}
+                    />
+                  </View>
+                </View>
+              )}
+
+              {/* Lista de Proveedores */}
+              <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.textSecondary, textTransform: 'uppercase', marginBottom: 6, letterSpacing: 0.5 }}>
+                Proveedores Registrados ({proveedoresCatalog.filter(p => !quickEditProvSearch || (p.nombre && p.nombre.toLowerCase().includes(quickEditProvSearch.toLowerCase()))).length})
+              </Text>
+
+              <View style={{ flex: 1, minHeight: 100 }}>
+                <FlatList
+                  data={proveedoresCatalog.filter(p => {
+                    if (!quickEditProvSearch.trim()) return true;
+                    const query = quickEditProvSearch.toLowerCase();
+                    const nameMatch = p.nombre && p.nombre.toLowerCase().includes(query);
+                    const rfcMatch = p.rfc && p.rfc.toLowerCase().includes(query);
+                    return nameMatch || rfcMatch;
+                  })}
+                  keyExtractor={(item) => item.id}
+                  keyboardShouldPersistTaps="handled"
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ gap: 6, paddingBottom: Spacing.two }}
+                  renderItem={({ item }) => {
+                    const isCurrent = (selectedGasto?.proveedor_id === item.id) ||
+                      (GastoHelper.getProveedor(selectedGasto)?.toLowerCase() === item.nombre?.toLowerCase());
+
+                    return (
+                      <TouchableOpacity
+                        onPress={() => handleSelectQuickProveedor(item)}
+                        disabled={isSavingQuickProv}
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          paddingVertical: 10,
+                          paddingHorizontal: 12,
+                          borderRadius: BorderRadius.medium,
+                          backgroundColor: isCurrent ? themeColors.accent + '20' : themeColors.backgroundElement,
+                          borderWidth: 1,
+                          borderColor: isCurrent ? themeColors.accent : themeColors.border,
+                        }}
+                      >
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={{
+                            fontSize: 14,
+                            fontWeight: isCurrent ? '800' : '600',
+                            color: isCurrent ? themeColors.accent : themeColors.text,
+                          }}>
+                            {item.nombre}
+                          </Text>
+                          {item.rfc ? (
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>
+                              RFC: {item.rfc}
+                            </Text>
+                          ) : null}
+                        </View>
+                        {isCurrent ? (
+                          <Ionicons name="checkmark-circle" size={20} color={themeColors.accent} />
+                        ) : (
+                          <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  }}
+                  ListEmptyComponent={
+                    <View style={{ padding: Spacing.three, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="alert-circle-outline" size={32} color={themeColors.textSecondary} />
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 13, marginTop: 6, textAlign: 'center' }}>
+                        No se encontraron proveedores que coincidan con la búsqueda.
+                      </Text>
+                    </View>
+                  }
+                />
+              </View>
+
+              {/* Footer con opción de dejar sin proveedor */}
+              <View style={{ paddingTop: Spacing.two, borderTopWidth: 1, borderTopColor: themeColors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                {GastoHelper.getProveedor(selectedGasto) ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (Platform.OS === 'web') {
+                        if (window.confirm('¿Deseas desasignar el proveedor de este gasto?')) {
+                          handleSelectQuickProveedor(null);
+                        }
+                      } else {
+                        Alert.alert('Desasignar Proveedor', '¿Deseas quitar el proveedor de este gasto?', [
+                          { text: 'Cancelar', style: 'cancel' },
+                          { text: 'Quitar', style: 'destructive', onPress: () => handleSelectQuickProveedor(null) },
+                        ]);
+                      }
+                    }}
+                    disabled={isSavingQuickProv}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 10 }}
+                  >
+                    <Ionicons name="trash-outline" size={15} color={themeColors.danger} />
+                    <Text style={{ color: themeColors.danger, fontSize: 12, fontWeight: '700' }}>
+                      Quitar Proveedor
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View />
+                )}
+
+                <TouchableOpacity
+                  onPress={() => setQuickEditProvModalVisible(false)}
+                  disabled={isSavingQuickProv}
+                  style={{
+                    backgroundColor: themeColors.backgroundElement,
+                    borderWidth: 1,
+                    borderColor: themeColors.border,
+                    paddingVertical: 8,
+                    paddingHorizontal: 16,
+                    borderRadius: BorderRadius.medium,
+                  }}
+                >
+                  <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }}>Cerrar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* MODAL DE FILTRO DE FECHAS Y CALENDARIO */}
+      <Modal statusBarTranslucent={true}
         animationType="fade"
         transparent={true}
         visible={dateFilterModalVisible}
@@ -3184,7 +3695,7 @@ export default function AdminGastosScreen() {
       </Modal>
 
       {/* Modal de Vinculación a Ventas al Aprobar */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={isLinkSaleModalVisible}
         animationType="slide"
         transparent={true}
@@ -3652,7 +4163,7 @@ export default function AdminGastosScreen() {
       </Modal>
 
       {/* Modal 1.1: Registro de Nuevo Usuario */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={addUserModalVisible}
@@ -3745,7 +4256,7 @@ export default function AdminGastosScreen() {
       </Modal>
 
       {/* Modal 1.2: Edición de Usuario Existente */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={editUserModalVisible}
@@ -3846,7 +4357,7 @@ export default function AdminGastosScreen() {
       </Modal>
 
       {/* Modal de Mi Perfil (Admin) */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={profileModalVisible}
@@ -3915,6 +4426,33 @@ export default function AdminGastosScreen() {
                     variant="primary"
                   />
                 </View>
+
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: scheme === 'dark' ? '#0f2b48' : '#e0f2fe',
+                    paddingVertical: 10,
+                    paddingHorizontal: 14,
+                    borderRadius: BorderRadius.medium,
+                    borderWidth: 1,
+                    borderColor: scheme === 'dark' ? '#0284c7' : '#bae6fd',
+                    marginTop: Spacing.two,
+                  }}
+                  onPress={() => {
+                    setProfileModalVisible(false);
+                    router.push('/(admin)/documentos?tab=mis_documentos' as any);
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="pencil" size={16} color="#0284c7" />
+                    <Text style={{ color: '#0284c7', fontWeight: 'bold', fontSize: 13 }}>
+                      Mis Documentos por Firmar
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#0284c7" />
+                </TouchableOpacity>
               </View>
             </ScrollView>
           </View>
@@ -3931,7 +4469,7 @@ export default function AdminGastosScreen() {
       />
 
       {/* ========== MODAL: Historial de Asistencia ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={asistenciaModalVisible}

@@ -455,6 +455,23 @@ export const AuthService = {
   }
 };
 
+export const sortUsuariosByRoleAndName = (usuarios: Usuario[]): Usuario[] => {
+  const getRolePriority = (role?: string | null) => {
+    const r = (role || '').toUpperCase();
+    if (r === 'ADMIN') return 1;
+    if (r === 'DEV') return 2;
+    if (r === 'EMPLEADO') return 3;
+    return 4;
+  };
+
+  return [...usuarios].sort((a, b) => {
+    const pA = getRolePriority(a.rol);
+    const pB = getRolePriority(b.rol);
+    if (pA !== pB) return pA - pB;
+    return (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' });
+  });
+};
+
 export interface Asistencia {
   id: string;
   empleado_id: string;
@@ -908,4 +925,161 @@ export const AuditoriaService = {
     }
   }
 };
+
+export interface Documento {
+  id: string;
+  titulo: string;
+  descripcion?: string | null;
+  contenido_html: string;
+  archivo_pdf_url?: string | null;
+  tipo_documento?: 'TEXTO' | 'PDF';
+  posicion_firma?: string | null;
+  creador_id?: string | null;
+  creador_nombre: string;
+  requiere_todos: boolean;
+  estado: 'BORRADOR' | 'PUBLICADO' | 'ARCHIVADO';
+  created_at?: string;
+  updated_at?: string;
+  total_asignados?: number;
+  total_firmados?: number;
+}
+
+export interface DocumentoFirmado {
+  id: string;
+  documento_id: string;
+  empleado_id: string;
+  empleado_nombre: string;
+  empleado_email?: string | null;
+  estado: 'PENDIENTE' | 'FIRMADO' | 'RECHAZADO';
+  firma_base64?: string | null;
+  firma_url?: string | null;
+  pdf_firmado_url?: string | null;
+  ip_registro?: string | null;
+  ubicacion_gps?: string | null;
+  dispositivo_info?: string | null;
+  hash_sha256?: string | null;
+  motivo_rechazo?: string | null;
+  firmado_at?: string | null;
+  created_at?: string;
+  documentos?: Documento;
+}
+
+export const DocumentoService = {
+  async obtenerDocumentosAdmin(): Promise<Documento[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/admin`, { headers });
+    if (!res.ok) throw new Error('Error al obtener documentos (Admin)');
+    return res.json();
+  },
+
+  async crearDocumento(
+    doc: Omit<Documento, 'id' | 'created_at' | 'updated_at'>,
+    empleadosIds: string[]
+  ): Promise<Documento> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ doc, empleadosIds })
+    });
+    if (!res.ok) throw new Error('Error al crear documento');
+    return res.json();
+  },
+
+  async obtenerMisDocumentosEmpleado(empleadoId: string): Promise<DocumentoFirmado[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/empleado/${empleadoId}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener documentos del empleado');
+    return res.json();
+  },
+
+  async obtenerFirmasDeDocumento(documentoId: string): Promise<DocumentoFirmado[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/${documentoId}/firmas`, { headers });
+    if (!res.ok) throw new Error('Error al obtener firmas');
+    return res.json();
+  },
+
+  async registrarFirma(
+    idAsignacion: string,
+    params: {
+      firmaBase64: string;
+      pdfUrl?: string;
+      ipRegistro?: string;
+      ubicacionGps?: string;
+      dispositivoInfo?: string;
+      hashSha256?: string;
+    }
+  ): Promise<DocumentoFirmado> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/firmas/${idAsignacion}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(params)
+    });
+    if (!res.ok) throw new Error('Error al registrar firma');
+    return res.json();
+  },
+
+  async eliminarDocumento(id: string): Promise<void> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/${id}`, { method: 'DELETE', headers });
+    if (!res.ok) throw new Error('Error al eliminar documento');
+  },
+
+  async subirPdfOriginal(fileUri: string, fileName: string): Promise<string> {
+    try {
+      const response = await fetch(fileUri);
+      const blob = await response.blob();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `originales/${Date.now()}_${cleanFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documentos-firmados')
+        .upload(filePath, blob, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        logger.error('Error al subir PDF original:', uploadError);
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (e) {
+      logger.error('Fallo la subida de PDF original:', e);
+      throw e;
+    }
+  },
+
+  async subirPdfFirmado(fileUri: string, fileName: string): Promise<string> {
+    try {
+      const response = await fetch(fileUri);
+      const blob = await response.blob();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `firmados/${Date.now()}_${cleanFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documentos-firmados')
+        .upload(filePath, blob, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        logger.error('Error al subir PDF firmado:', uploadError);
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (e) {
+      logger.error('Fallo la subida de PDF firmado:', e);
+      throw e;
+    }
+  }
+};
+
 

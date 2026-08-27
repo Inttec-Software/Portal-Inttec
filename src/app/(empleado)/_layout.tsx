@@ -53,6 +53,7 @@ export default function EmpleadoLayout() {
     { route: '/(empleado)/devoluciones', icon: 'return-up-back-outline', color: '#2ed573', name: 'Devoluciones' },
     { route: '/(empleado)/vehiculos', icon: 'car-outline', color: '#ff9ff3', name: 'Vehículos' },
     { route: '/(empleado)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
+    { route: '/(empleado)/documentos', icon: 'create-outline', color: '#0284c7', name: 'Documentos' },
     { route: '/(empleado)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },
     { route: '/(empleado)/perfil', icon: 'person-outline', color: '#5f27cd', name: 'Perfil' },
   ];

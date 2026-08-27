@@ -60,6 +60,7 @@ export default function AdminLayout() {
     { route: '/(admin)/reportes', icon: 'document-text-outline', color: '#10ac84', name: 'Reportes' },
     { route: '/(admin)/catalogos', icon: 'list-outline', color: '#5f27cd', name: 'Catálogos' },
     { route: '/(admin)/auditoria-tarjeta', icon: 'shield-checkmark-outline', color: '#ff9f43', name: 'Auditoría' },
+    { route: '/(admin)/documentos', icon: 'create-outline', color: '#0284c7', name: 'Documentos' },
     { route: '/(admin)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },
   ];
 

@@ -2478,7 +2478,7 @@ export default function GastoForm() {
           setActivePreviewUrl(null);
         }}
       />
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={showSplitModal}
         transparent={true}
         animationType="slide"
@@ -2776,7 +2776,7 @@ export default function GastoForm() {
       </Modal>
 
       {/* Modal Crear Proveedor (Admin Directo) */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={modalNuevoProveedorVisible}

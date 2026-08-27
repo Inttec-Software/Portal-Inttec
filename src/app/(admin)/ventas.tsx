@@ -2842,7 +2842,7 @@ export default function VentasScreen() {
       )}
 
       {/* Modal de Detalle de Venta */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={isDetailModalVisible}
         animationType="slide"
         transparent={true}
@@ -3466,7 +3466,7 @@ export default function VentasScreen() {
       </Modal>
 
       {/* Modal Dedicado Exclusivamente para Registrar Pago */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={isPagoModalVisible}
         animationType="slide"
         transparent={true}
@@ -3676,7 +3676,7 @@ export default function VentasScreen() {
       </Modal>
 
       {/* Modal de Pre-Timbrado / Edición de Factura CFDI 4.0 */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={isTimbradoModalVisible}
         animationType="slide"
         transparent={true}

@@ -721,7 +721,7 @@ export default function CatalogosManager() {
       </View>
 
       {/* Modal para Agregar Elemento */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="fade"
         transparent={true}
         visible={addModalVisible}
@@ -868,7 +868,7 @@ export default function CatalogosManager() {
       </Modal>
 
       {/* Modal para Editar Elemento */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="fade"
         transparent={true}
         visible={editModalVisible}
@@ -1018,7 +1018,7 @@ export default function CatalogosManager() {
       </Modal>
 
       {/* Modal para Gestionar Sucursales */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="fade"
         transparent={true}
         visible={sucursalesModalVisible}
@@ -1105,7 +1105,7 @@ export default function CatalogosManager() {
       </Modal>
 
       {/* Modal Resumen de Cliente (Super Premium UI) */}
-      <Modal visible={summaryModalVisible} animationType="fade" transparent={true}>
+      <Modal statusBarTranslucent={true} visible={summaryModalVisible} animationType="fade" transparent={true}>
         <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)' }]}>
           <View style={[styles.modalContent, { 
             backgroundColor: themeColors.background, 

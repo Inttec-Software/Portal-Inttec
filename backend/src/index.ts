@@ -18,6 +18,7 @@ import chatIaRoutes from './modules/chat-ia/chat.routes';
 import facturasRecibidasRoutes from './modules/facturas-recibidas/facturas-recibidas.routes';
 import retiroMaterialRoutes from './modules/retiro-material/retiro-material.routes';
 import devolucionesRoutes from './modules/devoluciones/devoluciones.routes';
+import documentosRoutes from './modules/documentos/documentos.routes';
 
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -98,6 +99,7 @@ app.use('/api/chat-ia', chatIaRoutes);
 app.use('/api/facturas-recibidas', facturasRecibidasRoutes);
 app.use('/api/retiro-material', retiroMaterialRoutes);
 app.use('/api/devoluciones', devolucionesRoutes);
+app.use('/api/documentos', documentosRoutes);
 
 // Ruta base
 app.get('/', (req, res) => {

@@ -1599,7 +1599,7 @@ export default function AuditoriaTarjetaScreen() {
       {/* ══════════════════════════════════════════════════
           MODAL — Detalle de transacción vs gasto
       ══════════════════════════════════════════════════ */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={!!selectedMatch}
         transparent
         animationType="slide"
@@ -1823,7 +1823,7 @@ export default function AuditoriaTarjetaScreen() {
       />
 
       {/* Modal de Detalle de Auditoría Guardada */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={!!selectedSavedAudit}
         animationType="slide"
         transparent={true}

@@ -14,7 +14,7 @@ import {
   Modal,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Usuario, AuthService, inttecClient, daravisaClient } from '@/services/supabase';
@@ -23,6 +23,7 @@ import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import { optimizeImage } from '@/utils/imageOptimizer';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
+import { EvidenceDraftService, EvidenceDraft } from '@/services/evidenceDraftService';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -33,6 +34,7 @@ import MaterialesSelector from '@/components/MaterialesSelector';
 
 export default function EvidenciaForm() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ draftId?: string }>();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { company, changeCompany } = useAuth();
@@ -40,6 +42,14 @@ export default function EvidenciaForm() {
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Estados del Sistema de Borradores
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [draftsList, setDraftsList] = useState<EvidenceDraft[]>([]);
+  const [draftsModalVisible, setDraftsModalVisible] = useState(false);
+  const [pendingDraftPrompt, setPendingDraftPrompt] = useState<EvidenceDraft | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   // Estados de Ruedita de Carga / Progreso de Fotos
   const [loadingModalVisible, setLoadingModalVisible] = useState(false);
@@ -108,6 +118,12 @@ export default function EvidenciaForm() {
     }
   };
 
+  const refreshDraftsList = async (userId: string, currentCompany: string) => {
+    const list = await EvidenceDraftService.getDrafts(userId, currentCompany);
+    setDraftsList(list);
+    return list;
+  };
+
   useEffect(() => {
     const init = async () => {
       const user = await AuthService.getCurrentUser();
@@ -117,9 +133,144 @@ export default function EvidenciaForm() {
       }
       setCurrentUser(user);
       await loadCatalogos(user.id);
+
+      const drafts = await refreshDraftsList(user.id, company || 'inttec');
+
+      // Si viene un ID de borrador por parámetro de URL, cargarlo directamente
+      if (params.draftId) {
+        const targetDraft = drafts.find(d => d.id === params.draftId);
+        if (targetDraft) {
+          handleLoadDraft(targetDraft, false);
+          return;
+        }
+      }
+
+      // Si hay borradores existentes y no se ha especificado uno, sugerir el más reciente
+      if (drafts.length > 0) {
+        setPendingDraftPrompt(drafts[0]);
+      }
     };
     init();
-  }, [router]);
+  }, [router, company, params.draftId]);
+
+  // Funciones del Sistema de Borradores
+  const handleSaveDraft = async (silent = false) => {
+    if (!currentUser) return;
+    setIsSavingDraft(true);
+    try {
+      const clienteObj = clientes.find(c => c.id === selectedCliente);
+      const sucObj = sucursalesCliente.find(s => s.id === selectedSucursal);
+
+      const saved = await EvidenceDraftService.saveDraft(currentUser.id, company || 'inttec', {
+        id: activeDraftId || undefined,
+        selectedCliente,
+        clienteNombre: clienteObj ? clienteObj.nombre : (selectedCliente ? 'Cliente' : 'Sin cliente asignado'),
+        selectedSucursal,
+        sucursalNombre: sucObj ? sucObj.nombre : '',
+        currentStep,
+        trabajos,
+      });
+
+      setActiveDraftId(saved.id);
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setLastSavedAt(timeStr);
+      await refreshDraftsList(currentUser.id, company || 'inttec');
+      setPendingDraftPrompt(null);
+
+      if (!silent) {
+        Alert.alert(
+          'Borrador Guardado',
+          `El progreso de la evidencia se guardó en tu dispositivo (${timeStr}). Puedes salir o continuar cuando gustes.`
+        );
+      }
+    } catch (err: any) {
+      console.error('Error guardando borrador:', err);
+      Alert.alert('Error', 'No se pudo guardar el borrador en la memoria local.');
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const handleLoadDraft = (draft: EvidenceDraft, notify = true) => {
+    setSelectedCliente(draft.selectedCliente || '');
+    const cli = clientes.find(c => c.id === draft.selectedCliente);
+    setClienteSearch(cli ? cli.nombre : (draft.clienteNombre || ''));
+
+    setSelectedSucursal(draft.selectedSucursal || '');
+    const suc = sucursalesCliente.find(s => s.id === draft.selectedSucursal);
+    setSucursalSearch(suc ? suc.nombre : (draft.sucursalNombre || ''));
+
+    if (draft.trabajos && draft.trabajos.length > 0) {
+      setTrabajos(draft.trabajos);
+    }
+    setCurrentStep(draft.currentStep || 1);
+    setActiveDraftId(draft.id);
+    setPendingDraftPrompt(null);
+    setDraftsModalVisible(false);
+
+    const timeStr = new Date(draft.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setLastSavedAt(timeStr);
+
+    if (notify) {
+      Alert.alert('Borrador Cargado', `Se restauró el borrador de "${draft.clienteNombre || 'Cliente'}" exitosamente.`);
+    }
+  };
+
+  const handleDeleteDraft = async (draftId: string) => {
+    if (!currentUser) return;
+    const confirmDelete = async () => {
+      await EvidenceDraftService.deleteDraft(currentUser.id, company || 'inttec', draftId);
+      if (activeDraftId === draftId) {
+        setActiveDraftId(null);
+        setLastSavedAt(null);
+      }
+      if (pendingDraftPrompt?.id === draftId) {
+        setPendingDraftPrompt(null);
+      }
+      await refreshDraftsList(currentUser.id, company || 'inttec');
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Deseas eliminar este borrador permanentemente?')) {
+        await confirmDelete();
+      }
+    } else {
+      Alert.alert('Eliminar Borrador', '¿Deseas eliminar este borrador permanentemente?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: confirmDelete },
+      ]);
+    }
+  };
+
+  const handleStartNewDraft = () => {
+    const doReset = () => {
+      setSelectedCliente('');
+      setClienteSearch('');
+      setSelectedSucursal('');
+      setSucursalSearch('');
+      setTrabajos([{ descripcion: '', materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [] }]);
+      setCurrentStep(1);
+      setActiveDraftId(null);
+      setLastSavedAt(null);
+      setPendingDraftPrompt(null);
+      setDraftsModalVisible(false);
+    };
+
+    if (trabajos.some(t => t.descripcion || t.solucion || t.antesImg || t.despuesImg || (t.fotosAdicionales && t.fotosAdicionales.length > 0))) {
+      if (Platform.OS === 'web') {
+        if (window.confirm('¿Deseas limpiar el formulario y empezar un nuevo reporte desde cero?')) {
+          doReset();
+        }
+      } else {
+        Alert.alert('Nuevo Reporte', '¿Deseas limpiar el formulario y empezar desde cero?', [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Nuevo', style: 'destructive', onPress: doReset },
+        ]);
+      }
+    } else {
+      doReset();
+    }
+  };
 
   // Solicitar permiso de cámara
   const requestCameraPermission = async (): Promise<boolean> => {
@@ -309,9 +460,9 @@ export default function EvidenciaForm() {
       Alert.alert('Validación', 'Por favor llena el nombre del cliente.');
       return;
     }
-    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim() || !t.materiales.trim());
+    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim());
     if (hasEmptyFields) {
-      Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
+      Alert.alert('Validación', 'Por favor llena la situación y la solución para todos los trabajos.');
       return;
     }
 
@@ -373,9 +524,9 @@ export default function EvidenciaForm() {
       Alert.alert('Validación', 'Por favor llena el nombre del cliente.');
       return;
     }
-    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim() || !t.materiales.trim());
+    const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim());
     if (hasEmptyFields) {
-      Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
+      Alert.alert('Validación', 'Por favor llena la situación y la solución para todos los trabajos.');
       return;
     }
 
@@ -510,6 +661,14 @@ export default function EvidenciaForm() {
       }
 
       setLoadingModalVisible(false);
+
+      // Si se guardó exitosamente y provenía de un borrador, eliminar el borrador local
+      if (activeDraftId && currentUser) {
+        await EvidenceDraftService.deleteDraft(currentUser.id, company || 'inttec', activeDraftId);
+        setActiveDraftId(null);
+        await refreshDraftsList(currentUser.id, company || 'inttec');
+      }
+
       Alert.alert('Éxito', 'Evidencia y reporte guardados correctamente en el servidor.');
       router.replace('/(empleado)/gastos');
     } catch (err: any) {
@@ -531,9 +690,9 @@ export default function EvidenciaForm() {
         Alert.alert('Validación', 'Por favor selecciona el cliente.');
         return;
       }
-      const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim() || !t.materiales.trim());
+      const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim());
       if (hasEmptyFields) {
-        Alert.alert('Validación', 'Por favor llena la situación, los materiales y la solución para todos los trabajos.');
+        Alert.alert('Validación', 'Por favor llena la situación y la solución para todos los trabajos.');
         return;
       }
       setCurrentStep(2);
@@ -548,9 +707,55 @@ export default function EvidenciaForm() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.backBtn} />
+        <TouchableOpacity
+          onPress={() => {
+            const hasData = selectedCliente || trabajos.some(t => t.descripcion || t.solucion || t.antesImg);
+            if (hasData && !activeDraftId) {
+              if (Platform.OS === 'web') {
+                if (window.confirm('Tienes cambios sin guardar. ¿Deseas guardarlos como borrador antes de salir?')) {
+                  handleSaveDraft(true).then(() => router.replace('/(empleado)/gastos'));
+                  return;
+                }
+              } else {
+                Alert.alert(
+                  'Guardar Borrador',
+                  '¿Deseas guardar tu avance antes de salir?',
+                  [
+                    { text: 'Salir sin guardar', style: 'destructive', onPress: () => router.replace('/(empleado)/gastos') },
+                    { text: 'Guardar y Salir', onPress: () => handleSaveDraft(true).then(() => router.replace('/(empleado)/gastos')) },
+                  ]
+                );
+                return;
+              }
+            }
+            router.replace('/(empleado)/gastos');
+          }}
+          style={styles.backBtn}
+        >
+          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
+        </TouchableOpacity>
+
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
-        <View style={{ width: 40 }} />
+
+        <TouchableOpacity
+          onPress={() => setDraftsModalVisible(true)}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 5,
+            paddingVertical: 6,
+            paddingHorizontal: 10,
+            borderRadius: BorderRadius.medium,
+            backgroundColor: themeColors.accent + '20',
+            borderWidth: 1,
+            borderColor: themeColors.accent,
+          }}
+        >
+          <Ionicons name="folder-open-outline" size={16} color={themeColors.accent} />
+          <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.accent }}>
+            Borradores{draftsList.length > 0 ? ` (${draftsList.length})` : ''}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Switch de Empresa */}
@@ -602,6 +807,97 @@ export default function EvidenciaForm() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Banner de Borrador Pendiente Sugerido al iniciar */}
+      {pendingDraftPrompt && !activeDraftId && (
+        <View style={{
+          backgroundColor: themeColors.warning + '18',
+          borderColor: themeColors.warning,
+          borderWidth: 1,
+          borderRadius: BorderRadius.medium,
+          padding: Spacing.two,
+          marginHorizontal: Spacing.four,
+          marginBottom: Spacing.two,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="document-text" size={16} color={themeColors.warning} />
+              <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.warning }}>
+                Borrador guardado disponible
+              </Text>
+            </View>
+            <Text style={{ fontSize: 12, color: themeColors.text, marginTop: 2 }}>
+              {pendingDraftPrompt.clienteNombre || 'Sin cliente'} • {new Date(pendingDraftPrompt.updatedAt).toLocaleDateString()} {new Date(pendingDraftPrompt.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+            <TouchableOpacity
+              onPress={() => handleLoadDraft(pendingDraftPrompt)}
+              style={{
+                backgroundColor: themeColors.warning,
+                paddingVertical: 6,
+                paddingHorizontal: 10,
+                borderRadius: BorderRadius.small,
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>Recuperar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setPendingDraftPrompt(null)}
+              style={{
+                backgroundColor: themeColors.backgroundElement,
+                padding: 6,
+                borderRadius: BorderRadius.small,
+                borderWidth: 1,
+                borderColor: themeColors.border,
+              }}
+            >
+              <Ionicons name="close" size={16} color={themeColors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Indicador de Borrador Activo en edición */}
+      {activeDraftId && (
+        <View style={{
+          backgroundColor: themeColors.success + '15',
+          borderColor: themeColors.success + '40',
+          borderWidth: 1,
+          borderRadius: BorderRadius.medium,
+          paddingVertical: 6,
+          paddingHorizontal: Spacing.two,
+          marginHorizontal: Spacing.four,
+          marginBottom: Spacing.two,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+            <Ionicons name="cloud-done-outline" size={16} color={themeColors.success} />
+            <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.success }} numberOfLines={1}>
+              Editando Borrador {lastSavedAt ? `(Guardado ${lastSavedAt})` : ''}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => handleSaveDraft(false)}
+            disabled={isSavingDraft}
+            style={{
+              backgroundColor: themeColors.success,
+              paddingVertical: 4,
+              paddingHorizontal: 8,
+              borderRadius: BorderRadius.small,
+            }}
+          >
+            <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff' }}>
+              {isSavingDraft ? 'Guardando...' : '💾 Guardar'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
 
       <KeyboardAwareScrollView
@@ -692,6 +988,15 @@ export default function EvidenciaForm() {
                   variant="success"
                   style={{ marginTop: Spacing.two }}
                   icon={<Ionicons name="cloud-upload-outline" size={20} color="#ffffff" style={{ marginRight: 8 }} />}
+                />
+
+                <CustomButton
+                  title="GUARDAR COMO BORRADOR"
+                  onPress={() => handleSaveDraft(false)}
+                  loading={isSavingDraft}
+                  variant="secondary"
+                  style={{ marginTop: Spacing.two }}
+                  icon={<Ionicons name="save-outline" size={20} color={themeColors.text} style={{ marginRight: 8 }} />}
                 />
               </View>
 
@@ -1117,9 +1422,21 @@ export default function EvidenciaForm() {
                 <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 14 }}>Agregar Otro Trabajo</Text>
               </TouchableOpacity>
 
-              <View style={styles.footerNav}>
-                <View style={{ flex: 1 }} />
-                <CustomButton title="Siguiente" onPress={nextStep} style={styles.navBtn} />
+              <View style={[styles.footerNav, { gap: 10, alignItems: 'center' }]}>
+                <CustomButton
+                  title="Guardar Borrador"
+                  onPress={() => handleSaveDraft(false)}
+                  variant="secondary"
+                  loading={isSavingDraft}
+                  style={{ flex: 1 }}
+                  icon={<Ionicons name="save-outline" size={18} color={themeColors.text} style={{ marginRight: 6 }} />}
+                />
+                <CustomButton
+                  title="Siguiente"
+                  onPress={nextStep}
+                  variant="primary"
+                  style={{ flex: 1 }}
+                />
               </View>
             </View>
           )}
@@ -1216,6 +1533,220 @@ export default function EvidenciaForm() {
                 ? 'Subiendo fotos a la nube. Por favor mantén la app abierta.' 
                 : 'Optimizando imágenes para un rendimiento óptimo.'}
             </Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL DE GESTIÓN DE BORRADORES */}
+      <Modal statusBarTranslucent={true}
+        visible={draftsModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setDraftsModalVisible(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.65)', justifyContent: 'center', alignItems: 'center', padding: Spacing.three }}>
+          <View style={{
+            backgroundColor: themeColors.background,
+            width: '100%',
+            maxWidth: 520,
+            maxHeight: '80%',
+            borderRadius: BorderRadius.large,
+            padding: Spacing.three,
+            borderWidth: 1,
+            borderColor: themeColors.border,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 10 },
+            shadowOpacity: 0.3,
+            shadowRadius: 20,
+            elevation: 10,
+          }}>
+            {/* Header Modal */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: Spacing.two, borderBottomWidth: 1, borderBottomColor: themeColors.border }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: themeColors.accent + '20', justifyContent: 'center', alignItems: 'center' }}>
+                  <Ionicons name="folder-open" size={18} color={themeColors.accent} />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: themeColors.text }}>Mis Borradores</Text>
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>Evidencias guardadas en este dispositivo</Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setDraftsModalVisible(false)} style={{ padding: 4 }}>
+                <Ionicons name="close-circle" size={24} color={themeColors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Acciones Rápidas */}
+            <View style={{ flexDirection: 'row', gap: 8, marginVertical: Spacing.two }}>
+              <TouchableOpacity
+                onPress={() => handleSaveDraft(false)}
+                disabled={isSavingDraft}
+                style={{
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  backgroundColor: themeColors.accent + '20',
+                  borderWidth: 1,
+                  borderColor: themeColors.accent,
+                  paddingVertical: 8,
+                  borderRadius: BorderRadius.medium,
+                }}
+              >
+                <Ionicons name="save-outline" size={16} color={themeColors.accent} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.accent }}>
+                  {activeDraftId ? 'Actualizar Borrador' : 'Guardar Actual'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleStartNewDraft}
+                style={{
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  backgroundColor: themeColors.backgroundElement,
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  paddingVertical: 8,
+                  borderRadius: BorderRadius.medium,
+                }}
+              >
+                <Ionicons name="add-circle-outline" size={16} color={themeColors.text} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                  Empezar Nuevo
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Lista de Borradores */}
+            {draftsList.length === 0 ? (
+              <View style={{ padding: Spacing.four, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="document-text-outline" size={40} color={themeColors.textSecondary} />
+                <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.text, marginTop: 8 }}>
+                  No tienes borradores guardados
+                </Text>
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary, textAlign: 'center', marginTop: 4 }}>
+                  Cuando estés llenando una evidencia, usa &quot;Guardar Borrador&quot; para guardar tu progreso sin publicar.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ gap: 8, paddingBottom: 8 }}>
+                {draftsList.map((d) => {
+                  const isActive = activeDraftId === d.id;
+                  const totalFotos = (d.trabajos || []).reduce((acc, t) => {
+                    let c = 0;
+                    if (t.antesImg) c++;
+                    if (t.despuesImg) c++;
+                    c += (t.fotosAdicionales?.length || 0);
+                    return acc + c;
+                  }, 0);
+
+                  return (
+                    <View
+                      key={d.id}
+                      style={{
+                        backgroundColor: isActive ? themeColors.accent + '15' : themeColors.backgroundElement,
+                        borderWidth: 1,
+                        borderColor: isActive ? themeColors.accent : themeColors.border,
+                        borderRadius: BorderRadius.medium,
+                        padding: Spacing.two,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={{ fontSize: 14, fontWeight: '800', color: isActive ? themeColors.accent : themeColors.text }}>
+                              {d.clienteNombre || 'Cliente sin especificar'}
+                            </Text>
+                            {isActive && (
+                              <View style={{ backgroundColor: themeColors.accent, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>ACTIVO</Text>
+                              </View>
+                            )}
+                          </View>
+                          {d.sucursalNombre ? (
+                            <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 1 }}>
+                              Sucursal: {d.sucursalNombre}
+                            </Text>
+                          ) : null}
+                          <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                              🛠️ {d.trabajos?.length || 0} {(d.trabajos?.length || 0) === 1 ? 'trabajo' : 'trabajos'}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                              📷 {totalFotos} fotos
+                            </Text>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                              🕒 {new Date(d.updatedAt).toLocaleDateString()} {new Date(d.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <TouchableOpacity
+                          onPress={() => handleDeleteDraft(d.id)}
+                          style={{ padding: 6 }}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8, gap: 6 }}>
+                        {!isActive ? (
+                          <TouchableOpacity
+                            onPress={() => handleLoadDraft(d)}
+                            style={{
+                              backgroundColor: themeColors.primary,
+                              paddingVertical: 6,
+                              paddingHorizontal: 12,
+                              borderRadius: BorderRadius.small,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <Ionicons name="arrow-forward-circle-outline" size={15} color="#fff" />
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Cargar Borrador</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <TouchableOpacity
+                            onPress={() => setDraftsModalVisible(false)}
+                            style={{
+                              backgroundColor: themeColors.accent,
+                              paddingVertical: 6,
+                              paddingHorizontal: 12,
+                              borderRadius: BorderRadius.small,
+                            }}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Continuar Editando</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            {/* Footer */}
+            <View style={{ paddingTop: Spacing.two, borderTopWidth: 1, borderTopColor: themeColors.border, flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <TouchableOpacity
+                onPress={() => setDraftsModalVisible(false)}
+                style={{
+                  backgroundColor: themeColors.backgroundElement,
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  paddingVertical: 8,
+                  paddingHorizontal: 16,
+                  borderRadius: BorderRadius.medium,
+                }}
+              >
+                <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

@@ -425,7 +425,7 @@ export default function AdminEvidenciasScreen() {
       )}
 
       {/* Modal de Detalle */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={modalVisible}
