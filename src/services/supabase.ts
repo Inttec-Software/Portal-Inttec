@@ -862,46 +862,49 @@ export interface AuditoriaTarjeta {
 
 export const AuditoriaService = {
   async guardarAuditoria(auditoria: Omit<AuditoriaTarjeta, 'id' | 'creado_en'>): Promise<AuditoriaTarjeta> {
-    const { data, error } = await supabase
-      .from('auditorias_tarjeta')
-      .insert([auditoria])
-      .select()
-      .single();
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/auditoria`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(auditoria)
+    });
 
-    if (error) {
-      logger.error('Error al guardar auditoría de tarjeta:', error);
-      throw error;
+    if (!res.ok) {
+      const errorText = await res.text();
+      logger.error('Error al guardar auditoría de tarjeta:', errorText);
+      throw new Error(errorText);
     }
-    return data as AuditoriaTarjeta;
+    const json = await res.json();
+    return json.data as AuditoriaTarjeta;
   },
 
   async obtenerAuditorias(tarjeta?: string): Promise<AuditoriaTarjeta[]> {
-    let query = supabase
-      .from('auditorias_tarjeta')
-      .select('*')
-      .order('creado_en', { ascending: false });
+    const headers = await getApiHeaders();
+    const url = tarjeta && tarjeta !== 'TODAS' 
+      ? `${getApiUrl()}/api/auditoria?tarjeta=${encodeURIComponent(tarjeta)}`
+      : `${getApiUrl()}/api/auditoria`;
 
-    if (tarjeta && tarjeta !== 'TODAS') {
-      query = query.eq('tarjeta', tarjeta);
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const errorText = await res.text();
+      logger.error('Error al obtener auditorías de tarjeta:', errorText);
+      throw new Error(errorText);
     }
-
-    const { data, error } = await query;
-    if (error) {
-      logger.error('Error al obtener auditorías de tarjeta:', error);
-      throw error;
-    }
-    return (data || []) as AuditoriaTarjeta[];
+    const json = await res.json();
+    return (json.auditorias || []) as AuditoriaTarjeta[];
   },
 
   async eliminarAuditoria(id: string): Promise<void> {
-    const { error } = await supabase
-      .from('auditorias_tarjeta')
-      .delete()
-      .eq('id', id);
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/auditoria/${id}`, {
+      method: 'DELETE',
+      headers
+    });
 
-    if (error) {
-      logger.error('Error al eliminar auditoría de tarjeta:', error);
-      throw error;
+    if (!res.ok) {
+      const errorText = await res.text();
+      logger.error('Error al eliminar auditoría de tarjeta:', errorText);
+      throw new Error(errorText);
     }
   }
 };

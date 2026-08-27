@@ -13,6 +13,7 @@ import reportesRoutes from './modules/reportes/reportes.routes';
 import asistenciasRoutes from './modules/asistencias/asistencias.routes';
 import ventasRoutes from './modules/ventas/ventas.routes';
 import cotizacionesRoutes from './modules/cotizaciones/cotizaciones.routes';
+import auditoriaRoutes from './modules/auditoria/auditoria.routes';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -41,6 +42,7 @@ app.use('/api/reportes', reportesRoutes);
 app.use('/api/asistencias', asistenciasRoutes);
 app.use('/api/ventas', ventasRoutes);
 app.use('/api/cotizaciones', cotizacionesRoutes);
+app.use('/api/auditoria', auditoriaRoutes);
 
 // Ruta base
 app.get('/', (req, res) => {

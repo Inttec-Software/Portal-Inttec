@@ -24,6 +24,7 @@ import * as Sharing from 'expo-sharing';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, GastoHelper, AuditoriaService, AuditoriaTarjeta } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { GeminiService, CardTransaction, CardStatementResult } from '@/services/gemini';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import { useAuth } from '@/context/AuthContext';
@@ -235,32 +236,18 @@ export default function AuditoriaTarjetaScreen() {
         ? new Date(Math.max(...fechaMs) + DAY_MS * MATCH_TOLERANCE_DAYS).toISOString().split('T')[0]
         : result.periodo_fin || new Date().toISOString().split('T')[0];
 
-      // 3. Fetch gastos filtered by SPECIFIC card AND payment method
-      let query = supabase
-        .from('gastos')
-        .select(`
-          *,
-          subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-          proveedor_rel:proveedores(id, nombre),
-          cliente_rel:clientes(id, nombre),
-          sucursal_rel:sucursales_cliente(id, nombre)
-        `)
-        .eq('status', 'APPROVED')
-        .eq('tipo_tarjeta', selectedTarjeta)
-        .gte('fecha_comprobante', minDate)
-        .lte('fecha_comprobante', maxDate);
-
-      if (selectedMetodoPago !== 'tarjeta') {
-        // Specific method: credit or debit
-        query = query.eq('metodo_pago', selectedMetodoPago);
-      } else {
-        // "Any" card method
-        query = query.in('metodo_pago', ['tarjeta', 'tarjeta_credito', 'tarjeta_debito']);
-      }
-
-      const { data: gastosData, error } = await query;
-      if (error) throw error;
-      const gastos: Gasto[] = gastosData || [];
+      // 3. Fetch gastos filtered by SPECIFIC card AND payment method via API
+      const headers = await getApiHeaders();
+      const queryParams = new URLSearchParams({
+        tarjeta: selectedTarjeta,
+        minDate,
+        maxDate,
+        metodoPago: selectedMetodoPago
+      });
+      const res = await fetch(`${getApiUrl()}/api/auditoria/gastos?${queryParams.toString()}`, { headers });
+      if (!res.ok) throw new Error('Error al obtener gastos');
+      const data = await res.json();
+      const gastos: Gasto[] = data.gastos || [];
 
       // 4. Cross-reference each cargo with a reported expense
       const usedGastoIds = new Set<string>();
