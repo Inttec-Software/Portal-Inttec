@@ -18,6 +18,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { parseCfdiXml } from '../../../supabase/functions/sync-facturas-recibidas/xmlParser';
 import { exportFacturaCfdiToPdf } from '@/utils/cfdiPdfGenerator';
 
@@ -96,19 +97,17 @@ export default function FacturasRecibidasScreen() {
     try {
       setLoading(true);
       setTableMissing(false);
-      const { data, error } = await supabase
-        .from('facturas_recibidas')
-        .select('*')
-        .order('fecha_emision', { ascending: false });
-
-      if (error) {
-        if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
-          setTableMissing(true);
-        } else {
-          console.error('Error fetching facturas recibidas:', error);
-        }
-      } else {
-        setFacturas(data || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/facturas-recibidas`, { headers });
+      if (!res.ok) {
+        throw new Error('Error de red al cargar facturas recibidas');
+      }
+      const json = await res.json();
+      
+      if (json.tableMissing) {
+        setTableMissing(true);
+      } else if (json.facturas) {
+        setFacturas(json.facturas);
       }
     } catch (err) {
       console.error('Unexpected error:', err);
@@ -120,18 +119,16 @@ export default function FacturasRecibidasScreen() {
 
   const fetchSatSolicitudes = async () => {
     try {
-      const { data, error } = await supabase
-        .from('sat_descarga_solicitudes')
-        .select('*')
-        .in('estado_sat', ['PENDIENTE', 'EN_PROCESO'])
-        .order('created_at', { ascending: false })
-        .limit(3);
-
-      if (!error && data) {
-        setSatSolicitudes(data);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/facturas-recibidas/sat-solicitudes`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.solicitudes) {
+          setSatSolicitudes(json.solicitudes);
+        }
       }
-    } catch {
-      // Ignorar si la tabla aún no existe
+    } catch (err) {
+      console.error('Error fetching SAT solicitudes:', err);
     }
   };
 
@@ -197,33 +194,17 @@ export default function FacturasRecibidasScreen() {
       setImportingXml(true);
       const parsed = parseCfdiXml(xmlInputText);
 
-      const { error } = await supabase
-        .from('facturas_recibidas')
-        .upsert(
-          {
-            uuid: parsed.uuid,
-            rfc_emisor: parsed.rfcEmisor,
-            nombre_emisor: parsed.nombreEmisor,
-            rfc_receptor: parsed.rfcReceptor,
-            fecha_emision: parsed.fechaEmision,
-            subtotal: parsed.subtotal,
-            descuento: parsed.descuento,
-            iva: parsed.iva,
-            retencion_isr: parsed.retencionIsr,
-            retencion_iva: parsed.retencionIva,
-            total: parsed.total,
-            moneda: parsed.moneda,
-            tipo_comprobante: parsed.tipoComprobante,
-            estado_sat: parsed.estadoSat,
-            conceptos_json: parsed.conceptos,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'uuid' }
-        )
-        .select()
-        .single();
-
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/facturas-recibidas/import`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ parsed })
+      });
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Error al importar XML en el servidor');
+      }
 
       showAlert('Éxito', `Factura de ${parsed.nombreEmisor} ($${parsed.total.toFixed(2)}) importada correctamente.`);
       setShowImportModal(false);
