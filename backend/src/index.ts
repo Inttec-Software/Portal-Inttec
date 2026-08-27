@@ -17,6 +17,7 @@ import auditoriaRoutes from './modules/auditoria/auditoria.routes';
 import chatIaRoutes from './modules/chat-ia/chat.routes';
 import facturasRecibidasRoutes from './modules/facturas-recibidas/facturas-recibidas.routes';
 import retiroMaterialRoutes from './modules/retiro-material/retiro-material.routes';
+import devolucionesRoutes from './modules/devoluciones/devoluciones.routes';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -49,6 +50,7 @@ app.use('/api/auditoria', auditoriaRoutes);
 app.use('/api/chat-ia', chatIaRoutes);
 app.use('/api/facturas-recibidas', facturasRecibidasRoutes);
 app.use('/api/retiro-material', retiroMaterialRoutes);
+app.use('/api/devoluciones', devolucionesRoutes);
 
 // Ruta base
 app.get('/', (req, res) => {
