@@ -26,6 +26,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, Venta, VentaPartida, VentaPago, calcularEstadoPago, EstadoPagoVenta, syncVentaPaymentStatus, recalculateVentaTotals, ClienteItem, SucursalCliente, GastoHelper } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { parseCFDIXML } from '@/utils/cfdiParser';
@@ -334,12 +335,13 @@ export default function VentasScreen() {
 
       // Cargar catálogo de clientes y sucursales
       try {
-        const [cliRes, sucRes] = await Promise.all([
-          supabase.from('clientes').select('*').order('nombre'),
-          supabase.from('sucursales_cliente').select('*').order('nombre')
-        ]);
-        if (cliRes.data) setClientes(cliRes.data);
-        if (sucRes.data) setSucursalesCliente(sucRes.data);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/catalogs`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          setClientes(data.clientes || []);
+          setSucursalesCliente(data.sucursales || []);
+        }
       } catch (err) {
         console.error('Error loading catalogs:', err);
       }
@@ -417,62 +419,11 @@ export default function VentasScreen() {
   const loadHistorial = async () => {
     setIsLoadingHistorial(true);
     try {
-      const { data: ventasData, error } = await supabase
-        .from('ventas')
-        .select('*, cotizaciones(folio), usuarios!ventas_registrado_por_fkey(nombre), ventas_partidas(descripcion, unidad)')
-        .order('created_at', { ascending: false })
-        .limit(300);
-
-      if (error) throw error;
-
-      const rawVentas = ventasData || [];
-      const ventaIds = rawVentas.map(v => v.id);
-
-      let pagosMap: Record<string, VentaPago[]> = {};
-      if (ventaIds.length > 0) {
-        try {
-          const { data: pagosData, error: pagosErr } = await supabase
-            .from('ventas_pagos')
-            .select('*')
-            .in('venta_id', ventaIds)
-            .order('fecha_pago', { ascending: false });
-
-          if (!pagosErr && pagosData) {
-            pagosData.forEach((p: VentaPago) => {
-              if (!pagosMap[p.venta_id]) pagosMap[p.venta_id] = [];
-              pagosMap[p.venta_id].push(p);
-            });
-          }
-        } catch (errPagos) {
-          // Ignorar si la tabla no existe en Supabase aun
-        }
-      }
-
-      const ventasConPagos: VentaConPago[] = rawVentas.map(v => {
-        const pagos = pagosMap[v.id] || [];
-        const totalPagado = pagos.length > 0
-          ? pagos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0)
-          : (Number(v.total_pagado) || 0);
-
-        const precioFacturado = Number(v.precio_total_facturado) || 0;
-        const saldoPendiente = v.saldo_pendiente !== undefined && v.saldo_pendiente !== null
-          ? Number(v.saldo_pendiente)
-          : Math.max(0, precioFacturado - totalPagado);
-
-        const estadoPago = v.estado_pago || calcularEstadoPago(precioFacturado, totalPagado);
-        const fechaUltimoPago = pagos.length > 0 ? pagos[0].fecha_pago : null;
-
-        return {
-          ...v,
-          total_pagado: totalPagado,
-          saldo_pendiente: saldoPendiente,
-          estado_pago: estadoPago,
-          fecha_ultimo_pago: fechaUltimoPago,
-          pagos_count: pagos.length,
-        };
-      });
-
-      setVentasHistorial(ventasConPagos);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/ventas/historial`, { headers });
+      if (!res.ok) throw new Error('Error al cargar historial de ventas');
+      const data = await res.json();
+      setVentasHistorial(data.ventas || []);
     } catch (err: any) {
       console.error('Error loading sales history:', err);
     } finally {
@@ -483,23 +434,21 @@ export default function VentasScreen() {
   const loadPagosForSelectedVenta = async (ventaId: string, currentVentaObj?: VentaConPago) => {
     setIsLoadingPagos(true);
     try {
-      const { data: pagosData, error } = await supabase
-        .from('ventas_pagos')
-        .select('*')
-        .eq('venta_id', ventaId)
-        .order('fecha_pago', { ascending: false });
-
-      if (error) {
-        console.warn('Error fetching pagos for sale:', error);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/ventas/${ventaId}/pagos`, { headers });
+      
+      if (!res.ok) {
+        console.warn('Error fetching pagos for sale');
         setSelectedVentaPagos([]);
         return [];
       }
 
-      const pagos = pagosData || [];
+      const resData = await res.json();
+      const pagos = resData.pagos || [];
       setSelectedVentaPagos(pagos);
 
       // Recalcular métricas de pago para la venta seleccionada
-      const totalPagado = pagos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+      const totalPagado = pagos.reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0);
       const targetVenta = currentVentaObj || selectedVenta;
       if (targetVenta) {
         const precioFacturado = Number(targetVenta.precio_total_facturado) || 0;
@@ -567,22 +516,13 @@ export default function VentasScreen() {
     setPagoReferencia('');
 
     try {
-      // 1. Cargar partidas
-      const { data: partData, error: partError } = await supabase
-        .from('ventas_partidas')
-        .select('*')
-        .eq('venta_id', venta.id);
-      if (partError) throw partError;
-      setSelectedVentaPartidas(partData || []);
-
-      // 2. Cargar gastos vinculados
-      const { data: gastosData, error: gastosError } = await supabase
-        .from('gastos')
-        .select(GastoHelper.GASTOS_SELECT_QUERY)
-        .eq('venta_id', venta.id)
-        .eq('status', 'APPROVED');
-      if (gastosError) throw gastosError;
-      setSelectedVentaGastos(gastosData || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/ventas/${venta.id}/detalle`, { headers });
+      if (!res.ok) throw new Error('Error fetching details from API');
+      const data = await res.json();
+      
+      setSelectedVentaPartidas(data.partidas || []);
+      setSelectedVentaGastos(data.gastos || []);
 
       // 3. Cargar pagos
       await loadPagosForSelectedVenta(venta.id, venta);
@@ -610,7 +550,6 @@ export default function VentasScreen() {
     setIsSubmittingPago(true);
     try {
       const payload = {
-        venta_id: selectedVenta.id,
         monto: montoNum,
         fecha_pago: pagoFecha,
         metodo_pago: pagoMetodo || 'Transferencia',
@@ -618,16 +557,18 @@ export default function VentasScreen() {
         registrado_por: currentUser?.id || null,
       };
 
-      const { error } = await supabase
-        .from('ventas_pagos')
-        .insert([payload]);
-
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pagos`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('Error al registrar pago');
 
       showAlert('Éxito', `Se registró la parcialidad de ${formatCurrency(montoNum)} correctamente.`);
       
       const updatedPagos = await loadPagosForSelectedVenta(selectedVenta.id);
-      const nuevoTotalPagado = updatedPagos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+      const nuevoTotalPagado = updatedPagos.reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0);
       const nuevoSaldo = Math.max(0, (Number(selectedVenta.precio_total_facturado) || 0) - nuevoTotalPagado);
       setPagoMonto(nuevoSaldo > 0 ? String(nuevoSaldo) : '');
       setPagoReferencia('');
@@ -648,12 +589,12 @@ export default function VentasScreen() {
 
     const performDelete = async () => {
       try {
-        const { error } = await supabase
-          .from('ventas_pagos')
-          .delete()
-          .eq('id', pagoId);
-
-        if (error) throw error;
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pagos/${pagoId}`, {
+          method: 'DELETE',
+          headers
+        });
+        if (!res.ok) throw new Error('Error al eliminar pago');
 
         showAlert('Éxito', 'Pago/Parcialidad eliminada correctamente.');
         await loadPagosForSelectedVenta(selectedVenta.id);
@@ -686,21 +627,12 @@ export default function VentasScreen() {
     const performDelete = async () => {
       setIsSubmitting(true);
       try {
-        // Eliminar partidas primero (clave foránea)
-        const { error: partError } = await supabase
-          .from('ventas_partidas')
-          .delete()
-          .eq('venta_id', selectedVenta.id);
-
-        if (partError) throw partError;
-
-        // Eliminar venta
-        const { error: ventError } = await supabase
-          .from('ventas')
-          .delete()
-          .eq('id', selectedVenta.id);
-
-        if (ventError) throw ventError;
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}`, {
+          method: 'DELETE',
+          headers
+        });
+        if (!res.ok) throw new Error('Error al eliminar la venta');
 
         showAlert('Éxito', 'La venta fue eliminada correctamente.');
         setIsDetailModalVisible(false);
@@ -739,12 +671,11 @@ export default function VentasScreen() {
 
       let partidasToCopy: any[] = [];
       if (venta) {
-        const { data: partData, error: partError } = await supabase
-          .from('ventas_partidas')
-          .select('*')
-          .eq('venta_id', targetVenta.id);
-        if (partError) throw partError;
-        partidasToCopy = partData || [];
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${targetVenta.id}/partidas`, { headers });
+        if (!res.ok) throw new Error('Error al cargar partidas para duplicar');
+        const data = await res.json();
+        partidasToCopy = data.partidas || [];
       } else {
         partidasToCopy = selectedVentaPartidas;
       }
@@ -1080,13 +1011,14 @@ export default function VentasScreen() {
       let warningMsg = '';
       if (result.informacion_general.factura_o_referencia) {
         try {
-          const { data: existing } = await supabase
-            .from('ventas')
-            .select('id')
-            .ilike('factura_referencia', result.informacion_general.factura_o_referencia.trim())
-            .maybeSingle();
-          if (existing) {
-            warningMsg = `\n\n⚠️ ADVERTENCIA: La orden/factura "${result.informacion_general.factura_o_referencia}" ya existe registrada en el sistema. Verifica que no la estés duplicando.`;
+          const headers = await getApiHeaders();
+          const refParam = encodeURIComponent(result.informacion_general.factura_o_referencia.trim());
+          const res = await fetch(`${getApiUrl()}/api/ventas/check-duplicate?ref=${refParam}`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.exists) {
+              warningMsg = `\n\n⚠️ ADVERTENCIA: La orden/factura "${result.informacion_general.factura_o_referencia}" ya existe registrada en el sistema. Verifica que no la estés duplicando.`;
+            }
           }
         } catch (e) {
           console.warn('Error checking duplicate reference:', e);
@@ -1204,65 +1136,13 @@ export default function VentasScreen() {
         cotizacion_id: cotizacionIdOrigen || null,
       };
 
-      let activeVentaId = '';
-
-      if (editingVentaId) {
-        // ACTUALIZAR VENTA EXISTENTE
-        const { error: updateError } = await supabase
-          .from('ventas')
-          .update(ventaPayload)
-          .eq('id', editingVentaId);
-
-        if (updateError) throw updateError;
-        activeVentaId = editingVentaId;
-
-        // Eliminar partidas anteriores
-        const { error: deletePartidasError } = await supabase
-          .from('ventas_partidas')
-          .delete()
-          .eq('venta_id', editingVentaId);
-
-        if (deletePartidasError) throw deletePartidasError;
-      } else {
-        // Generar folio secuencial
-        const { data: lastVenta } = await supabase
-          .from('ventas')
-          .select('folio')
-          .not('folio', 'is', null)
-          .ilike('folio', 'A4%')
-          .order('folio', { ascending: false })
-          .limit(1);
-
-        let nextFolio = 'A4000';
-        if (lastVenta && lastVenta.length > 0 && lastVenta[0].folio) {
-          const lastNumStr = lastVenta[0].folio.substring(2);
-          const lastNum = parseInt(lastNumStr, 10);
-          if (!isNaN(lastNum)) {
-            nextFolio = `A${lastNum + 1}`;
-          }
-        }
-
-        const ventaPayloadWithFolio = { ...ventaPayload, folio: nextFolio };
-
-        // INSERTAR NUEVA VENTA
-        const { data: ventaData, error: ventaError } = await supabase
-          .from('ventas')
-          .insert([ventaPayloadWithFolio])
-          .select()
-          .single();
-
-        if (ventaError) throw ventaError;
-        activeVentaId = ventaData.id;
-      }
-
-      // Insertar partidas nuevas/editadas
+      // Crear payload de partidas
       const partidasPayload = partidas.map(p => {
         const cant = Number(p.cantidad) || 0;
         const precioUV = Number(p.precio_unitario_venta) || 0;
         const costoUP = Number(p.costo_unitario_proveedor) || 0;
 
         return {
-          venta_id: activeVentaId,
           descripcion: p.descripcion.trim(),
           cantidad: cant,
           unidad: p.unidad || 'PZA',
@@ -1273,13 +1153,31 @@ export default function VentasScreen() {
         };
       });
 
-      const { error: partidasError } = await supabase
-        .from('ventas_partidas')
-        .insert(partidasPayload);
+      const headers = await getApiHeaders();
+      let activeVentaId = '';
 
-      if (partidasError) throw partidasError;
+      if (editingVentaId) {
+        // ACTUALIZAR VENTA EXISTENTE
+        const res = await fetch(`${getApiUrl()}/api/ventas/${editingVentaId}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ ventaPayload, partidasPayload })
+        });
+        if (!res.ok) throw new Error('Error al actualizar la venta');
+        activeVentaId = editingVentaId;
+      } else {
+        // INSERTAR NUEVA VENTA
+        const res = await fetch(`${getApiUrl()}/api/ventas`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ventaPayload, partidasPayload })
+        });
+        if (!res.ok) throw new Error('Error al crear la venta');
+        const data = await res.json();
+        activeVentaId = data.venta.id;
+      }
 
-      // Recalcular y sincronizar totales con gastos en la base de datos
+      // Recalcular y sincronizar totales con gastos en la base de datos (se usa apiHelper internamente)
       await recalculateVentaTotals(activeVentaId);
 
       if (editingVentaId) {
@@ -1371,8 +1269,12 @@ export default function VentasScreen() {
     try {
       let partidasList = selectedVentaPartidas;
       if (partidasList.length === 0 || selectedVenta?.id !== ventaToStamp.id) {
-        const { data } = await supabase.from('ventas_partidas').select('*').eq('venta_id', ventaToStamp.id);
-        partidasList = data || [];
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${ventaToStamp.id}/partidas`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          partidasList = data.partidas || [];
+        }
       }
 
       if (partidasList.length > 0) {
@@ -3417,20 +3319,14 @@ export default function VentasScreen() {
                 <TouchableOpacity
                   onPress={async () => {
                     if (selectedVenta) {
-                      const { data: clientData } = await supabase
-                        .from('clientes')
-                        .select('*')
-                        .eq('nombre', selectedVenta.cliente)
-                        .single();
-
+                      const headers = await getApiHeaders();
+                      const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pdf-data`, { headers });
+                      let clientData = null;
                       let cotizacionLineas: any[] = [];
-                      if (selectedVenta.cotizacion_id) {
-                        const { data: cotData } = await supabase
-                          .from('cotizaciones')
-                          .select('lineas')
-                          .eq('id', selectedVenta.cotizacion_id)
-                          .single();
-                        if (cotData?.lineas) cotizacionLineas = cotData.lineas;
+                      if (res.ok) {
+                        const data = await res.json();
+                        clientData = data.clientData;
+                        cotizacionLineas = data.cotizacionLineas || [];
                       }
 
                       const cotData = {

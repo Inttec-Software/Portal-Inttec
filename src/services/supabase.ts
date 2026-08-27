@@ -724,7 +724,7 @@ export async function recalculateVentaTotals(ventaId: string): Promise<void> {
     });
     if (!res.ok) throw new Error('Error recalculating venta totals via API');
     const data = await res.json();
-    logger.error(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Total: ${data.costoTotal}`);
+    logger.info(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Total: ${data.costoTotal}`);
   } catch (err) {
     logger.error('[Recalculate] Error recalculating venta totals:', err);
   }
@@ -732,38 +732,11 @@ export async function recalculateVentaTotals(ventaId: string): Promise<void> {
 
 export async function syncVentaPaymentStatus(ventaId: string): Promise<void> {
   try {
-    const { data: venta, error: vErr } = await supabase
-      .from('ventas')
-      .select('precio_total_facturado')
-      .eq('id', ventaId)
-      .single();
-
-    if (vErr || !venta) return;
-
-    const { data: pagos, error: pErr } = await supabase
-      .from('ventas_pagos')
-      .select('monto')
-      .eq('venta_id', ventaId);
-
-    if (pErr) return; // Si la tabla aún no existe, omitimos silenciosamente
-
-    const precioTotal = Number(venta?.precio_total_facturado) || 0;
-    const totalPagado = (pagos || []).reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
-    const saldoPendiente = Math.max(0, precioTotal - totalPagado);
-    const estadoPago = calcularEstadoPago(precioTotal, totalPagado);
-
-    const { error: updErr } = await supabase
-      .from('ventas')
-      .update({
-        total_pagado: totalPagado,
-        saldo_pendiente: saldoPendiente,
-        estado_pago: estadoPago
-      })
-      .eq('id', ventaId);
-
-    if (updErr) {
-      console.warn('[SyncPaymentStatus] No se pudieron actualizar columnas de pago en ventas:', updErr.message);
-    }
+    const headers = await getApiHeaders();
+    await fetch(`${getApiUrl()}/api/ventas/${ventaId}/sync-payment`, {
+      method: 'POST',
+      headers
+    });
   } catch (err) {
     // Captura limpia sin romper la ejecucion
   }

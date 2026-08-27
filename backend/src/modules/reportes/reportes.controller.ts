@@ -438,6 +438,8 @@ export const recalculateVentaTotalsInternal = async (client: any, id: string) =>
     .eq('id', id);
   
   if (updateErr) throw updateErr;
+
+  return { costoTotal, utilidadBruta, margenPorcentual };
 };
 
 export const recalculateVentaTotals = async (req: Request, res: Response) => {
@@ -448,9 +450,9 @@ export const recalculateVentaTotals = async (req: Request, res: Response) => {
     const client = getSupabaseClient(company, env);
 
     const { id } = req.params;
-    await recalculateVentaTotalsInternal(client, id as string);
+    const result = await recalculateVentaTotalsInternal(client, id as string);
     
-    return res.json({ success: true });
+    return res.json({ success: true, ...result });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
