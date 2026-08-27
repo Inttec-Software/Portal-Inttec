@@ -254,23 +254,27 @@ export const createVenta = async (req: Request, res: Response) => {
 
     const { ventaPayload, partidasPayload } = req.body;
 
-    // Generate sequential folio
-    const { data: lastVenta } = await client
+    // Generate sequential folio (escalable, ignorando A1 y buscando el máximo real)
+    const { data: allFolios } = await client
       .from('ventas')
       .select('folio')
       .not('folio', 'is', null)
-      .ilike('folio', 'A4%')
-      .order('folio', { ascending: false })
-      .limit(1);
+      .ilike('folio', 'A%');
 
-    let nextFolio = 'A4000';
-    if (lastVenta && lastVenta.length > 0 && lastVenta[0].folio) {
-      const lastNumStr = lastVenta[0].folio.substring(2);
-      const lastNum = parseInt(lastNumStr, 10);
-      if (!isNaN(lastNum)) {
-        nextFolio = `A${lastNum + 1}`;
+    let maxNum = 3999; // Base para que empiece en A4000 si no hay mayores
+    if (allFolios && allFolios.length > 0) {
+      for (const item of allFolios) {
+        if (item.folio) {
+          const numStr = item.folio.substring(1);
+          const num = parseInt(numStr, 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        }
       }
     }
+
+    const nextFolio = `A${maxNum + 1}`;
 
     const ventaPayloadWithFolio = { ...ventaPayload, folio: nextFolio };
 
