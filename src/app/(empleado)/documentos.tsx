@@ -309,7 +309,7 @@ export default function EmpleadoDocumentosScreen() {
       )}
 
       {/* Modal de Lectura y Firma del Documento */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={modalLecturaVisible}
         animationType="slide"
         transparent

@@ -267,6 +267,7 @@ export default function AdminDocumentosScreen() {
         visible={modalFirmasVisible}
         animationType="fade"
         transparent
+        statusBarTranslucent={true}
         onRequestClose={() => setModalFirmasVisible(false)}
       >
         <View style={styles.modalOverlay}>
@@ -323,8 +324,8 @@ export default function AdminDocumentosScreen() {
               <ActivityIndicator size="large" color={themeColors.accent} style={{ marginVertical: 40 }} />
             ) : (
               <ScrollView
-                style={{ maxHeight: 440 }}
-                contentContainerStyle={{ paddingVertical: 4, paddingRight: 6, gap: 10 }}
+                style={{ maxHeight: 480 }}
+                contentContainerStyle={{ paddingVertical: 4, gap: 10 }}
                 showsVerticalScrollIndicator={true}
               >
                 {firmasDetalle.map((firmante) => {
@@ -349,14 +350,16 @@ export default function AdminDocumentosScreen() {
                         },
                       ]}
                     >
-                      {/* Avatar e Información del Empleado */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, paddingRight: 8 }}>
+                      {/* Fila Superior: Avatar + Info + Badge de Estado */}
+                      <View style={styles.firmanteTopRow}>
                         <View
                           style={[
                             styles.firmanteAvatar,
                             {
                               backgroundColor: isFirmado
                                 ? (scheme === 'dark' ? '#064e3b' : '#d1fae5')
+                                : isRechazado
+                                ? (scheme === 'dark' ? '#450a0a' : '#fee2e2')
                                 : (scheme === 'dark' ? '#334155' : '#e2e8f0'),
                             },
                           ]}
@@ -365,42 +368,32 @@ export default function AdminDocumentosScreen() {
                             style={{
                               fontSize: 13,
                               fontWeight: 'bold',
-                              color: isFirmado ? '#059669' : themeColors.text,
+                              color: isFirmado ? '#059669' : isRechazado ? '#dc2626' : themeColors.text,
                             }}
                           >
                             {initials}
                           </Text>
                         </View>
 
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.firmanteName, { color: themeColors.text }]}>
+                        <View style={{ flex: 1, paddingRight: 6 }}>
+                          <Text style={[styles.firmanteName, { color: themeColors.text }]} numberOfLines={1}>
                             {firmante.empleado_nombre}
                           </Text>
-                          <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 1 }}>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 1 }} numberOfLines={1}>
                             {firmante.empleado_email || 'Sin correo registrado'}
                           </Text>
-                          {firmante.firmado_at && (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                              <Ionicons name="checkmark-circle" size={13} color="#10b981" />
-                              <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '500' }}>
-                                Firmado el {new Date(firmante.firmado_at).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })} a las {new Date(firmante.firmado_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
-                              </Text>
-                            </View>
-                          )}
                         </View>
-                      </View>
 
-                      {/* Estado y Botón de Acción */}
-                      <View style={styles.firmanteActionCol}>
+                        {/* Badge Estado */}
                         <View
                           style={[
                             styles.modalBadge,
                             {
                               backgroundColor: isFirmado
-                                ? '#d1fae5'
+                                ? (scheme === 'dark' ? 'rgba(5, 150, 105, 0.25)' : '#d1fae5')
                                 : isRechazado
-                                ? '#fee2e2'
-                                : '#fef3c7',
+                                ? (scheme === 'dark' ? 'rgba(220, 38, 38, 0.25)' : '#fee2e2')
+                                : (scheme === 'dark' ? 'rgba(217, 119, 6, 0.25)' : '#fef3c7'),
                             },
                           ]}
                         >
@@ -409,83 +402,104 @@ export default function AdminDocumentosScreen() {
                               styles.modalBadgeText,
                               {
                                 color: isFirmado
-                                  ? '#047857'
+                                  ? (scheme === 'dark' ? '#34d399' : '#047857')
                                   : isRechazado
-                                  ? '#b91c1c'
-                                  : '#b45309',
+                                  ? (scheme === 'dark' ? '#f87171' : '#b91c1c')
+                                  : (scheme === 'dark' ? '#fbbf24' : '#b45309'),
                               },
                             ]}
                           >
                             {firmante.estado}
                           </Text>
                         </View>
+                      </View>
 
-                        {isFirmado && (
-                          <>
-                            {/* Ver PDF Limpio Estándar */}
+                      {/* Info de firma */}
+                      {firmante.firmado_at && (
+                        <View style={[styles.firmanteAuditBox, { backgroundColor: scheme === 'dark' ? '#0f291e' : '#f0fdf4', borderColor: scheme === 'dark' ? '#14532d' : '#bbf7d0' }]}>
+                          <Ionicons name="checkmark-circle" size={14} color="#10b981" />
+                          <Text style={{ color: scheme === 'dark' ? '#86efac' : '#15803d', fontSize: 11, fontWeight: '500', flex: 1 }}>
+                            Firmado el {new Date(firmante.firmado_at).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })} a las {new Date(firmante.firmado_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Info de rechazo */}
+                      {isRechazado && firmante.motivo_rechazo && (
+                        <View style={[styles.firmanteAuditBox, { backgroundColor: scheme === 'dark' ? '#2c1517' : '#fef2f2', borderColor: scheme === 'dark' ? '#7f1d1d' : '#fecaca' }]}>
+                          <Ionicons name="alert-circle" size={14} color="#ef4444" />
+                          <Text style={{ color: scheme === 'dark' ? '#fca5a5' : '#b91c1c', fontSize: 11, fontWeight: '500', flex: 1 }}>
+                            Motivo: {firmante.motivo_rechazo}
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Botones de Acción (En fila horizontal amplia y cómoda) */}
+                      {isFirmado && (
+                        <View style={styles.firmanteActionsRow}>
+                          {/* Ver PDF Limpio Estándar */}
+                          <TouchableOpacity
+                            style={[styles.pdfButtonFilled, { backgroundColor: scheme === 'dark' ? '#0f2b48' : '#e0f2fe' }]}
+                            onPress={async () => {
+                              if (firmante.pdf_firmado_url) {
+                                Linking.openURL(firmante.pdf_firmado_url);
+                              } else if (selectedDoc && firmante.firma_base64) {
+                                try {
+                                  await PdfDocumentoService.generarYCompartirPdf({
+                                    documento: selectedDoc,
+                                    firmado: firmante,
+                                    firmaBase64: firmante.firma_base64 || '',
+                                    ipRegistro: firmante.ip_registro || 'Registrado',
+                                    ubicacionGps: firmante.ubicacion_gps || 'No registrada',
+                                    dispositivoInfo: firmante.dispositivo_info || 'Móvil/Web',
+                                    incluirConstancia: false,
+                                  });
+                                } catch (e) {
+                                  Alert.alert('Error', 'No se pudo generar la vista del PDF firmado.');
+                                }
+                              }
+                            }}
+                          >
+                            <Ionicons name="document-text-outline" size={14} color="#0284c7" />
+                            <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: '700' }}>
+                              Ver PDF
+                            </Text>
+                          </TouchableOpacity>
+
+                          {/* Descargar PDF con Constancia NOM-151 */}
+                          {selectedDoc && firmante.firma_base64 && (
                             <TouchableOpacity
-                              style={[styles.pdfButtonFilled, { backgroundColor: scheme === 'dark' ? '#0f2b48' : '#e0f2fe' }]}
+                              style={[
+                                styles.constanciaButton,
+                                {
+                                  backgroundColor: scheme === 'dark' ? '#1e1b4b' : '#f5f3ff',
+                                  borderColor: scheme === 'dark' ? '#4338ca' : '#ddd6fe',
+                                },
+                              ]}
                               onPress={async () => {
-                                if (firmante.pdf_firmado_url) {
-                                  Linking.openURL(firmante.pdf_firmado_url);
-                                } else if (selectedDoc && firmante.firma_base64) {
-                                  try {
-                                    await PdfDocumentoService.generarYCompartirPdf({
-                                      documento: selectedDoc,
-                                      firmado: firmante,
-                                      firmaBase64: firmante.firma_base64,
-                                      ipRegistro: firmante.ip_registro || 'Registrado',
-                                      ubicacionGps: firmante.ubicacion_gps || 'No registrada',
-                                      dispositivoInfo: firmante.dispositivo_info || 'Móvil/Web',
-                                      incluirConstancia: false,
-                                    });
-                                  } catch (e) {
-                                    Alert.alert('Error', 'No se pudo generar la vista del PDF firmado.');
-                                  }
+                                try {
+                                  await PdfDocumentoService.generarYCompartirPdf({
+                                    documento: selectedDoc,
+                                    firmado: firmante,
+                                    firmaBase64: firmante.firma_base64 || '',
+                                    ipRegistro: firmante.ip_registro || 'Registrado',
+                                    ubicacionGps: firmante.ubicacion_gps || 'No registrada',
+                                    dispositivoInfo: firmante.dispositivo_info || 'Móvil/Web',
+                                    incluirConstancia: true,
+                                  });
+                                } catch (e) {
+                                  Alert.alert('Error', 'No se pudo generar el PDF con constancia.');
                                 }
                               }}
                             >
-                              <Ionicons name="document-text-outline" size={13} color="#0284c7" />
-                              <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>
-                                Ver PDF
+                              <Ionicons name="shield-checkmark-outline" size={14} color="#7c3aed" />
+                              <Text style={{ color: '#7c3aed', fontSize: 11, fontWeight: '700' }}>
+                                + Constancia NOM-151
                               </Text>
                             </TouchableOpacity>
-
-                            {/* Descargar PDF con Constancia NOM-151 */}
-                            {selectedDoc && firmante.firma_base64 && (
-                              <TouchableOpacity
-                                style={[
-                                  styles.constanciaButton,
-                                  {
-                                    backgroundColor: scheme === 'dark' ? '#1e1b4b' : '#f5f3ff',
-                                    borderColor: scheme === 'dark' ? '#4338ca' : '#ddd6fe',
-                                  },
-                                ]}
-                                onPress={async () => {
-                                  try {
-                                    await PdfDocumentoService.generarYCompartirPdf({
-                                      documento: selectedDoc,
-                                      firmado: firmante,
-                                      firmaBase64: firmante.firma_base64,
-                                      ipRegistro: firmante.ip_registro || 'Registrado',
-                                      ubicacionGps: firmante.ubicacion_gps || 'No registrada',
-                                      dispositivoInfo: firmante.dispositivo_info || 'Móvil/Web',
-                                      incluirConstancia: true,
-                                    });
-                                  } catch (e) {
-                                    Alert.alert('Error', 'No se pudo generar el PDF con constancia.');
-                                  }
-                                }}
-                              >
-                                <Ionicons name="shield-checkmark-outline" size={12} color="#7c3aed" />
-                                <Text style={{ color: '#7c3aed', fontSize: 10, fontWeight: '700' }}>
-                                  + Constancia
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-                          </>
-                        )}
-                      </View>
+                          )}
+                        </View>
+                      )}
                     </View>
                   );
                 })}
@@ -639,14 +653,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.65)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 20,
   },
   modalContent: {
     width: '100%',
-    maxWidth: 640,
+    maxWidth: 580,
+    maxHeight: '92%',
     borderRadius: 20,
     borderWidth: 1,
-    padding: 24,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.25,
@@ -657,23 +673,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   modalHeaderIconBg: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
   },
   modalCloseBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -681,29 +697,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   modalStatItem: {
     alignItems: 'center',
-    gap: 2,
+    gap: 1,
   },
   modalStatDivider: {
     width: 1,
-    height: 24,
+    height: 20,
   },
   firmanteCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    flexDirection: 'column',
+    padding: 12,
     borderRadius: 14,
     borderWidth: 1,
-    gap: 12,
+    gap: 8,
+  },
+  firmanteTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   firmanteAvatar: {
     width: 38,
@@ -716,41 +734,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  firmanteActionCol: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    width: 118,
-  },
   modalBadge: {
-    width: '100%',
+    paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalBadgeText: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0.5,
     textAlign: 'center',
   },
+  firmanteAuditBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  firmanteActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
   pdfButtonFilled: {
-    width: '100%',
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 5,
+    gap: 6,
+    height: 36,
     borderRadius: 8,
   },
   constanciaButton: {
-    width: '100%',
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    paddingVertical: 4,
+    gap: 5,
+    height: 36,
     borderRadius: 8,
     borderWidth: 1,
   },

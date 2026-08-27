@@ -15,7 +15,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/theme';
-import { supabase, DocumentoService, Usuario } from '@/services/supabase';
+import { supabase, DocumentoService, Usuario, sortUsuariosByRoleAndName } from '@/services/supabase';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { useAuth } from '@/context/AuthContext';
@@ -133,9 +133,8 @@ export default function NuevoDocumentoScreen() {
     try {
       const { data } = await supabase
         .from('usuarios')
-        .select('*')
-        .order('nombre', { ascending: true });
-      const users = data || [];
+        .select('*');
+      const users = sortUsuariosByRoleAndName(data || []);
       setEmpleados(users);
       setEmpleadosSeleccionados(users.map((u) => u.id));
     } catch (e) {
@@ -1202,18 +1201,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   empList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 8,
+    marginTop: 8,
   },
   empChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 20,
+    borderRadius: 10,
     borderWidth: 1,
+    gap: 10,
   },
   empChipText: {
     fontSize: 13,
@@ -1357,22 +1355,5 @@ const styles = StyleSheet.create({
     color: '#0284c7',
     textAlign: 'center',
     letterSpacing: 0.5,
-  },
-  empList: {
-    gap: 8,
-    marginTop: 8,
-  },
-  empChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    gap: 10,
-  },
-  empChipText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
 });

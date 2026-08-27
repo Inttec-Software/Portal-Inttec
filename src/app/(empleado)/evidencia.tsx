@@ -1566,7 +1566,7 @@ export default function EvidenciaForm() {
       </Modal>
 
       {/* MODAL DE GESTIÓN DE BORRADORES */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={draftsModalVisible}
         transparent={true}
         animationType="fade"

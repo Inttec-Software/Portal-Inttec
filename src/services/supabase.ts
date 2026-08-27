@@ -432,6 +432,23 @@ export const AuthService = {
   }
 };
 
+export const sortUsuariosByRoleAndName = (usuarios: Usuario[]): Usuario[] => {
+  const getRolePriority = (role?: string | null) => {
+    const r = (role || '').toUpperCase();
+    if (r === 'ADMIN') return 1;
+    if (r === 'DEV') return 2;
+    if (r === 'EMPLEADO') return 3;
+    return 4;
+  };
+
+  return [...usuarios].sort((a, b) => {
+    const pA = getRolePriority(a.rol);
+    const pB = getRolePriority(b.rol);
+    if (pA !== pB) return pA - pB;
+    return (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' });
+  });
+};
+
 export interface Asistencia {
   id: string;
   empleado_id: string;

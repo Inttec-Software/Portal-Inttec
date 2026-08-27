@@ -185,7 +185,7 @@ export default function SignatureCanvasModal({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal statusBarTranslucent={true} visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={[styles.container, { backgroundColor: themeColors.backgroundElement }]}>
           {/* Header */}

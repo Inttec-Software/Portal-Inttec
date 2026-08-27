@@ -23,7 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem } from '@/services/supabase';
+import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import ExpenseCard from '@/components/ExpenseCard';
@@ -348,7 +348,7 @@ export default function ReportesScreen() {
 
       setGastos(enrichedGastos);
       setProveedoresCatalog(provRes.data || []);
-      setPersonal(usersRes.data || []);
+      setPersonal(sortUsuariosByRoleAndName(usersRes.data || []));
       setVehiculos(vehList);
       setRegistrosGasolina(gasLogs);
     } catch (err: any) {
@@ -2162,7 +2162,7 @@ export default function ReportesScreen() {
 
 
       {/* MODAL 1.5 EXTRA: GESTIÓN DE VEHÍCULOS Y BITÁCORA */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={vehiculosManagerModalVisible}
@@ -2492,7 +2492,7 @@ export default function ReportesScreen() {
       </Modal>
 
       {/* MODAL 1 EXTRA: PERSONAL MANAGER */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={personalModalVisible}
@@ -2526,8 +2526,26 @@ export default function ReportesScreen() {
                     {!!item.telefono && <Text style={[styles.userEmail, { color: themeColors.textSecondary }]}>{item.telefono}</Text>}
                   </View>
                   <View style={styles.userMetaActions}>
-                    <View style={[styles.roleBadge, { backgroundColor: item.rol === 'ADMIN' ? themeColors.danger + '15' : themeColors.accent + '15' }]}>
-                      <Text style={[styles.roleText, { color: item.rol === 'ADMIN' ? themeColors.danger : themeColors.accent }]}>
+                    <View style={[
+                      styles.roleBadge, 
+                      { 
+                        backgroundColor: item.rol === 'ADMIN' 
+                          ? themeColors.danger + '18' 
+                          : item.rol === 'DEV' 
+                            ? '#8b5cf6' + '20' 
+                            : themeColors.accent + '18' 
+                      }
+                    ]}>
+                      <Text style={[
+                        styles.roleText, 
+                        { 
+                          color: item.rol === 'ADMIN' 
+                            ? themeColors.danger 
+                            : item.rol === 'DEV' 
+                              ? '#8b5cf6' 
+                              : themeColors.accent 
+                        }
+                      ]}>
                         {item.rol}
                       </Text>
                     </View>
@@ -2660,7 +2678,7 @@ export default function ReportesScreen() {
       </View>
 
       {/* Modal de Detalle/Revisión de Gasto */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={reviewModalVisible}
@@ -3225,7 +3243,7 @@ export default function ReportesScreen() {
       </Modal>
 
       {/* MODAL DE FILTRO DE FECHAS Y CALENDARIO */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="fade"
         transparent={true}
         visible={dateFilterModalVisible}
@@ -3402,6 +3420,7 @@ export default function ReportesScreen() {
       <Modal
         animationType="fade"
         transparent={true}
+        statusBarTranslucent={true}
         visible={quickEditProvModalVisible}
         onRequestClose={() => {
           if (!isSavingQuickProv) setQuickEditProvModalVisible(false);
@@ -3416,7 +3435,8 @@ export default function ReportesScreen() {
               backgroundColor: themeColors.background,
               width: '100%',
               maxWidth: 500,
-              maxHeight: '85%',
+              height: '82%',
+              maxHeight: 650,
               borderRadius: BorderRadius.large,
               padding: Spacing.three,
               borderWidth: 1,
@@ -3605,69 +3625,71 @@ export default function ReportesScreen() {
                 Proveedores Registrados ({proveedoresCatalog.filter(p => !quickEditProvSearch || (p.nombre && p.nombre.toLowerCase().includes(quickEditProvSearch.toLowerCase()))).length})
               </Text>
 
-              <FlatList
-                data={proveedoresCatalog.filter(p => {
-                  if (!quickEditProvSearch.trim()) return true;
-                  const query = quickEditProvSearch.toLowerCase();
-                  const nameMatch = p.nombre && p.nombre.toLowerCase().includes(query);
-                  const rfcMatch = p.rfc && p.rfc.toLowerCase().includes(query);
-                  return nameMatch || rfcMatch;
-                })}
-                keyExtractor={(item) => item.id}
-                keyboardShouldPersistTaps="handled"
-                style={{ flex: 1, minHeight: 120 }}
-                contentContainerStyle={{ gap: 6, paddingBottom: Spacing.two }}
-                renderItem={({ item }) => {
-                  const isCurrent = (selectedGasto?.proveedor_id === item.id) ||
-                    (GastoHelper.getProveedor(selectedGasto)?.toLowerCase() === item.nombre?.toLowerCase());
+              <View style={{ flex: 1, minHeight: 100 }}>
+                <FlatList
+                  data={proveedoresCatalog.filter(p => {
+                    if (!quickEditProvSearch.trim()) return true;
+                    const query = quickEditProvSearch.toLowerCase();
+                    const nameMatch = p.nombre && p.nombre.toLowerCase().includes(query);
+                    const rfcMatch = p.rfc && p.rfc.toLowerCase().includes(query);
+                    return nameMatch || rfcMatch;
+                  })}
+                  keyExtractor={(item) => item.id}
+                  keyboardShouldPersistTaps="handled"
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ gap: 6, paddingBottom: Spacing.two }}
+                  renderItem={({ item }) => {
+                    const isCurrent = (selectedGasto?.proveedor_id === item.id) ||
+                      (GastoHelper.getProveedor(selectedGasto)?.toLowerCase() === item.nombre?.toLowerCase());
 
-                  return (
-                    <TouchableOpacity
-                      onPress={() => handleSelectQuickProveedor(item)}
-                      disabled={isSavingQuickProv}
-                      style={{
-                        flexDirection: 'row',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        paddingVertical: 10,
-                        paddingHorizontal: 12,
-                        borderRadius: BorderRadius.medium,
-                        backgroundColor: isCurrent ? themeColors.accent + '20' : themeColors.backgroundElement,
-                        borderWidth: 1,
-                        borderColor: isCurrent ? themeColors.accent : themeColors.border,
-                      }}
-                    >
-                      <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={{
-                          fontSize: 14,
-                          fontWeight: isCurrent ? '800' : '600',
-                          color: isCurrent ? themeColors.accent : themeColors.text,
-                        }}>
-                          {item.nombre}
-                        </Text>
-                        {item.rfc ? (
-                          <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>
-                            RFC: {item.rfc}
+                    return (
+                      <TouchableOpacity
+                        onPress={() => handleSelectQuickProveedor(item)}
+                        disabled={isSavingQuickProv}
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          paddingVertical: 10,
+                          paddingHorizontal: 12,
+                          borderRadius: BorderRadius.medium,
+                          backgroundColor: isCurrent ? themeColors.accent + '20' : themeColors.backgroundElement,
+                          borderWidth: 1,
+                          borderColor: isCurrent ? themeColors.accent : themeColors.border,
+                        }}
+                      >
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={{
+                            fontSize: 14,
+                            fontWeight: isCurrent ? '800' : '600',
+                            color: isCurrent ? themeColors.accent : themeColors.text,
+                          }}>
+                            {item.nombre}
                           </Text>
-                        ) : null}
-                      </View>
-                      {isCurrent ? (
-                        <Ionicons name="checkmark-circle" size={20} color={themeColors.accent} />
-                      ) : (
-                        <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
-                      )}
-                    </TouchableOpacity>
-                  );
-                }}
-                ListEmptyComponent={
-                  <View style={{ padding: Spacing.three, alignItems: 'center', justifyContent: 'center' }}>
-                    <Ionicons name="alert-circle-outline" size={32} color={themeColors.textSecondary} />
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 13, marginTop: 6, textAlign: 'center' }}>
-                      No se encontraron proveedores que coincidan con la búsqueda.
-                    </Text>
-                  </View>
-                }
-              />
+                          {item.rfc ? (
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>
+                              RFC: {item.rfc}
+                            </Text>
+                          ) : null}
+                        </View>
+                        {isCurrent ? (
+                          <Ionicons name="checkmark-circle" size={20} color={themeColors.accent} />
+                        ) : (
+                          <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  }}
+                  ListEmptyComponent={
+                    <View style={{ padding: Spacing.three, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="alert-circle-outline" size={32} color={themeColors.textSecondary} />
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 13, marginTop: 6, textAlign: 'center' }}>
+                        No se encontraron proveedores que coincidan con la búsqueda.
+                      </Text>
+                    </View>
+                  }
+                />
+              </View>
 
               {/* Footer con opción de dejar sin proveedor */}
               <View style={{ paddingTop: Spacing.two, borderTopWidth: 1, borderTopColor: themeColors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3718,7 +3740,7 @@ export default function ReportesScreen() {
       </Modal>
 
       {/* Modal de Vinculación a Ventas al Aprobar */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={isLinkSaleModalVisible}
         animationType="slide"
         transparent={true}
@@ -4186,7 +4208,7 @@ export default function ReportesScreen() {
       </Modal>
 
       {/* Modal 1.1: Registro de Nuevo Usuario */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={addUserModalVisible}
@@ -4279,7 +4301,7 @@ export default function ReportesScreen() {
       </Modal>
 
       {/* Modal 1.2: Edición de Usuario Existente */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={editUserModalVisible}
@@ -4380,7 +4402,7 @@ export default function ReportesScreen() {
       </Modal>
 
       {/* Modal de Mi Perfil (Admin) */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={profileModalVisible}
@@ -4465,7 +4487,7 @@ export default function ReportesScreen() {
       />
 
       {/* ========== MODAL: Historial de Asistencia ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={asistenciaModalVisible}

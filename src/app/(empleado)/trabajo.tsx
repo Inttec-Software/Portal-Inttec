@@ -403,7 +403,7 @@ export default function MiTrabajoScreen() {
       )}
 
       {/* Modal de Detalle */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={modalVisible}
