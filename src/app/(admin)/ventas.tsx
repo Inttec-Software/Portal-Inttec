@@ -33,6 +33,8 @@ import { parseCFDIXML } from '@/utils/cfdiParser';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
+import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
+import { SAT_UNIDADES } from '@/constants/satCatalog';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -1329,7 +1331,17 @@ export default function VentasScreen() {
   };
 
   const handleUpdateCfdiPartida = (id: string, field: string, val: string) => {
-    setCfdiPartidas(prev => prev.map(p => p.id === id ? { ...p, [field]: val } : p));
+    setCfdiPartidas(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      const updated = { ...p, [field]: val };
+      if (field === 'clave_unidad') {
+        const u = SAT_UNIDADES.find(x => x.clave.toUpperCase() === (val || '').trim().toUpperCase());
+        if (u) {
+          updated.unidad = u.nombre;
+        }
+      }
+      return updated;
+    }));
   };
 
   const handleRemoveCfdiPartida = (id: string) => {
@@ -3928,25 +3940,23 @@ export default function VentasScreen() {
                               />
                             </View>
 
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginBottom: 2 }}>Clave SAT</Text>
-                              <TextInput
-                                style={{ height: 36, borderWidth: 1, borderColor: themeColors.border, borderRadius: 6, paddingHorizontal: 8, color: themeColors.text, backgroundColor: themeColors.backgroundElement, fontSize: 12 }}
-                                value={partida.clave_sat}
-                                onChangeText={val => handleUpdateCfdiPartida(partida.id, 'clave_sat', val)}
-                                placeholder="01010101"
-                              />
-                            </View>
+                            <SatCatalogAutocomplete
+                              tipo="producto"
+                              label="Clave SAT"
+                              value={partida.clave_sat}
+                              onChangeValue={val => handleUpdateCfdiPartida(partida.id, 'clave_sat', val)}
+                              placeholder="01010101"
+                              style={{ flex: 1.2 }}
+                            />
 
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginBottom: 2 }}>Unidad SAT</Text>
-                              <TextInput
-                                style={{ height: 36, borderWidth: 1, borderColor: themeColors.border, borderRadius: 6, paddingHorizontal: 8, color: themeColors.text, backgroundColor: themeColors.backgroundElement, fontSize: 12 }}
-                                value={partida.clave_unidad}
-                                onChangeText={val => handleUpdateCfdiPartida(partida.id, 'clave_unidad', val)}
-                                placeholder="H87"
-                              />
-                            </View>
+                            <SatCatalogAutocomplete
+                              tipo="unidad"
+                              label="Unidad SAT"
+                              value={partida.clave_unidad}
+                              onChangeValue={val => handleUpdateCfdiPartida(partida.id, 'clave_unidad', val)}
+                              placeholder="H87"
+                              style={{ flex: 1 }}
+                            />
                           </View>
 
                           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 2 }}>
