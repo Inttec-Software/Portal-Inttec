@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import { GastoHelper } from './supabase';
+import { getApiUrl, getApiHeaders } from './apiHelper';
 
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 

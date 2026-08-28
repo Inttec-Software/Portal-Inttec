@@ -1,5 +1,8 @@
-import { AuthService, CompanyService, EnvService } from './supabase';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+
+const isBrowser = Platform.OS !== 'web' || typeof window !== 'undefined';
 
 export const resolveLocalhost = (url: string) => {
   if (__DEV__ && url && (url.includes('localhost') || url.includes('127.0.0.1'))) {
@@ -13,9 +16,19 @@ export const resolveLocalhost = (url: string) => {
 };
 
 export const getApiHeaders = async () => {
-  const token = await AuthService.getToken();
-  const company = CompanyService.getActiveCompany();
-  const env = EnvService.getActiveEnv();
+  let company = 'inttec';
+  let env = 'prod';
+  let token = null;
+
+  try {
+    if (isBrowser) {
+      company = (await AsyncStorage.getItem('active_company')) || 'inttec';
+      env = (await AsyncStorage.getItem('active_env')) || 'prod';
+      token = await AsyncStorage.getItem(`jwt_token_${company}`);
+    }
+  } catch (e) {
+    console.warn('Error reading auth state from AsyncStorage in apiHelper', e);
+  }
   
   return {
     'Content-Type': 'application/json',

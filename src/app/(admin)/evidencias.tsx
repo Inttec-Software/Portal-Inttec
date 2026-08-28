@@ -639,6 +639,16 @@ export default function AdminEvidenciasScreen() {
                 {/* Acciones */}
                 <View style={styles.modalActionContainer}>
                   <CustomButton
+                    title="EDITAR REPORTE"
+                    onPress={() => {
+                      setModalVisible(false);
+                      router.push(`/(admin)/editar-evidencia?id=${selectedEvidencia.id}`);
+                    }}
+                    variant="secondary"
+                    icon={<Ionicons name="create-outline" size={20} color={themeColors.text} style={{ marginRight: 8 }} />}
+                    style={{ marginBottom: Spacing.two }}
+                  />
+                  <CustomButton
                     title="EXPORTAR REPORTE (PDF)"
                     onPress={() => handleExportPDF(selectedEvidencia)}
                     loading={isExporting}

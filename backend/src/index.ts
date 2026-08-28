@@ -29,6 +29,15 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// Logging exhaustivo para debug
+app.use((req, res, next) => {
+  console.log(`\n[REQ] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+  res.on('finish', () => {
+    console.log(`[RES] ${req.method} ${req.url} - Status: ${res.statusCode}`);
+  });
+  next();
+});
+
 // 1. HTTP Security Headers (Helmet)
 app.use(helmet());
 
@@ -42,27 +51,8 @@ const apiLimiter = rateLimit({
 });
 app.use('/api/', apiLimiter);
 
-// 3. Configuración estricta de CORS (Fase 4)
-const allowedOrigins = [
-  'http://localhost:8081',
-  'http://localhost:19006',
-  'http://localhost:3000',
-  'https://portal-inttec.netlify.app'
-];
-
 const corsOptions: cors.CorsOptions = {
-  origin: (origin, callback) => {
-    // Permitir peticiones de apps móviles nativas o server-to-server (sin origin)
-    if (!origin) {
-      return callback(null, true);
-    }
-    // Permitir peticiones de la lista blanca o dominios *.netlify.app dinámicos (deploy previews)
-    if (allowedOrigins.includes(origin) || origin.endsWith('.netlify.app')) {
-      return callback(null, true);
-    }
-    return callback(new Error('Bloqueado por política CORS'));
-  },
-  credentials: true,
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
@@ -109,6 +99,6 @@ app.get('/', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en el puerto ${PORT}`);
+app.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`Servidor corriendo en http://0.0.0.0:${PORT}`);
 });

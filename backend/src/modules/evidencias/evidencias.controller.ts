@@ -6,7 +6,8 @@ export const getCatalogos = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const { company, env, user } = tenant;
+    const { company, env } = tenant;
+    const user = req.user;
     const client = getSupabaseClient(company, env);
 
     const [cliRes, sucRes, prodRes] = await Promise.all([
@@ -35,7 +36,8 @@ export const crearEvidencia = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const { company, env, user } = tenant;
+    const { company, env } = tenant;
+    const user = req.user;
     const client = getSupabaseClient(company, env);
 
     const {
@@ -139,6 +141,104 @@ export const getAdminEvidencias = async (req: Request, res: Response) => {
       employees: employeesRes.data || []
     });
 
+  } catch (error: any) {
+    console.error('[GET MIS EVIDENCIAS ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// 4. GET /api/evidencias/mis-evidencias
+export const getMisEvidencias = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const user = req.user;
+    const client = getSupabaseClient(company, env);
+
+    if (!user) {
+      return res.status(401).json({ error: 'No autorizado' });
+    }
+
+    const { data, error } = await client
+      .from('evidencias')
+      .select('*')
+      .eq('empleado_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return res.json({ evidencias: data || [] });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// 5. PUT /api/evidencias/admin/:id
+export const actualizarEvidencia = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const user = req.user;
+    const client = getSupabaseClient(company, env);
+    const { id } = req.params;
+
+    if (!user || (user.rol !== 'ADMIN' && user.rol !== 'DEV')) {
+      return res.status(401).json({ error: 'No autorizado' });
+    }
+
+    const {
+      cliente,
+      descripcion_trabajo,
+      materiales_usados,
+      observaciones,
+      foto_antes_url,
+      foto_despues_url,
+      fotos_adicionales_urls,
+    } = req.body;
+
+    const { data, error } = await client
+      .from('evidencias')
+      .update({
+        cliente,
+        descripcion_trabajo,
+        materiales_usados,
+        observaciones,
+        foto_antes_url,
+        foto_despues_url,
+        fotos_adicionales_urls,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return res.json(data);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// 6. GET /api/evidencias/admin/:id
+export const getAdminEvidenciaById = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+    const { id } = req.params;
+
+    const { data, error } = await client
+      .from('evidencias')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+
+    return res.json({ evidencia: data });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

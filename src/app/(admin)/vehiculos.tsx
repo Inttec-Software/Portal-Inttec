@@ -169,10 +169,7 @@ export default function AdminVehiculosScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-          <TouchableOpacity onPress={() => router.back()} style={{ marginRight: Spacing.three, padding: Spacing.one }}>
-            <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-          </TouchableOpacity>
-          <View>
+          <View style={{ marginLeft: Spacing.two }}>
             <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary }]}>Administración</Text>
             <Text style={[styles.headerTitle, { color: themeColors.text }]}>Módulo de Flota</Text>
           </View>

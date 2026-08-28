@@ -312,8 +312,21 @@ export default function AdminGastosScreen() {
     }
     try {
       const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/admin/all`, { headers });
-      if (!res.ok) throw new Error('Error al cargar datos');
+      const apiUrl = getApiUrl();
+      const fetchUrl = `${apiUrl}/api/reportes/admin/all`;
+      const res = await fetch(fetchUrl, { headers });
+      
+      if (res.status === 401) {
+         // Token expirado o nulo, forzar logout
+         await require('@/services/supabase').AuthService.logout();
+         require('expo-router').router.replace('/');
+         return;
+      }
+      
+      if (!res.ok) {
+         const errText = await res.text();
+         throw new Error(`HTTP ${res.status} en ${fetchUrl} - Detalle: ${errText}`);
+      }
       const data = await res.json();
 
       setGastos(data.gastos || []);

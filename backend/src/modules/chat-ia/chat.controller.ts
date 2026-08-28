@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getSupabaseClient } from '../../config/supabase';
+import { GoogleGenAI } from '@google/genai';
 
 const safeFetch = async (client: any, table: string) => {
   try {
@@ -193,5 +194,52 @@ export const getEmployeeChatContext = async (req: Request, res: Response) => {
     return res.json({ context });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
+  }
+};
+
+// === POST /api/chat-ia/mejorar-redaccion ===
+export const mejorarRedaccion = async (req: Request, res: Response) => {
+  try {
+    const { texto, tipo } = req.body;
+    if (!texto) {
+      return res.status(400).json({ error: 'Falta el texto a mejorar' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY no está configurada en el servidor' });
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    
+    let reglasEspeciales = '';
+    if (tipo === 'situacion') {
+      reglasEspeciales = '- Asegúrate de que la redacción comience exactamente con "Se solicitó " (o similar) y luego continúa con la redacción, ajustando el verbo principal.';
+    } else if (tipo === 'solucion') {
+      reglasEspeciales = '- Asegúrate de que la redacción comience exactamente con "Se realizó " (o similar) y luego continúa con la redacción, ajustando el verbo principal.';
+    }
+
+    const prompt = `
+Corrige la ortografía y mejora la redacción del siguiente texto técnico de un reporte de mantenimiento.
+Instrucciones:
+- Mantén el tono profesional y técnico.
+- No agregues ni inventes información nueva ni quites hechos.
+- Si el texto está en formato de viñetas, devuélvelo en formato de viñetas usando guiones (-).
+${reglasEspeciales}
+- Retorna ÚNICAMENTE el texto mejorado, sin introducciones ni comentarios adicionales.
+
+Texto original:
+"${texto}"
+`;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+    });
+    
+    return res.json({ textoMejorado: response.text });
+  } catch (error: any) {
+    console.error('Error mejorando redacción:', error);
+    return res.status(500).json({ error: error.message || 'Error al procesar el texto con IA' });
   }
 };
