@@ -337,13 +337,27 @@ export default function VentasScreen() {
 
       // Cargar catálogo de clientes y sucursales
       try {
-        const headers = await getApiHeaders();
-        const res = await fetch(`${getApiUrl()}/api/ventas/catalogs`, { headers });
-        if (res.ok) {
-          const data = await res.json();
-          setClientes(data.clientes || []);
-          setSucursalesCliente(data.sucursales || []);
-        }
+        // 1. Intentar API backend
+        try {
+          const headers = await getApiHeaders();
+          const res = await fetch(`${getApiUrl()}/api/ventas/catalogs`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.clientes) && data.clientes.length > 0) {
+              setClientes(data.clientes);
+              setSucursalesCliente(data.sucursales || []);
+              return;
+            }
+          }
+        } catch (_) {}
+
+        // 2. Fallback resiliente directo a Supabase
+        const [{ data: clientesData }, { data: sucursalesData }] = await Promise.all([
+          supabase.from('clientes').select('*').order('nombre'),
+          supabase.from('sucursales').select('*').order('nombre'),
+        ]);
+        if (clientesData) setClientes(clientesData);
+        if (sucursalesData) setSucursalesCliente(sucursalesData);
       } catch (err) {
         console.error('Error loading catalogs:', err);
       }
@@ -421,11 +435,28 @@ export default function VentasScreen() {
   const loadHistorial = async () => {
     setIsLoadingHistorial(true);
     try {
-      const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/ventas/historial`, { headers });
-      if (!res.ok) throw new Error('Error al cargar historial de ventas');
-      const data = await res.json();
-      setVentasHistorial(data.ventas || []);
+      // 1. Intentar API backend (/api/ventas/historial)
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/historial`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.ventas)) {
+            setVentasHistorial(data.ventas);
+            return;
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fallback resiliente directo a Supabase
+      const { data, error } = await supabase
+        .from('ventas')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        setVentasHistorial(data as any);
+      }
     } catch (err: any) {
       console.error('Error loading sales history:', err);
     } finally {
