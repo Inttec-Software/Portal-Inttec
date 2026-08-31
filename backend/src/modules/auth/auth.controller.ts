@@ -18,7 +18,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const supabase = getSupabaseClient(company, env);
 
     // Llamamos al RPC custom que ya existía en la BD para validar credenciales
-    const { data: usuario, error } = await supabase
+    let { data: usuario, error } = await supabase
       .rpc('login_usuario', {
         email_param: email.trim().toLowerCase(),
         password_param: password,
@@ -26,9 +26,28 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       .maybeSingle();
 
     if (error) {
-      console.error('[Auth Controller] Error de Supabase:', error.message);
-      res.status(500).json({ message: 'Error de conexión con la base de datos.' });
-      return;
+      console.error('[Auth Controller] Error de Supabase RPC:', error.message);
+      // No devolvemos error 500 aquí para intentar el fallback manual
+    }
+
+    // Fallback manual si el RPC falla o retorna null (problema detectado en la BD de Daravisa)
+    if (!usuario) {
+      const { data: manualUser, error: manualError } = await supabase
+        .from('usuarios')
+        .select('id, nombre, email, rol, telefono, created_at')
+        .eq('email', email.trim().toLowerCase())
+        .eq('password', password)
+        .maybeSingle();
+
+      if (manualError) {
+        console.error('[Auth Controller] Error de Supabase Fallback:', manualError.message);
+        res.status(500).json({ message: 'Error de conexión con la base de datos.' });
+        return;
+      }
+
+      if (manualUser) {
+        usuario = manualUser;
+      }
     }
 
     if (!usuario) {

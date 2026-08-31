@@ -56,6 +56,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const currentEmail = user?.email;
       const currentRole = user?.rol;
+
+      // Copiar el token JWT al nuevo entorno ANTES de cambiar la empresa
+      // para que getApiHeaders() pueda enviarlo en las llamadas de catálogo.
+      const currentToken = await AsyncStorage.getItem(`jwt_token_${company}`);
+      if (currentToken) {
+        await AsyncStorage.setItem(`jwt_token_${newCompany}`, currentToken);
+      }
+
       await CompanyService.setActiveCompany(newCompany);
       setCompanyState(newCompany);
       
@@ -80,12 +88,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           await AsyncStorage.setItem(`logged_user_${newCompany}`, JSON.stringify(dbUser));
-          
-          // Copiar también el token JWT al nuevo entorno
-          const currentToken = await AsyncStorage.getItem(`jwt_token_${company}`);
-          if (currentToken) {
-            await AsyncStorage.setItem(`jwt_token_${newCompany}`, currentToken);
-          }
           
           currentUser = dbUser as Usuario;
         } else {
