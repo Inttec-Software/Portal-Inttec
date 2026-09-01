@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { AuthService, supabase } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 
 import CustomButton from '@/components/CustomButton';
@@ -70,14 +71,16 @@ export default function DevolucionesEmpleadoScreen() {
   const loadInventario = async (userId: string) => {
     try {
       setIsLoading(true);
-      const { data, error } = await supabase
-        .from('inventario_empleados')
-        .select('id, producto_id, cantidad_disponible, producto:productos(nombre_oficial, sku_interno)')
-        .eq('empleado_id', userId)
-        .gt('cantidad_disponible', 0)
-        .order('updated_at', { ascending: false });
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/devoluciones/inventario?userId=${userId}`, { headers });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('[loadInventario Error]', res.status, errorText);
+        throw new Error(errorText || 'Error al cargar inventario');
+      }
+      const json = await res.json();
+      const data = json.inventario;
 
-      if (error) throw error;
       setInventario((data as any) || []);
       
       // Inicializar el arreglo de devolución
@@ -127,24 +130,19 @@ export default function DevolucionesEmpleadoScreen() {
         estado: 'PENDIENTE'
       };
 
-      const { error } = await supabase.from('devoluciones_empleado').insert([payload]);
-      
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/devoluciones/solicitar`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          payload,
+          materiales: aDevolver
+        })
+      });
 
-      // Descontar inmediatamente del inventario del empleado para bloquearlo
-      for (const m of aDevolver) {
-        if (m.devolver > 0) {
-          const { data: invData } = await supabase.from('inventario_empleados').select('id, cantidad_disponible')
-            .eq('empleado_id', currentUser.id)
-            .eq('producto_id', m.productoId)
-            .maybeSingle();
-            
-          if (invData) {
-            await supabase.from('inventario_empleados').update({
-              cantidad_disponible: Math.max(0, invData.cantidad_disponible - m.devolver)
-            }).eq('id', invData.id);
-          }
-        }
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Error al enviar la solicitud');
       }
 
       Alert.alert('Éxito', 'Tu solicitud de devolución ha sido enviada al administrador.');

@@ -21,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import {
   supabase,
@@ -216,23 +217,19 @@ export default function GastoForm() {
 
   const loadCatalogos = async () => {
     try {
-      const [catRes, subRes, cliRes, usrRes, vehList, sucRes, provRes] = await Promise.all([
-        supabase.from('categorias').select('*').order('nombre'),
-        supabase.from('subcategorias').select('*').order('nombre'),
-        supabase.from('clientes').select('*').order('nombre'),
-        supabase.from('usuarios').select('*').order('nombre'),
-        VehiculoService.getVehiculos(true),
-        supabase.from('sucursales_cliente').select('*').order('nombre'),
-        supabase.from('proveedores').select('*').order('nombre'),
-      ]);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/form-catalogs`, { headers });
+      if (!res.ok) throw new Error('Error al cargar catálogos del formulario');
+      const data = await res.json();
+      const vehList = await VehiculoService.getVehiculos(true);
 
-      if (catRes.data) setCategorias(catRes.data);
-      if (subRes.data) setSubcategorias(subRes.data);
-      if (cliRes.data) setClientes(cliRes.data);
-      if (usrRes.data) setAllUsers(usrRes.data);
+      if (data.categorias) setCategorias(data.categorias);
+      if (data.subcategorias) setSubcategorias(data.subcategorias);
+      if (data.clientes) setClientes(data.clientes);
+      if (data.usuarios) setAllUsers(data.usuarios);
       if (vehList) setVehiculos(vehList);
-      if (sucRes.data) setSucursalesCliente(sucRes.data);
-      if (provRes.data) setProveedores(provRes.data);
+      if (data.sucursales) setSucursalesCliente(data.sucursales);
+      if (data.proveedores) setProveedores(data.proveedores);
     } catch (err) {
       console.error('Error loading catalogs:', err);
     }
@@ -856,39 +853,37 @@ export default function GastoForm() {
           }
         ];
 
-        const { data: insertedGastos, error: dbError } = await supabase
-          .from('gastos')
-          .insert(payloadsToInsert)
-          .select();
-
-        if (dbError) throw dbError;
-
-        // Si es combustible, guardar bitácora de gasolina vinculada y sincronizar kilometraje en ambas empresas
         const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
-        if (esGasolina && insertedGastos && insertedGastos.length > 0) {
-          const mainGastoId = insertedGastos[0].id;
-          const { error: gasError } = await supabase
-            .from('registro_gasolina')
-            .insert([
-              {
-                gasto_id: mainGastoId,
-                vehiculo_id: selectedVehiculoId,
-                empleado_id: currentUser.id,
-                fecha: dbFecha,
-                kilometraje_actual: Number(kilometrajeActual),
-                litros: Number(litrosGasolina),
-                costo_total: totalGasto,
-                ticket_foto_url: publicUrl || null,
-              },
-            ]);
+        let gasolinaPayload = null;
 
-          if (gasError) {
-            console.error('Error insertando en registro_gasolina:', gasError.message);
-          } else {
-            const vehiculoObj = vehiculos.find((v) => v.id === selectedVehiculoId);
-            if (vehiculoObj?.placas) {
-              await VehiculoService.syncVehiculoKilometraje(vehiculoObj.placas, Number(kilometrajeActual));
-            }
+        if (esGasolina) {
+          gasolinaPayload = {
+            vehiculo_id: selectedVehiculoId,
+            empleado_id: currentUser.id,
+            fecha: dbFecha,
+            kilometraje_actual: Number(kilometrajeActual),
+            litros: Number(litrosGasolina),
+            costo_total: totalGasto,
+            ticket_foto_url: publicUrl || null,
+          };
+        }
+
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/reportes/gastos`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ payloadsToInsert, gasolinaPayload })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Error al guardar el gasto');
+        }
+
+        if (esGasolina) {
+          const vehiculoObj = vehiculos.find((v) => v.id === selectedVehiculoId);
+          if (vehiculoObj?.placas) {
+            await VehiculoService.syncVehiculoKilometraje(vehiculoObj.placas, Number(kilometrajeActual));
           }
         }
 
@@ -936,7 +931,7 @@ export default function GastoForm() {
         );
       }
 
-      router.replace('/(admin)/dashboard');
+      router.replace('/(admin)/gastos');
     } catch (err: any) {
       const errorDetails = err?.message || err?.details || err?.hint || (typeof err === 'object' ? JSON.stringify(err) : String(err));
       console.error('Error al guardar gasto:', errorDetails);
@@ -1000,21 +995,21 @@ export default function GastoForm() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       {/* Header */}
       <View style={styles.header}>
-        
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Registrar Gasto</Text>
         <View style={{ width: 40 }} />
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
         style={{ flex: 1 }}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 120 }]}
           keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled={true}
         >
           <Pressable
             onPress={() => {
@@ -1381,7 +1376,8 @@ export default function GastoForm() {
                     value={dateValue}
                     mode="date"
                     display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={onChangeDate}
+                    onValueChange={onChangeDate}
+                    onDismiss={() => setShowDatePicker(false)}
                     maximumDate={new Date()}
                   />
                   {Platform.OS === 'ios' && (
@@ -2273,9 +2269,15 @@ export default function GastoForm() {
                   <Ionicons name={showCatDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showCatDropdown && (
-                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                  <View style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      <ScrollView
+                        nestedScrollEnabled={true}
+                        style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                        keyboardShouldPersistTaps="always"
+                        showsVerticalScrollIndicator={true}
+                        bounces={false}
+                      >
                         {categorias.map((cat, index, array) => (
                           <TouchableOpacity
                             key={cat.id}
@@ -2296,7 +2298,7 @@ export default function GastoForm() {
                         ))}
                       </ScrollView>
                     </View>
-                  </Pressable>
+                  </View>
                 )}
               </View>
 
@@ -2319,9 +2321,15 @@ export default function GastoForm() {
                     <Ionicons name={showSubDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                   </TouchableOpacity>
                   {showSubDropdown && (
-                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                    <View style={{ width: '100%', zIndex: 1000 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        <ScrollView
+                          nestedScrollEnabled={true}
+                          style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                          keyboardShouldPersistTaps="always"
+                          showsVerticalScrollIndicator={true}
+                          bounces={false}
+                        >
                           {filteredSubcategorias.length > 0 ? (
                             filteredSubcategorias.map((sub, index, array) => (
                               <TouchableOpacity
@@ -2347,7 +2355,7 @@ export default function GastoForm() {
                           )}
                         </ScrollView>
                       </View>
-                    </Pressable>
+                    </View>
                   )}
                 </View>
               )}
@@ -2481,7 +2489,7 @@ export default function GastoForm() {
           setActivePreviewUrl(null);
         }}
       />
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={showSplitModal}
         transparent={true}
         animationType="slide"
@@ -2779,7 +2787,7 @@ export default function GastoForm() {
       </Modal>
 
       {/* Modal Crear Proveedor (Admin Directo) */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={modalNuevoProveedorVisible}
@@ -2848,7 +2856,6 @@ export default function GastoForm() {
           </KeyboardAvoidingView>
         </Pressable>
       </Modal>
-    </ScrollView>
     </SafeAreaView>
   );
 }

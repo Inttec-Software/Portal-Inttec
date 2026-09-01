@@ -80,7 +80,7 @@ const preparePdfImage = async (uriOrBase64: string): Promise<string> => {
     // Si es un base64 sin prefijo
     if (
       clean.includes('base64,') || 
-      (!clean.startsWith('http://') && !clean.startsWith('https://') && !clean.startsWith('file:') && !clean.startsWith('content:') && !clean.startsWith('/'))
+      (!clean.startsWith('http://') && !clean.startsWith('https://') && !clean.startsWith('file:') && !clean.startsWith('content:') && !clean.startsWith('/') && !clean.startsWith('blob:'))
     ) {
       inputUri = clean.startsWith('data:') ? clean : `data:image/jpeg;base64,${clean}`;
     }
@@ -98,7 +98,7 @@ const preparePdfImage = async (uriOrBase64: string): Promise<string> => {
     return manipulated.uri || clean;
   } catch (err) {
     console.warn('Could not downsample image for PDF, returning fallback:', err);
-    if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('file:') || clean.startsWith('content:')) {
+    if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('file:') || clean.startsWith('content:') || clean.startsWith('blob:')) {
       return clean;
     }
     return `data:image/jpeg;base64,${clean}`;
@@ -111,9 +111,11 @@ export const EvidenceReportGenerator = {
     userName: string,
     fotosAdicionales: string[] = []
   ): Promise<void> {
-    const fecha = evidencia.created_at
-      ? new Date(evidencia.created_at).toLocaleString('es-MX')
-      : new Date().toLocaleString('es-MX');
+    const dateObj = evidencia.created_at ? new Date(evidencia.created_at) : new Date();
+    const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    const fecha = `${dateObj.getDate()} de ${meses[dateObj.getMonth()]} del ${dateObj.getFullYear()}`;
+
+
 
     const textToBulletPoints = (text: string): string => {
       if (!text) return '';
@@ -132,6 +134,7 @@ export const EvidenceReportGenerator = {
     let listTrabajos: { 
       descripcion: string; 
       materiales?: string | null; 
+      materiales_usados?: any[] | null;
       observaciones?: string | null; 
       solucion?: string | null; 
       antesImg?: string | null; 
@@ -152,7 +155,8 @@ export const EvidenceReportGenerator = {
     if (!isMultiple) {
       listTrabajos = [{
         descripcion: evidencia.descripcion_trabajo || '',
-        materiales: evidencia.materiales_usados,
+        materiales: typeof evidencia.materiales_usados === 'string' ? evidencia.materiales_usados : null,
+        materiales_usados: Array.isArray(evidencia.materiales_usados) ? evidencia.materiales_usados : null,
         observaciones: evidencia.observaciones,
         antesImg: evidencia.foto_antes_url,
         despuesImg: evidencia.foto_despues_url,
@@ -182,281 +186,208 @@ export const EvidenceReportGenerator = {
       })
     );
 
-    // Optimizar fotos adicionales globales si se pasaron por separado
-    const validExtras = (fotosAdicionales || []).filter(Boolean);
-    const optimizedExtras: string[] = [];
-    const BATCH_SIZE = 4;
-    for (let i = 0; i < validExtras.length; i += BATCH_SIZE) {
-      const chunk = validExtras.slice(i, i + BATCH_SIZE);
-      const processed = await Promise.all(chunk.map(f => preparePdfImage(f)));
-      optimizedExtras.push(...processed.filter(Boolean));
-    }
+    // Se eliminó la optimización de fotos adicionales globales porque ya no se renderizan
 
-    // Renderizar exactamente 2 fotos grandes por hoja (página independiente)
-    const renderPhotoPages = (photos: string[], sectionTitle: string) => {
-      const cleanPhotos = (photos || []).filter(Boolean);
-      if (cleanPhotos.length === 0) return '';
-      let pagesHtml = '';
-      const PHOTOS_PER_PAGE = 2; // 2 fotos de tamaño grande por hoja
-      
-      for (let i = 0; i < cleanPhotos.length; i += PHOTOS_PER_PAGE) {
-        const pagePhotos = cleanPhotos.slice(i, i + PHOTOS_PER_PAGE);
-        const startIdx = i + 1;
-        const endIdx = i + pagePhotos.length;
-        const pageSubtitle = pagePhotos.length === 1 
-          ? `Foto ${startIdx} de ${cleanPhotos.length}` 
-          : `Fotos ${startIdx} y ${endIdx} de ${cleanPhotos.length}`;
-
-        pagesHtml += `
-          <div class="photo-page" style="page-break-before: always; page-break-inside: avoid; padding-top: 15px;">
-            <div class="photo-page-header" style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #1a365d; padding-bottom: 6px; margin-bottom: 18px;">
-              <div style="font-size: 14px; font-weight: 800; color: #1a365d; text-transform: uppercase; letter-spacing: 0.5px;">
-                ${sectionTitle}
-              </div>
-              <div style="font-size: 11px; font-weight: 700; color: #718096;">
-                ${pageSubtitle}
-              </div>
-            </div>
-
-            <div style="display: flex; flex-direction: column; gap: 20px;">
-              ${pagePhotos.map((imgSrc, pIdx) => `
-                <div class="large-photo-card" style="border: 1px solid #cbd5e0; border-radius: 8px; background-color: #ffffff; overflow: hidden; page-break-inside: avoid;">
-                  <div style="font-size: 12px; font-weight: 700; color: #2d3748; background-color: #f1f5f9; padding: 8px 14px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
-                    <span>Fotografía #${i + pIdx + 1}</span>
-                    <span style="font-size: 10px; color: #64748b; font-weight: 600;">Evidencia de Trabajo</span>
-                  </div>
-                  <div style="height: 380px; display: flex; align-items: center; justify-content: center; background-color: #f8fafc; padding: 10px;">
-                    <img src="${imgSrc}" alt="Foto #${i + pIdx + 1}" style="max-width: 100%; max-height: 380px; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;" />
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        `;
-      }
-      return pagesHtml;
-    };
+    // Se eliminó renderPhotoPages porque las fotos ahora se renderizan inline en cada trabajo
 
     let trabajosHtml = '';
-    let perJobPhotoAnnexesHtml = '';
 
     if (optimizedTrabajos.length > 0) {
       trabajosHtml = optimizedTrabajos.map((t, idx) => {
-        if (t.fotosAdicionales && t.fotosAdicionales.length > 0) {
-          const jobTitle = optimizedTrabajos.length > 1 ? `Anexo Fotográfico - Trabajo #${idx + 1}` : 'Anexo Fotográfico de Evidencia';
-          perJobPhotoAnnexesHtml += renderPhotoPages(t.fotosAdicionales, jobTitle);
+        // Unificar todas las fotos en un solo arreglo limpio
+        const todasLasFotos = [t.antesImg, t.despuesImg, ...(t.fotosAdicionales || [])].filter(Boolean) as string[];
+        
+        let fotosHtml = '';
+        if (todasLasFotos.length > 0) {
+          if (todasLasFotos.length === 1) {
+            fotosHtml = `
+              <div style="margin-top: 15px; text-align: center; page-break-inside: avoid;">
+                <img src="${todasLasFotos[0]}" style="max-width: 100%; max-height: 400px; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;" />
+              </div>
+            `;
+          } else {
+            // Usar inline-block para compatibilidad universal de 2 columnas
+            fotosHtml = `
+              <div style="margin-top: 15px; text-align: center;">
+                ${todasLasFotos.map(img => `
+                  <div style="display: inline-block; width: 48%; margin: 0 0.5% 15px 0.5%; vertical-align: top; page-break-inside: avoid;">
+                    <img src="${img}" style="width: 100%; height: 350px; object-fit: contain; border-radius: 4px; display: block;" />
+                  </div>
+                `).join('')}
+              </div>
+            `;
+          }
         }
 
         return `
-          <div style="margin-bottom: 25px; page-break-inside: avoid;">
-            ${optimizedTrabajos.length > 1 ? `
-              <div style="background-color: #edf2f7; padding: 6px 10px; border-radius: 4px; font-size: 14px; font-weight: 800; color: #2d3748; margin-bottom: 12px; border-left: 4px solid #3182ce;">
-                TRABAJO #${idx + 1}
+          <div style="margin-bottom: 30px; page-break-inside: auto;">
+            <h2 style="font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #000;">
+              Situación encontrada
+            </h2>
+            <div style="font-size: 16px; margin-bottom: 12px; color: #000; line-height: 1.5;">
+                ${parseMarkdownToHtml(t.descripcion || '')}
               </div>
-            ` : ''}
-            <h2 style="font-size: 18px; font-weight: bold; color: #000; margin-bottom: 8px; margin-top: 0;">Situación encontrada</h2>
-            <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5; padding-left: 2px;">
-              ${parseMarkdownToHtml(t.descripcion || '')}
+              
+              ${(t.solucion || t.observaciones) ? `
+              <h3 style="font-size: 18px; font-weight: bold; color: #000; margin-bottom: 4px; margin-top: 0;">Solución:</h3>
+              <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5;">
+                ${textToBulletPoints(t.solucion || t.observaciones || '')}
+              </div>
+              ` : ''}
+
+              ${(t.materiales_usados && Array.isArray(t.materiales_usados) && t.materiales_usados.length > 0) ? `
+              <h3 style="font-size: 18px; font-weight: bold; color: #000; margin-bottom: 4px; margin-top: 0;">Material:</h3>
+              <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5;">
+                <ul style="margin: 4px 0; padding-left: 18px; list-style-type: none;">
+                  ${t.materiales_usados.map((m: any) => `<li style="margin-bottom: 6px; position: relative;"><span style="position: absolute; left: -14px;">৹</span>${m.usado}x ${m.nombre}</li>`).join('\n')}
+                </ul>
+              </div>
+              ` : t.materiales ? `
+              <h3 style="font-size: 18px; font-weight: bold; color: #000; margin-bottom: 4px; margin-top: 0;">Material:</h3>
+              <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5;">
+                ${textToBulletPoints(t.materiales.replace(/Sobrante.*?(?=\n|$)/g, '').replace(/Retirado.*?(?=\n|$)/g, ''))}
+              </div>
+              ` : ''}
             </div>
             
-            ${(t.solucion || t.observaciones) ? `
-            <h3 style="font-size: 16px; font-weight: bold; color: #000; margin-bottom: 4px; margin-top: 0;">Solución:</h3>
-            <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5;">
-              ${textToBulletPoints(t.solucion || t.observaciones || '')}
-            </div>
-            ` : ''}
-
-            ${t.materiales ? `
-            <h3 style="font-size: 16px; font-weight: bold; color: #000; margin-bottom: 4px; margin-top: 0;">Material:</h3>
-            <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5;">
-              ${textToBulletPoints(t.materiales)}
-            </div>
-            ` : ''}
-
-            ${(t.antesImg || t.despuesImg) ? `
-            <table style="width: 100%; border-collapse: separate; border-spacing: 12px 0; margin-top: 15px; border: none;">
-              <tr>
-                ${t.antesImg ? `
-                  <td style="width: 50%; vertical-align: top; padding: 0; border: none;">
-                    <div class="evidence-card" style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background-color: #f7fafc;">
-                      <div class="card-header antes" style="font-size: 11px; font-weight: 800; text-align: center; padding: 6px; color: #ffffff; background-color: #e53e3e; letter-spacing: 0.5px;">ESTADO ANTES</div>
-                      <div class="image-wrapper" style="height: 220px; display: flex; align-items: center; justify-content: center; background-color: #f1f5f9; padding: 8px;">
-                        <img src="${t.antesImg}" alt="Antes del trabajo" style="max-width: 100%; max-height: 220px; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;" />
-                      </div>
-                    </div>
-                  </td>
-                ` : ''}
-                ${t.despuesImg ? `
-                  <td style="width: 50%; vertical-align: top; padding: 0; border: none;">
-                    <div class="evidence-card" style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background-color: #f7fafc;">
-                      <div class="card-header despues" style="font-size: 11px; font-weight: 800; text-align: center; padding: 6px; color: #ffffff; background-color: #38a169; letter-spacing: 0.5px;">ESTADO DESPUÉS</div>
-                      <div class="image-wrapper" style="height: 220px; display: flex; align-items: center; justify-content: center; background-color: #f1f5f9; padding: 8px;">
-                        <img src="${t.despuesImg}" alt="Después del trabajo" style="max-width: 100%; max-height: 220px; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;" />
-                      </div>
-                    </div>
-                  </td>
-                ` : ''}
-              </tr>
-            </table>
-            ` : ''}
+            ${fotosHtml}
           </div>
         `;
       }).join('');
     }
 
-    const globalExtrasHtml = renderPhotoPages(optimizedExtras, 'Anexo Fotográfico General');
+    // Título principal con el nombre de la sucursal o el cliente
+    const tituloPrincipal = `Reporte de mantenimiento ${(evidencia as any).sucursal_nombre ? 'sucursal ' + (evidencia as any).sucursal_nombre : (evidencia.cliente || '')}`;
 
     const htmlContent = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8" />
-        <title>Hoja de servicio - ${evidencia.cliente || 'General'}</title>
+        <title>Reporte de mantenimiento - ${evidencia.cliente || 'General'}</title>
         <style>
-          * {
-            box-sizing: border-box;
-          }
+          * { box-sizing: border-box; }
           body {
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            color: #2b2d42;
+            font-family: 'Calibri', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #000000;
             margin: 0;
-            padding: 20px;
+            padding: 15mm 15mm 25mm 15mm;
             line-height: 1.4;
             background-color: #ffffff;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
-          @media print {
-            body {
-              padding: 0 !important;
-              margin: 0 !important;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-            @page {
-              size: letter;
-              margin: 12mm 10mm;
-            }
-            .photo-page {
-              page-break-before: always !important;
-              page-break-inside: avoid !important;
-            }
-            .large-photo-card {
-              page-break-inside: avoid !important;
-            }
+          @page {
+            size: letter;
+            margin: 0;
           }
-          .header-container {
+          table.report-container {
+            width: 100%;
+          }
+          thead.report-header {
+            display: table-header-group;
+          }
+          tfoot.report-footer {
+            display: table-footer-group;
+          }
+          .header-inner {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 3px solid #1a365d;
-            padding-bottom: 12px;
+            padding-bottom: 15px;
             margin-bottom: 15px;
+            border-bottom: 2px solid #000;
           }
-          .report-title {
-            font-size: 15px;
-            font-weight: 800;
-            color: #1a365d;
-            text-transform: uppercase;
-            margin: 0;
-            letter-spacing: 0.5px;
-          }
-          .report-meta {
-            font-size: 10px;
-            color: #718096;
-            margin-top: 2px;
-          }
-          .info-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 15px;
-          }
-          .info-table td {
-            padding: 6px 10px;
-            font-size: 11px;
-          }
-          .info-table td.label {
-            font-weight: 700;
-            color: #4a5568;
-            width: 25%;
-            background-color: #f7fafc;
-            border: 1px solid #edf2f7;
-          }
-          .info-table td.value {
-            color: #2d3748;
-            border: 1px solid #edf2f7;
-          }
-          .evidence-card {
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            overflow: hidden;
-            background-color: #f7fafc;
-          }
-          .card-header {
-            font-size: 11px;
-            font-weight: 800;
-            text-align: center;
-            padding: 6px;
-            color: #ffffff;
-          }
-          .card-header.antes {
-            background-color: #e53e3e;
-          }
-          .card-header.despues {
-            background-color: #38a169;
-          }
-          .image-wrapper {
-            height: 220px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background-color: #f1f5f9;
-            padding: 8px;
-          }
-          .image-wrapper img {
-            max-width: 100%;
-            max-height: 220px;
+          .header-logo {
+            max-height: 50px;
+            max-width: 150px;
             object-fit: contain;
-            border-radius: 4px;
+          }
+          .header-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #000;
+            margin: 0;
+            text-transform: uppercase;
+            text-align: center;
+            flex: 1;
+          }
+          .header-date {
+            font-size: 14px;
+            font-weight: normal;
+            color: #333;
+            text-align: right;
+            min-width: 150px;
+          }
+          .footer-inner {
+            display: flex;
+            justify-content: space-between;
+            padding-top: 10px;
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+          }
+          .page-number:after {
+            content: counter(page);
+          }
+          ul {
+            margin: 0;
+            padding-left: 20px;
+          }
+          li {
+            margin-bottom: 6px;
           }
         </style>
       </head>
       <body>
-        <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #1a365d; padding-bottom: 12px; margin-bottom: 15px; border: none;">
-          <tr>
-            <td style="vertical-align: middle; border: none; padding: 0;">
-              <table style="border-collapse: collapse; border: none;">
-                <tr>
-                  <td style="vertical-align: middle; padding: 0; border: none;">
-                    <img src="${LOGO_BASE64}" style="max-height: 60px; max-width: 250px; object-fit: contain;" />
-                  </td>
-                </tr>
-              </table>
-            </td>
-            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
-              <h1 class="report-title" style="font-size: 15px; font-weight: 800; color: #1a365d; text-transform: uppercase; margin: 0; letter-spacing: 0.5px;">Reporte Técnico de Evidencia</h1>
-              <p class="report-meta" style="font-size: 10px; color: #718096; margin-top: 2px; margin-bottom: 0;">Fecha: ${fecha}</p>
-            </td>
-          </tr>
+        <table class="report-container">
+          <thead class="report-header">
+            <tr>
+              <td>
+                <div class="header-inner">
+                  <img src="${LOGO_BASE64}" class="header-logo" />
+                  <h1 class="header-title">REPORTE DE SERVICIOS REALIZADOS</h1>
+                  <div class="header-date">${fecha}</div>
+                </div>
+              </td>
+            </tr>
+          </thead>
+          
+          <tfoot class="report-footer">
+            <tr>
+              <td>
+                <div class="footer-inner">
+                  <span></span>
+                  <span>Integración de Tecnologías</span>
+                  <span class="page-number"></span>
+                </div>
+              </td>
+            </tr>
+          </tfoot>
+
+          <tbody>
+            <tr>
+              <td>
+                <table style="width: 100%; margin: 10px 0 25px 0; border-collapse: collapse; font-size: 12px; border: 1px solid #ddd; text-align: center;">
+                  <thead>
+                    <tr>
+                      <th style="padding: 4px 10px; border: 1px solid #ddd; background-color: #eee; font-weight: bold; color: #333; width: 50%;">CLIENTE</th>
+                      <th style="padding: 4px 10px; border: 1px solid #ddd; background-color: #eee; font-weight: bold; color: #333; width: 50%;">SUCURSAL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding: 6px 10px; border: 1px solid #ddd; color: #000;">${(evidencia.cliente || '').split('-')[0].trim()}</td>
+                      <td style="padding: 6px 10px; border: 1px solid #ddd; color: #000;">${(evidencia as any).sucursal_nombre || (evidencia.cliente || '').split('-')[1]?.trim() || 'N/A'}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                ${trabajosHtml}
+              </td>
+            </tr>
+          </tbody>
         </table>
-
-        <table class="info-table" style="margin-bottom: 15px;">
-          <tr>
-            <td class="label">Responsable</td>
-            <td class="value">${userName}</td>
-            <td class="label">Cliente / Ubicación</td>
-            <td class="value">${evidencia.cliente}</td>
-          </tr>
-        </table>
-
-        ${trabajosHtml}
-        
-        <div style="margin-top: 25px; border-top: 1px solid #e2e8f0; padding-top: 8px; text-align: center; font-size: 9px; color: #718096; page-break-inside: avoid;">
-          Documento Generado por el Sistema de Control de Gastos y Evidencias. CONFIDENCIAL.
-        </div>
-
-        ${perJobPhotoAnnexesHtml}
-        ${globalExtrasHtml}
       </body>
       </html>
     `;

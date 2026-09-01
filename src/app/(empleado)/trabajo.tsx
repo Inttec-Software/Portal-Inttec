@@ -10,12 +10,15 @@ import {
   Modal,
   ScrollView,
   Image,
+  Platform,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, Evidencia } from '@/services/supabase';
+import { useAuth } from '@/context/AuthContext';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
+import { EvidenceDraftService, EvidenceDraft } from '@/services/evidenceDraftService';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,11 +27,13 @@ import ImageViewerModal from '@/components/ImageViewerModal';
 
 export default function MiTrabajoScreen() {
   const router = useRouter();
+  const { company } = useAuth();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
+  const [drafts, setDrafts] = useState<EvidenceDraft[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -66,12 +71,36 @@ export default function MiTrabajoScreen() {
 
       if (error) throw error;
       setEvidencias(data || []);
+
+      // Cargar borradores locales
+      const localDrafts = await EvidenceDraftService.getDrafts(userId, company || 'inttec');
+      setDrafts(localDrafts);
     } catch (error: any) {
       console.error('Error al cargar evidencias:', error.message);
       Alert.alert('Error', 'No se pudieron cargar las evidencias de trabajo.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
+    }
+  };
+
+  const handleDeleteDraft = async (draftId: string) => {
+    if (!currentUser) return;
+    const confirmDel = async () => {
+      await EvidenceDraftService.deleteDraft(currentUser.id, company || 'inttec', draftId);
+      const updated = await EvidenceDraftService.getDrafts(currentUser.id, company || 'inttec');
+      setDrafts(updated);
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Deseas eliminar este borrador?')) {
+        await confirmDel();
+      }
+    } else {
+      Alert.alert('Eliminar Borrador', '¿Deseas eliminar este borrador?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: confirmDel },
+      ]);
     }
   };
 
@@ -167,9 +196,28 @@ export default function MiTrabajoScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.backBtn} />
+        <TouchableOpacity
+          onPress={() => router.replace('/(empleado)/gastos')}
+          style={styles.backBtn}
+        >
+          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
+        </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Mi Trabajo</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity
+          onPress={() => router.push('/(empleado)/evidencia' as any)}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            backgroundColor: themeColors.primary,
+            paddingVertical: 6,
+            paddingHorizontal: 10,
+            borderRadius: BorderRadius.medium,
+          }}
+        >
+          <Ionicons name="add" size={18} color="#fff" />
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Nueva</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
@@ -197,6 +245,96 @@ export default function MiTrabajoScreen() {
           contentContainerStyle={styles.listContent}
           refreshing={isRefreshing}
           onRefresh={handleRefresh}
+          ListHeaderComponent={
+            drafts.length > 0 ? (
+              <View style={{ marginBottom: Spacing.three }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: Spacing.one }}>
+                  <Ionicons name="document-text" size={16} color={themeColors.warning} />
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: themeColors.warning, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Borradores Pendientes ({drafts.length})
+                  </Text>
+                </View>
+
+                {drafts.map((d) => {
+                  const totalFotos = (d.trabajos || []).reduce((acc, t) => {
+                    let c = 0;
+                    if (t.antesImg) c++;
+                    if (t.despuesImg) c++;
+                    c += (t.fotosAdicionales?.length || 0);
+                    return acc + c;
+                  }, 0);
+
+                  return (
+                    <View
+                      key={d.id}
+                      style={{
+                        backgroundColor: themeColors.warning + '12',
+                        borderColor: themeColors.warning,
+                        borderWidth: 1,
+                        borderRadius: BorderRadius.medium,
+                        padding: Spacing.two,
+                        marginBottom: Spacing.two,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.text }}>
+                            {d.clienteNombre || 'Sin cliente asignado'}
+                          </Text>
+                          {d.sucursalNombre ? (
+                            <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 1 }}>
+                              Sucursal: {d.sucursalNombre}
+                            </Text>
+                          ) : null}
+                          <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                              🛠️ {d.trabajos?.length || 0} {(d.trabajos?.length || 0) === 1 ? 'trabajo' : 'trabajos'}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                              📷 {totalFotos} fotos
+                            </Text>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                              🕒 {formatFriendlyDate(d.updatedAt)}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <TouchableOpacity
+                          onPress={() => handleDeleteDraft(d.id)}
+                          style={{ padding: 4 }}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: Spacing.one }}>
+                        <TouchableOpacity
+                          onPress={() => router.push(`/(empleado)/evidencia?draftId=${d.id}` as any)}
+                          style={{
+                            backgroundColor: themeColors.warning,
+                            paddingVertical: 6,
+                            paddingHorizontal: 12,
+                            borderRadius: BorderRadius.small,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 4,
+                          }}
+                        >
+                          <Ionicons name="create-outline" size={15} color="#fff" />
+                          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Continuar Borrador</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+
+                <View style={{ borderBottomWidth: 1, borderBottomColor: themeColors.border, marginVertical: Spacing.two }} />
+                <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: Spacing.one }}>
+                  Reportes Publicados ({filteredEvidencias.length})
+                </Text>
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => (
             <TouchableOpacity
               activeOpacity={0.7}
@@ -265,7 +403,7 @@ export default function MiTrabajoScreen() {
       )}
 
       {/* Modal de Detalle */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={modalVisible}

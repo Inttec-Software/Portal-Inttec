@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS public.ventas (
   total_pagado numeric DEFAULT 0,
   saldo_pendiente numeric DEFAULT 0,
   estado_pago text DEFAULT 'PENDIENTE DE PAGO'::text,
+  folio text,
   CONSTRAINT ventas_pkey PRIMARY KEY (id),
   CONSTRAINT ventas_cotizacion_id_fkey FOREIGN KEY (cotizacion_id) REFERENCES public.cotizaciones(id),
   CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)
@@ -285,8 +286,10 @@ CREATE TABLE IF NOT EXISTS public.productos (
   precio_unitario numeric DEFAULT 0,
   impuesto_porcentaje numeric DEFAULT 16,
   clave_facturacion text,
+  proveedor_id uuid,
   CONSTRAINT productos_pkey PRIMARY KEY (id),
-  CONSTRAINT productos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias_productos(id)
+  CONSTRAINT productos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias_productos(id),
+  CONSTRAINT productos_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id)
 );
 
 CREATE TABLE IF NOT EXISTS public.alias_proveedor_producto (

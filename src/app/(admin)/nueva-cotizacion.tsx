@@ -11,6 +11,7 @@ import { supabase } from '@/services/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 
 export default function NuevaCotizacionScreen() {
   const router = useRouter();
@@ -78,11 +79,14 @@ export default function NuevaCotizacionScreen() {
       setClientSearchResults([]);
       return;
     }
-    const { data } = await supabase
-      .from('clientes')
-      .select('*')
-      .ilike('nombre', `%${text}%`)
-      .limit(5);
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/cotizaciones/search-clientes?q=${encodeURIComponent(text)}`, { headers });
+    if (!res.ok) {
+      setClientSearchResults([]);
+      return;
+    }
+    const { clientes } = await res.json();
+    const data = clientes;
     
     if (data && data.length > 0) {
       setClientSearchResults(data);
@@ -113,12 +117,17 @@ export default function NuevaCotizacionScreen() {
 
     setActiveProductLineId(lineId);
 
-    let query = supabase.from('productos').select('*').limit(15);
-    if (text.trim().length > 0) {
-      query = query.ilike('nombre_oficial', `%${text}%`);
+    const headers = await getApiHeaders();
+    const q = text.trim();
+    const url = q.length > 0 
+      ? `${getApiUrl()}/api/cotizaciones/search-productos?q=${encodeURIComponent(q)}`
+      : `${getApiUrl()}/api/cotizaciones/search-productos`;
+    const res = await fetch(url, { headers });
+    let data = [];
+    if (res.ok) {
+      const json = await res.json();
+      data = json.productos || [];
     }
-
-    const { data } = await query;
     
     if (data && data.length > 0) {
       setProductSearchResults(data);
@@ -152,34 +161,36 @@ export default function NuevaCotizacionScreen() {
   useEffect(() => {
     const fetchCotizacion = async () => {
       if (editId) {
-        const { data, error } = await supabase.from('cotizaciones').select('*').eq('id', editId).single();
-        if (data && !error) {
-          const { data: clientData } = await supabase.from('clientes').select('*').eq('nombre', data.cliente_nombre).single();
-          setCotizacion({
-            id: data.id,
-            numeroCotizacion: data.folio,
-            clienteNombre: data.cliente_nombre,
-            clienteRFC: clientData?.rfc || '',
-            clienteCorreo: clientData?.correo_electronico || '',
-            clienteCP: clientData?.codigo_postal || '',
-            direccionFactura: clientData?.direccion || '',
-            sucursal: data.sucursal || '',
-            fechaCreacion: data.fecha_creacion,
-            vendedor: data.vendedor || user?.nombre || '',
-            moneda: data.moneda || 'MXN',
-            lineas: data.lineas || [],
-            terminosCondiciones: data.terminos_condiciones || 'https://inttec.odoo.com/terms',
-            estado: data.estado || 'Borrador',
-            subtotal: data.subtotal || 0,
-            iva: data.iva || 0,
-            total: data.total || 0,
-          });
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/cotizaciones/${editId}`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          const cotData = data.cotizacion;
+          const clientData = data.clientData;
+          if (cotData) {
+            setCotizacion({
+              id: cotData.id,
+              numeroCotizacion: cotData.folio,
+              clienteNombre: cotData.cliente_nombre,
+              clienteRFC: clientData?.rfc || '',
+              clienteCorreo: clientData?.correo_electronico || '',
+              clienteCP: clientData?.codigo_postal || '',
+              direccionFactura: clientData?.direccion || '',
+              sucursal: cotData.sucursal || '',
+              fechaCreacion: cotData.fecha_creacion,
+              vendedor: cotData.vendedor || user?.nombre || '',
+              moneda: cotData.moneda || 'MXN',
+              lineas: cotData.lineas || [],
+              terminosCondiciones: cotData.terminos_condiciones || 'https://inttec.odoo.com/terms',
+              estado: cotData.estado || 'Borrador',
+              subtotal: cotData.subtotal || 0,
+              iva: cotData.iva || 0,
+              total: cotData.total || 0,
+            });
 
-          if (clientData?.id) {
-            const { data: sucData } = await supabase.from('sucursales_cliente').select('*').eq('cliente_id', clientData.id);
-            if (sucData) setSucursales(sucData);
+            if (data.sucursales) setSucursales(data.sucursales);
+            return;
           }
-          return;
         }
       }
 
@@ -191,20 +202,19 @@ export default function NuevaCotizacionScreen() {
         const day = String(today.getDate()).padStart(2, '0');
         const datePrefix = `${year}/${month}/${day}/`;
 
-        const { data, error } = await supabase
-          .from('cotizaciones')
-          .select('folio')
-          .ilike('folio', `${datePrefix}%`)
-          .order('folio', { ascending: false })
-          .limit(1);
-        
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/cotizaciones/last-folio?prefix=${encodeURIComponent(datePrefix)}`, { headers });
         let newSequential = 1;
-        if (!error && data && data.length > 0) {
-          const lastFolio = data[0].folio;
-          const parts = lastFolio.split('/');
-          const lastNum = parseInt(parts[parts.length - 1], 10);
-          if (!isNaN(lastNum)) {
-            newSequential = lastNum + 1;
+
+        if (res.ok) {
+          const data = await res.json();
+          const lastFolio = data.lastFolio;
+          if (lastFolio) {
+            const parts = lastFolio.split('/');
+            const lastNum = parseInt(parts[parts.length - 1], 10);
+            if (!isNaN(lastNum)) {
+              newSequential = lastNum + 1;
+            }
           }
         }
         
@@ -298,73 +308,7 @@ export default function NuevaCotizacionScreen() {
     }
     
     try {
-      console.log('Guardando cliente...');
-      // Upsert client based on name
-      const { error: errorCliente } = await supabase.from('clientes').upsert(
-        {
-          nombre: cotizacion.clienteNombre.trim(),
-          rfc: cotizacion.clienteRFC,
-          correo_electronico: cotizacion.clienteCorreo,
-          codigo_postal: cotizacion.clienteCP,
-          direccion: cotizacion.direccionFactura,
-        },
-        { onConflict: 'nombre' }
-      );
-      if (errorCliente) throw errorCliente;
-      
-      console.log('Guardando/Actualizando productos...');
-      const lineasClonadas = cotizacion.lineas.map(linea => ({ ...linea }));
-      for (let linea of lineasClonadas) {
-        if (!linea.productoNombre.trim()) continue;
-        
-        try {
-          if (linea.productoId) {
-            // Actualizar precio, iva y clave del producto existente
-            await supabase.from('productos').update({
-              precio_unitario: linea.precioUnitario,
-              impuesto_porcentaje: linea.impuestoPorcentaje,
-              clave_facturacion: linea.claveFacturacion || null
-            }).eq('id', linea.productoId);
-          } else {
-            const { data: catData } = await supabase.from('categorias_productos').select('id').limit(1);
-            let categoriaId = catData && catData.length > 0 ? catData[0].id : null;
-            
-            if (!categoriaId) {
-              const { data: newCat, error: errCat } = await supabase.from('categorias_productos').insert({ nombre: 'General' }).select('id').single();
-              if (newCat && !errCat) {
-                categoriaId = newCat.id;
-              }
-            }
-            
-            const tempSku = `TEMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            
-            if (categoriaId) {
-              const { data: newProd, error: prodErr } = await supabase.from('productos').insert({
-                nombre_oficial: linea.productoNombre.trim(),
-                sku_interno: tempSku,
-                categoria_id: categoriaId,
-                precio_unitario: linea.precioUnitario,
-                impuesto_porcentaje: linea.impuestoPorcentaje,
-                clave_facturacion: linea.claveFacturacion || null,
-                activo: true
-              }).select('id').single();
-              
-              if (newProd && !prodErr) {
-                linea.productoId = newProd.id;
-              } else if (prodErr) {
-                console.error("Error al crear nuevo producto:", prodErr);
-              }
-            } else {
-              console.error("No se pudo obtener ni crear una categoría, el producto no fue guardado.");
-            }
-          }
-        } catch (e) {
-          console.error('Excepción al guardar/actualizar producto:', e);
-        }
-      }
-
-      console.log('Guardando cotizacion...');
-      let errorCotizacion;
+      console.log('Enviando cotizacion a la API...');
       
       const payload = {
         folio: cotizacion.numeroCotizacion,
@@ -375,21 +319,34 @@ export default function NuevaCotizacionScreen() {
         subtotal,
         iva,
         total,
-        lineas: lineasClonadas,
+        lineas: cotizacion.lineas,
         terminos_condiciones: cotizacion.terminosCondiciones,
         estado: cotizacion.estado || 'Borrador'
       };
 
-      if (editId) {
-        const { error } = await supabase.from('cotizaciones').update(payload).eq('id', editId);
-        errorCotizacion = error;
-      } else {
-        const { error } = await supabase.from('cotizaciones').insert(payload);
-        errorCotizacion = error;
-      }
+      const clientData = {
+        nombre: cotizacion.clienteNombre.trim(),
+        rfc: cotizacion.clienteRFC,
+        correo_electronico: cotizacion.clienteCorreo,
+        codigo_postal: cotizacion.clienteCP,
+        direccion: cotizacion.direccionFactura,
+      };
 
-      if (errorCotizacion) {
-        throw errorCotizacion;
+      const updateProducts = cotizacion.lineas;
+
+      const headers = await getApiHeaders();
+      const method = editId ? 'PUT' : 'POST';
+      const url = editId ? `${getApiUrl()}/api/cotizaciones/${editId}` : `${getApiUrl()}/api/cotizaciones`;
+
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: JSON.stringify({ payload, clientData, updateProducts })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Error en la API');
       }
       
       showAlert('Éxito', editId ? 'Cotización actualizada exitosamente.' : 'Cotización guardada y cliente registrado.');
@@ -631,7 +588,8 @@ export default function NuevaCotizacionScreen() {
                       value={currentDate}
                       mode="date"
                       display="default"
-                      onChange={onDateChange}
+                      onValueChange={onDateChange}
+                      onDismiss={() => setShowDatePicker(false)}
                     />
                   )}
                 </View>

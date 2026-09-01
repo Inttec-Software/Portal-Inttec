@@ -378,7 +378,7 @@ export default function EmpleadoAsistencia() {
         </ScrollView>
 
         {/* ========== MODAL: Instrucciones del Checador ========== */}
-        <Modal
+        <Modal statusBarTranslucent={true}
           animationType="slide"
           transparent={true}
           visible={checadorInstructionVisible}
@@ -428,7 +428,7 @@ export default function EmpleadoAsistencia() {
         </Modal>
 
         {/* ========== MODAL: Cámara con Marca de Agua ========== */}
-        <Modal
+        <Modal statusBarTranslucent={true}
           animationType="fade"
           transparent={false}
           visible={checadorCameraVisible}
@@ -531,7 +531,7 @@ export default function EmpleadoAsistencia() {
         </Modal>
 
         {/* ========== MODAL: Resultado del Checador ========== */}
-        <Modal
+        <Modal statusBarTranslucent={true}
           animationType="slide"
           transparent={true}
           visible={checadorResultVisible}

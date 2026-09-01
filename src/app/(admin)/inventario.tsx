@@ -18,7 +18,9 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, CatalogoItem } from '@/services/supabase';
+import { supabase, daravisaClient, inttecClient, Usuario, CatalogoItem } from '@/services/supabase';
+import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
+import { useAuth } from '@/context/AuthContext';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -45,6 +47,7 @@ interface Producto {
   categoria_id: string;
   proveedor_id?: string;
   stock_actual: number;
+  precio_unitario?: number;
   activo: boolean;
 }
 
@@ -56,6 +59,7 @@ interface FacturaItemStaging {
   productoIdSugerido?: string; // ID del producto asociado en catálogo
   esNuevoProducto: boolean;
   categoriaSeleccionadaId?: string; // Si es nuevo, categoría asignada
+  skuSugerido?: string; // SKU que se asignará si es un producto nuevo
 }
 
 interface ConsumoItem {
@@ -70,6 +74,14 @@ export default function InventarioDashboard() {
   const isMobile = windowWidth < 600;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}: ${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
 
   // Tab activa: 'catalogo' | 'ia-import' | 'consumo' | 'categorias'
   const [activeTab, setActiveTab] = useState<'importacion' | 'categorias' | 'retribuciones'>('importacion');
@@ -100,6 +112,7 @@ export default function InventarioDashboard() {
   const [formCategoriaId, setFormCategoriaId] = useState('');
   const [formProveedorId, setFormProveedorId] = useState('');
   const [formStock, setFormStock] = useState('0');
+  const [formPrecio, setFormPrecio] = useState('');
   const [isSavingProduct, setIsSavingProduct] = useState(false);
 
   // Creador de Categorías y Proveedores
@@ -169,9 +182,18 @@ export default function InventarioDashboard() {
     if (!verifyingEvidencia) return;
     setIsVerifying(true);
     try {
-      await supabase.from('evidencias').update({ 
-         sobrantes_verificados: true
-      }).eq('id', verifyingEvidencia.id);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/evidencias/verificar`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          evidenciaId: verifyingEvidencia.id,
+          action: 'VERIFICAR',
+          reason: 'Validación administrativa',
+          userActionName: 'ADMIN'
+        })
+      });
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al verificar evidencia'); }
 
       Alert.alert('Éxito', 'Evidencia marcada como revisada.');
       setVerifyModalVisible(false);
@@ -187,15 +209,11 @@ export default function InventarioDashboard() {
     if (!empleadoId) return;
     setIsLoadingDevoluciones(true);
     try {
-      const { data, error } = await supabase
-        .from('devoluciones_empleado')
-        .select('*')
-        .eq('empleado_id', empleadoId)
-        .eq('estado', 'PENDIENTE')
-        .order('creado_en', { ascending: false });
-
-      if (error) throw error;
-      setDevolucionesData(data || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/empleado/${empleadoId}/retribuciones`, { headers });
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al cargar devoluciones'); }
+      const data = await res.json();
+      setDevolucionesData(data.devoluciones || []);
     } catch (err: any) {
       console.error(err);
     } finally {
@@ -206,32 +224,13 @@ export default function InventarioDashboard() {
   const executeAprobarDevolucion = async (dev: any) => {
     setIsApprovingDevolucion(true);
     try {
-      const materiales = typeof dev.materiales === 'string' ? JSON.parse(dev.materiales || '[]') : dev.materiales;
-      for (const m of materiales) {
-        if (m.devolver > 0) {
-          // 1. Add to central stock
-          const { data: pData } = await supabase.from('productos').select('stock_actual').eq('id', m.productoId).single();
-          if (pData) {
-            await supabase.from('productos').update({ stock_actual: pData.stock_actual + m.devolver }).eq('id', m.productoId);
-            
-            // 2. Insert into movimientos_inventario
-            await supabase.from('movimientos_inventario').insert([{
-              producto_id: m.productoId,
-              tipo: 'ENTRADA',
-              cantidad: m.devolver,
-              folio_factura: `DEVOLUCIÓN MANUAL ${dev.id.substring(0,8)}`,
-              creado_por: null
-            }]);
-          }
-
-          // 3. (REMOVIDO) Ya no descontamos del inventario del empleado aquí.
-          // Ahora se descuenta inmediatamente cuando el empleado envía la solicitud
-          // para bloquear el material y evitar que lo use en otras evidencias.
-        }
-      }
-
-      // 4. Marcar devolución como aprobada
-      await supabase.from('devoluciones_empleado').update({ estado: 'APROBADO', revisado_por: null }).eq('id', dev.id);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/devoluciones/aprobar`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ dev })
+      });
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al aprobar devolución'); }
 
       Alert.alert('Éxito', 'Devolución aprobada e integrada al almacén.');
       loadDevolucionesPendientes(selectedEmpleadoRetribucion);
@@ -265,13 +264,12 @@ export default function InventarioDashboard() {
     if (!empleadoId) return;
     setIsLoadingRetribuciones(true);
     try {
-      const { data: evidencias, error: eviErr } = await supabase
-        .from('evidencias')
-        .select('id, cliente, created_at, descripcion_trabajo, empleado_nombre, sobrantes_verificados')
-        .eq('empleado_id', empleadoId)
-        .order('created_at', { ascending: false });
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/empleado/${empleadoId}/retribuciones`, { headers });
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al cargar evidencias'); }
+      const data = await res.json();
+      const evidencias = data.evidencias;
 
-      if (eviErr) throw eviErr;
       console.log(`[loadRetribuciones] Fetched ${evidencias?.length} for ${empleadoId}`);
 
       const parsedData: any[] = [];
@@ -325,21 +323,11 @@ export default function InventarioDashboard() {
     setIsLoadingEmployeeInventory(true);
     setEmployeeInventoryModalVisible(true);
     try {
-      const { data: invData, error: invErr } = await supabase
-        .from('inventario_empleados')
-        .select(`
-          id,
-          cantidad_disponible,
-          productos (
-            id,
-            nombre_oficial,
-            sku_interno
-          )
-        `)
-        .eq('empleado_id', empleadoId)
-        .gt('cantidad_disponible', 0);
-      if (invErr) throw invErr;
-      setEmployeeInventoryData(invData || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/empleado/${empleadoId}/retribuciones`, { headers });
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al cargar inventario del empleado'); }
+      const data = await res.json();
+      setEmployeeInventoryData(data.inventario || []);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'No se pudo cargar el inventario del empleado');
     } finally {
@@ -350,33 +338,20 @@ export default function InventarioDashboard() {
 async function loadAllData() {
     setIsLoading(true);
     try {
-      // Cargar categorías, proveedores, productos, historial de consumo y clientes
-      const [catRes, provRes, prodRes, histRes, cliRes, empRes] = await Promise.all([
-        supabase.from('categorias_productos').select('*').order('nombre'),
-        supabase.from('proveedores').select('*').order('nombre'),
-        supabase.from('productos').select('*').order('nombre_oficial'),
-        supabase
-          .from('movimientos_inventario')
-          .select('*, producto:productos(nombre_oficial)')
-          .eq('tipo', 'SALIDA')
-          .order('fecha', { ascending: false })
-          .limit(50),
-        supabase.from('clientes').select('*').order('nombre'),
-        supabase.from('usuarios').select('id, nombre').in('rol', ['EMPLEADO', 'DEV']).order('nombre'),
-      ]);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/dashboard`, { headers });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al cargar datos del dashboard');
+      }
+      const data = await res.json();
 
-      if (catRes.error) throw catRes.error;
-      if (provRes.error) throw provRes.error;
-      if (prodRes.error) throw prodRes.error;
-      if (cliRes.error) throw cliRes.error;
-      if (empRes.error) throw empRes.error;
-
-      setCategorias(catRes.data || []);
-      setProveedores(provRes.data || []);
-      setProductos(prodRes.data || []);
-      setHistorialConsumo(histRes.data || []);
-      setClientes(cliRes.data || []);
-      setEmpleados(empRes.data || []);
+      setCategorias(data.categorias || []);
+      setProveedores(data.proveedores || []);
+      setProductos(data.productos || []);
+      setHistorialConsumo(data.historial_consumo || []);
+      setClientes(data.clientes || []);
+      setEmpleados(data.usuarios || []);
     } catch (err: any) {
       console.error('Error al cargar datos de inventario:', err);
       Alert.alert('Error', err.message || 'No se pudieron recuperar los datos de inventario.');
@@ -464,6 +439,7 @@ async function loadAllData() {
     setFormCategoriaId(categorias[0]?.id || '');
     setFormProveedorId('');
     setFormStock('0');
+    setFormPrecio('');
     setCrudModalVisible(true);
   };
 
@@ -474,6 +450,7 @@ async function loadAllData() {
     setFormCategoriaId(p.categoria_id);
     setFormProveedorId(p.proveedor_id || '');
     setFormStock(p.stock_actual.toString());
+    setFormPrecio(p.precio_unitario?.toString() || '0');
     setCrudModalVisible(true);
   };
 
@@ -491,37 +468,33 @@ async function loadAllData() {
 
     setIsSavingProduct(true);
     try {
-      if (editingProduct) {
-        // Editar
-        const { error } = await supabase
-          .from('productos')
-          .update({
-            sku_interno: formSku.trim(),
-            nombre_oficial: formNombre.trim(),
-            categoria_id: formCategoriaId,
-            proveedor_id: formProveedorId || null,
-            stock_actual: stockNum,
-          })
-          .eq('id', editingProduct.id);
+      const headers = await getApiHeaders();
+      const payload = {
+        sku_interno: formSku.trim().toUpperCase(),
+        nombre_oficial: formNombre.trim(),
+        categoria_id: formCategoriaId,
+        proveedor_id: formProveedorId || null,
+        stock_actual: stockNum,
+        precio_unitario: parseFloat(formPrecio) || 0,
+        activo: true,
+      };
 
-        if (error) throw error;
-        Alert.alert('Éxito', 'Producto actualizado correctamente.');
-      } else {
-        // Crear
-        const { error } = await supabase.from('productos').insert([
-          {
-            sku_interno: formSku.trim().toUpperCase(),
-            nombre_oficial: formNombre.trim(),
-            categoria_id: formCategoriaId,
-            proveedor_id: formProveedorId || null,
-            stock_actual: stockNum,
-            activo: true,
-          },
-        ]);
+      const url = editingProduct 
+        ? `${getApiUrl()}/api/inventario/productos/${editingProduct.id}`
+        : `${getApiUrl()}/api/inventario/productos`;
+      const method = editingProduct ? 'PUT' : 'POST';
 
-        if (error) throw error;
-        Alert.alert('Éxito', 'Producto agregado correctamente.');
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al guardar el producto en el servidor');
       }
+      Alert.alert('Éxito', editingProduct ? 'Producto actualizado correctamente.' : 'Producto agregado correctamente.');
 
       setCrudModalVisible(false);
       await loadAllData();
@@ -536,12 +509,14 @@ async function loadAllData() {
     const performDelete = async () => {
       setIsLoading(true);
       try {
-        const { error } = await supabase
-          .from('productos')
-          .update({ activo: false })
-          .eq('id', p.id);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/inventario/productos/${p.id}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ activo: false })
+        });
 
-        if (error) throw error;
+        if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al desactivar el producto'); }
         if (Platform.OS === 'web') {
           window.alert('Producto desactivado.');
         } else {
@@ -591,36 +566,20 @@ async function loadAllData() {
 
     setIsLoading(true);
     try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/productos/${product.id}/stock`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          cantidad: toAdd,
+          motivo: 'AJUSTE_RAPIDO',
+          currentStock: product.stock_actual
+        })
+      });
+
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al añadir stock'); }
+
       const newStock = product.stock_actual + toAdd;
-
-      // 1. Actualizar el producto en Supabase
-      const { error: updateErr } = await supabase
-        .from('productos')
-        .update({ stock_actual: newStock })
-        .eq('id', product.id);
-
-      if (updateErr) throw updateErr;
-
-      // 2. Registrar movimiento de entrada en el historial
-      const { data: userData } = await supabase.auth.getUser();
-      const currentUserId = userData?.user?.id || null;
-
-      const { error: moveErr } = await supabase
-        .from('movimientos_inventario')
-        .insert([
-          {
-            producto_id: product.id,
-            tipo: 'ENTRADA',
-            cantidad: toAdd,
-            folio_factura: 'AJUSTE_RAPIDO',
-            creado_por: currentUserId,
-          },
-        ]);
-
-      if (moveErr) {
-        console.warn('Ajuste de stock realizado, pero no se pudo registrar el movimiento:', moveErr.message);
-      }
-
       // Limpiar el input de este producto
       setQuickStockAdjustments(prev => ({ ...prev, [product.id]: '' }));
 
@@ -639,17 +598,18 @@ async function loadAllData() {
       Alert.alert('Validación', 'Por favor ingresa el nombre de la categoría.');
       return;
     }
-
     setIsSavingNewCat(true);
     try {
-      const { error } = await supabase.from('categorias_productos').insert([
-        {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/catalogos/categoria`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
           nombre: newCatNombre.trim(),
           descripcion: newCatDesc.trim() || null,
-        },
-      ]);
-
-      if (error) throw error;
+        })
+      });
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al crear categoría'); }
 
       Alert.alert('Éxito', 'Categoría agregada correctamente.');
       setNewCatNombre('');
@@ -677,14 +637,16 @@ async function loadAllData() {
 
     setIsSavingNewProv(true);
     try {
-      const { error } = await supabase.from('proveedores').insert([
-        {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/catalogos/proveedor`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
           nombre: newProvNombre.trim(),
           rfc: cleanRfc || null,
-        },
-      ]);
-
-      if (error) throw error;
+        })
+      });
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al crear proveedor'); }
 
       Alert.alert('Éxito', 'Proveedor agregado correctamente.');
       setNewProvNombre('');
@@ -700,21 +662,21 @@ async function loadAllData() {
 
   const handleAddNewCliente = async (nombre: string) => {
     try {
-      const { data, error } = await supabase
-        .from('clientes')
-        .insert([{ nombre: nombre.trim() }])
-        .select();
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const newCli = data[0];
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/catalogos/cliente`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ nombre: nombre.trim() })
+      });
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al crear cliente'); }
+      const data = await res.json();
+      if (data && data.data) {
+        const newCli = data.data;
         setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
         setConsumoCliente(newCli.nombre);
       } else {
-        const { data: allCli } = await supabase.from('clientes').select('*').order('nombre');
-        if (allCli) {
-          setClientes(allCli);
-          setConsumoCliente(nombre.trim());
-        }
+        await loadAllData();
+        setConsumoCliente(nombre.trim());
       }
       setClienteSearch('');
       setShowCliDropdown(false);
@@ -797,39 +759,28 @@ async function loadAllData() {
 
     setIsSavingConsumo(true);
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      const currentUserId = userData?.user?.id || null;
-
-      // Restar stock y registrar movimientos
-      for (const item of consumoItems) {
+      const headers = await getApiHeaders();
+      const itemsPayload = consumoItems.map(item => {
         const prod = productos.find(p => p.id === item.productoId)!;
-        const newStock = prod.stock_actual - item.cantidad;
+        return {
+          productoId: item.productoId,
+          qty: item.cantidad,
+          currentStock: prod.stock_actual
+        };
+      });
 
-        // 1. Descontar del inventario
-        const { error: stockErr } = await supabase
-          .from('productos')
-          .update({ stock_actual: newStock })
-          .eq('id', item.productoId);
+      const res = await fetch(`${getApiUrl()}/api/inventario/consumos`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          items: itemsPayload,
+          esAsignacionEmpleado: false, // El administrador aquí solo reporta salidas a clientes/proyectos
+          destinoId: null,
+          motivoGeneral: consumoCliente.trim()
+        })
+      });
 
-        if (stockErr) throw stockErr;
-
-        // 2. Registrar movimiento de salida
-        const { error: moveErr } = await supabase
-          .from('movimientos_inventario')
-          .insert([
-            {
-              producto_id: item.productoId,
-              tipo: 'SALIDA',
-              cantidad: item.cantidad,
-              folio_factura: consumoCliente.trim(),
-              creado_por: currentUserId,
-            },
-          ]);
-
-        if (moveErr) {
-          console.warn('Ajuste de consumo realizado pero falló el registro histórico:', moveErr.message);
-        }
-      }
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al registrar consumo'); }
 
       Alert.alert('Éxito', 'Consumo registrado. Se actualizaron los niveles de stock.');
       setConsumoItems([]);
@@ -983,6 +934,7 @@ async function loadAllData() {
             productoIdSugerido: suggestedProd?.id,
             esNuevoProducto: esNuevo,
             categoriaSeleccionadaId: suggestedCat?.id || categorias[0]?.id,
+            skuSugerido: esNuevo ? 'SKU-AI-' + Math.random().toString(36).substring(3, 8).toUpperCase() : undefined,
           };
         });
 
@@ -1006,109 +958,55 @@ async function loadAllData() {
 
   const handleSaveAIImport = async () => {
     if (!selectedProveedorId) {
-      Alert.alert('Validación', 'Por favor selecciona un Proveedor.');
+      showAlert('Validación', 'Por favor selecciona un Proveedor de la lista (icono de búsqueda 🔍 junto a Proveedor Asignado).');
       return;
     }
     if (!folioFactura.trim()) {
-      Alert.alert('Validación', 'Por favor ingresa el Folio de la Factura.');
+      showAlert('Validación', 'Por favor ingresa el Folio de la Factura.');
       return;
     }
     if (stagingItems.length === 0) {
-      Alert.alert('Validación', 'No hay ítems para procesar.');
+      showAlert('Validación', 'No hay ítems para procesar.');
       return;
     }
 
     setIsSavingAIImport(true);
+    console.log('Iniciando handleSaveAIImport...');
+    console.log('Folio Factura:', folioFactura);
+    console.log('Proveedor ID:', selectedProveedorId);
+    console.log('Items a procesar:', stagingItems.length);
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      const currentUserId = userData?.user?.id || null;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/importar`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          mappedItems: stagingItems.map(item => ({
+            esNuevoProducto: item.esNuevoProducto,
+            skuSugerido: item.skuSugerido,
+            descripcionFactura: item.nombreFactura,
+            categoriaSeleccionadaId: item.categoriaSeleccionadaId || categorias[0]?.id,
+            cantidad: item.cantidad,
+            precioUnitario: item.precioUnitario || 0,
+            matchedProductId: item.productoIdSugerido
+          })),
+          proveedorId: selectedProveedorId,
+          folioFactura: folioFactura.trim()
+        })
+      });
 
-      // Procesar cada ítem del staging
-      for (const item of stagingItems) {
-        let finalProductoId = item.productoIdSugerido;
+      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al procesar la importación por IA'); }
 
-        if (item.esNuevoProducto) {
-          // 1. Crear nuevo producto en DB
-          const generatedSku = 'SKU-AI-' + Math.random().toString(36).substring(3, 8).toUpperCase();
-          const { data: newProd, error: newProdErr } = await supabase
-            .from('productos')
-            .insert([
-              {
-                sku_interno: generatedSku,
-                nombre_oficial: item.nombreFactura,
-                categoria_id: item.categoriaSeleccionadaId || categorias[0]?.id,
-                stock_actual: item.cantidad,
-                activo: true,
-              },
-            ])
-            .select()
-            .single();
-
-          if (newProdErr) throw newProdErr;
-          finalProductoId = newProd.id;
-
-          // 2. Registrar alias proveedor
-          await supabase.from('alias_proveedor_producto').insert([
-            {
-              
-              producto_id: finalProductoId,
-              nombre_segun_proveedor: item.nombreFactura,
-            },
-          ]);
-        } else if (finalProductoId) {
-          // 1. Actualizar el stock del producto existente
-          const prodObj = productos.find(p => p.id === finalProductoId);
-          const currentStock = prodObj ? prodObj.stock_actual : 0;
-
-          const { error: stockErr } = await supabase
-            .from('productos')
-            .update({ stock_actual: currentStock + item.cantidad })
-            .eq('id', finalProductoId);
-
-          if (stockErr) throw stockErr;
-
-          // 2. Registrar alias (si no existe ya)
-          const { data: aliasExists } = await supabase
-            .from('alias_proveedor_producto')
-            .select('id')
-            .eq('proveedor_id', selectedProveedorId)
-            .eq('nombre_segun_proveedor', item.nombreFactura)
-            .maybeSingle();
-
-          if (!aliasExists) {
-            await supabase.from('alias_proveedor_producto').insert([
-              {
-                
-                producto_id: finalProductoId,
-                nombre_segun_proveedor: item.nombreFactura,
-              },
-            ]);
-          }
-        }
-
-        // 3. Crear movimiento de inventario (ENTRADA)
-        if (finalProductoId) {
-          await supabase.from('movimientos_inventario').insert([
-            {
-              producto_id: finalProductoId,
-              tipo: 'ENTRADA',
-              cantidad: item.cantidad,
-              folio_factura: folioFactura.trim(),
-              
-              creado_por: currentUserId,
-            },
-          ]);
-        }
-      }
-
-      Alert.alert('Éxito', 'Inventario actualizado correctamente.');
+      console.log('Todos los ítems procesados correctamente.');
+      showAlert('Éxito', 'Inventario actualizado correctamente.');
       setStagingItems([]);
       setFolioFactura('');
       setSelectedProveedorId('');
       setActiveTab('importacion');
       await loadAllData();
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo guardar la importación.');
+      console.error('Error crítico en handleSaveAIImport:', err);
+      showAlert('Error', err.message || 'No se pudo guardar la importación.');
     } finally {
       setIsSavingAIImport(false);
     }
@@ -1199,6 +1097,20 @@ async function loadAllData() {
             <View style={{ gap: Spacing.two }}>
               <View style={[styles.metadataCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
 
+                {/* Proveedor */}
+                <View style={[styles.customDropdownContainer, { marginBottom: 16 }]}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Proveedor Asignado *</Text>
+                  <TouchableOpacity
+                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                    onPress={openProveedorSelector}
+                  >
+                    <Text style={{ color: selectedProveedorId ? themeColors.text : themeColors.textSecondary }}>
+                      {activeProveedorName || 'Selecciona el proveedor'}
+                    </Text>
+                    <Ionicons name="search" size={18} color={themeColors.text} />
+                  </TouchableOpacity>
+                </View>
+
                 {/* Folio Factura */}
                 <CustomInput
                   label="Folio de Factura *"
@@ -1215,7 +1127,11 @@ async function loadAllData() {
                   key={item.id}
                   style={[styles.stagingItemCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                 >
-                  <Text style={[styles.stagingName, { color: themeColors.text }]}>{item.nombreFactura}</Text>
+                  <CustomInput
+                    label="Nombre Extraído"
+                    value={item.nombreFactura}
+                    onChangeText={txt => handleUpdateStagingItem(item.id, { nombreFactura: txt })}
+                  />
                   
                   <View style={styles.stagingFieldsRow}>
                     <View style={{ flex: 1 }}>
@@ -1234,6 +1150,14 @@ async function loadAllData() {
                         onChangeText={txt => handleUpdateStagingItem(item.id, { precioUnitario: parseFloat(txt) || 0 })}
                       />
                     </View>
+                    <View style={{ flex: 1.2 }}>
+                      <CustomInput
+                        label="Precio con IVA"
+                        value={new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(item.precioUnitario * 1.16)}
+                        editable={false}
+                        style={{ backgroundColor: themeColors.background }}
+                      />
+                    </View>
                   </View>
 
                   <View style={{ marginTop: Spacing.one }}>
@@ -1241,6 +1165,13 @@ async function loadAllData() {
                       <View style={styles.newProductContainer}>
                         <View style={styles.badgeNew}>
                           <Text style={styles.badgeNewText}>NUEVO PRODUCTO</Text>
+                        </View>
+                        <View style={{ marginTop: Spacing.one }}>
+                          <CustomInput
+                            label="SKU Sugerido (editable)"
+                            value={item.skuSugerido || ''}
+                            onChangeText={txt => handleUpdateStagingItem(item.id, { skuSugerido: txt })}
+                          />
                         </View>
                         {/* Dropdown de Categoría */}
                         <View style={{ marginTop: Spacing.one }}>
@@ -1670,7 +1601,7 @@ async function loadAllData() {
                           {item.producto ? item.producto.nombre_oficial : 'Producto Eliminado'}
                         </Text>
                         <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4 }}>
-                          Ref: {item.folio_factura || 'N/A'} | Fecha: {dateStr}
+                          Ref: {item.folio_factura || 'N/A'}{item.usuario?.nombre ? ` | Empleado: ${item.usuario.nombre}` : ''} | Fecha: {dateStr}
                         </Text>
                       </View>
                       <View style={{ backgroundColor: themeColors.danger + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: BorderRadius.small }}>
@@ -1795,7 +1726,7 @@ async function loadAllData() {
           )}
           
           {/* Modal de Verificación Simple */}
-          <Modal visible={verifyModalVisible} animationType="fade" transparent={true} onRequestClose={() => setVerifyModalVisible(false)}>
+          <Modal statusBarTranslucent={true} visible={verifyModalVisible} animationType="fade" transparent={true} onRequestClose={() => setVerifyModalVisible(false)}>
             <View style={styles.modalOverlay}>
               <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement }]}>
                 <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -1820,7 +1751,7 @@ async function loadAllData() {
           </Modal>
 
           {/* Modal de Inventario del Empleado */}
-          <Modal visible={employeeInventoryModalVisible} animationType="fade" transparent={true} onRequestClose={() => setEmployeeInventoryModalVisible(false)}>
+          <Modal statusBarTranslucent={true} visible={employeeInventoryModalVisible} animationType="fade" transparent={true} onRequestClose={() => setEmployeeInventoryModalVisible(false)}>
             <View style={styles.modalOverlay}>
               <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, maxHeight: '80%', width: '90%' }]}>
                 <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -1864,7 +1795,7 @@ async function loadAllData() {
       )}
 
       {/* ========== MODAL CRUD MANUAL ========== */}
-      <Modal animationType="fade"
+      <Modal statusBarTranslucent={true} animationType="fade"
         transparent={true}
         visible={crudModalVisible}
         onRequestClose={() => setCrudModalVisible(false)}
@@ -1934,6 +1865,26 @@ async function loadAllData() {
                 onChangeText={(val) => setFormStock(val.replace(/[^0-9]/g, ''))}
               />
 
+              <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Precio Unitario"
+                    value={formPrecio}
+                    onChangeText={setFormPrecio}
+                    keyboardType="numeric"
+                    placeholder="0.00"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Precio con IVA (16%)"
+                    value={new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format((parseFloat(formPrecio) || 0) * 1.16)}
+                    editable={false}
+                    style={{ backgroundColor: themeColors.background }}
+                  />
+                </View>
+              </View>
+
               <CustomButton
                 title={editingProduct ? 'Guardar Cambios' : 'Dar de Alta'}
                 onPress={handleSaveProduct}
@@ -1946,7 +1897,7 @@ async function loadAllData() {
       </Modal>
 
       {/* ========== CENTRALIZED SELECTOR MODAL ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="fade"
         transparent={true}
         visible={selectorVisible}
@@ -2013,7 +1964,7 @@ async function loadAllData() {
       </Modal>
 
       {/* ========== MODAL NUEVA CATEGORÍA ========== */}
-      <Modal animationType="fade"
+      <Modal statusBarTranslucent={true} animationType="fade"
         transparent={true}
         visible={newCatModalVisible}
         onRequestClose={() => setNewCatModalVisible(false)}
@@ -2053,7 +2004,7 @@ async function loadAllData() {
       </Modal>
 
       {/* ========== MODAL NUEVO PROVEEDOR ========== */}
-      <Modal animationType="fade"
+      <Modal statusBarTranslucent={true} animationType="fade"
         transparent={true}
         visible={newProvModalVisible}
         onRequestClose={() => setNewProvModalVisible(false)}

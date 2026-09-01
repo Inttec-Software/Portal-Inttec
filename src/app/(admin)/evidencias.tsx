@@ -24,6 +24,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 
 export default function AdminEvidenciasScreen() {
   const router = useRouter();
@@ -65,26 +66,20 @@ export default function AdminEvidenciasScreen() {
     }
 
     try {
-      const { data: evidencesData, error: evidencesErr } = await supabase
-        .from('evidencias')
-        .select('*')
-        .order('creado_en', { ascending: false });
-
-      if (evidencesErr) throw evidencesErr;
-      setEvidencias(evidencesData || []);
-
-      // 2. Obtener lista de personal (usuarios de tipo EMPLEADO)
-      const { data: employeesData, error: employeesErr } = await supabase
-        .from('usuarios')
-        .select('*')
-        .eq('rol', 'EMPLEADO')
-        .order('nombre');
-
-      if (employeesErr) throw employeesErr;
-      setEmployees(employeesData || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/evidencias/admin/all`, { headers });
+      
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al recuperar evidencias');
+      }
+      
+      const data = await res.json();
+      setEvidencias(data.evidencias || []);
+      setEmployees(data.employees || []);
     } catch (err: any) {
       console.error('Error al actualizar evidencias:', err.message);
-      Alert.alert('Error', 'No se pudieron recuperar los reportes de trabajo.');
+      Alert.alert('Error', err.message || 'No se pudieron recuperar los reportes de trabajo.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -430,7 +425,7 @@ export default function AdminEvidenciasScreen() {
       )}
 
       {/* Modal de Detalle */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={modalVisible}
@@ -643,6 +638,16 @@ export default function AdminEvidenciasScreen() {
 
                 {/* Acciones */}
                 <View style={styles.modalActionContainer}>
+                  <CustomButton
+                    title="EDITAR REPORTE"
+                    onPress={() => {
+                      setModalVisible(false);
+                      router.push(`/(admin)/editar-evidencia?id=${selectedEvidencia.id}`);
+                    }}
+                    variant="secondary"
+                    icon={<Ionicons name="create-outline" size={20} color={themeColors.text} style={{ marginRight: 8 }} />}
+                    style={{ marginBottom: Spacing.two }}
+                  />
                   <CustomButton
                     title="EXPORTAR REPORTE (PDF)"
                     onPress={() => handleExportPDF(selectedEvidencia)}

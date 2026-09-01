@@ -49,6 +49,7 @@ export default function AdminLayout() {
 
   const quickLinks = [
     { route: '/(admin)/ventas', icon: 'cart-outline', color: '#ff6b6b', name: 'Ventas' },
+    { route: '/(admin)/facturacion', icon: 'receipt-outline', color: '#0984e3', name: 'Facturación CFDI' },
     { route: '/(admin)/gastos', icon: 'cash-outline', color: '#feca57', name: 'Gastos' },
     { route: '/(admin)/facturas-recibidas', icon: 'receipt-outline', color: '#2e86de', name: 'Facturas Recibidas' },
     { route: '/(admin)/cotizaciones', icon: 'document-text-outline', color: '#54a0ff', name: 'Cotizaciones' },
@@ -60,6 +61,7 @@ export default function AdminLayout() {
     { route: '/(admin)/reportes', icon: 'document-text-outline', color: '#10ac84', name: 'Reportes' },
     { route: '/(admin)/catalogos', icon: 'list-outline', color: '#5f27cd', name: 'Catálogos' },
     { route: '/(admin)/auditoria-tarjeta', icon: 'shield-checkmark-outline', color: '#ff9f43', name: 'Auditoría' },
+    { route: '/(admin)/documentos', icon: 'create-outline', color: '#0284c7', name: 'Documentos' },
     { route: '/(admin)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },
   ];
 
@@ -72,7 +74,11 @@ export default function AdminLayout() {
             style={styles.headerTitleContainer}
             onPress={() => {
               setIsMenuOpen(false);
-              router.replace('/(admin)/dashboard');
+              if (pathname.includes('editar-gasto') || pathname.includes('formulario') || pathname.includes('nueva-cotizacion')) {
+                router.back();
+              } else {
+                router.replace('/(admin)/dashboard');
+              }
             }}
             // @ts-ignore
             onMouseEnter={() => setIsHoveringHeader(true)}

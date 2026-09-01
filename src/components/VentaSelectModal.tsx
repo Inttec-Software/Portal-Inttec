@@ -50,14 +50,18 @@ export default function VentaSelectModal({
 
   const sucursalesUnicas = Array.from(new Set(data.map(v => v.sucursal).filter(Boolean))) as string[];
 
+  const normalize = (str?: any) => {
+    if (!str) return '';
+    return String(str).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  };
+
   const filteredData = data.filter(item => {
     let matchSearch = true;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      matchSearch = 
-        String(item.factura_referencia || '').toLowerCase().includes(q) ||
-        String(item.sucursal || '').toLowerCase().includes(q) ||
-        String(item.fecha || '').toLowerCase().includes(q);
+    if (searchQuery.trim()) {
+      const q = normalize(searchQuery);
+      const tokens = q.split(/\s+/).filter(Boolean);
+      const combined = normalize(`${item.cliente || ''} ${item.factura_referencia || ''} ${item.sucursal || ''} ${item.fecha || ''} ${item.descripcion || ''} ${item.folio || ''}`);
+      matchSearch = tokens.every(t => combined.includes(t));
     }
 
     let matchSucursal = true;
@@ -105,7 +109,7 @@ export default function VentaSelectModal({
         <Ionicons name="chevron-down" size={20} color={themeColors.textSecondary} />
       </TouchableOpacity>
 
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={modalVisible}
         animationType="slide"
         transparent={true}
@@ -213,15 +217,16 @@ export default function VentaSelectModal({
                             value={filterFecha ? new Date(filterFecha + 'T12:00:00') : new Date()}
                             mode="date"
                             display="default"
-                            onChange={(event, selectedDate) => {
+                            onValueChange={(event, selectedDate) => {
                               setShowDatePicker(false);
-                              if (selectedDate && event.type !== 'dismissed') {
+                              if (selectedDate) {
                                 const yyyy = selectedDate.getFullYear();
                                 const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
                                 const dd = String(selectedDate.getDate()).padStart(2, '0');
                                 setFilterFecha(`${yyyy}-${mm}-${dd}`);
                               }
                             }}
+                            onDismiss={() => setShowDatePicker(false)}
                           />
                         )}
                       </>

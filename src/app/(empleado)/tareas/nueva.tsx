@@ -21,6 +21,7 @@ import SelectDropdown from '@/components/SelectDropdown';
 import VentaSelectModal from '@/components/VentaSelectModal';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '@/services/supabase';
+import { TareasService } from '@/services/tareasService';
 
 export default function NuevaTareaScreen() {
   const router = useRouter();
@@ -59,18 +60,15 @@ export default function NuevaTareaScreen() {
   const fetchFormularyData = async () => {
     setFetchingData(true);
     try {
-      let userQuery = supabase.from('usuarios').select('id, nombre');
+      const data = await TareasService.getFormLookups();
+      
+      let users = data.usuarios || [];
       if (user?.rol === 'EMPLEADO') {
-        userQuery = userQuery.eq('rol', 'EMPLEADO');
+         users = users.filter((u: any) => u.rol === 'EMPLEADO');
       }
-      const { data: userData } = await userQuery;
-      setUsuarios(userData || []);
-
-      const { data: clientsData } = await supabase.from('clientes').select('id, nombre');
-      setClientes((clientsData || []).map((c: any) => ({ id: c.id, nombre: c.nombre })));
-
-      const { data: ventasData } = await supabase.from('ventas').select('id, cliente, factura_referencia, fecha, sucursal');
-      setVentas(ventasData || []);
+      setUsuarios(users);
+      setClientes(data.clientes || []);
+      setVentas(data.ventas || []);
       
       if (user?.id) {
         setResponsableId(user.id);
@@ -137,18 +135,10 @@ export default function NuevaTareaScreen() {
         vinculo_id: vinculoTipo === 'Cliente' ? (relacionarVenta ? referenciaVentaId : clienteId) : null
       };
 
-      const { data: tarea, error } = await supabase.from('tareas').insert(nuevaTarea).select().single();
-      if (error) throw error;
-
-      if (corresponsables.length > 0) {
-        const corrInserts = corresponsables.filter(c => c).map(cId => ({
-          tarea_id: tarea.id,
-          usuario_id: cId
-        }));
-        if (corrInserts.length > 0) {
-          await supabase.from('tarea_corresponsables').insert(corrInserts);
-        }
-      }
+      await TareasService.createTarea({
+        ...nuevaTarea,
+        corresponsables: corresponsables.filter(c => c)
+      });
 
       if (Platform.OS === 'web') window.alert('Tarea creada exitosamente');
       else Alert.alert('Éxito', 'Tarea creada exitosamente');
@@ -259,10 +249,11 @@ export default function NuevaTareaScreen() {
                   value={fechaCompromiso}
                   mode="date"
                   display="default"
-                  onChange={(event, selectedDate) => {
+                  onValueChange={(event, selectedDate) => {
                     setShowDatePicker(Platform.OS === 'ios');
                     if (selectedDate) setFechaCompromiso(selectedDate);
                   }}
+                  onDismiss={() => setShowDatePicker(false)}
                 />
               )}
             </>

@@ -59,14 +59,22 @@ export default function ExpenseCard({
     statusColor = themeColors.danger;
     statusIcon = 'close-circle-outline';
   } else if (gasto.status === 'ACTION_REQUIRED') {
-    statusText = 'ACCIÓN REQUERIDA';
+    statusText = 'ACCIÓN REQ.';
     statusColor = themeColors.actionRequired;
     statusIcon = 'alert-circle-outline';
   }
 
+  const matchProv = gasto.justificacion?.match(/\[Proveedor a agregar:\s*([^\]]+)\]/);
+  const provSugerido = matchProv ? matchProv[1].trim() : null;
+
+  const matchSuc = gasto.justificacion?.match(/\[Sucursal a agregar:\s*([^\]]+)\]/);
+  const sucSugerida = matchSuc ? matchSuc[1].trim() : null;
+
+  const mainTitle = proveedorNombre || (provSugerido ? `[Pendiente: ${provSugerido}]` : (clienteNombre || 'Sin proveedor'));
+
   return (
     <TouchableOpacity
-      activeOpacity={0.8}
+      activeOpacity={0.7}
       onPress={onPress}
       style={[
         styles.card,
@@ -77,28 +85,32 @@ export default function ExpenseCard({
         },
       ]}
     >
-      {/* Header: Categoria & Status Badge + Delete Button */}
+      {/* 1. Header: Categoría a la izquierda & Badges de Estado a la derecha */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-          <Ionicons
-            name={
-              categoriaNombre.toLowerCase().includes('transporte')
-                ? 'car-outline'
-                : categoriaNombre.toLowerCase().includes('aliment')
-                ? 'restaurant-outline'
-                : categoriaNombre.toLowerCase().includes('hosped')
-                ? 'bed-outline'
-                : 'receipt-outline'
-            }
-            size={16}
-            color={themeColors.accent}
-          />
-          <Text style={[styles.category, { color: themeColors.text }]} numberOfLines={1}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+          <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: themeColors.accent + '18', alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons
+              name={
+                categoriaNombre.toLowerCase().includes('transporte')
+                  ? 'car-outline'
+                  : categoriaNombre.toLowerCase().includes('aliment')
+                  ? 'restaurant-outline'
+                  : categoriaNombre.toLowerCase().includes('hosped')
+                  ? 'bed-outline'
+                  : 'receipt-outline'
+              }
+              size={15}
+              color={themeColors.accent}
+            />
+          </View>
+          <Text style={[styles.category, { color: themeColors.textSecondary }]} numberOfLines={1}>
             {categoriaNombre || 'Sin Categoría'}
-            {subcategoriaNombre ? ` - ${subcategoriaNombre}` : ''}
+            {subcategoriaNombre ? ` • ${subcategoriaNombre}` : ''}
           </Text>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+
+        {/* Badges de Estado */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 1 }}>
           {/* Factura Badge */}
           {gasto.facturado ? (
             <View style={[styles.statusBadge, { backgroundColor: themeColors.success + '18' }]}>
@@ -121,6 +133,7 @@ export default function ExpenseCard({
             <Ionicons name={statusIcon} size={11} color={statusColor} />
             <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>
           </View>
+
           {onDelete && (
             <TouchableOpacity
               onPress={(e) => {
@@ -134,73 +147,61 @@ export default function ExpenseCard({
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="trash-outline" size={14} color={themeColors.danger} />
+              <Ionicons name="trash-outline" size={13} color={themeColors.danger} />
             </TouchableOpacity>
           )}
         </View>
       </View>
       
-      {/* Detalle */}
-      <View style={{ gap: 4, marginBottom: 8 }}>
-        {showEmployeeName && gasto.empleado_nombre && (
-          <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
-            <Text style={{fontWeight: '600', color: themeColors.text}}>Empleado: </Text>
-            {gasto.empleado_nombre}
-          </Text>
-        )}
-        {proveedorNombre ? (
-          <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
-            <Text style={{fontWeight: '600', color: themeColors.text}}>Detalle: </Text>
-            {proveedorNombre}
-            {clienteNombre ? ` | ${clienteNombre}` : ''}
-          </Text>
-        ) : (
-          (() => {
-            const match = gasto.justificacion?.match(/\[Proveedor a agregar:\s*([^\]]+)\]/);
-            const provSugerido = match ? match[1].trim() : null;
-            return (
-              <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
-                <Text style={{fontWeight: '600', color: themeColors.text}}>Detalle: </Text>
-                {provSugerido ? (
-                  <Text style={{ color: themeColors.warning, fontWeight: '500' }}>[Pendiente: {provSugerido}]</Text>
-                ) : (
-                  <Text style={{ color: themeColors.danger, fontStyle: 'italic' }}>Sin proveedor</Text>
-                )}
-                {clienteNombre ? ` | ${clienteNombre}` : ''}
-              </Text>
-            );
-          })()
-        )}
-        {sucursalNombre ? (
-          <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
-            <Text style={{fontWeight: '600', color: themeColors.text}}>Sucursal: </Text>
-            {sucursalNombre}
-          </Text>
-        ) : (
-          (() => {
-            const match = gasto.justificacion?.match(/\[Sucursal a agregar:\s*([^\]]+)\]/);
-            const sucSugerida = match ? match[1].trim() : null;
-            return sucSugerida ? (
-              <Text style={[styles.detailText, { color: themeColors.textSecondary }]} numberOfLines={1}>
-                <Text style={{fontWeight: '600', color: themeColors.text}}>Sucursal: </Text>
-                <Text style={{ color: themeColors.warning, fontWeight: '500' }}>[Pendiente: {sucSugerida}]</Text>
-              </Text>
-            ) : null;
-          })()
-        )}
+      {/* 2. Proveedor / Título Principal (Fila dedicada de ancho completo para evitar empalmes) */}
+      <View style={{ marginBottom: 6 }}>
+        <Text style={[styles.mainTitle, { color: themeColors.text }]}>
+          {mainTitle}
+        </Text>
+
+        {/* Cliente vinculado si existe y no es el título principal */}
+        {clienteNombre && proveedorNombre ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            <Ionicons name="business-outline" size={13} color={themeColors.primary} />
+            <Text style={{ color: themeColors.primary, fontSize: 12, fontWeight: '600' }}>
+              Cliente: {clienteNombre}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Sucursal vinculada si existe */}
+        {(sucursalNombre || sucSugerida) ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            <Ionicons name="location-outline" size={13} color={themeColors.textSecondary} />
+            <Text style={{ color: themeColors.textSecondary, fontSize: 12, fontWeight: '500' }}>
+              Sucursal: {sucursalNombre || `[Pendiente: ${sucSugerida}]`}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
-      {/* Footer: Fecha & Monto */}
-      <View style={styles.footer}>
+      {/* 3. Empleado (si se requiere mostrar) */}
+      {showEmployeeName && gasto.empleado_nombre ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 }}>
+          <Ionicons name="person-outline" size={12} color={themeColors.textSecondary} />
+          <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+            Empleado: <Text style={{ color: themeColors.text, fontWeight: '600' }}>{gasto.empleado_nombre}</Text>
+          </Text>
+        </View>
+      ) : null}
+
+      {/* 4. Footer: Fecha & Monto */}
+      <View style={[styles.footer, { borderTopColor: themeColors.border + '30' }]}>
         <View style={styles.detailRow}>
-          <Ionicons name="calendar-outline" size={12} color={themeColors.textSecondary} />
-          <Text style={[styles.detailText, { color: themeColors.textSecondary }]}>{fecha}</Text>
+          <Ionicons name="calendar-outline" size={13} color={themeColors.textSecondary} />
+          <Text style={[styles.dateText, { color: themeColors.textSecondary }]}>{fecha}</Text>
         </View>
         <Text style={[styles.monto, { color: themeColors.text }]}>{montoFormatted}</Text>
       </View>
 
+      {/* 5. Feedback Box */}
       {gasto.rejection_feedback ? (
-        <View style={[styles.feedbackContainer, { backgroundColor: statusColor + '10' }]}>
+        <View style={[styles.feedbackContainer, { backgroundColor: statusColor + '10', borderLeftColor: statusColor }]}>
           <Text style={[styles.feedbackTitle, { color: statusColor }]}>
             {gasto.status === 'APPROVED' ? 'Revisión:' : gasto.status === 'REJECTED' ? 'Motivo de rechazo:' : 'Nota de revisión:'}
           </Text>
@@ -216,78 +217,61 @@ export default function ExpenseCard({
 const styles = StyleSheet.create({
   card: {
     borderRadius: BorderRadius.large,
-    padding: Spacing.two,
-    marginBottom: Spacing.one,
+    padding: Spacing.three,
+    marginBottom: Spacing.two,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 10,
+    shadowRadius: 8,
     elevation: 2,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.two,
-  },
-  categoryContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: Spacing.one,
-  },
-  iconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   category: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
   },
-  monto: {
+  mainTitle: {
     fontSize: 15,
     fontWeight: '800',
+    lineHeight: 20,
+  },
+  monto: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  dateText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: Spacing.one,
+    marginTop: 4,
+    paddingTop: 8,
+    borderTopWidth: 1,
   },
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
   },
-  metadataRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  detailText: {
-    fontSize: 12,
-    maxWidth: 120,
-  },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.one,
-    paddingVertical: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     borderRadius: BorderRadius.small,
     gap: 3,
   },
   statusText: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
   },
   feedbackContainer: {
     marginTop: Spacing.two,
-    padding: Spacing.one,
+    padding: Spacing.two,
     borderRadius: BorderRadius.small,
     borderLeftWidth: 3,
-    borderLeftColor: 'transparent', // Custom color set programmatically or dynamically
   },
   feedbackTitle: {
     fontSize: 11,

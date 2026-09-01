@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -10,13 +10,13 @@ import {
   Text,
   Alert,
   ActivityIndicator,
-  Animated,
+  Linking,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
-import ZoomableView from './ZoomableView';
+import ZoomableView, { ZoomableViewRef } from './ZoomableView';
 
 interface AsistenciaInfo {
   fecha: string;
@@ -56,8 +56,13 @@ export default function ImageViewerModal({
   asistenciaInfo,
 }: ImageViewerModalProps) {
   const viewRef = useRef<View>(null);
-  const [prevAsistenciaInfo, setPrevAsistenciaInfo] = React.useState(asistenciaInfo);
-  const [mapUrl, setMapUrl] = React.useState<string>(() =>
+  const zoomRef = useRef<ZoomableViewRef>(null);
+
+  const [currentZoomScale, setCurrentZoomScale] = useState(1);
+  const [currentRotation, setCurrentRotation] = useState(0);
+
+  const [prevAsistenciaInfo, setPrevAsistenciaInfo] = useState(asistenciaInfo);
+  const [mapUrl, setMapUrl] = useState<string>(() =>
     asistenciaInfo ? getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng) : ''
   );
 
@@ -66,38 +71,73 @@ export default function ImageViewerModal({
     setMapUrl(asistenciaInfo ? getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng) : '');
   }
 
+  // Reset zoom on open/close
+  useEffect(() => {
+    if (visible) {
+      setCurrentZoomScale(1);
+      setCurrentRotation(0);
+      zoomRef.current?.reset();
+    }
+  }, [visible, imageUrl]);
+
+  // Keyboard shortcuts for web
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !visible) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      } else if (e.key === '+' || e.key === '=') {
+        zoomRef.current?.zoomIn(0.5);
+      } else if (e.key === '-' || e.key === '_') {
+        zoomRef.current?.zoomOut(0.5);
+      } else if (e.key === '0') {
+        zoomRef.current?.reset();
+      } else if (e.key === 'r' || e.key === 'R') {
+        zoomRef.current?.rotate(90);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [visible, onClose]);
+
   if (!imageUrl) return null;
+
+  const handleOpenOriginal = () => {
+    if (Platform.OS === 'web') {
+      window.open(imageUrl, '_blank');
+    } else {
+      Linking.openURL(imageUrl).catch(() => {
+        Alert.alert('Error', 'No se pudo abrir el enlace de la imagen.');
+      });
+    }
+  };
 
   const handleShare = async () => {
     if (Platform.OS === 'web') {
       if (!asistenciaInfo) return;
       try {
-        // En web, podemos dibujar la imagen y la marca en un canvas y descargarla
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('No se pudo crear el contexto del canvas');
 
-        // Cargar la imagen principal
         const mainImg = new window.Image();
         if (imageUrl.startsWith('http')) {
           mainImg.crossOrigin = 'anonymous';
-          // Cache bust to prevent browser cache CORS issues
           mainImg.src = imageUrl + (imageUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
         } else {
           mainImg.src = imageUrl;
         }
-        
+
         await new Promise((resolve, reject) => {
           mainImg.onload = resolve;
           mainImg.onerror = () => reject(new Error('No se pudo cargar la imagen de la selfie.'));
         });
 
-        // Definir dimensiones fijas de exportación (ej. 1080x1440 para alta calidad)
         canvas.width = 1080;
         canvas.height = 1440;
 
-        // Dibujar imagen de fondo (selfie)
-        // Escalado "cover"
         const imgRatio = mainImg.width / mainImg.height;
         const canvasRatio = canvas.width / canvas.height;
         let drawWidth, drawHeight, drawX, drawY;
@@ -116,24 +156,20 @@ export default function ImageViewerModal({
 
         ctx.drawImage(mainImg, drawX, drawY, drawWidth, drawHeight);
 
-        // Dibujar el overlay oscuro al fondo
         const overlayHeight = 280;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.fillRect(0, canvas.height - overlayHeight, canvas.width, overlayHeight);
 
-        // Dibujar texto de la Hora
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 90px sans-serif';
         const horaStr = asistenciaInfo.hora.substring(0, 5);
         ctx.fillText(horaStr, 40, canvas.height - overlayHeight + 110);
         const timeWidth = ctx.measureText(horaStr).width;
 
-        // Dibujar línea vertical amarilla dynamically
         const lineX = 40 + timeWidth + 15;
         ctx.fillStyle = '#ffc107';
         ctx.fillRect(lineX, canvas.height - overlayHeight + 35, 6, 90);
 
-        // Dibujar texto de la Fecha y Tipo dynamically
         const textX = lineX + 20;
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 28px sans-serif';
@@ -142,12 +178,6 @@ export default function ImageViewerModal({
         ctx.font = 'bold 24px sans-serif';
         ctx.fillText(asistenciaInfo.tipo.toUpperCase(), textX, canvas.height - overlayHeight + 110);
 
-        // Dibujar Dirección (multilínea) y Nombre Empleado dynamically to avoid overlap
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 24px sans-serif';
-        const direccion = asistenciaInfo.direccion;
-        
-        // Función para envolver texto
         const wrapText = (context: CanvasRenderingContext2D, text: string, x: number, startY: number, maxWidth: number, lineHeight: number): number => {
           const words = text.split(' ');
           let line = '';
@@ -168,17 +198,14 @@ export default function ImageViewerModal({
           return currentY + lineHeight;
         };
 
-        const nextY = wrapText(ctx, direccion, 40, canvas.height - overlayHeight + 175, 750, 32);
+        const nextY = wrapText(ctx, asistenciaInfo.direccion, 40, canvas.height - overlayHeight + 175, 750, 32);
 
-        // Dibujar Nombre Empleado dynamically based on nextY
         ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
         ctx.font = 'bold 24px sans-serif';
         ctx.fillText(`👤 ${asistenciaInfo.empleadoNombre}`, 40, Math.min(nextY, canvas.height - 35));
 
-        // Dibujar el Mapa a la derecha si está disponible
-        // En web usamos OpenStreetMap porque soporta CORS. Google Maps Static API no soporta CORS y mancharía el canvas.
         const canvasMapUrl = `https://staticmap.openstreetmap.de/staticmap.php?center=${asistenciaInfo.lat},${asistenciaInfo.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${asistenciaInfo.lat},${asistenciaInfo.lng},red-pushpin`;
-        
+
         const mapImg = new window.Image();
         mapImg.crossOrigin = 'anonymous';
         try {
@@ -187,12 +214,11 @@ export default function ImageViewerModal({
             mapImg.onerror = () => reject(new Error('No se pudo cargar la imagen del mapa para compartir.'));
             mapImg.src = canvasMapUrl + '&t=' + Date.now();
           });
-          
+
           const mapSize = 200;
           const mapX = canvas.width - mapSize - 40;
           const mapY = canvas.height - mapSize - 40;
-          
-          // Dibujar borde blanco alrededor del mapa
+
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 6;
           ctx.strokeRect(mapX - 3, mapY - 3, mapSize + 6, mapSize + 6);
@@ -201,7 +227,6 @@ export default function ImageViewerModal({
           console.error('Error al dibujar mapa en canvas de web:', mapErr);
         }
 
-        // Convertir canvas a link de descarga
         const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
         const link = document.createElement('a');
         link.download = `asistencia_${asistenciaInfo.empleadoNombre.replace(/\s+/g, '_')}_${asistenciaInfo.fecha}.jpg`;
@@ -214,13 +239,11 @@ export default function ImageViewerModal({
       return;
     }
     try {
-      // Capturar el contenedor de la imagen + marca de agua
       const uri = await captureRef(viewRef, {
         format: 'jpg',
         quality: 0.9,
       });
 
-      // Compartir el archivo generado
       await Sharing.shareAsync(uri, {
         dialogTitle: 'Compartir Registro de Asistencia',
         mimeType: 'image/jpeg',
@@ -231,7 +254,7 @@ export default function ImageViewerModal({
   };
 
   return (
-    <Modal
+    <Modal statusBarTranslucent={true}
       visible={visible}
       transparent={true}
       animationType="fade"
@@ -239,20 +262,20 @@ export default function ImageViewerModal({
     >
       <SafeAreaView style={styles.overlay}>
         {/* Botón de cierre */}
-        <TouchableOpacity 
-          style={styles.closeButton} 
-          onPress={onClose} 
+        <TouchableOpacity
+          style={styles.closeButton}
+          onPress={onClose}
           activeOpacity={0.7}
           testID="close-image-viewer"
         >
           <Ionicons name="close-circle" size={38} color="#ffffff" />
         </TouchableOpacity>
 
-        {/* Botón de compartir con marca de agua */}
+        {/* Botón de compartir con marca de agua (cuando aplica) */}
         {asistenciaInfo && (
-          <TouchableOpacity 
-            style={styles.shareButton} 
-            onPress={handleShare} 
+          <TouchableOpacity
+            style={styles.shareButton}
+            onPress={handleShare}
             activeOpacity={0.7}
           >
             <Ionicons name="share-social-outline" size={20} color="#000000" />
@@ -260,22 +283,27 @@ export default function ImageViewerModal({
           </TouchableOpacity>
         )}
 
-        {/* Imagen a pantalla completa */}
+        {/* Imagen a pantalla completa con Zoom & Pan */}
         <View style={styles.imageContainer}>
-          <ZoomableView>
+          <ZoomableView
+            ref={zoomRef}
+            onScaleChange={setCurrentZoomScale}
+            onRotationChange={setCurrentRotation}
+            minScale={1}
+            maxScale={8}
+          >
             {asistenciaInfo ? (
-              <View 
-                ref={viewRef} 
+              <View
+                ref={viewRef}
                 style={styles.captureContainer}
                 collapsable={false}
               >
                 <Image
                   source={{ uri: imageUrl }}
                   style={styles.image}
-                  resizeMode="cover"
+                  contentFit="cover"
                 />
                 <View style={styles.watermarkOverlay}>
-                  {/* Info Izquierda */}
                   <View style={styles.watermarkLeftCol}>
                     <View style={styles.watermarkTimeDateRow}>
                       <Text style={styles.watermarkTimeText}>
@@ -299,20 +327,17 @@ export default function ImageViewerModal({
                     </Text>
                   </View>
 
-                  {/* Mapa Derecha */}
                   <View style={styles.watermarkMapContainer}>
                     {mapUrl ? (
                       <Image
-                        source={{
-                          uri: mapUrl,
-                        }}
+                        source={{ uri: mapUrl }}
                         onError={() => {
                           if (asistenciaInfo && !mapUrl.includes('openstreetmap.de')) {
                             setMapUrl(`https://staticmap.openstreetmap.de/staticmap.php?center=${asistenciaInfo.lat},${asistenciaInfo.lng}&zoom=16&size=200x200&maptype=mapnik&markers=${asistenciaInfo.lat},${asistenciaInfo.lng},red-pushpin`);
                           }
                         }}
                         style={styles.watermarkMap}
-                        resizeMode="cover"
+                        contentFit="cover"
                       />
                     ) : (
                       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#333' }}>
@@ -326,11 +351,86 @@ export default function ImageViewerModal({
               <Image
                 source={{ uri: imageUrl }}
                 style={styles.fullImage}
-                resizeMode="contain"
+                contentFit="contain"
               />
             )}
           </ZoomableView>
         </View>
+
+        {/* Barra Flotante de Herramientas de Visualización */}
+        <View style={styles.floatingToolbar}>
+          {/* Zoom Out */}
+          <TouchableOpacity
+            style={styles.toolbarBtn}
+            onPress={() => zoomRef.current?.zoomOut(0.5)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="remove" size={20} color="#ffffff" />
+          </TouchableOpacity>
+
+          {/* Porcentaje Zoom */}
+          <TouchableOpacity
+            style={styles.toolbarScaleBtn}
+            onPress={() => zoomRef.current?.reset()}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.toolbarScaleText}>
+              {Math.round(currentZoomScale * 100)}%
+            </Text>
+          </TouchableOpacity>
+
+          {/* Zoom In */}
+          <TouchableOpacity
+            style={styles.toolbarBtn}
+            onPress={() => zoomRef.current?.zoomIn(0.5)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="add" size={20} color="#ffffff" />
+          </TouchableOpacity>
+
+          <View style={styles.toolbarDivider} />
+
+          {/* Rotar 90° */}
+          <TouchableOpacity
+            style={styles.toolbarBtn}
+            onPress={() => zoomRef.current?.rotate(90)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="reload-outline" size={18} color="#ffffff" />
+          </TouchableOpacity>
+
+          {/* Reset / Centrar */}
+          <TouchableOpacity
+            style={styles.toolbarBtn}
+            onPress={() => zoomRef.current?.reset()}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="scan-outline" size={18} color="#ffffff" />
+          </TouchableOpacity>
+
+          {/* Abrir original en nueva pestaña / navegador */}
+          <TouchableOpacity
+            style={styles.toolbarBtn}
+            onPress={handleOpenOriginal}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="open-outline" size={18} color="#ffffff" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Tip explicativo en Desktop */}
+        {Platform.OS === 'web' && (
+          <View style={styles.helpHint}>
+            <Text style={styles.helpHintText}>
+              💡 Rueda del mouse para zoom hacia el cursor • Clic y arrastrar para mover • Doble clic para zoom rápido
+            </Text>
+          </View>
+        )}
       </SafeAreaView>
     </Modal>
   );
@@ -341,7 +441,7 @@ const { width, height } = Dimensions.get('window');
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    backgroundColor: 'rgba(0, 0, 0, 0.96)',
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
@@ -383,8 +483,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   imageContainer: {
+    flex: 1,
     width: '100%',
-    height: '80%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -408,9 +509,74 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   fullImage: {
-    width: width,
+    width: '100%',
     height: '100%',
-    maxWidth: Platform.OS === 'web' ? 800 : undefined,
+  },
+  floatingToolbar: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 40 : 25,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(28, 28, 30, 0.88)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1,
+    borderRadius: 30,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    gap: 10,
+    zIndex: 999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+    ...Platform.select({
+      web: {
+        backdropFilter: 'blur(16px)',
+      },
+    }),
+  },
+  toolbarBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  toolbarScaleBtn: {
+    paddingHorizontal: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 44,
+  },
+  toolbarScaleText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  toolbarDivider: {
+    width: 1,
+    height: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  helpHint: {
+    position: 'absolute',
+    top: 30,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    pointerEvents: 'none',
+  },
+  helpHintText: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 11,
+    fontWeight: '500',
   },
   watermarkOverlay: {
     position: 'absolute',

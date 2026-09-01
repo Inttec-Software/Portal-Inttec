@@ -19,6 +19,7 @@ import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
 import { SyncService, OfflineGastoItem } from '@/services/sync';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
@@ -387,47 +388,12 @@ export default function EmpleadoGastos() {
       setMisRegistrosGasolina([]);
     }
     try {
-      // 1. Obtener de Supabase (con fallback resiliente y enriquecimiento)
-      const [gastosRes, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
-        supabase
-          .from('gastos')
-          .select(`
-            *,
-            subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-            proveedor_rel:proveedores(id, nombre),
-            cliente_rel:clientes(id, nombre),
-            sucursal_rel:sucursales_cliente(id, nombre)
-          `)
-          .eq('empleado_id', userId)
-          .order('created_at', { ascending: false }),
-        supabase.from('categorias').select('*'),
-        supabase.from('subcategorias').select('*'),
-        supabase.from('proveedores').select('*'),
-        supabase.from('clientes').select('*'),
-        supabase.from('sucursales_cliente').select('*'),
-      ]);
-
-      let rawGastos = gastosRes.data || [];
-      if (gastosRes.error) {
-        console.warn('Relational gastos query failed, attempting basic query:', gastosRes.error.message);
-        const fallbackRes = await supabase
-          .from('gastos')
-          .select('*')
-          .eq('empleado_id', userId)
-          .order('created_at', { ascending: false });
-        rawGastos = fallbackRes.data || [];
-      }
-
-      const enrichedGastos = GastoService.enrichGastosWithCatalogs(
-        rawGastos,
-        catRes.data || [],
-        subRes.data || [],
-        provRes.data || [],
-        cliRes.data || [],
-        sucRes.data || []
-      );
-
-      setGastos(enrichedGastos);
+      // 1. Obtener de Backend
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/empleado`, { headers });
+      if (!res.ok) throw new Error('Error al obtener gastos');
+      const data = await res.json();
+      setGastos(data.gastos || []);
 
       // 2. Obtener cola local offline
       const localQueue = await SyncService.getOfflineQueue();
@@ -443,17 +409,6 @@ export default function EmpleadoGastos() {
       setMisRegistrosGasolina(myGasLogs);
     } catch (err: any) {
       console.error('Error al cargar datos:', err);
-      // Emergency fallback
-      try {
-        const emergency = await supabase
-          .from('gastos')
-          .select('*')
-          .eq('empleado_id', userId)
-          .order('created_at', { ascending: false });
-        if (emergency.data && emergency.data.length > 0) {
-          setGastos(emergency.data);
-        }
-      } catch (_) {}
     } finally {
       if (!silent) setIsLoading(false);
     }
@@ -513,16 +468,23 @@ export default function EmpleadoGastos() {
     const nuevaJustificacion = `${selectedGasto.justificacion || ''} | Resp Empleado: ${repondFeedback.trim()}`;
 
     try {
-      const { error } = await supabase
-        .from('gastos')
-        .update({
-          status: 'PENDING',
-          rejection_feedback: null,
-          justificacion: nuevaJustificacion,
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          updatePayload: {
+            status: 'PENDING',
+            rejection_feedback: null,
+            justificacion: nuevaJustificacion,
+          }
         })
-        .eq('id', selectedGasto.id);
+      });
 
-      if (error) throw error;
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Error al reenviar gasto');
+      }
 
       Alert.alert('Éxito', 'Gasto reenviado correctamente para revisión.');
       setModalVisible(false);
@@ -711,12 +673,41 @@ export default function EmpleadoGastos() {
       {/* Resumen Cards */}
       <View style={styles.summaryContainer}>
         <View style={[styles.summaryCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>PENDIENTE / OFFLINE</Text>
-          <Text style={[styles.summaryValue, { color: themeColors.text }]}>{formatCurrency(saldoPendiente)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: themeColors.warning + '18', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="time" size={14} color={themeColors.warning} />
+            </View>
+            <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>
+              PENDIENTE / OFFLINE
+            </Text>
+          </View>
+          <Text
+            style={[styles.summaryValue, { color: themeColors.text }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.75}
+          >
+            {formatCurrency(saldoPendiente)}
+          </Text>
         </View>
+
         <View style={[styles.summaryCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]}>TOTAL APROBADO</Text>
-          <Text style={[styles.summaryValue, { color: themeColors.success }]}>{formatCurrency(totalAprobado)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: themeColors.success + '18', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="checkmark-circle" size={14} color={themeColors.success} />
+            </View>
+            <Text style={[styles.summaryLabel, { color: themeColors.textSecondary }]} numberOfLines={1}>
+              TOTAL APROBADO
+            </Text>
+          </View>
+          <Text
+            style={[styles.summaryValue, { color: themeColors.success }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit={true}
+            minimumFontScale={0.75}
+          >
+            {formatCurrency(totalAprobado)}
+          </Text>
         </View>
       </View>
 
@@ -808,7 +799,7 @@ export default function EmpleadoGastos() {
       </View>
 
       {/* ========== MODAL: Instrucciones del Checador ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={checadorInstructionVisible}
@@ -858,7 +849,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* ========== MODAL: Cámara con Marca de Agua ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="fade"
         transparent={false}
         visible={checadorCameraVisible}
@@ -963,7 +954,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* ========== MODAL: Resultado del Checador ========== */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={checadorResultVisible}
@@ -1039,7 +1030,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* Modal de Detalle */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={modalVisible}
@@ -1243,7 +1234,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* Modal de Vehículos y Gasolina (Empleado) */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={employeeVehiculosModalVisible}
@@ -1395,7 +1386,7 @@ export default function EmpleadoGastos() {
       </Modal>
 
       {/* Modal de Mi Perfil */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         animationType="slide"
         transparent={true}
         visible={profileModalVisible}
@@ -1539,25 +1530,31 @@ const styles = StyleSheet.create({
   },
   summaryContainer: {
     flexDirection: 'row',
-    paddingHorizontal: Spacing.four,
+    paddingHorizontal: Spacing.three,
     gap: Spacing.two,
-    marginBottom: Spacing.three,
+    marginBottom: Spacing.two,
   },
   summaryCard: {
     flex: 1,
-    padding: Spacing.three,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.two,
     borderRadius: BorderRadius.medium,
     borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   summaryLabel: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0.5,
   },
   summaryValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    marginTop: 4,
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 1,
   },
   tabsContainer: {
     flexDirection: 'row',

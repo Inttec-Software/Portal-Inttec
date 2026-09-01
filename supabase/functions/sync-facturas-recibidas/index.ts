@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 import JSZip from "https://esm.sh/jszip@3.10.1";
@@ -68,7 +69,7 @@ async function saveFacturaToDb(supabase: any, parsed: FacturaParsed, xmlUrl: str
   return data;
 }
 
-serve(async (req) => {
+serve(async (req: any) => {
   // Manejo de preflight CORS
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -283,6 +284,36 @@ serve(async (req) => {
         console.error(`💥 [TEST DESCARGA] Error:`, dErr.message);
         return new Response(
           JSON.stringify({ success: false, error: dErr.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // =========================================================================
+    // ACCIÓN: Prueba de Verificación de Solicitud
+    // =========================================================================
+    if (action === "test_verificar") {
+      const idSolicitud = reqData.id_solicitud || "";
+      try {
+        const satClient = new SatSoapClient({
+          rfc: satRfc,
+          cerB64: satCerB64,
+          keyB64: satKeyB64,
+          password: satPassword,
+        });
+
+        const verif = await satClient.verificarSolicitud(idSolicitud);
+        return new Response(
+          JSON.stringify({
+            success: true,
+            idSolicitud,
+            verifResult: verif,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (vErr: any) {
+        return new Response(
+          JSON.stringify({ success: false, error: vErr.message }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }

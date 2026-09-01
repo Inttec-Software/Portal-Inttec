@@ -28,6 +28,7 @@ interface ModuleConfig {
 
 const MODULES: ModuleConfig[] = [
   { id: 'ventas', name: 'Ventas', icon: 'cart', route: '/(admin)/ventas', color: '#ff6b6b' },
+  { id: 'facturacion', name: 'Facturación CFDI', icon: 'receipt-outline', route: '/(admin)/facturacion', color: '#0984e3' },
   { id: 'gastos', name: 'Gastos', icon: 'cash', route: '/(admin)/gastos', color: '#feca57' },
   { id: 'facturas_recibidas', name: 'Facturas Recibidas', icon: 'receipt', route: '/(admin)/facturas-recibidas', color: '#2e86de' },
   { id: 'cotizaciones', name: 'Cotizaciones', icon: 'document-text', route: '/(admin)/cotizaciones', color: '#54a0ff' },
@@ -39,6 +40,7 @@ const MODULES: ModuleConfig[] = [
   { id: 'reportes', name: 'Reportes', icon: 'document-text', route: '/(admin)/reportes', color: '#10ac84' },
   { id: 'catalogos', name: 'Catálogos', icon: 'list', route: '/(admin)/catalogos', color: '#5f27cd' },
   { id: 'auditoria', name: 'Auditoría', icon: 'shield-checkmark', route: '/(admin)/auditoria-tarjeta', color: '#ff9f43' },
+  { id: 'documentos', name: 'Documentos', icon: 'create-outline', route: '/(admin)/documentos', color: '#0284c7' },
   { id: 'ia', name: 'Chat IA', icon: 'sparkles', route: '/(admin)/chat-ia', color: '#2e86de' },
 ];
 

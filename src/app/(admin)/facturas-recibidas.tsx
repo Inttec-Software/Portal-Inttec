@@ -18,7 +18,9 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { parseCfdiXml } from '../../../supabase/functions/sync-facturas-recibidas/xmlParser';
+import { exportFacturaCfdiToPdf } from '@/utils/cfdiPdfGenerator';
 
 interface FacturaRecibida {
   id: string;
@@ -95,19 +97,17 @@ export default function FacturasRecibidasScreen() {
     try {
       setLoading(true);
       setTableMissing(false);
-      const { data, error } = await supabase
-        .from('facturas_recibidas')
-        .select('*')
-        .order('fecha_emision', { ascending: false });
-
-      if (error) {
-        if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
-          setTableMissing(true);
-        } else {
-          console.error('Error fetching facturas recibidas:', error);
-        }
-      } else {
-        setFacturas(data || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/facturas-recibidas`, { headers });
+      if (!res.ok) {
+        throw new Error('Error de red al cargar facturas recibidas');
+      }
+      const json = await res.json();
+      
+      if (json.tableMissing) {
+        setTableMissing(true);
+      } else if (json.facturas) {
+        setFacturas(json.facturas);
       }
     } catch (err) {
       console.error('Unexpected error:', err);
@@ -119,18 +119,16 @@ export default function FacturasRecibidasScreen() {
 
   const fetchSatSolicitudes = async () => {
     try {
-      const { data, error } = await supabase
-        .from('sat_descarga_solicitudes')
-        .select('*')
-        .in('estado_sat', ['PENDIENTE', 'EN_PROCESO'])
-        .order('created_at', { ascending: false })
-        .limit(3);
-
-      if (!error && data) {
-        setSatSolicitudes(data);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/facturas-recibidas/sat-solicitudes`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.solicitudes) {
+          setSatSolicitudes(json.solicitudes);
+        }
       }
-    } catch {
-      // Ignorar si la tabla aún no existe
+    } catch (err) {
+      console.error('Error fetching SAT solicitudes:', err);
     }
   };
 
@@ -196,33 +194,17 @@ export default function FacturasRecibidasScreen() {
       setImportingXml(true);
       const parsed = parseCfdiXml(xmlInputText);
 
-      const { error } = await supabase
-        .from('facturas_recibidas')
-        .upsert(
-          {
-            uuid: parsed.uuid,
-            rfc_emisor: parsed.rfcEmisor,
-            nombre_emisor: parsed.nombreEmisor,
-            rfc_receptor: parsed.rfcReceptor,
-            fecha_emision: parsed.fechaEmision,
-            subtotal: parsed.subtotal,
-            descuento: parsed.descuento,
-            iva: parsed.iva,
-            retencion_isr: parsed.retencionIsr,
-            retencion_iva: parsed.retencionIva,
-            total: parsed.total,
-            moneda: parsed.moneda,
-            tipo_comprobante: parsed.tipoComprobante,
-            estado_sat: parsed.estadoSat,
-            conceptos_json: parsed.conceptos,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'uuid' }
-        )
-        .select()
-        .single();
-
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/facturas-recibidas/import`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ parsed })
+      });
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Error al importar XML en el servidor');
+      }
 
       showAlert('Éxito', `Factura de ${parsed.nombreEmisor} ($${parsed.total.toFixed(2)}) importada correctamente.`);
       setShowImportModal(false);
@@ -258,7 +240,6 @@ export default function FacturasRecibidasScreen() {
       if (error) {
         console.error(`❌ [SAT SYNC] Error retornado por Supabase Functions:`, error);
         
-        // Intentar obtener más detalles del error si viene en el contexto
         let errorDetail = error.message || 'Error desconocido';
         try {
           if ((error as any).context) {
@@ -270,9 +251,14 @@ export default function FacturasRecibidasScreen() {
           // Ignorar error al leer contexto
         }
 
+        let userFriendlyMsg = `Hubo un problema al conectar con el servicio de sincronización.\n\nDetalle: ${errorDetail}`;
+        if (errorDetail.includes('IDLE_TIMEOUT') || errorDetail.includes('timeout')) {
+          userFriendlyMsg = 'El servidor del SAT tardó más de 2.5 minutos en responder debido a saturación en sus servicios web.\n\nTe sugerimos reintentar en unos momentos o subir tus archivos al instante usando el botón "+ Importar XML".';
+        }
+
         showAlert(
-          'Error al Sincronizar',
-          `Hubo un problema al conectar con el servicio de sincronización.\n\nDetalle: ${errorDetail}`
+          'Tiempo de Espera del SAT Agotado',
+          userFriendlyMsg
         );
         return;
       }
@@ -322,6 +308,20 @@ export default function FacturasRecibidasScreen() {
     Linking.openURL(url).catch(() => {
       showAlert('Error', 'No se pudo abrir el enlace al archivo XML.');
     });
+  };
+
+  const [exportingPdfId, setExportingPdfId] = useState<string | null>(null);
+
+  const handleExportPdf = async (factura: FacturaRecibida) => {
+    try {
+      setExportingPdfId(factura.id);
+      await exportFacturaCfdiToPdf({ factura });
+    } catch (err: any) {
+      console.error('Error exportando PDF:', err);
+      showAlert('Error al generar PDF', err.message || 'No se pudo generar el documento PDF de la factura.');
+    } finally {
+      setExportingPdfId(null);
+    }
   };
 
   const formatCurrency = (amount: number) => {
@@ -571,7 +571,24 @@ export default function FacturasRecibidasScreen() {
                   <Text style={[styles.uuidText, { color: themeColors.textSecondary }]} numberOfLines={1}>
                     UUID: {f.uuid}
                   </Text>
-                  <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <TouchableOpacity
+                      style={styles.cardPdfBtn}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        handleExportPdf(f);
+                      }}
+                      disabled={exportingPdfId === f.id}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      {exportingPdfId === f.id ? (
+                        <ActivityIndicator size="small" color="#e74c3c" />
+                      ) : (
+                        <Ionicons name="document-text" size={18} color="#e74c3c" />
+                      )}
+                    </TouchableOpacity>
+                    <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
+                  </View>
                 </View>
               </TouchableOpacity>
             ))}
@@ -580,7 +597,7 @@ export default function FacturasRecibidasScreen() {
       </ScrollView>
 
       {/* Modal de Detalle de Factura */}
-      <Modal visible={showDetailModal} animationType="slide" transparent={true} onRequestClose={() => setShowDetailModal(false)}>
+      <Modal statusBarTranslucent={true} visible={showDetailModal} animationType="slide" transparent={true} onRequestClose={() => setShowDetailModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContainer, { backgroundColor: themeColors.backgroundElement }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -595,6 +612,23 @@ export default function FacturasRecibidasScreen() {
 
             {selectedFactura && (
               <ScrollView style={{ padding: 16 }}>
+                {/* Botón principal de exportación a PDF */}
+                <TouchableOpacity
+                  style={[styles.pdfExportMainBtn, { backgroundColor: '#e74c3c' }]}
+                  onPress={() => handleExportPdf(selectedFactura)}
+                  disabled={exportingPdfId === selectedFactura.id}
+                  activeOpacity={0.8}
+                >
+                  {exportingPdfId === selectedFactura.id ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="document-text-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+                      <Text style={styles.pdfExportMainBtnText}>Descargar / Exportar Factura en PDF (Formato SAT)</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
                 {/* Info General */}
                 <View style={[styles.infoSection, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
                   <Text style={[styles.sectionTitle, { color: themeColors.accent }]}>Emisor / Proveedor</Text>
@@ -678,7 +712,7 @@ export default function FacturasRecibidasScreen() {
       </Modal>
 
       {/* Modal de Importación Manual de XML */}
-      <Modal visible={showImportModal} animationType="fade" transparent={true} onRequestClose={() => setShowImportModal(false)}>
+      <Modal statusBarTranslucent={true} visible={showImportModal} animationType="fade" transparent={true} onRequestClose={() => setShowImportModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContainer, { backgroundColor: themeColors.backgroundElement }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -809,6 +843,25 @@ const styles = StyleSheet.create({
   infoSub: { fontSize: 13, marginTop: 2 },
   xmlLinkBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingVertical: 4 },
   xmlLinkText: { fontSize: 13, fontWeight: '600' },
+  pdfExportMainBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: BorderRadius.medium,
+    marginBottom: 14,
+  },
+  pdfExportMainBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  cardPdfBtn: {
+    padding: 4,
+    borderRadius: 6,
+    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+  },
   dividerLight: { height: 1, backgroundColor: 'rgba(150,150,150,0.2)', marginVertical: 10 },
   montoRow: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 2 },
   conceptoCard: { paddingVertical: 8, borderBottomWidth: 1 },

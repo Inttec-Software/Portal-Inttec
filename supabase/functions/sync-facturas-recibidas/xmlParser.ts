@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Parser de archivos XML CFDI 3.3 y 4.0 del SAT
  */

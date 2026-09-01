@@ -120,7 +120,7 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
         icon={<Ionicons name="add" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
       />
 
-      <Modal visible={modalVisible} animationType="slide" transparent={true} onRequestClose={() => setModalVisible(false)}>
+      <Modal statusBarTranslucent={true} visible={modalVisible} animationType="slide" transparent={true} onRequestClose={() => setModalVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -182,7 +182,14 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                       style={[styles.input, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
                       keyboardType="numeric"
                       value={usado}
-                      onChangeText={setUsado}
+                      onChangeText={(val) => {
+                        const num = parseInt(val, 10);
+                        if (!isNaN(num) && num > selectedProduct.stock_actual) {
+                          setUsado(selectedProduct.stock_actual.toString());
+                        } else {
+                          setUsado(val);
+                        }
+                      }}
                       placeholder="0"
                     />
                   </View>

@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/services/supabase';
 import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { Cotizacion } from '@/types/ventas';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 
 const getStatusConfig = (estado: string, isDark: boolean) => {
@@ -114,13 +115,11 @@ export default function CotizacionesListScreen() {
 
   const fetchCotizaciones = async () => {
     try {
-      const { data, error } = await supabase
-        .from('cotizaciones')
-        .select('*')
-        .order('creado_en', { ascending: false });
-
-      if (error) throw error;
-      setCotizaciones(data || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/cotizaciones`, { headers });
+      if (!res.ok) throw new Error('Error en API');
+      const data = await res.json();
+      setCotizaciones(data.cotizaciones || []);
     } catch (err) {
       console.error('Error fetching cotizaciones:', err);
     } finally {
@@ -133,13 +132,11 @@ export default function CotizacionesListScreen() {
     let active = true;
     const init = async () => {
       try {
-        const { data, error } = await supabase
-          .from('cotizaciones')
-          .select('*')
-          .order('creado_en', { ascending: false });
-
-        if (error) throw error;
-        if (active) setCotizaciones(data || []);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/cotizaciones`, { headers });
+        if (!res.ok) throw new Error('Error en API');
+        const data = await res.json();
+        if (active) setCotizaciones(data.cotizaciones || []);
       } catch (err) {
         console.error('Error fetching cotizaciones:', err);
       } finally {
@@ -169,12 +166,14 @@ export default function CotizacionesListScreen() {
 
   const handleDownloadPDF = async (cot: any, action: 'view' | 'download' = 'view') => {
     try {
-      // Intentar obtener los datos completos del cliente de la base de datos
-      const { data: clientData } = await supabase
-        .from('clientes')
-        .select('*')
-        .eq('nombre', cot.cliente_nombre)
-        .single();
+      // Intentar obtener los datos completos del cliente de la base de datos a través de la API
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/cotizaciones/${cot.id}/pdf-data`, { headers });
+      let clientData = null;
+      if (res.ok) {
+        const data = await res.json();
+        clientData = data.clientData;
+      }
 
       // Reconstruir objeto Cotizacion a partir de la BD
       const cotData: Cotizacion = {
@@ -220,8 +219,12 @@ export default function CotizacionesListScreen() {
 
   const ejecutarEliminacion = async (id: string) => {
     try {
-      const { error } = await supabase.from('cotizaciones').delete().eq('id', id);
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/cotizaciones/${id}`, {
+        method: 'DELETE',
+        headers
+      });
+      if (!res.ok) throw new Error('Error al eliminar');
       fetchCotizaciones();
     } catch (err) {
       console.error('Error al eliminar:', err);
@@ -239,39 +242,14 @@ export default function CotizacionesListScreen() {
   const handleDuplicate = async (cot: any) => {
     try {
       setIsLoading(true);
-      // Obtener el último folio secuencial para generar el siguiente
-      const { data: lastData } = await supabase
-        .from('cotizaciones')
-        .select('folio')
-        .order('folio', { ascending: false })
-        .limit(1);
-
-      let newFolio = (new Date().getFullYear() % 100).toString() + "0001";
-      if (lastData && lastData.length > 0) {
-        const lastFolio = parseInt(lastData[0].folio, 10);
-        if (!isNaN(lastFolio)) {
-          newFolio = (lastFolio + 1).toString();
-        }
-      }
-
-      const { error } = await supabase.from('cotizaciones').insert([
-        {
-          folio: newFolio,
-          cliente_nombre: cot.cliente_nombre,
-          vendedor: cot.vendedor,
-          moneda: cot.moneda,
-          fecha_creacion: new Date().toLocaleDateString('es-MX'),
-          subtotal: cot.subtotal,
-          iva: cot.iva,
-          total: cot.total,
-          lineas: cot.lineas,
-          terminos_condiciones: cot.terminos_condiciones,
-          estado: 'Borrador'
-        }
-      ]);
-
-      if (error) throw error;
-      showAlert('Éxito', `Cotización duplicada con éxito. Nuevo folio: ${newFolio}`);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/cotizaciones/duplicate/${cot.id}`, {
+        method: 'POST',
+        headers
+      });
+      if (!res.ok) throw new Error('Error al duplicar');
+      const data = await res.json();
+      showAlert('Éxito', `Cotización duplicada con éxito. Nuevo folio: ${data.newFolio}`);
       fetchCotizaciones();
     } catch (err: any) {
       console.error('Error duplicando cotización:', err);
@@ -283,11 +261,13 @@ export default function CotizacionesListScreen() {
 
   const handleEmail = async (cot: any) => {
     try {
-      const { data: clientData } = await supabase
-        .from('clientes')
-        .select('correo_electronico')
-        .eq('nombre', cot.cliente_nombre)
-        .single();
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/cotizaciones/${cot.id}/pdf-data`, { headers });
+      let clientData = null;
+      if (res.ok) {
+        const data = await res.json();
+        clientData = data.clientData;
+      }
 
       const defaultEmail = clientData?.correo_electronico || 'cliente@correo.com';
 
@@ -678,64 +658,75 @@ export default function CotizacionesListScreen() {
                       </View>
                     </View>
 
-                    {/* Action buttons (Row of 5 circular buttons) */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, borderTopWidth: 1, borderTopColor: themeColors.border + '50', paddingTop: 10 }}>
-                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, fontWeight: 'bold' }}>Acciones</Text>
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {/* Action buttons */}
+                    <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: themeColors.border + '50', paddingTop: 10 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <Text style={{ fontSize: 10, color: themeColors.textSecondary, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                          Acciones
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                         {/* 1. Ver PDF */}
                         <TouchableOpacity 
                           onPress={() => handleDownloadPDF(cot, 'view')}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('view', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="eye-outline" size={15} color={getActionBtnStyle('view', scheme === 'dark').color} />
+                          <Ionicons name="eye-outline" size={16} color={getActionBtnStyle('view', scheme === 'dark').color} />
                         </TouchableOpacity>
                         
                         {/* 2. Descargar PDF */}
                         <TouchableOpacity 
                           onPress={() => handleDownloadPDF(cot, 'download')}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('download', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="download-outline" size={15} color={getActionBtnStyle('download', scheme === 'dark').color} />
+                          <Ionicons name="download-outline" size={16} color={getActionBtnStyle('download', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 3. Enviar Correo */}
                         <TouchableOpacity 
                           onPress={() => handleEmail(cot)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('email', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="mail-outline" size={15} color={getActionBtnStyle('email', scheme === 'dark').color} />
+                          <Ionicons name="mail-outline" size={16} color={getActionBtnStyle('email', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 4. Duplicar */}
                         <TouchableOpacity 
                           onPress={() => handleDuplicate(cot)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('view', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="copy-outline" size={15} color={getActionBtnStyle('view', scheme === 'dark').color} />
+                          <Ionicons name="copy-outline" size={16} color={getActionBtnStyle('view', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 5. Editar */}
                         <TouchableOpacity 
                           onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('edit', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="pencil-outline" size={15} color={getActionBtnStyle('edit', scheme === 'dark').color} />
+                          <Ionicons name="pencil-outline" size={16} color={getActionBtnStyle('edit', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 6. Convertir a Venta */}
                         <TouchableOpacity 
                           onPress={() => handleConvertirVenta(cot)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('download', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="cash-outline" size={15} color={getActionBtnStyle('download', scheme === 'dark').color} />
+                          <Ionicons name="cash-outline" size={16} color={getActionBtnStyle('download', scheme === 'dark').color} />
                         </TouchableOpacity>
 
                         {/* 7. Eliminar */}
                         <TouchableOpacity 
                           onPress={() => handleDelete(cot.id)}
                           style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('delete', scheme === 'dark').bg }]}
+                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                         >
-                          <Ionicons name="trash-outline" size={15} color={getActionBtnStyle('delete', scheme === 'dark').color} />
+                          <Ionicons name="trash-outline" size={16} color={getActionBtnStyle('delete', scheme === 'dark').color} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -1182,9 +1173,10 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     fontWeight: 'bold',
   },
   circularActionBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    flex: 1,
+    maxWidth: 42,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },

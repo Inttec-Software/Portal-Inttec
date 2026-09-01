@@ -2,19 +2,24 @@ module.exports = {
   expo: {
     name: "Portal Inttec & Daravisa",
     slug: "portal-inttec",
-    version: "1.3.3",
+    version: "1.3.6",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "appmovil",
     userInterfaceStyle: "automatic",
     ios: {
+      bundleIdentifier: "com.alexisef23.appmovil",
+      appleTeamId: "2345ZRS7HS",
       icon: "./assets/expo.icon",
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false
+      },
       config: {
         googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""
       }
     },
     android: {
-      versionCode: 58,
+      versionCode: 61,
       adaptiveIcon: {
         backgroundColor: "#E6F4FE",
         foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -22,6 +27,7 @@ module.exports = {
         monochromeImage: "./assets/images/android-icon-monochrome.png"
       },
       predictiveBackGestureEnabled: false,
+      softwareKeyboardLayoutMode: "pan",
       package: "com.alexisef23.appmovil",
       config: {
         googleMaps: {

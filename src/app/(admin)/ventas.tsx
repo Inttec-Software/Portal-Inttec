@@ -26,12 +26,15 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario, Venta, VentaPartida, VentaPago, calcularEstadoPago, EstadoPagoVenta, syncVentaPaymentStatus, recalculateVentaTotals, ClienteItem, SucursalCliente, GastoHelper } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { parseCFDIXML } from '@/utils/cfdiParser';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
+import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
+import { SAT_UNIDADES } from '@/constants/satCatalog';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -121,6 +124,103 @@ const formatCurrency = (val: number) =>
 
 const getTimestampFileName = (userId: string, ext: string) => {
   return `ventas/${userId}/${Date.now()}_factura.${ext}`;
+};
+
+const MESES_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+];
+
+const MESES_ABR = [
+  'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+  'jul', 'ago', 'sep', 'oct', 'nov', 'dic'
+];
+
+// Helper para normalizar texto (sin acentos/tildes y en minúsculas)
+const normalizeSearchText = (str?: string | number | null): string => {
+  if (str === undefined || str === null) return '';
+  return String(str)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+};
+
+// Extrae múltiples formatos de texto a partir de una fecha ISO o YYYY-MM-DD
+const getDateSearchStrings = (dateStr?: string | null): string[] => {
+  if (!dateStr) return [];
+  const variations: string[] = [dateStr];
+  try {
+    const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+    const parts = cleanDate.split('-');
+    if (parts.length === 3) {
+      const year = parts[0];
+      const monthIdx = parseInt(parts[1], 10) - 1;
+      const day = parts[2];
+      const dayNum = parseInt(day, 10);
+
+      variations.push(`${day}/${parts[1]}/${year}`);
+      variations.push(`${day}-${parts[1]}-${year}`);
+      variations.push(`${dayNum}/${monthIdx + 1}/${year}`);
+      variations.push(`${parts[1]}/${year}`);
+      variations.push(year);
+
+      if (monthIdx >= 0 && monthIdx < 12) {
+        const mesNombre = MESES_ES[monthIdx];
+        const mesAbr = MESES_ABR[monthIdx];
+        variations.push(mesNombre);
+        variations.push(mesAbr);
+        variations.push(`${mesNombre} ${year}`);
+        variations.push(`${dayNum} de ${mesNombre}`);
+        variations.push(`${dayNum} de ${mesNombre} de ${year}`);
+        variations.push(`${dayNum} ${mesAbr} ${year}`);
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return variations;
+};
+
+// Genera un texto consolidado con todos los campos de la venta para búsqueda universal
+const buildVentaSearchableText = (v: VentaConPago): string => {
+  const parts: string[] = [
+    v.cliente || '',
+    v.sucursal || '',
+    v.factura_referencia || '',
+    v.folio || '',
+    v.cotizaciones?.folio || '',
+    v.descripcion || '',
+    v.tipo_proyecto || '',
+    v.proveedor || '',
+    v.notas || '',
+    v.usuarios?.nombre || '',
+    v.estado_pago || '',
+    v.cfdi_estado || '',
+    v.cfdi_uuid || '',
+    v.precio_total_facturado !== undefined ? String(v.precio_total_facturado) : '',
+    v.precio_total_facturado !== undefined ? formatCurrency(v.precio_total_facturado) : '',
+    v.total_pagado !== undefined ? String(v.total_pagado) : '',
+    v.total_pagado !== undefined ? formatCurrency(v.total_pagado) : '',
+    v.saldo_pendiente !== undefined ? String(v.saldo_pendiente) : '',
+    v.saldo_pendiente !== undefined ? formatCurrency(v.saldo_pendiente) : '',
+    v.costo_total !== undefined ? String(v.costo_total) : '',
+    v.costo_total !== undefined ? formatCurrency(v.costo_total) : '',
+    v.utilidad_bruta !== undefined ? String(v.utilidad_bruta) : '',
+    v.utilidad_bruta !== undefined ? formatCurrency(v.utilidad_bruta) : '',
+    ...getDateSearchStrings(v.fecha),
+    ...getDateSearchStrings(v.fecha_ultimo_pago),
+    ...getDateSearchStrings(v.created_at),
+  ];
+
+  if (v.ventas_partidas && Array.isArray(v.ventas_partidas)) {
+    v.ventas_partidas.forEach((p) => {
+      if (p.descripcion) parts.push(p.descripcion);
+      if (p.unidad) parts.push(p.unidad);
+    });
+  }
+
+  return normalizeSearchText(parts.join(' '));
 };
 
 export default function VentasScreen() {
@@ -237,12 +337,27 @@ export default function VentasScreen() {
 
       // Cargar catálogo de clientes y sucursales
       try {
-        const [cliRes, sucRes] = await Promise.all([
+        // 1. Intentar API backend
+        try {
+          const headers = await getApiHeaders();
+          const res = await fetch(`${getApiUrl()}/api/ventas/catalogs`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.clientes) && data.clientes.length > 0) {
+              setClientes(data.clientes);
+              setSucursalesCliente(data.sucursales || []);
+              return;
+            }
+          }
+        } catch (_) {}
+
+        // 2. Fallback resiliente directo a Supabase
+        const [{ data: clientesData }, { data: sucursalesData }] = await Promise.all([
           supabase.from('clientes').select('*').order('nombre'),
-          supabase.from('sucursales_cliente').select('*').order('nombre')
+          supabase.from('sucursales').select('*').order('nombre'),
         ]);
-        if (cliRes.data) setClientes(cliRes.data);
-        if (sucRes.data) setSucursalesCliente(sucRes.data);
+        if (clientesData) setClientes(clientesData);
+        if (sucursalesData) setSucursalesCliente(sucursalesData);
       } catch (err) {
         console.error('Error loading catalogs:', err);
       }
@@ -320,62 +435,28 @@ export default function VentasScreen() {
   const loadHistorial = async () => {
     setIsLoadingHistorial(true);
     try {
-      const { data: ventasData, error } = await supabase
+      // 1. Intentar API backend (/api/ventas/historial)
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/historial`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.ventas)) {
+            setVentasHistorial(data.ventas);
+            return;
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fallback resiliente directo a Supabase
+      const { data, error } = await supabase
         .from('ventas')
         .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .order('created_at', { ascending: false });
 
-      if (error) throw error;
-
-      const rawVentas = ventasData || [];
-      const ventaIds = rawVentas.map(v => v.id);
-
-      let pagosMap: Record<string, VentaPago[]> = {};
-      if (ventaIds.length > 0) {
-        try {
-          const { data: pagosData, error: pagosErr } = await supabase
-            .from('ventas_pagos')
-            .select('*')
-            .in('venta_id', ventaIds)
-            .order('fecha_pago', { ascending: false });
-
-          if (!pagosErr && pagosData) {
-            pagosData.forEach((p: VentaPago) => {
-              if (!pagosMap[p.venta_id]) pagosMap[p.venta_id] = [];
-              pagosMap[p.venta_id].push(p);
-            });
-          }
-        } catch (errPagos) {
-          // Ignorar si la tabla no existe en Supabase aun
-        }
+      if (data) {
+        setVentasHistorial(data as any);
       }
-
-      const ventasConPagos: VentaConPago[] = rawVentas.map(v => {
-        const pagos = pagosMap[v.id] || [];
-        const totalPagado = pagos.length > 0
-          ? pagos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0)
-          : (Number(v.total_pagado) || 0);
-
-        const precioFacturado = Number(v.precio_total_facturado) || 0;
-        const saldoPendiente = v.saldo_pendiente !== undefined && v.saldo_pendiente !== null
-          ? Number(v.saldo_pendiente)
-          : Math.max(0, precioFacturado - totalPagado);
-
-        const estadoPago = v.estado_pago || calcularEstadoPago(precioFacturado, totalPagado);
-        const fechaUltimoPago = pagos.length > 0 ? pagos[0].fecha_pago : null;
-
-        return {
-          ...v,
-          total_pagado: totalPagado,
-          saldo_pendiente: saldoPendiente,
-          estado_pago: estadoPago,
-          fecha_ultimo_pago: fechaUltimoPago,
-          pagos_count: pagos.length,
-        };
-      });
-
-      setVentasHistorial(ventasConPagos);
     } catch (err: any) {
       console.error('Error loading sales history:', err);
     } finally {
@@ -386,23 +467,21 @@ export default function VentasScreen() {
   const loadPagosForSelectedVenta = async (ventaId: string, currentVentaObj?: VentaConPago) => {
     setIsLoadingPagos(true);
     try {
-      const { data: pagosData, error } = await supabase
-        .from('ventas_pagos')
-        .select('*')
-        .eq('venta_id', ventaId)
-        .order('fecha_pago', { ascending: false });
-
-      if (error) {
-        console.warn('Error fetching pagos for sale:', error);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/ventas/${ventaId}/pagos`, { headers });
+      
+      if (!res.ok) {
+        console.warn('Error fetching pagos for sale');
         setSelectedVentaPagos([]);
         return [];
       }
 
-      const pagos = pagosData || [];
+      const resData = await res.json();
+      const pagos = resData.pagos || [];
       setSelectedVentaPagos(pagos);
 
       // Recalcular métricas de pago para la venta seleccionada
-      const totalPagado = pagos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+      const totalPagado = pagos.reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0);
       const targetVenta = currentVentaObj || selectedVenta;
       if (targetVenta) {
         const precioFacturado = Number(targetVenta.precio_total_facturado) || 0;
@@ -470,22 +549,13 @@ export default function VentasScreen() {
     setPagoReferencia('');
 
     try {
-      // 1. Cargar partidas
-      const { data: partData, error: partError } = await supabase
-        .from('ventas_partidas')
-        .select('*')
-        .eq('venta_id', venta.id);
-      if (partError) throw partError;
-      setSelectedVentaPartidas(partData || []);
-
-      // 2. Cargar gastos vinculados
-      const { data: gastosData, error: gastosError } = await supabase
-        .from('gastos')
-        .select(GastoHelper.GASTOS_SELECT_QUERY)
-        .eq('venta_id', venta.id)
-        .eq('status', 'APPROVED');
-      if (gastosError) throw gastosError;
-      setSelectedVentaGastos(gastosData || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/ventas/${venta.id}/detalle`, { headers });
+      if (!res.ok) throw new Error('Error fetching details from API');
+      const data = await res.json();
+      
+      setSelectedVentaPartidas(data.partidas || []);
+      setSelectedVentaGastos(data.gastos || []);
 
       // 3. Cargar pagos
       await loadPagosForSelectedVenta(venta.id, venta);
@@ -513,7 +583,6 @@ export default function VentasScreen() {
     setIsSubmittingPago(true);
     try {
       const payload = {
-        venta_id: selectedVenta.id,
         monto: montoNum,
         fecha_pago: pagoFecha,
         metodo_pago: pagoMetodo || 'Transferencia',
@@ -521,16 +590,18 @@ export default function VentasScreen() {
         registrado_por: currentUser?.id || null,
       };
 
-      const { error } = await supabase
-        .from('ventas_pagos')
-        .insert([payload]);
-
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pagos`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('Error al registrar pago');
 
       showAlert('Éxito', `Se registró la parcialidad de ${formatCurrency(montoNum)} correctamente.`);
       
       const updatedPagos = await loadPagosForSelectedVenta(selectedVenta.id);
-      const nuevoTotalPagado = updatedPagos.reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+      const nuevoTotalPagado = updatedPagos.reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0);
       const nuevoSaldo = Math.max(0, (Number(selectedVenta.precio_total_facturado) || 0) - nuevoTotalPagado);
       setPagoMonto(nuevoSaldo > 0 ? String(nuevoSaldo) : '');
       setPagoReferencia('');
@@ -551,12 +622,12 @@ export default function VentasScreen() {
 
     const performDelete = async () => {
       try {
-        const { error } = await supabase
-          .from('ventas_pagos')
-          .delete()
-          .eq('id', pagoId);
-
-        if (error) throw error;
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pagos/${pagoId}`, {
+          method: 'DELETE',
+          headers
+        });
+        if (!res.ok) throw new Error('Error al eliminar pago');
 
         showAlert('Éxito', 'Pago/Parcialidad eliminada correctamente.');
         await loadPagosForSelectedVenta(selectedVenta.id);
@@ -589,21 +660,12 @@ export default function VentasScreen() {
     const performDelete = async () => {
       setIsSubmitting(true);
       try {
-        // Eliminar partidas primero (clave foránea)
-        const { error: partError } = await supabase
-          .from('ventas_partidas')
-          .delete()
-          .eq('venta_id', selectedVenta.id);
-
-        if (partError) throw partError;
-
-        // Eliminar venta
-        const { error: ventError } = await supabase
-          .from('ventas')
-          .delete()
-          .eq('id', selectedVenta.id);
-
-        if (ventError) throw ventError;
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}`, {
+          method: 'DELETE',
+          headers
+        });
+        if (!res.ok) throw new Error('Error al eliminar la venta');
 
         showAlert('Éxito', 'La venta fue eliminada correctamente.');
         setIsDetailModalVisible(false);
@@ -630,6 +692,57 @@ export default function VentasScreen() {
           { text: 'Eliminar', style: 'destructive', onPress: performDelete }
         ]
       );
+    }
+  };
+  const handleDuplicateVenta = async (venta?: VentaConPago) => {
+    const targetVenta = venta || selectedVenta;
+    if (!targetVenta) return;
+
+    try {
+      setIsLoadingHistorial(true);
+      setIsDetailModalVisible(false);
+
+      let partidasToCopy: any[] = [];
+      if (venta) {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${targetVenta.id}/partidas`, { headers });
+        if (!res.ok) throw new Error('Error al cargar partidas para duplicar');
+        const data = await res.json();
+        partidasToCopy = data.partidas || [];
+      } else {
+        partidasToCopy = selectedVentaPartidas;
+      }
+
+      const editablePartidas: PartidaEditable[] = partidasToCopy.map(p => ({
+        id: `temp-${Date.now()}-${Math.random()}`,
+        descripcion: p.descripcion,
+        cantidad: String(p.cantidad),
+        unidad: p.unidad,
+        precio_unitario_venta: String(p.precio_unitario_venta),
+        costo_unitario_proveedor: String(p.costo_unitario_proveedor),
+      }));
+
+      const today = new Date();
+      setDateValue(today);
+      setFecha(today.toISOString().split('T')[0]);
+      
+      setCliente(targetVenta.cliente);
+      setSucursal(targetVenta.sucursal || '');
+      setFacturaReferencia('');
+      setDescripcion(`(Copia) ${targetVenta.descripcion || ''}`);
+      setAgregarIva(targetVenta.agregar_iva || false);
+      setTipoProyecto(targetVenta.tipo_proyecto || '');
+      setProveedor(targetVenta.proveedor || '');
+      setNotas(targetVenta.notas || '');
+      setPartidas(editablePartidas);
+      setEditingVentaId(null);
+
+      setActiveTab('registrar');
+      setCurrentStep(2);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo duplicar la venta.');
+    } finally {
+      setIsLoadingHistorial(false);
     }
   };
 
@@ -707,17 +820,15 @@ export default function VentasScreen() {
       filtradas = filtradas.filter(v => v.fecha?.startsWith(formattedFilterDate));
     }
 
-    const q = historialSearch.trim().toLowerCase();
-    if (q) {
-      filtradas = filtradas.filter(v =>
-        v.cliente?.toLowerCase().includes(q) ||
-        v.factura_referencia?.toLowerCase().includes(q) ||
-        v.descripcion?.toLowerCase().includes(q) ||
-        v.fecha?.toLowerCase().includes(q) ||
-        v.tipo_proyecto?.toLowerCase().includes(q) ||
-        v.proveedor?.toLowerCase().includes(q) ||
-        v.estado_pago?.toLowerCase().includes(q)
-      );
+    const rawQuery = normalizeSearchText(historialSearch);
+    if (rawQuery) {
+      const queryTokens = rawQuery.split(/\s+/).filter(Boolean);
+
+      filtradas = filtradas.filter(v => {
+        const itemText = buildVentaSearchableText(v);
+        // Cada término de búsqueda debe estar presente en los datos consolidados de la venta
+        return queryTokens.every(token => itemText.includes(token));
+      });
     }
     
     return filtradas;
@@ -933,13 +1044,14 @@ export default function VentasScreen() {
       let warningMsg = '';
       if (result.informacion_general.factura_o_referencia) {
         try {
-          const { data: existing } = await supabase
-            .from('ventas')
-            .select('id')
-            .ilike('factura_referencia', result.informacion_general.factura_o_referencia.trim())
-            .maybeSingle();
-          if (existing) {
-            warningMsg = `\n\n⚠️ ADVERTENCIA: La orden/factura "${result.informacion_general.factura_o_referencia}" ya existe registrada en el sistema. Verifica que no la estés duplicando.`;
+          const headers = await getApiHeaders();
+          const refParam = encodeURIComponent(result.informacion_general.factura_o_referencia.trim());
+          const res = await fetch(`${getApiUrl()}/api/ventas/check-duplicate?ref=${refParam}`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.exists) {
+              warningMsg = `\n\n⚠️ ADVERTENCIA: La orden/factura "${result.informacion_general.factura_o_referencia}" ya existe registrada en el sistema. Verifica que no la estés duplicando.`;
+            }
           }
         } catch (e) {
           console.warn('Error checking duplicate reference:', e);
@@ -1057,45 +1169,13 @@ export default function VentasScreen() {
         cotizacion_id: cotizacionIdOrigen || null,
       };
 
-      let activeVentaId = '';
-
-      if (editingVentaId) {
-        // ACTUALIZAR VENTA EXISTENTE
-        const { error: updateError } = await supabase
-          .from('ventas')
-          .update(ventaPayload)
-          .eq('id', editingVentaId);
-
-        if (updateError) throw updateError;
-        activeVentaId = editingVentaId;
-
-        // Eliminar partidas anteriores
-        const { error: deletePartidasError } = await supabase
-          .from('ventas_partidas')
-          .delete()
-          .eq('venta_id', editingVentaId);
-
-        if (deletePartidasError) throw deletePartidasError;
-      } else {
-        // INSERTAR NUEVA VENTA
-        const { data: ventaData, error: ventaError } = await supabase
-          .from('ventas')
-          .insert([ventaPayload])
-          .select()
-          .single();
-
-        if (ventaError) throw ventaError;
-        activeVentaId = ventaData.id;
-      }
-
-      // Insertar partidas nuevas/editadas
+      // Crear payload de partidas
       const partidasPayload = partidas.map(p => {
         const cant = Number(p.cantidad) || 0;
         const precioUV = Number(p.precio_unitario_venta) || 0;
         const costoUP = Number(p.costo_unitario_proveedor) || 0;
 
         return {
-          venta_id: activeVentaId,
           descripcion: p.descripcion.trim(),
           cantidad: cant,
           unidad: p.unidad || 'PZA',
@@ -1106,13 +1186,31 @@ export default function VentasScreen() {
         };
       });
 
-      const { error: partidasError } = await supabase
-        .from('ventas_partidas')
-        .insert(partidasPayload);
+      const headers = await getApiHeaders();
+      let activeVentaId = '';
 
-      if (partidasError) throw partidasError;
+      if (editingVentaId) {
+        // ACTUALIZAR VENTA EXISTENTE
+        const res = await fetch(`${getApiUrl()}/api/ventas/${editingVentaId}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ ventaPayload, partidasPayload })
+        });
+        if (!res.ok) throw new Error('Error al actualizar la venta');
+        activeVentaId = editingVentaId;
+      } else {
+        // INSERTAR NUEVA VENTA
+        const res = await fetch(`${getApiUrl()}/api/ventas`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ventaPayload, partidasPayload })
+        });
+        if (!res.ok) throw new Error('Error al crear la venta');
+        const data = await res.json();
+        activeVentaId = data.venta.id;
+      }
 
-      // Recalcular y sincronizar totales con gastos en la base de datos
+      // Recalcular y sincronizar totales con gastos en la base de datos (se usa apiHelper internamente)
       await recalculateVentaTotals(activeVentaId);
 
       if (editingVentaId) {
@@ -1204,8 +1302,12 @@ export default function VentasScreen() {
     try {
       let partidasList = selectedVentaPartidas;
       if (partidasList.length === 0 || selectedVenta?.id !== ventaToStamp.id) {
-        const { data } = await supabase.from('ventas_partidas').select('*').eq('venta_id', ventaToStamp.id);
-        partidasList = data || [];
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${ventaToStamp.id}/partidas`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          partidasList = data.partidas || [];
+        }
       }
 
       if (partidasList.length > 0) {
@@ -1260,7 +1362,17 @@ export default function VentasScreen() {
   };
 
   const handleUpdateCfdiPartida = (id: string, field: string, val: string) => {
-    setCfdiPartidas(prev => prev.map(p => p.id === id ? { ...p, [field]: val } : p));
+    setCfdiPartidas(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      const updated = { ...p, [field]: val };
+      if (field === 'clave_unidad') {
+        const u = SAT_UNIDADES.find(x => x.clave.toUpperCase() === (val || '').trim().toUpperCase());
+        if (u) {
+          updated.unidad = u.nombre;
+        }
+      }
+      return updated;
+    }));
   };
 
   const handleRemoveCfdiPartida = (id: string) => {
@@ -1704,7 +1816,7 @@ export default function VentasScreen() {
                   value={dateValue}
                   mode="date"
                   display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={(event: any, selectedDate?: Date) => {
+                  onValueChange={(event: any, selectedDate?: Date) => {
                     if (Platform.OS === 'android') {
                       setShowDatePicker(false);
                     }
@@ -1716,6 +1828,7 @@ export default function VentasScreen() {
                       setFecha(`${yyyy}-${mm}-${dd}`);
                     }
                   }}
+                  onDismiss={() => setShowDatePicker(false)}
                   maximumDate={new Date()}
                 />
                 {Platform.OS === 'ios' && (
@@ -2210,6 +2323,83 @@ export default function VentasScreen() {
     );
   };
 
+  const renderScreenHeader = () => (
+    <View>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
+        
+        <Text style={[styles.headerTitle, { color: themeColors.text }]}>
+          {editingVentaId ? 'Editar Venta' : 'Registro de Ventas'}
+        </Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      {/* Tabs / Banner de edición */}
+      {editingVentaId ? (
+        <View style={[styles.editingBanner, { backgroundColor: themeColors.accent + '20', borderBottomColor: themeColors.border }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}>
+            <Ionicons name="create" size={20} color={themeColors.accent} />
+            <Text style={[styles.editingBannerText, { color: themeColors.text }]}>
+              Editando Venta de: <Text style={{ fontWeight: '800' }}>{cliente}</Text>
+            </Text>
+          </View>
+          <TouchableOpacity 
+            onPress={cancelEditing} 
+            style={[styles.cancelEditBtn, { borderColor: themeColors.danger + '40', backgroundColor: themeColors.danger + '15' }]}
+          >
+            <Text style={{ color: themeColors.danger, fontWeight: '700', fontSize: 13 }}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={[styles.tabsContainer, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
+          <TouchableOpacity
+            onPress={() => setActiveTab('registrar')}
+            style={[
+              styles.tab,
+              activeTab === 'registrar'
+                ? {
+                    backgroundColor: themeColors.accent,
+                    ...Platform.select({
+                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                      android: { elevation: 2 },
+                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                    })
+                  }
+                : { backgroundColor: 'transparent' },
+            ]}
+          >
+            <Text style={[styles.tabText, { color: activeTab === 'registrar' ? '#fff' : themeColors.textSecondary }]}>
+              Registrar Venta
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => {
+              setActiveTab('historial');
+              loadHistorial();
+            }}
+            style={[
+              styles.tab,
+              activeTab === 'historial'
+                ? {
+                    backgroundColor: themeColors.accent,
+                    ...Platform.select({
+                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                      android: { elevation: 2 },
+                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                    })
+                  }
+                : { backgroundColor: 'transparent' },
+            ]}
+          >
+            <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#fff' : themeColors.textSecondary }]}>
+              Historial
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+
   const renderHistorial = () => (
     <View style={{ flex: 1 }}>
       {/* Buscador */}
@@ -2222,7 +2412,7 @@ export default function VentasScreen() {
         <Ionicons name="search" size={18} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
         <TextInput
           style={[styles.searchInput, { color: themeColors.text }]}
-          placeholder="Buscar por cliente, PO, descripción, fecha..."
+          placeholder="Buscar por cliente, sucursal, fecha, referencia, monto, vendedor..."
           placeholderTextColor={themeColors.textSecondary}
           value={historialSearch}
           onChangeText={setHistorialSearch}
@@ -2281,10 +2471,11 @@ export default function VentasScreen() {
           value={filterDate || new Date()}
           mode="date"
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={(event: any, selectedDate?: Date) => {
+          onValueChange={(event: any, selectedDate?: Date) => {
             if (Platform.OS === 'android') setShowFilterDatePicker(false);
             if (selectedDate) setFilterDate(selectedDate);
           }}
+          onDismiss={() => setShowFilterDatePicker(false)}
           maximumDate={new Date()}
         />
       )}
@@ -2300,6 +2491,22 @@ export default function VentasScreen() {
           <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
             No hay ventas registradas aún.
           </Text>
+        </View>
+      ) : ventasFiltradas.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="search-outline" size={48} color={themeColors.textSecondary} />
+          <Text style={[styles.emptyText, { color: themeColors.textSecondary, marginTop: Spacing.one }]}>
+            No se encontraron ventas que coincidan con los criterios de búsqueda.
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              setHistorialSearch('');
+              setFilterDate(null);
+            }}
+            style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}
+          >
+            <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>Limpiar búsqueda</Text>
+          </TouchableOpacity>
         </View>
       ) : isDesktop ? (
         <ScrollView style={{ flex: 1 }}>
@@ -2400,6 +2607,16 @@ export default function VentasScreen() {
                       >
                         <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
                       </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleDuplicateVenta(item);
+                        }}
+                        style={{ padding: 4 }}
+                      >
+                        <Ionicons name="copy-outline" size={16} color={themeColors.primary} />
+                      </TouchableOpacity>
                     </View>
                   </Pressable>
                 );
@@ -2409,7 +2626,7 @@ export default function VentasScreen() {
         </ScrollView>
       ) : (
         <FlatList scrollEnabled={true} style={{ flex: 1 }}
-          ListHeaderComponent={renderScreenHeader}
+          ListHeaderComponent={renderScreenHeader()}
           data={ventasFiltradas}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
@@ -2429,54 +2646,81 @@ export default function VentasScreen() {
               <TouchableOpacity
                 onPress={() => handleSelectVenta(item)}
                 style={[styles.historialCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                activeOpacity={0.7}
               >
+                {/* 1. Header: Categoría / Tipo e Icono a la izquierda, y Badges de Estado a la derecha */}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                    <Ionicons name="bar-chart-sharp" size={16} color={themeColors.primary} />
-                    <Text style={[styles.cardTitle, { color: themeColors.text }]} numberOfLines={1}>
-                      {item.cliente} {item.sucursal ? `(${item.sucursal})` : ''}
-                    </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+                    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: themeColors.primary + '18', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="cart-outline" size={15} color={themeColors.primary} />
+                    </View>
+                    {item.tipo_proyecto ? (
+                      <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 7, borderRadius: 10 }]}>
+                        <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
+                      </View>
+                    ) : null}
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-                    <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }}>
-                      <Text style={{ color: styleCfg.text, fontSize: 10, fontWeight: '800' }}>{estadoPago}</Text>
+
+                  {/* Badges de Estado */}
+                  <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 1 }}>
+                    <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10 }}>
+                      <Text style={{ color: styleCfg.text, fontSize: 9, fontWeight: '800' }}>{estadoPago}</Text>
                     </View>
                     {(() => {
                       const cfdiCfg = getEstadoCfdiStyle(item.cfdi_estado);
                       return (
-                        <View style={{ backgroundColor: cfdiCfg.bg, borderColor: cfdiCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }}>
-                          <Text style={{ color: cfdiCfg.text, fontSize: 9, fontWeight: '800' }}>{cfdiCfg.label}</Text>
+                        <View style={{ backgroundColor: cfdiCfg.bg, borderColor: cfdiCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10 }}>
+                          <Text style={{ color: cfdiCfg.text, fontSize: 8, fontWeight: '800' }}>{cfdiCfg.label}</Text>
                         </View>
                       );
                     })()}
-                    {item.tipo_proyecto && (
-                      <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12 }]}>
-                        <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
-                      </View>
-                    )}
                   </View>
                 </View>
-                
-                <View style={{ gap: 2, marginBottom: 8 }}>
-                  {item.factura_referencia ? (
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
-                      <Text style={{ fontWeight: '600', color: themeColors.text }}>Factura/PO: </Text>
-                      {item.factura_referencia}
-                    </Text>
-                  ) : null}
-                  {item.descripcion ? (
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 12 }} numberOfLines={1}>
-                      <Text style={{ fontWeight: '600', color: themeColors.text }}>Detalle: </Text>
-                      {item.descripcion}
-                    </Text>
+
+                {/* 2. Nombre del Cliente (Fila dedicada de ancho completo para evitar que se empalme) */}
+                <View style={{ marginBottom: 6 }}>
+                  <Text style={[styles.cardTitle, { color: themeColors.text, fontSize: 15, fontWeight: '800', lineHeight: 20 }]}>
+                    {item.cliente || 'Cliente sin nombre'}
+                  </Text>
+                  {item.sucursal ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                      <Ionicons name="business-outline" size={13} color={themeColors.textSecondary} />
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+                        {item.sucursal}
+                      </Text>
+                    </View>
                   ) : null}
                 </View>
+                
+                {/* 3. Metadatos: Factura/PO y Descripción */}
+                {(item.factura_referencia || item.descripcion) ? (
+                  <View style={{ gap: 3, marginBottom: 8, backgroundColor: themeColors.background, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border + '40' }}>
+                    {item.factura_referencia ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Ionicons name="document-text-outline" size={13} color={themeColors.textSecondary} />
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+                          <Text style={{ fontWeight: '700', color: themeColors.text }}>Ref / PO: </Text>
+                          {item.factura_referencia}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {item.descripcion ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 4 }}>
+                        <Ionicons name="information-circle-outline" size={13} color={themeColors.textSecondary} style={{ marginTop: 1 }} />
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 12, flex: 1 }} numberOfLines={2}>
+                          <Text style={{ fontWeight: '700', color: themeColors.text }}>Detalle: </Text>
+                          {item.descripcion}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
 
-                {/* Totales y Saldos de Pago */}
-                <View style={[styles.historialTotals, { marginBottom: 8 }]}>
+                {/* 4. Totales y Saldos de Pago */}
+                <View style={[styles.historialTotals, { marginBottom: 8, backgroundColor: themeColors.background, borderColor: themeColors.border + '40', borderWidth: 1, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8 }]}>
                   <View style={{ alignItems: 'flex-start', flex: 1 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FECHA</Text>
-                    <Text style={[styles.historialFecha, { color: themeColors.text, fontSize: 11, fontWeight: '600' }]}>{item.fecha}</Text>
+                    <Text style={[styles.historialFecha, { color: themeColors.text, fontSize: 11, fontWeight: '700', marginTop: 1 }]}>{item.fecha}</Text>
                     {item.fecha_ultimo_pago && (
                       <Text style={{ color: themeColors.textSecondary, fontSize: 9, marginTop: 2 }}>
                         Pago: {item.fecha_ultimo_pago}
@@ -2485,7 +2729,7 @@ export default function VentasScreen() {
                   </View>
                   <View style={{ alignItems: 'center', flex: 1 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FACTURADO</Text>
-                    <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '800' }}>
+                    <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '800', marginTop: 1 }}>
                       {formatCurrency(item.precio_total_facturado)}
                     </Text>
                     <Text style={{ color: themeColors.success, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
@@ -2494,7 +2738,7 @@ export default function VentasScreen() {
                   </View>
                   <View style={{ alignItems: 'flex-end', flex: 1 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>SALDO PEND.</Text>
-                    <Text style={{ color: saldoPen > 0 ? themeColors.danger : themeColors.success, fontSize: 12, fontWeight: '800' }}>
+                    <Text style={{ color: saldoPen > 0 ? themeColors.danger : themeColors.success, fontSize: 12, fontWeight: '800', marginTop: 1 }}>
                       {formatCurrency(saldoPen)}
                     </Text>
                     <Text style={{ color: isProfit ? themeColors.success : themeColors.danger, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
@@ -2503,110 +2747,58 @@ export default function VentasScreen() {
                   </View>
                 </View>
 
-                {/* Botón rápido Agregar Pago en Tarjeta */}
-                <TouchableOpacity
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleOpenPagoModal(item);
-                  }}
-                  style={{
-                    backgroundColor: themeColors.success + '15',
-                    borderColor: themeColors.success + '40',
-                    borderWidth: 1,
-                    borderRadius: 8,
-                    paddingVertical: 6,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexDirection: 'row',
-                    gap: 6
-                  }}
-                >
-                  <Ionicons name="cash-outline" size={14} color={themeColors.success} />
-                  <Text style={{ color: themeColors.success, fontWeight: '800', fontSize: 12 }}>+ Registrar Pago / Parcialidad</Text>
-                </TouchableOpacity>
+                {/* 5. Botones de Acción */}
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleDuplicateVenta(item);
+                    }}
+                    style={{
+                      flex: 1,
+                      backgroundColor: themeColors.primary + '15',
+                      borderColor: themeColors.primary + '40',
+                      borderWidth: 1,
+                      borderRadius: 8,
+                      paddingVertical: 6,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexDirection: 'row',
+                      gap: 4
+                    }}
+                  >
+                    <Ionicons name="copy-outline" size={13} color={themeColors.primary} />
+                    <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 11 }}>Duplicar</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleOpenPagoModal(item);
+                    }}
+                    style={{
+                      flex: 1.4,
+                      backgroundColor: themeColors.success + '15',
+                      borderColor: themeColors.success + '40',
+                      borderWidth: 1,
+                      borderRadius: 8,
+                      paddingVertical: 6,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexDirection: 'row',
+                      gap: 4
+                    }}
+                  >
+                    <Ionicons name="cash-outline" size={13} color={themeColors.success} />
+                    <Text style={{ color: themeColors.success, fontWeight: '700', fontSize: 11 }}>+ Reg. Pago</Text>
+                  </TouchableOpacity>
+                </View>
               </TouchableOpacity>
             );
           }}
           refreshing={isLoadingHistorial}
           onRefresh={loadHistorial}
         />
-      )}
-    </View>
-  );
-
-  const renderScreenHeader = () => (
-    <View>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        
-        <Text style={[styles.headerTitle, { color: themeColors.text }]}>
-          {editingVentaId ? 'Editar Venta' : 'Registro de Ventas'}
-        </Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      {/* Tabs / Banner de edición */}
-      {editingVentaId ? (
-        <View style={[styles.editingBanner, { backgroundColor: themeColors.accent + '20', borderBottomColor: themeColors.border }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one }}>
-            <Ionicons name="create" size={20} color={themeColors.accent} />
-            <Text style={[styles.editingBannerText, { color: themeColors.text }]}>
-              Editando Venta de: <Text style={{ fontWeight: '800' }}>{cliente}</Text>
-            </Text>
-          </View>
-          <TouchableOpacity 
-            onPress={cancelEditing} 
-            style={[styles.cancelEditBtn, { borderColor: themeColors.danger + '40', backgroundColor: themeColors.danger + '15' }]}
-          >
-            <Text style={{ color: themeColors.danger, fontWeight: '700', fontSize: 13 }}>Cancelar</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={[styles.tabsContainer, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
-          <TouchableOpacity
-            onPress={() => setActiveTab('registrar')}
-            style={[
-              styles.tab,
-              activeTab === 'registrar'
-                ? {
-                    backgroundColor: themeColors.accent,
-                    ...Platform.select({
-                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-                      android: { elevation: 2 },
-                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
-                    })
-                  }
-                : { backgroundColor: 'transparent' },
-            ]}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'registrar' ? '#fff' : themeColors.textSecondary }]}>
-              Registrar Venta
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => {
-              setActiveTab('historial');
-              loadHistorial();
-            }}
-            style={[
-              styles.tab,
-              activeTab === 'historial'
-                ? {
-                    backgroundColor: themeColors.accent,
-                    ...Platform.select({
-                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-                      android: { elevation: 2 },
-                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
-                    })
-                  }
-                : { backgroundColor: 'transparent' },
-            ]}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#fff' : themeColors.textSecondary }]}>
-              Historial
-            </Text>
-          </TouchableOpacity>
-        </View>
       )}
     </View>
   );
@@ -2620,34 +2812,57 @@ export default function VentasScreen() {
         renderHistorial()
       ) : (
         <>
-          {renderScreenHeader()}
-          {/* Step Indicator */}
-          <StepIndicator 
-            currentStep={currentStep} 
-            steps={['Factura Compra', 'Costos y Precios', 'Resumen']} 
-            onStepPress={(step) => {
-              if (step < currentStep || true) {
-                setCurrentStep(step);
-              }
-            }}
-          />
-
-          <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-          >
-            <ScrollView
+          {Platform.OS === 'web' ? (
+            <View style={{ flex: 1, overflow: 'hidden' }}>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={[styles.scrollContent, { maxWidth: 700, alignSelf: 'center', width: '100%' }]}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={true}
+              >
+                {renderScreenHeader()}
+                <StepIndicator 
+                  currentStep={currentStep} 
+                  steps={['Factura Compra', 'Costos y Precios', 'Resumen']} 
+                  onStepPress={(step) => {
+                    if (step < currentStep || true) {
+                      setCurrentStep(step);
+                    }
+                  }}
+                />
+                {currentStep === 1 && renderStep1()}
+                {currentStep === 2 && renderStep2()}
+                {currentStep === 3 && renderStep3()}
+              </ScrollView>
+            </View>
+          ) : (
+            <KeyboardAvoidingView
               style={{ flex: 1 }}
-              contentContainerStyle={[styles.scrollContent, { maxWidth: 700, alignSelf: 'center', width: '100%' }]}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
-              {currentStep === 1 && renderStep1()}
-              {currentStep === 2 && renderStep2()}
-              {currentStep === 3 && renderStep3()}
-            </ScrollView>
-          </KeyboardAvoidingView>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={[styles.scrollContent, { maxWidth: 700, alignSelf: 'center', width: '100%' }]}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {renderScreenHeader()}
+                <StepIndicator 
+                  currentStep={currentStep} 
+                  steps={['Factura Compra', 'Costos y Precios', 'Resumen']} 
+                  onStepPress={(step) => {
+                    if (step < currentStep || true) {
+                      setCurrentStep(step);
+                    }
+                  }}
+                />
+                {currentStep === 1 && renderStep1()}
+                {currentStep === 2 && renderStep2()}
+                {currentStep === 3 && renderStep3()}
+              </ScrollView>
+            </KeyboardAvoidingView>
+          )}
 
           {/* Footer Navigation */}
           {currentStep < 3 && (
@@ -2670,7 +2885,7 @@ export default function VentasScreen() {
       )}
 
       {/* Modal de Detalle de Venta */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={isDetailModalVisible}
         animationType="slide"
         transparent={true}
@@ -3147,29 +3362,57 @@ export default function VentasScreen() {
                 <TouchableOpacity
                   onPress={async () => {
                     if (selectedVenta) {
+                      const headers = await getApiHeaders();
+                      const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pdf-data`, { headers });
+                      let clientData = null;
+                      let cotizacionLineas: any[] = [];
+                      if (res.ok) {
+                        const data = await res.json();
+                        clientData = data.clientData;
+                        cotizacionLineas = data.cotizacionLineas || [];
+                      }
+
                       const cotData = {
-                        numeroCotizacion: selectedVenta.id.toString().slice(-6),
+                        numeroCotizacion: selectedVenta.folio || selectedVenta.id.toString().slice(-6),
+                        cotizacionRelacionada: selectedVenta.cotizaciones?.folio,
                         clienteNombre: selectedVenta.cliente,
-                        fechaCreacion: selectedVenta.created_at || new Date().toISOString(),
-                        vendedor: 'Portal-Inttec',
+                        clienteRFC: clientData?.rfc || '',
+                        clienteCP: clientData?.codigo_postal || '',
+                        direccionFactura: clientData?.direccion || '',
+                        clienteCorreo: clientData?.correo_electronico || '',
+                        fechaCreacion: selectedVenta.fecha || selectedVenta.created_at || new Date().toISOString(),
+                        vendedor: selectedVenta.usuarios?.nombre || 'Portal-Inttec',
                         moneda: 'MXN',
-                        lineas: selectedVentaPartidas.map(p => ({
-                          id: p.id.toString(),
-                          productoNombre: p.descripcion,
-                          productoDescripcion: p.descripcion,
-                          tiempoEntrega: 'Inmediato',
-                          cantidad: Number(p.cantidad) || 1,
-                          unidad: p.unidad || 'PZA',
-                          precioUnitario: Number(p.precio_unitario_venta) || 0,
-                          impuestoPorcentaje: 16,
-                          importe: (Number(p.cantidad) || 1) * (Number(p.precio_unitario_venta) || 0)
-                        })),
+                        lineas: selectedVentaPartidas.map((p, idx) => {
+                          const descParts = p.descripcion.split(' - ');
+                          const prodName = descParts[0] || '';
+                          const prodDesc = descParts.slice(1).join(' - ') || '';
+                          
+                          let tEntrega = 'Inmediato';
+                          const matchedLine = cotizacionLineas.find(cl => cl.productoNombre === prodName) || cotizacionLineas[idx];
+                          if (matchedLine && matchedLine.tiempoEntrega) {
+                            tEntrega = matchedLine.tiempoEntrega;
+                          }
+
+                          return {
+                            id: p.id.toString(),
+                            productoNombre: prodName,
+                            productoDescripcion: prodDesc,
+                            tiempoEntrega: tEntrega,
+                            cantidad: Number(p.cantidad) || 1,
+                            unidad: p.unidad || 'PZA',
+                            precioUnitario: Number(p.precio_unitario_venta) || 0,
+                            impuestoPorcentaje: 16,
+                            importe: (Number(p.cantidad) || 1) * (Number(p.precio_unitario_venta) || 0)
+                          };
+                        }),
                         subtotal: Number(selectedVenta.precio_total_facturado) || 0,
                         iva: (Number(selectedVenta.precio_total_facturado) || 0) * 0.16,
-                        total: (Number(selectedVenta.precio_total_facturado) || 0) * 1.16
+                        total: (Number(selectedVenta.precio_total_facturado) || 0) * 1.16,
+                        terminosCondiciones: 'https://inttec.odoo.com/terms'
                       };
                       try {
-                        await exportarCotizacionOdooPDF(cotData, 'download');
+                        await exportarCotizacionOdooPDF(cotData, 'download', 'venta');
                       } catch (err: any) {
                         showAlert('Error', 'No se pudo generar el PDF de Venta: ' + err.message);
                       }
@@ -3228,6 +3471,15 @@ export default function VentasScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  onPress={() => handleDuplicateVenta()}
+                  disabled={isSubmitting}
+                  style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
+                >
+                  <Ionicons name="copy-outline" size={18} color={themeColors.primary} />
+                  <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>Duplicar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   onPress={handleDeleteVenta}
                   disabled={isSubmitting}
                   style={[styles.modalActionBtn, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}
@@ -3257,7 +3509,7 @@ export default function VentasScreen() {
       </Modal>
 
       {/* Modal Dedicado Exclusivamente para Registrar Pago */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={isPagoModalVisible}
         animationType="slide"
         transparent={true}
@@ -3467,7 +3719,7 @@ export default function VentasScreen() {
       </Modal>
 
       {/* Modal de Pre-Timbrado / Edición de Factura CFDI 4.0 */}
-      <Modal
+      <Modal statusBarTranslucent={true}
         visible={isTimbradoModalVisible}
         animationType="slide"
         transparent={true}
@@ -3719,25 +3971,23 @@ export default function VentasScreen() {
                               />
                             </View>
 
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginBottom: 2 }}>Clave SAT</Text>
-                              <TextInput
-                                style={{ height: 36, borderWidth: 1, borderColor: themeColors.border, borderRadius: 6, paddingHorizontal: 8, color: themeColors.text, backgroundColor: themeColors.backgroundElement, fontSize: 12 }}
-                                value={partida.clave_sat}
-                                onChangeText={val => handleUpdateCfdiPartida(partida.id, 'clave_sat', val)}
-                                placeholder="01010101"
-                              />
-                            </View>
+                            <SatCatalogAutocomplete
+                              tipo="producto"
+                              label="Clave SAT"
+                              value={partida.clave_sat}
+                              onChangeValue={val => handleUpdateCfdiPartida(partida.id, 'clave_sat', val)}
+                              placeholder="01010101"
+                              style={{ flex: 1.2 }}
+                            />
 
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginBottom: 2 }}>Unidad SAT</Text>
-                              <TextInput
-                                style={{ height: 36, borderWidth: 1, borderColor: themeColors.border, borderRadius: 6, paddingHorizontal: 8, color: themeColors.text, backgroundColor: themeColors.backgroundElement, fontSize: 12 }}
-                                value={partida.clave_unidad}
-                                onChangeText={val => handleUpdateCfdiPartida(partida.id, 'clave_unidad', val)}
-                                placeholder="H87"
-                              />
-                            </View>
+                            <SatCatalogAutocomplete
+                              tipo="unidad"
+                              label="Unidad SAT"
+                              value={partida.clave_unidad}
+                              onChangeValue={val => handleUpdateCfdiPartida(partida.id, 'clave_unidad', val)}
+                              placeholder="H87"
+                              style={{ flex: 1 }}
+                            />
                           </View>
 
                           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 2 }}>
@@ -4341,16 +4591,20 @@ const styles = StyleSheet.create({
   modalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingVertical: 4,
+    gap: 8,
   },
   modalLabel: {
     fontSize: 13,
     fontWeight: '600',
+    flexShrink: 0,
   },
   modalValue: {
     fontSize: 13,
     fontWeight: '700',
+    flex: 1,
+    textAlign: 'right',
   },
   modalDivider: {
     height: 1,

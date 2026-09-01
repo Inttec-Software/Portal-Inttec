@@ -1,6 +1,8 @@
 import { logger } from '@/utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+
+import { getApiHeaders, getApiUrl } from './apiHelper';
 import { Platform } from 'react-native';
 
 import Constants from 'expo-constants';
@@ -387,33 +389,46 @@ export interface ProveedorItem {
  */
 export const AuthService = {
   async login(email: string, password: string): Promise<Usuario> {
-    const { data, error } = await supabase
-      .rpc('login_usuario', {
-        email_param: email.trim().toLowerCase(),
-        password_param: password,
-      })
-      .maybeSingle();
+    const rawApiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000';
+    const apiUrl = resolveLocalhost(rawApiUrl);
+    const company = CompanyService.getActiveCompany();
+    const env = EnvService.getActiveEnv();
 
-    if (error) {
+    try {
+      const response = await fetch(`${apiUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-company': company,
+          'x-env': env
+        },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Error al iniciar sesión');
+      }
+
+      if (isBrowser) {
+        // Guardamos tanto el usuario como el token
+        await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(data.usuario));
+        await AsyncStorage.setItem(`jwt_token_${company}`, data.token);
+      }
+
+      return data.usuario as Usuario;
+    } catch (error: any) {
       throw new Error(`Error de conexión: ${error.message}`);
     }
-
-    if (!data) {
-      throw new Error('Credenciales incorrectas');
-    }
-
-    // Guardar usuario en almacenamiento local
-    if (isBrowser) {
-      const company = CompanyService.getActiveCompany();
-      await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(data));
-    }
-    return data as Usuario;
   },
 
   async logout(): Promise<void> {
     if (isBrowser) {
       await AsyncStorage.removeItem('logged_user_inttec');
       await AsyncStorage.removeItem('logged_user_daravisa');
+      await AsyncStorage.removeItem('jwt_token_inttec');
+      await AsyncStorage.removeItem('jwt_token_daravisa');
     }
   },
 
@@ -429,7 +444,32 @@ export const AuthService = {
       }
     }
     return null;
+  },
+
+  async getToken(): Promise<string | null> {
+    if (isBrowser) {
+      const company = CompanyService.getActiveCompany();
+      return await AsyncStorage.getItem(`jwt_token_${company}`);
+    }
+    return null;
   }
+};
+
+export const sortUsuariosByRoleAndName = (usuarios: Usuario[]): Usuario[] => {
+  const getRolePriority = (role?: string | null) => {
+    const r = (role || '').toUpperCase();
+    if (r === 'ADMIN') return 1;
+    if (r === 'DEV') return 2;
+    if (r === 'EMPLEADO') return 3;
+    return 4;
+  };
+
+  return [...usuarios].sort((a, b) => {
+    const pA = getRolePriority(a.rol);
+    const pB = getRolePriority(b.rol);
+    if (pA !== pB) return pA - pB;
+    return (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' });
+  });
 };
 
 export interface Asistencia {
@@ -485,20 +525,10 @@ export const AsistenciaService = {
    */
   async getRegistroHoy(empleadoId: string): Promise<Asistencia | null> {
     const fechaJornada = this.getFechaJornada();
-    const { data, error } = await supabase
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleadoId)
-      .eq('fecha', fechaJornada)
-      .order('creado_en', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      logger.error('Error al obtener registro de la jornada actual:', error);
-      throw error;
-    }
-    return data as Asistencia | null;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/hoy/${empleadoId}?fecha=${fechaJornada}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener registro de asistencia');
+    return await res.json();
   },
 
   /**
@@ -515,9 +545,11 @@ export const AsistenciaService = {
     const horaStr = this.getHoraLocal(ahora);
     const fechaStr = this.getFechaJornada(ahora);
 
-    const { data, error } = await supabase
-      .from('asistencias')
-      .insert([{
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/entrada`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
         empleado_id: empleadoId,
         fecha: fechaStr,
         hora_entrada: horaStr,
@@ -525,12 +557,10 @@ export const AsistenciaService = {
         latitud_entrada: latitud,
         longitud_entrada: longitud,
         direccion_entrada: direccion,
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data as Asistencia;
+      })
+    });
+    if (!res.ok) throw new Error('Error al registrar entrada');
+    return await res.json();
   },
 
   /**
@@ -546,35 +576,31 @@ export const AsistenciaService = {
     const ahora = new Date();
     const horaStr = this.getHoraLocal(ahora);
 
-    const { data, error } = await supabase
-      .from('asistencias')
-      .update({
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/salida`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        id: asistenciaId,
         hora_salida: horaStr,
         foto_salida_url: fotoUrl,
         latitud_salida: latitud,
         longitud_salida: longitud,
         direccion_salida: direccion,
       })
-      .eq('id', asistenciaId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data as Asistencia;
+    });
+    if (!res.ok) throw new Error('Error al registrar salida');
+    return await res.json();
   },
 
   /**
-   * Obtiene el historial de asistencia de un empleado (para vista de admin).
+   * Obtiene el historial de asistencias de un empleado.
    */
   async getHistorialEmpleado(empleadoId: string): Promise<Asistencia[]> {
-    const { data, error } = await supabase
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleadoId)
-      .order('fecha', { ascending: false });
-
-    if (error) throw error;
-    return (data || []) as Asistencia[];
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/historial/${empleadoId}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener historial de asistencia');
+    return await res.json();
   },
 
   /**
@@ -658,12 +684,17 @@ export interface Venta {
   notas?: string | null;
   descripcion?: string | null;
   agregar_iva?: boolean;
+  folio?: string | null;
   created_at?: string;
   cfdi_uuid?: string | null;
   cfdi_facturapi_id?: string | null;
   cfdi_estado?: string | null;
   cfdi_xml_url?: string | null;
   sucursal?: string | null;
+  cotizaciones?: { folio: string } | null;
+  usuarios?: { nombre: string } | null;
+  cotizacion_id?: string | null;
+  ventas_partidas?: { descripcion: string; unidad?: string }[] | null;
 }
 
 export interface VentaPartida {
@@ -703,51 +734,14 @@ export function calcularEstadoPago(precioTotalFacturado: number, totalPagado: nu
 
 export async function recalculateVentaTotals(ventaId: string): Promise<void> {
   try {
-    // 1. Obtener la venta
-    const { data: venta, error: ventaErr } = await supabase
-      .from('ventas')
-      .select('precio_total_facturado')
-      .eq('id', ventaId)
-      .single();
-    if (ventaErr || !venta) throw ventaErr || new Error('Sale not found');
-
-    // 2. Obtener la suma del costo de las partidas de la venta
-    const { data: partidas, error: partidasErr } = await supabase
-      .from('ventas_partidas')
-      .select('costo_total_proveedor')
-      .eq('venta_id', ventaId);
-    if (partidasErr) throw partidasErr;
-
-    const costoPartidas = (partidas || []).reduce((sum, p) => sum + (Number(p.costo_total_proveedor) || 0), 0);
-
-    // 3. Obtener la suma de los montos de los gastos aprobados vinculados a la venta
-    const { data: gastos, error: gastosErr } = await supabase
-      .from('gastos')
-      .select('monto')
-      .eq('venta_id', ventaId)
-      .eq('status', 'APPROVED');
-    if (gastosErr) throw gastosErr;
-
-    const costoGastos = (gastos || []).reduce((sum, g) => sum + (Number(g.monto) || 0), 0);
-
-    // 4. Calcular nuevos totales
-    const costoTotal = Math.round((costoPartidas + costoGastos) * 100) / 100;
-    const precioTotal = Number(venta.precio_total_facturado) || 0;
-    const utilidadBruta = Math.round((precioTotal - costoTotal) * 100) / 100;
-    const margenPorcentual = precioTotal > 0 ? Math.round((utilidadBruta / precioTotal) * 10000) / 10000 : 0;
-
-    // 5. Actualizar la venta
-    const { error: updateErr } = await supabase
-      .from('ventas')
-      .update({
-        costo_total: costoTotal,
-        utilidad_bruta: utilidadBruta,
-        margen_porcentual: margenPorcentual
-      })
-      .eq('id', ventaId);
-    
-    if (updateErr) throw updateErr;
-    logger.error(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Partidas: ${costoPartidas}, Costo Gastos: ${costoGastos}, Costo Total: ${costoTotal}`);
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/reportes/ventas/${ventaId}/recalculate`, {
+      method: 'POST',
+      headers
+    });
+    if (!res.ok) throw new Error('Error recalculating venta totals via API');
+    const data = await res.json();
+    logger.info(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Total: ${data.costoTotal}`);
   } catch (err) {
     logger.error('[Recalculate] Error recalculating venta totals:', err);
   }
@@ -755,38 +749,11 @@ export async function recalculateVentaTotals(ventaId: string): Promise<void> {
 
 export async function syncVentaPaymentStatus(ventaId: string): Promise<void> {
   try {
-    const { data: venta, error: vErr } = await supabase
-      .from('ventas')
-      .select('precio_total_facturado')
-      .eq('id', ventaId)
-      .single();
-
-    if (vErr || !venta) return;
-
-    const { data: pagos, error: pErr } = await supabase
-      .from('ventas_pagos')
-      .select('monto')
-      .eq('venta_id', ventaId);
-
-    if (pErr) return; // Si la tabla aún no existe, omitimos silenciosamente
-
-    const precioTotal = Number(venta?.precio_total_facturado) || 0;
-    const totalPagado = (pagos || []).reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
-    const saldoPendiente = Math.max(0, precioTotal - totalPagado);
-    const estadoPago = calcularEstadoPago(precioTotal, totalPagado);
-
-    const { error: updErr } = await supabase
-      .from('ventas')
-      .update({
-        total_pagado: totalPagado,
-        saldo_pendiente: saldoPendiente,
-        estado_pago: estadoPago
-      })
-      .eq('id', ventaId);
-
-    if (updErr) {
-      console.warn('[SyncPaymentStatus] No se pudieron actualizar columnas de pago en ventas:', updErr.message);
-    }
+    const headers = await getApiHeaders();
+    await fetch(`${getApiUrl()}/api/ventas/${ventaId}/sync-payment`, {
+      method: 'POST',
+      headers
+    });
   } catch (err) {
     // Captura limpia sin romper la ejecucion
   }
@@ -828,171 +795,69 @@ export interface RegistroGasolina {
 
 export const VehiculoService = {
   async getVehiculos(soloActivos = true): Promise<Vehiculo[]> {
-    let query = supabase.from('vehiculos').select('*');
-    if (soloActivos) {
-      query = query.eq('activo', true);
-    }
-    const { data, error } = await query.order('marca', { ascending: true });
-    if (error) throw error;
-    return (data || []) as Vehiculo[];
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos?soloActivos=${soloActivos}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener vehículos');
+    return res.json();
   },
 
   async crearVehiculo(vehiculo: Omit<Vehiculo, 'id' | 'created_at'>): Promise<Vehiculo> {
-    const { data, error } = await supabase
-      .from('vehiculos')
-      .insert([vehiculo])
-      .select()
-      .single();
-    if (error) throw error;
-    return data as Vehiculo;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(vehiculo)
+    });
+    if (!res.ok) throw new Error('Error al crear vehículo');
+    return res.json();
   },
 
   async actualizarVehiculo(id: string, updates: Partial<Vehiculo>): Promise<Vehiculo> {
-    const { data, error } = await supabase
-      .from('vehiculos')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data as Vehiculo;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates)
+    });
+    if (!res.ok) throw new Error('Error al actualizar vehículo');
+    return res.json();
   },
 
   async eliminarVehiculo(id: string): Promise<void> {
-    const { error } = await supabase.from('vehiculos').delete().eq('id', id);
-    if (error) throw error;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
+      method: 'DELETE',
+      headers
+    });
+    if (!res.ok) throw new Error('Error al eliminar vehículo');
   },
 
-  /**
-   * Sincroniza el kilometraje actual de un vehículo en AMBAS bases de datos (Inttec y Daravisa)
-   */
   async syncVehiculoKilometraje(placas: string | undefined | null, nuevoKilometraje: number): Promise<void> {
-    if (!placas || !nuevoKilometraje || isNaN(nuevoKilometraje)) return;
-    try {
-      await Promise.allSettled([
-        inttecClient.from('vehiculos').update({ kilometraje_actual: nuevoKilometraje }).eq('placas', placas),
-        daravisaClient.from('vehiculos').update({ kilometraje_actual: nuevoKilometraje }).eq('placas', placas),
-      ]);
-    } catch (e) {
-      console.warn('Error sincronizando kilometraje entre empresas:', e);
-    }
+    // This is handled automatically by the backend now, but we'll leave it as a no-op just in case it's called manually somewhere
   },
 
-  /**
-   * Obtiene la bitácora unificada de consumo de gasolina combinando registros de Inttec y Daravisa
-   * para trazabilidad 100% coherente y cálculo exacto de rendimiento km/L sin importar en qué portal se registró.
-   */
   async getRegistrosGasolina(filtros?: { vehiculoId?: string; empleadoId?: string; placas?: string }): Promise<RegistroGasolina[]> {
-    let targetPlacas = filtros?.placas;
-
-    // Si se pasa vehiculoId pero no placas, buscar las placas
-    if (filtros?.vehiculoId && !targetPlacas) {
-      try {
-        const { data: v } = await supabase.from('vehiculos').select('placas').eq('id', filtros.vehiculoId).single();
-        if (v?.placas) targetPlacas = v.placas;
-      } catch {}
-    }
-
-    const fetchFromClient = async (client: typeof supabase, empresaNombre: string) => {
-      try {
-        let query = client
-          .from('registro_gasolina')
-          .select(`
-            *,
-            vehiculo:vehiculo_id (marca, modelo, placas),
-            empleado:empleado_id (nombre)
-          `);
-
-        if (filtros?.empleadoId) {
-          query = query.eq('empleado_id', filtros.empleadoId);
-        }
-
-        const { data, error } = await query;
-        if (error || !data) return [];
-        return data.map((row: any) => ({
-          ...row,
-          vehiculo_marca: row.vehiculo?.marca,
-          vehiculo_modelo: row.vehiculo?.modelo,
-          vehiculo_placas: row.vehiculo?.placas,
-          empleado_nombre: row.empleado?.nombre,
-          empresa_origen: empresaNombre,
-        }));
-      } catch {
-        return [];
-      }
-    };
-
-    const [inttecLogs, daravisaLogs] = await Promise.all([
-      fetchFromClient(inttecClient, 'INTTEC'),
-      fetchFromClient(daravisaClient, 'DARAVISA'),
-    ]);
-
-    // Combinar sin duplicados
-    const logMap = new Map<string, any>();
-    [...inttecLogs, ...daravisaLogs].forEach(item => {
-      if (item && item.id) {
-        logMap.set(item.id, item);
-      }
-    });
-
-    let allLogs = Array.from(logMap.values());
-
-    // Filtrar por placas si aplica
-    if (targetPlacas) {
-      const cleanTarget = targetPlacas.toLowerCase().trim();
-      allLogs = allLogs.filter(item => (item.vehiculo_placas || '').toLowerCase().trim() === cleanTarget);
-    }
-
-    // Ordenar de más antiguo a más reciente para trazar el kilometraje en orden cronológico
-    allLogs.sort((a, b) => {
-      const timeA = new Date(a.fecha || a.created_at).getTime();
-      const timeB = new Date(b.fecha || b.created_at).getTime();
-      if (timeA !== timeB) return timeA - timeB;
-      return Number(a.kilometraje_actual || 0) - Number(b.kilometraje_actual || 0);
-    });
-
-    // Trazar el rendimiento real entre cargas consecutivas sin importar la empresa
-    for (let i = 0; i < allLogs.length; i++) {
-      if (i > 0) {
-        const prev = allLogs[i - 1];
-        const kmAnterior = Number(prev.kilometraje_actual || 0);
-        const kmActual = Number(allLogs[i].kilometraje_actual || 0);
-        const litros = Number(allLogs[i].litros || 0);
-        const kmRecorridos = Math.max(0, kmActual - kmAnterior);
-
-        allLogs[i].kilometraje_anterior = kmAnterior;
-        allLogs[i].distancia_recorrida = kmRecorridos;
-        allLogs[i].rendimiento_km_l = litros > 0 && kmRecorridos > 0 ? Number((kmRecorridos / litros).toFixed(2)) : 0;
-      } else {
-        allLogs[i].kilometraje_anterior = null;
-        allLogs[i].distancia_recorrida = 0;
-        allLogs[i].rendimiento_km_l = 0;
-      }
-    }
-
-    // Retornar de más reciente a más antiguo para vista de lista / reporte
-    return allLogs.reverse() as RegistroGasolina[];
+    const headers = await getApiHeaders();
+    
+    let url = `${getApiUrl()}/api/vehiculos/gasolina?`;
+    if (filtros?.vehiculoId) url += `vehiculoId=${filtros.vehiculoId}&`;
+    if (filtros?.empleadoId) url += `empleadoId=${filtros.empleadoId}&`;
+    if (filtros?.placas) url += `placas=${filtros.placas}&`;
+    
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error('Error al obtener registros de gasolina');
+    return res.json();
   },
 
   async crearRegistroGasolina(registro: Omit<RegistroGasolina, 'id' | 'created_at'>): Promise<RegistroGasolina> {
-    const { data, error } = await supabase
-      .from('registro_gasolina')
-      .insert([registro])
-      .select()
-      .single();
-    if (error) throw error;
-
-    // Sincronizar kilometraje actual en vehículos de ambas empresas
-    if (registro.vehiculo_id && registro.kilometraje_actual) {
-      try {
-        const { data: v } = await supabase.from('vehiculos').select('placas').eq('id', registro.vehiculo_id).single();
-        if (v?.placas) {
-          await VehiculoService.syncVehiculoKilometraje(v.placas, registro.kilometraje_actual);
-        }
-      } catch {}
-    }
-
-    return data as RegistroGasolina;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/gasolina`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(registro)
+    });
+    if (!res.ok) throw new Error('Error al crear registro de gasolina');
+    return res.json();
   },
 };
 
@@ -1014,47 +879,207 @@ export interface AuditoriaTarjeta {
 
 export const AuditoriaService = {
   async guardarAuditoria(auditoria: Omit<AuditoriaTarjeta, 'id' | 'creado_en'>): Promise<AuditoriaTarjeta> {
-    const { data, error } = await supabase
-      .from('auditorias_tarjeta')
-      .insert([auditoria])
-      .select()
-      .single();
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/auditoria`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(auditoria)
+    });
 
-    if (error) {
-      logger.error('Error al guardar auditoría de tarjeta:', error);
-      throw error;
+    if (!res.ok) {
+      const errorText = await res.text();
+      logger.error('Error al guardar auditoría de tarjeta:', errorText);
+      throw new Error(errorText);
     }
-    return data as AuditoriaTarjeta;
+    const json = await res.json();
+    return json.data as AuditoriaTarjeta;
   },
 
   async obtenerAuditorias(tarjeta?: string): Promise<AuditoriaTarjeta[]> {
-    let query = supabase
-      .from('auditorias_tarjeta')
-      .select('*')
-      .order('creado_en', { ascending: false });
+    const headers = await getApiHeaders();
+    const url = tarjeta && tarjeta !== 'TODAS' 
+      ? `${getApiUrl()}/api/auditoria?tarjeta=${encodeURIComponent(tarjeta)}`
+      : `${getApiUrl()}/api/auditoria`;
 
-    if (tarjeta && tarjeta !== 'TODAS') {
-      query = query.eq('tarjeta', tarjeta);
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const errorText = await res.text();
+      logger.error('Error al obtener auditorías de tarjeta:', errorText);
+      throw new Error(errorText);
     }
-
-    const { data, error } = await query;
-    if (error) {
-      logger.error('Error al obtener auditorías de tarjeta:', error);
-      throw error;
-    }
-    return (data || []) as AuditoriaTarjeta[];
+    const json = await res.json();
+    return (json.auditorias || []) as AuditoriaTarjeta[];
   },
 
   async eliminarAuditoria(id: string): Promise<void> {
-    const { error } = await supabase
-      .from('auditorias_tarjeta')
-      .delete()
-      .eq('id', id);
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/auditoria/${id}`, {
+      method: 'DELETE',
+      headers
+    });
 
-    if (error) {
-      logger.error('Error al eliminar auditoría de tarjeta:', error);
-      throw error;
+    if (!res.ok) {
+      const errorText = await res.text();
+      logger.error('Error al eliminar auditoría de tarjeta:', errorText);
+      throw new Error(errorText);
     }
   }
 };
+
+export interface Documento {
+  id: string;
+  titulo: string;
+  descripcion?: string | null;
+  contenido_html: string;
+  archivo_pdf_url?: string | null;
+  tipo_documento?: 'TEXTO' | 'PDF';
+  posicion_firma?: string | null;
+  creador_id?: string | null;
+  creador_nombre: string;
+  requiere_todos: boolean;
+  estado: 'BORRADOR' | 'PUBLICADO' | 'ARCHIVADO';
+  created_at?: string;
+  updated_at?: string;
+  total_asignados?: number;
+  total_firmados?: number;
+}
+
+export interface DocumentoFirmado {
+  id: string;
+  documento_id: string;
+  empleado_id: string;
+  empleado_nombre: string;
+  empleado_email?: string | null;
+  estado: 'PENDIENTE' | 'FIRMADO' | 'RECHAZADO';
+  firma_base64?: string | null;
+  firma_url?: string | null;
+  pdf_firmado_url?: string | null;
+  ip_registro?: string | null;
+  ubicacion_gps?: string | null;
+  dispositivo_info?: string | null;
+  hash_sha256?: string | null;
+  motivo_rechazo?: string | null;
+  firmado_at?: string | null;
+  created_at?: string;
+  documentos?: Documento;
+}
+
+export const DocumentoService = {
+  async obtenerDocumentosAdmin(): Promise<Documento[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/admin`, { headers });
+    if (!res.ok) throw new Error('Error al obtener documentos (Admin)');
+    return res.json();
+  },
+
+  async crearDocumento(
+    doc: Omit<Documento, 'id' | 'created_at' | 'updated_at'>,
+    empleadosIds: string[]
+  ): Promise<Documento> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ doc, empleadosIds })
+    });
+    if (!res.ok) throw new Error('Error al crear documento');
+    return res.json();
+  },
+
+  async obtenerMisDocumentosEmpleado(empleadoId: string): Promise<DocumentoFirmado[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/empleado/${empleadoId}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener documentos del empleado');
+    return res.json();
+  },
+
+  async obtenerFirmasDeDocumento(documentoId: string): Promise<DocumentoFirmado[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/${documentoId}/firmas`, { headers });
+    if (!res.ok) throw new Error('Error al obtener firmas');
+    return res.json();
+  },
+
+  async registrarFirma(
+    idAsignacion: string,
+    params: {
+      firmaBase64: string;
+      pdfUrl?: string;
+      ipRegistro?: string;
+      ubicacionGps?: string;
+      dispositivoInfo?: string;
+      hashSha256?: string;
+    }
+  ): Promise<DocumentoFirmado> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/firmas/${idAsignacion}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(params)
+    });
+    if (!res.ok) throw new Error('Error al registrar firma');
+    return res.json();
+  },
+
+  async eliminarDocumento(id: string): Promise<void> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/documentos/${id}`, { method: 'DELETE', headers });
+    if (!res.ok) throw new Error('Error al eliminar documento');
+  },
+
+  async subirPdfOriginal(fileUri: string, fileName: string): Promise<string> {
+    try {
+      const response = await fetch(fileUri);
+      const blob = await response.blob();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `originales/${Date.now()}_${cleanFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documentos-firmados')
+        .upload(filePath, blob, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        logger.error('Error al subir PDF original:', uploadError);
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (e) {
+      logger.error('Fallo la subida de PDF original:', e);
+      throw e;
+    }
+  },
+
+  async subirPdfFirmado(fileUri: string, fileName: string): Promise<string> {
+    try {
+      const response = await fetch(fileUri);
+      const blob = await response.blob();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `firmados/${Date.now()}_${cleanFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documentos-firmados')
+        .upload(filePath, blob, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        logger.error('Error al subir PDF firmado:', uploadError);
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (e) {
+      logger.error('Fallo la subida de PDF firmado:', e);
+      throw e;
+    }
+  }
+};
+
 
