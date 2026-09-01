@@ -134,6 +134,7 @@ export const EvidenceReportGenerator = {
     let listTrabajos: { 
       descripcion: string; 
       materiales?: string | null; 
+      materiales_usados?: any[] | null;
       observaciones?: string | null; 
       solucion?: string | null; 
       antesImg?: string | null; 
@@ -154,7 +155,8 @@ export const EvidenceReportGenerator = {
     if (!isMultiple) {
       listTrabajos = [{
         descripcion: evidencia.descripcion_trabajo || '',
-        materiales: evidencia.materiales_usados,
+        materiales: typeof evidencia.materiales_usados === 'string' ? evidencia.materiales_usados : null,
+        materiales_usados: Array.isArray(evidencia.materiales_usados) ? evidencia.materiales_usados : null,
         observaciones: evidencia.observaciones,
         antesImg: evidencia.foto_antes_url,
         despuesImg: evidencia.foto_despues_url,
@@ -233,10 +235,17 @@ export const EvidenceReportGenerator = {
               </div>
               ` : ''}
 
-              ${t.materiales ? `
+              ${(t.materiales_usados && Array.isArray(t.materiales_usados) && t.materiales_usados.length > 0) ? `
               <h3 style="font-size: 18px; font-weight: bold; color: #000; margin-bottom: 4px; margin-top: 0;">Material:</h3>
               <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5;">
-                ${textToBulletPoints(t.materiales)}
+                <ul style="margin: 4px 0; padding-left: 18px; list-style-type: none;">
+                  ${t.materiales_usados.map((m: any) => `<li style="margin-bottom: 6px; position: relative;"><span style="position: absolute; left: -14px;">৹</span>${m.usado}x ${m.nombre}</li>`).join('\n')}
+                </ul>
+              </div>
+              ` : t.materiales ? `
+              <h3 style="font-size: 18px; font-weight: bold; color: #000; margin-bottom: 4px; margin-top: 0;">Material:</h3>
+              <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5;">
+                ${textToBulletPoints(t.materiales.replace(/Sobrante.*?(?=\n|$)/g, '').replace(/Retirado.*?(?=\n|$)/g, ''))}
               </div>
               ` : ''}
             </div>

@@ -8,6 +8,7 @@ module.exports = {
     scheme: "appmovil",
     userInterfaceStyle: "automatic",
     ios: {
+      bundleIdentifier: "com.alexisef23.appmovil",
       icon: "./assets/expo.icon",
       config: {
         googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""
