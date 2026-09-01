@@ -30,7 +30,7 @@ interface Producto {
 
 interface CartItem {
   producto: Producto;
-  cantidad: number;
+  cantidad: number | '';
 }
 
 export default function RetiroMaterialScreen() {
@@ -84,11 +84,12 @@ export default function RetiroMaterialScreen() {
     setCart(prev => {
       const existing = prev.find(item => item.producto.id === producto.id);
       if (existing) {
-        if (existing.cantidad + qty > producto.stock_actual) {
+        const currentQty = typeof existing.cantidad === 'number' ? existing.cantidad : 0;
+        if (currentQty + qty > producto.stock_actual) {
           Alert.alert('Stock Insuficiente', `Solo hay ${producto.stock_actual} unidades disponibles.`);
           return prev;
         }
-        return prev.map(item => item.producto.id === producto.id ? { ...item, cantidad: item.cantidad + qty } : item);
+        return prev.map(item => item.producto.id === producto.id ? { ...item, cantidad: currentQty + qty } : item);
       }
       return [...prev, { producto, cantidad: qty }];
     });
@@ -99,11 +100,21 @@ export default function RetiroMaterialScreen() {
   };
 
   const updateCartQty = (productoId: string, qtyStr: string) => {
+    if (qtyStr.trim() === '') {
+      setCart(prev => prev.map(item => item.producto.id === productoId ? { ...item, cantidad: '' } : item));
+      return;
+    }
+
     const qty = parseInt(qtyStr, 10);
-    if (isNaN(qty) || qty <= 0) {
+    if (qty === 0) {
       removeFromCart(productoId);
       return;
     }
+
+    if (isNaN(qty) || qty < 0) {
+      return;
+    }
+
     setCart(prev => prev.map(item => {
       if (item.producto.id === productoId) {
         if (qty > item.producto.stock_actual) {
@@ -117,7 +128,11 @@ export default function RetiroMaterialScreen() {
   };
 
   const handleConfirmarRetiro = async () => {
-    if (cart.length === 0) return;
+    const validCart = cart.filter(item => typeof item.cantidad === 'number' && item.cantidad > 0);
+    if (validCart.length === 0) {
+      Alert.alert('Validación', 'El carrito está vacío o tiene cantidades inválidas.');
+      return;
+    }
     if (!currentUser) return;
     if (!motivoRetiro.trim()) {
       Alert.alert('Validación', 'Por favor ingresa un motivo o referencia para el retiro.');
@@ -131,7 +146,7 @@ export default function RetiroMaterialScreen() {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          cart,
+          cart: validCart,
           motivoRetiro,
           currentUser
         })
@@ -155,7 +170,7 @@ export default function RetiroMaterialScreen() {
     }
   };
 
-  const totalItems = cart.reduce((sum, item) => sum + item.cantidad, 0);
+  const totalItems = cart.reduce((sum, item) => sum + (typeof item.cantidad === 'number' ? item.cantidad : 0), 0);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
@@ -198,21 +213,37 @@ export default function RetiroMaterialScreen() {
           {filteredProductos.length === 0 ? (
             <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginTop: 40 }}>No se encontraron materiales en stock.</Text>
           ) : (
-            filteredProductos.map(prod => (
-              <View key={prod.id} style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: themeColors.text }}>{prod.nombre_oficial}</Text>
-                  <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }}>SKU: {prod.sku_interno}</Text>
-                  <Text style={{ fontSize: 14, color: themeColors.primary, fontWeight: 'bold', marginTop: 4 }}>Disponible: {prod.stock_actual}</Text>
+            filteredProductos.map(prod => {
+              const cartItem = cart.find(c => c.producto.id === prod.id);
+              const qtyInCart = cartItem && typeof cartItem.cantidad === 'number' ? cartItem.cantidad : 0;
+              const displayStock = prod.stock_actual - qtyInCart;
+              
+              return (
+                <View key={prod.id} style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 16, fontWeight: '600', color: themeColors.text }}>{prod.nombre_oficial}</Text>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }}>SKU: {prod.sku_interno}</Text>
+                    <Text style={{ fontSize: 14, color: themeColors.primary, fontWeight: 'bold', marginTop: 4 }}>Disponible: {displayStock}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    {qtyInCart > 0 && (
+                      <TouchableOpacity
+                        style={[styles.addBtn, { backgroundColor: themeColors.danger + '20', marginRight: 8 }]}
+                        onPress={() => updateCartQty(prod.id, String(qtyInCart - 1))}
+                      >
+                        <Ionicons name="remove" size={20} color={themeColors.danger} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={[styles.addBtn, { backgroundColor: themeColors.primary + '20' }]}
+                      onPress={() => addToCart(prod)}
+                    >
+                      <Ionicons name="add" size={20} color={themeColors.primary} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <TouchableOpacity
-                  style={[styles.addBtn, { backgroundColor: themeColors.primary + '20' }]}
-                  onPress={() => addToCart(prod)}
-                >
-                  <Ionicons name="add" size={20} color={themeColors.primary} />
-                </TouchableOpacity>
-              </View>
-            ))
+              );
+            })
           )}
         </ScrollView>
       )}

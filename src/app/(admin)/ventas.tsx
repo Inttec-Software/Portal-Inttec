@@ -33,6 +33,8 @@ import { parseCFDIXML } from '@/utils/cfdiParser';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
+import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
+import { SAT_UNIDADES } from '@/constants/satCatalog';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -335,13 +337,27 @@ export default function VentasScreen() {
 
       // Cargar catálogo de clientes y sucursales
       try {
-        const headers = await getApiHeaders();
-        const res = await fetch(`${getApiUrl()}/api/ventas/catalogs`, { headers });
-        if (res.ok) {
-          const data = await res.json();
-          setClientes(data.clientes || []);
-          setSucursalesCliente(data.sucursales || []);
-        }
+        // 1. Intentar API backend
+        try {
+          const headers = await getApiHeaders();
+          const res = await fetch(`${getApiUrl()}/api/ventas/catalogs`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.clientes) && data.clientes.length > 0) {
+              setClientes(data.clientes);
+              setSucursalesCliente(data.sucursales || []);
+              return;
+            }
+          }
+        } catch (_) {}
+
+        // 2. Fallback resiliente directo a Supabase
+        const [{ data: clientesData }, { data: sucursalesData }] = await Promise.all([
+          supabase.from('clientes').select('*').order('nombre'),
+          supabase.from('sucursales').select('*').order('nombre'),
+        ]);
+        if (clientesData) setClientes(clientesData);
+        if (sucursalesData) setSucursalesCliente(sucursalesData);
       } catch (err) {
         console.error('Error loading catalogs:', err);
       }
@@ -419,11 +435,28 @@ export default function VentasScreen() {
   const loadHistorial = async () => {
     setIsLoadingHistorial(true);
     try {
-      const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/ventas/historial`, { headers });
-      if (!res.ok) throw new Error('Error al cargar historial de ventas');
-      const data = await res.json();
-      setVentasHistorial(data.ventas || []);
+      // 1. Intentar API backend (/api/ventas/historial)
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/historial`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.ventas)) {
+            setVentasHistorial(data.ventas);
+            return;
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fallback resiliente directo a Supabase
+      const { data, error } = await supabase
+        .from('ventas')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        setVentasHistorial(data as any);
+      }
     } catch (err: any) {
       console.error('Error loading sales history:', err);
     } finally {
@@ -1329,7 +1362,17 @@ export default function VentasScreen() {
   };
 
   const handleUpdateCfdiPartida = (id: string, field: string, val: string) => {
-    setCfdiPartidas(prev => prev.map(p => p.id === id ? { ...p, [field]: val } : p));
+    setCfdiPartidas(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      const updated = { ...p, [field]: val };
+      if (field === 'clave_unidad') {
+        const u = SAT_UNIDADES.find(x => x.clave.toUpperCase() === (val || '').trim().toUpperCase());
+        if (u) {
+          updated.unidad = u.nombre;
+        }
+      }
+      return updated;
+    }));
   };
 
   const handleRemoveCfdiPartida = (id: string) => {
@@ -3928,25 +3971,23 @@ export default function VentasScreen() {
                               />
                             </View>
 
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginBottom: 2 }}>Clave SAT</Text>
-                              <TextInput
-                                style={{ height: 36, borderWidth: 1, borderColor: themeColors.border, borderRadius: 6, paddingHorizontal: 8, color: themeColors.text, backgroundColor: themeColors.backgroundElement, fontSize: 12 }}
-                                value={partida.clave_sat}
-                                onChangeText={val => handleUpdateCfdiPartida(partida.id, 'clave_sat', val)}
-                                placeholder="01010101"
-                              />
-                            </View>
+                            <SatCatalogAutocomplete
+                              tipo="producto"
+                              label="Clave SAT"
+                              value={partida.clave_sat}
+                              onChangeValue={val => handleUpdateCfdiPartida(partida.id, 'clave_sat', val)}
+                              placeholder="01010101"
+                              style={{ flex: 1.2 }}
+                            />
 
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginBottom: 2 }}>Unidad SAT</Text>
-                              <TextInput
-                                style={{ height: 36, borderWidth: 1, borderColor: themeColors.border, borderRadius: 6, paddingHorizontal: 8, color: themeColors.text, backgroundColor: themeColors.backgroundElement, fontSize: 12 }}
-                                value={partida.clave_unidad}
-                                onChangeText={val => handleUpdateCfdiPartida(partida.id, 'clave_unidad', val)}
-                                placeholder="H87"
-                              />
-                            </View>
+                            <SatCatalogAutocomplete
+                              tipo="unidad"
+                              label="Unidad SAT"
+                              value={partida.clave_unidad}
+                              onChangeValue={val => handleUpdateCfdiPartida(partida.id, 'clave_unidad', val)}
+                              placeholder="H87"
+                              style={{ flex: 1 }}
+                            />
                           </View>
 
                           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 2 }}>

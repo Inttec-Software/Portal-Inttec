@@ -62,7 +62,45 @@ export const crearEvidencia = async (req: Request, res: Response) => {
       }
     } catch (e) {}
 
-    // Insert Evidencia
+    // 1. Agrupar y calcular uso total por material para evitar inconsistencias y validar antes
+    const materialUsage: Record<string, { usado: number; nombre: string; dbId?: string; currentStock?: number; motivos: string[] }> = {};
+    for (const t of trabajosPayload) {
+      for (const m of (t.materiales_usados || [])) {
+        if (m.usado > 0) {
+          if (!materialUsage[m.productoId]) {
+            materialUsage[m.productoId] = { usado: 0, nombre: m.nombre, motivos: [] };
+          }
+          materialUsage[m.productoId].usado += m.usado;
+          if (t.descripcion) {
+            materialUsage[m.productoId].motivos.push(`Trabajo: ${t.descripcion.substring(0, 50)}`);
+          }
+        }
+      }
+    }
+
+    // 2. Validar que exista suficiente stock en el inventario del empleado para todos los materiales
+    for (const prodId of Object.keys(materialUsage)) {
+      const item = materialUsage[prodId];
+      const { data: invEmp, error: invError } = await client
+        .from('inventario_empleados')
+        .select('id, cantidad_disponible')
+        .eq('empleado_id', user.id)
+        .eq('producto_id', prodId)
+        .maybeSingle();
+
+      if (invError || !invEmp) {
+        return res.status(400).json({ error: `No se encontró inventario para el material: ${item.nombre}` });
+      }
+
+      if (invEmp.cantidad_disponible < item.usado) {
+        return res.status(400).json({ error: `Stock insuficiente para: ${item.nombre}. Disponible: ${invEmp.cantidad_disponible}, Requerido: ${item.usado}` });
+      }
+      
+      item.dbId = invEmp.id;
+      item.currentStock = invEmp.cantidad_disponible;
+    }
+
+    // 3. Insertar Evidencia
     const { data: evidenciaData, error: evidenciaError } = await client.from('evidencias').insert([
       {
         empleado_id: user.id,
@@ -79,37 +117,28 @@ export const crearEvidencia = async (req: Request, res: Response) => {
 
     if (evidenciaError) throw evidenciaError;
 
-    // Process inventory
-    for (const t of trabajosPayload) {
-      for (const m of (t.materiales_usados || [])) {
-        if (m.usado > 0) {
-          const { data: invEmp } = await client
-            .from('inventario_empleados')
-            .select('id, cantidad_disponible')
-            .eq('empleado_id', user.id)
-            .eq('producto_id', m.productoId)
-            .maybeSingle();
-            
-          if (invEmp) {
-            await client
-              .from('inventario_empleados')
-              .update({ 
-                cantidad_disponible: Math.max(0, invEmp.cantidad_disponible - m.usado),
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', invEmp.id);
-              
-            // Create movement log
-            await client.from('movimientos_inventario').insert({
-              producto_id: m.productoId,
-              empleado_id: user.id,
-              cantidad: m.usado,
-              tipo: 'USO_EVIDENCIA',
-              motivo: `Utilizado en evidencia. Trabajo: ${t.descripcion?.substring(0, 50) || ''}`,
-              empresa: company
-            });
-          }
-        }
+    // 4. Descontar del inventario y registrar movimientos de forma consistente
+    for (const prodId of Object.keys(materialUsage)) {
+      const item = materialUsage[prodId];
+      if (item.dbId && item.currentStock !== undefined) {
+        // Actualizar inventario
+        await client
+          .from('inventario_empleados')
+          .update({ 
+            cantidad_disponible: item.currentStock - item.usado,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', item.dbId);
+          
+        // Crear log de movimiento
+        await client.from('movimientos_inventario').insert({
+          producto_id: prodId,
+          empleado_id: user.id,
+          cantidad: item.usado,
+          tipo: 'USO_EVIDENCIA',
+          motivo: `Utilizado en evidencia. ${item.motivos.join(' | ')}`,
+          empresa: company
+        });
       }
     }
 

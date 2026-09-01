@@ -19,6 +19,7 @@ import facturasRecibidasRoutes from './modules/facturas-recibidas/facturas-recib
 import retiroMaterialRoutes from './modules/retiro-material/retiro-material.routes';
 import devolucionesRoutes from './modules/devoluciones/devoluciones.routes';
 import documentosRoutes from './modules/documentos/documentos.routes';
+import satRoutes from './modules/sat/sat.routes';
 
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -90,6 +91,7 @@ app.use('/api/facturas-recibidas', facturasRecibidasRoutes);
 app.use('/api/retiro-material', retiroMaterialRoutes);
 app.use('/api/devoluciones', devolucionesRoutes);
 app.use('/api/documentos', documentosRoutes);
+app.use('/api/sat', satRoutes);
 
 // Ruta base
 app.get('/', (req, res) => {

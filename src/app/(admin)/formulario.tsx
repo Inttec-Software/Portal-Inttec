@@ -995,10 +995,8 @@ export default function GastoForm() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       {/* Header */}
       <View style={styles.header}>
-        
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Registrar Gasto</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -1009,8 +1007,9 @@ export default function GastoForm() {
         style={{ flex: 1 }}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 120 }]}
           keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled={true}
         >
           <Pressable
             onPress={() => {
@@ -2270,9 +2269,15 @@ export default function GastoForm() {
                   <Ionicons name={showCatDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showCatDropdown && (
-                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                  <View style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      <ScrollView
+                        nestedScrollEnabled={true}
+                        style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                        keyboardShouldPersistTaps="always"
+                        showsVerticalScrollIndicator={true}
+                        bounces={false}
+                      >
                         {categorias.map((cat, index, array) => (
                           <TouchableOpacity
                             key={cat.id}
@@ -2293,7 +2298,7 @@ export default function GastoForm() {
                         ))}
                       </ScrollView>
                     </View>
-                  </Pressable>
+                  </View>
                 )}
               </View>
 
@@ -2316,9 +2321,15 @@ export default function GastoForm() {
                     <Ionicons name={showSubDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                   </TouchableOpacity>
                   {showSubDropdown && (
-                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                    <View style={{ width: '100%', zIndex: 1000 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        <ScrollView
+                          nestedScrollEnabled={true}
+                          style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                          keyboardShouldPersistTaps="always"
+                          showsVerticalScrollIndicator={true}
+                          bounces={false}
+                        >
                           {filteredSubcategorias.length > 0 ? (
                             filteredSubcategorias.map((sub, index, array) => (
                               <TouchableOpacity
@@ -2344,7 +2355,7 @@ export default function GastoForm() {
                           )}
                         </ScrollView>
                       </View>
-                    </Pressable>
+                    </View>
                   )}
                 </View>
               )}
@@ -2845,7 +2856,6 @@ export default function GastoForm() {
           </KeyboardAvoidingView>
         </Pressable>
       </Modal>
-    </ScrollView>
     </SafeAreaView>
   );
 }

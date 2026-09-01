@@ -990,6 +990,7 @@ export default function GastoForm() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled={true}
         >
           <Pressable
             onPress={() => {
@@ -2146,9 +2147,15 @@ export default function GastoForm() {
                   <Ionicons name={showCatDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showCatDropdown && (
-                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                  <View style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      <ScrollView
+                        nestedScrollEnabled={true}
+                        style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                        keyboardShouldPersistTaps="always"
+                        showsVerticalScrollIndicator={true}
+                        bounces={false}
+                      >
                         {categorias.map((cat, index, array) => (
                           <TouchableOpacity
                             key={cat.id}
@@ -2169,7 +2176,7 @@ export default function GastoForm() {
                         ))}
                       </ScrollView>
                     </View>
-                  </Pressable>
+                  </View>
                 )}
               </View>
 
@@ -2180,6 +2187,7 @@ export default function GastoForm() {
                   <TouchableOpacity
                     style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                     onPress={() => {
+                      Keyboard.dismiss();
                       setShowSubDropdown(!showSubDropdown);
                       setShowCatDropdown(false);
                       setShowCliDropdown(false);
@@ -2191,9 +2199,15 @@ export default function GastoForm() {
                     <Ionicons name={showSubDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                   </TouchableOpacity>
                   {showSubDropdown && (
-                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                    <View style={{ width: '100%', zIndex: 1000 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                        <ScrollView
+                          nestedScrollEnabled={true}
+                          style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                          keyboardShouldPersistTaps="always"
+                          showsVerticalScrollIndicator={true}
+                          bounces={false}
+                        >
                           {filteredSubcategorias.length > 0 ? (
                             filteredSubcategorias.map((sub, index, array) => (
                               <TouchableOpacity
@@ -2219,7 +2233,7 @@ export default function GastoForm() {
                           )}
                         </ScrollView>
                       </View>
-                    </Pressable>
+                    </View>
                   )}
                 </View>
               )}

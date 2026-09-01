@@ -862,6 +862,7 @@ export default function EditarGastoForm() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled={true}
         >
           <Pressable
             onPress={() => {
@@ -1980,9 +1981,10 @@ export default function EditarGastoForm() {
                 <TouchableOpacity
                   style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                   onPress={() => {
+                    Keyboard.dismiss();
                     setShowCatDropdown(!showCatDropdown);
-                  setShowSubDropdown(false);
-                  setShowCliDropdown(false);
+                    setShowSubDropdown(false);
+                    setShowCliDropdown(false);
                   }}
                 >
                   <Text style={{ color: selectedCategoria ? themeColors.text : themeColors.textSecondary }}>
@@ -1991,25 +1993,36 @@ export default function EditarGastoForm() {
                   <Ionicons name={showCatDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showCatDropdown && (
-                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                  <View style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
-                        {categorias.map((cat) => (
+                      <ScrollView
+                        nestedScrollEnabled={true}
+                        style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                        keyboardShouldPersistTaps="always"
+                        showsVerticalScrollIndicator={true}
+                        bounces={false}
+                      >
+                        {categorias.map((cat, index, array) => (
                           <TouchableOpacity
                             key={cat.id}
-                            style={styles.dropdownItem}
+                            style={[
+                              styles.dropdownItem,
+                              index === array.length - 1 && { borderBottomWidth: 0 },
+                              { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                            ]}
                             onPress={() => {
                               setSelectedCategoria(cat.nombre);
                               setSelectedSubcategoria(''); // Limpiar subcategoría al cambiar de categoría
                               setShowCatDropdown(false);
                             }}
                           >
-                            <Text style={{ color: themeColors.text }}>{cat.nombre}</Text>
+                            <Ionicons name="folder-open-outline" size={24} color={themeColors.primary} />
+                            <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cat.nombre}</Text>
                           </TouchableOpacity>
                         ))}
                       </ScrollView>
                     </View>
-                  </Pressable>
+                  </View>
                 )}
               </View>
 
@@ -2020,6 +2033,7 @@ export default function EditarGastoForm() {
                   <TouchableOpacity
                     style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                     onPress={() => {
+                      Keyboard.dismiss();
                       setShowSubDropdown(!showSubDropdown);
                       setShowCatDropdown(false);
                       setShowCliDropdown(false);
@@ -2031,20 +2045,31 @@ export default function EditarGastoForm() {
                     <Ionicons name={showSubDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                   </TouchableOpacity>
                   {showSubDropdown && (
-                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                    <View style={{ width: '100%', zIndex: 1000 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
+                        <ScrollView
+                          nestedScrollEnabled={true}
+                          style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                          keyboardShouldPersistTaps="always"
+                          showsVerticalScrollIndicator={true}
+                          bounces={false}
+                        >
                           {filteredSubcategorias.length > 0 ? (
-                            filteredSubcategorias.map((sub) => (
+                            filteredSubcategorias.map((sub, index, array) => (
                               <TouchableOpacity
                                 key={sub.id}
-                                style={styles.dropdownItem}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
                                 onPress={() => {
                                   setSelectedSubcategoria(sub.nombre);
                                   setShowSubDropdown(false);
                                 }}
                               >
-                                <Text style={{ color: themeColors.text }}>{sub.nombre}</Text>
+                                <Ionicons name="pricetag-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{sub.nombre}</Text>
                               </TouchableOpacity>
                             ))
                           ) : (
@@ -2054,7 +2079,7 @@ export default function EditarGastoForm() {
                           )}
                         </ScrollView>
                       </View>
-                    </Pressable>
+                    </View>
                   )}
                 </View>
               )}
