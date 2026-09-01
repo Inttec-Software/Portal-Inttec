@@ -16,6 +16,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, AuthService, Usuario } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CustomButton from '@/components/CustomButton';
@@ -29,7 +30,7 @@ interface Producto {
 
 interface CartItem {
   producto: Producto;
-  cantidad: number;
+  cantidad: number | '';
 }
 
 export default function RetiroMaterialScreen() {
@@ -61,14 +62,11 @@ export default function RetiroMaterialScreen() {
       }
       setCurrentUser(user);
 
-      const { data, error } = await supabase
-        .from('productos')
-        .select('id, sku_interno, nombre_oficial, stock_actual')
-        .eq('activo', true)
-        .gt('stock_actual', 0)
-        .order('nombre_oficial');
-
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/retiro-material/productos`, { headers });
+      if (!res.ok) throw new Error('Error de red al cargar productos');
+      
+      const { productos: data } = await res.json();
       setProductos(data || []);
     } catch (err) {
       console.error('Error loading products:', err);
@@ -86,11 +84,12 @@ export default function RetiroMaterialScreen() {
     setCart(prev => {
       const existing = prev.find(item => item.producto.id === producto.id);
       if (existing) {
-        if (existing.cantidad + qty > producto.stock_actual) {
+        const currentQty = typeof existing.cantidad === 'number' ? existing.cantidad : 0;
+        if (currentQty + qty > producto.stock_actual) {
           Alert.alert('Stock Insuficiente', `Solo hay ${producto.stock_actual} unidades disponibles.`);
           return prev;
         }
-        return prev.map(item => item.producto.id === producto.id ? { ...item, cantidad: item.cantidad + qty } : item);
+        return prev.map(item => item.producto.id === producto.id ? { ...item, cantidad: currentQty + qty } : item);
       }
       return [...prev, { producto, cantidad: qty }];
     });
@@ -101,11 +100,21 @@ export default function RetiroMaterialScreen() {
   };
 
   const updateCartQty = (productoId: string, qtyStr: string) => {
+    if (qtyStr.trim() === '') {
+      setCart(prev => prev.map(item => item.producto.id === productoId ? { ...item, cantidad: '' } : item));
+      return;
+    }
+
     const qty = parseInt(qtyStr, 10);
-    if (isNaN(qty) || qty <= 0) {
+    if (qty === 0) {
       removeFromCart(productoId);
       return;
     }
+
+    if (isNaN(qty) || qty < 0) {
+      return;
+    }
+
     setCart(prev => prev.map(item => {
       if (item.producto.id === productoId) {
         if (qty > item.producto.stock_actual) {
@@ -119,7 +128,11 @@ export default function RetiroMaterialScreen() {
   };
 
   const handleConfirmarRetiro = async () => {
-    if (cart.length === 0) return;
+    const validCart = cart.filter(item => typeof item.cantidad === 'number' && item.cantidad > 0);
+    if (validCart.length === 0) {
+      Alert.alert('Validación', 'El carrito está vacío o tiene cantidades inválidas.');
+      return;
+    }
     if (!currentUser) return;
     if (!motivoRetiro.trim()) {
       Alert.alert('Validación', 'Por favor ingresa un motivo o referencia para el retiro.');
@@ -128,60 +141,20 @@ export default function RetiroMaterialScreen() {
 
     setIsSubmitting(true);
     try {
-      // Registrar en movimientos_inventario y descontar stock
-      for (const item of cart) {
-        const prod = productos.find(p => p.id === item.producto.id);
-        if (!prod) continue;
-        
-        const newStock = prod.stock_actual - item.cantidad;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/retiro-material/confirmar`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          cart: validCart,
+          motivoRetiro,
+          currentUser
+        })
+      });
 
-        // 1. Descontar del inventario
-        const { error: stockErr } = await supabase
-          .from('productos')
-          .update({ stock_actual: newStock })
-          .eq('id', item.producto.id);
-
-        if (stockErr) throw stockErr;
-
-        // 2. Registrar movimiento de salida
-        const { error: moveErr } = await supabase
-          .from('movimientos_inventario')
-          .insert([
-            {
-              producto_id: item.producto.id,
-              tipo: 'SALIDA',
-              cantidad: item.cantidad,
-              folio_factura: `RETIRO: ${motivoRetiro.trim()}`,
-              creado_por: currentUser.id,
-            },
-          ]);
-
-        if (moveErr) {
-          console.warn('No se pudo registrar histórico:', moveErr.message);
-        }
-
-        // 3. Agregar al inventario del empleado
-        const { data: invEmp, error: invErr1 } = await supabase
-          .from('inventario_empleados')
-          .select('id, cantidad_disponible')
-          .eq('empleado_id', currentUser.id)
-          .eq('producto_id', item.producto.id)
-          .maybeSingle();
-
-        if (invEmp) {
-          await supabase
-            .from('inventario_empleados')
-            .update({ cantidad_disponible: invEmp.cantidad_disponible + item.cantidad, updated_at: new Date().toISOString() })
-            .eq('id', invEmp.id);
-        } else {
-          await supabase
-            .from('inventario_empleados')
-            .insert([{
-              empleado_id: currentUser.id,
-              producto_id: item.producto.id,
-              cantidad_disponible: item.cantidad
-            }]);
-        }
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || 'Error al procesar el retiro en el servidor');
       }
 
       Alert.alert('Éxito', 'Material retirado correctamente.');
@@ -197,7 +170,7 @@ export default function RetiroMaterialScreen() {
     }
   };
 
-  const totalItems = cart.reduce((sum, item) => sum + item.cantidad, 0);
+  const totalItems = cart.reduce((sum, item) => sum + (typeof item.cantidad === 'number' ? item.cantidad : 0), 0);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
@@ -240,21 +213,37 @@ export default function RetiroMaterialScreen() {
           {filteredProductos.length === 0 ? (
             <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginTop: 40 }}>No se encontraron materiales en stock.</Text>
           ) : (
-            filteredProductos.map(prod => (
-              <View key={prod.id} style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: themeColors.text }}>{prod.nombre_oficial}</Text>
-                  <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }}>SKU: {prod.sku_interno}</Text>
-                  <Text style={{ fontSize: 14, color: themeColors.primary, fontWeight: 'bold', marginTop: 4 }}>Disponible: {prod.stock_actual}</Text>
+            filteredProductos.map(prod => {
+              const cartItem = cart.find(c => c.producto.id === prod.id);
+              const qtyInCart = cartItem && typeof cartItem.cantidad === 'number' ? cartItem.cantidad : 0;
+              const displayStock = prod.stock_actual - qtyInCart;
+              
+              return (
+                <View key={prod.id} style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 16, fontWeight: '600', color: themeColors.text }}>{prod.nombre_oficial}</Text>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }}>SKU: {prod.sku_interno}</Text>
+                    <Text style={{ fontSize: 14, color: themeColors.primary, fontWeight: 'bold', marginTop: 4 }}>Disponible: {displayStock}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    {qtyInCart > 0 && (
+                      <TouchableOpacity
+                        style={[styles.addBtn, { backgroundColor: themeColors.danger + '20', marginRight: 8 }]}
+                        onPress={() => updateCartQty(prod.id, String(qtyInCart - 1))}
+                      >
+                        <Ionicons name="remove" size={20} color={themeColors.danger} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={[styles.addBtn, { backgroundColor: themeColors.primary + '20' }]}
+                      onPress={() => addToCart(prod)}
+                    >
+                      <Ionicons name="add" size={20} color={themeColors.primary} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <TouchableOpacity
-                  style={[styles.addBtn, { backgroundColor: themeColors.primary + '20' }]}
-                  onPress={() => addToCart(prod)}
-                >
-                  <Ionicons name="add" size={20} color={themeColors.primary} />
-                </TouchableOpacity>
-              </View>
-            ))
+              );
+            })
           )}
         </ScrollView>
       )}

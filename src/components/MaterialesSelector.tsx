@@ -182,7 +182,14 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                       style={[styles.input, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
                       keyboardType="numeric"
                       value={usado}
-                      onChangeText={setUsado}
+                      onChangeText={(val) => {
+                        const num = parseInt(val, 10);
+                        if (!isNaN(num) && num > selectedProduct.stock_actual) {
+                          setUsado(selectedProduct.stock_actual.toString());
+                        } else {
+                          setUsado(val);
+                        }
+                      }}
                       placeholder="0"
                     />
                   </View>

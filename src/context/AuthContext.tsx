@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { AuthService, Usuario, CompanyService, EnvService, supabase } from '@/services/supabase';
+import { AuthService, Usuario, CompanyService, EnvService } from '@/services/supabase';
+import { CatalogService } from '@/services/catalogService';
 import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PushNotificationService } from '@/services/pushNotifications';
@@ -55,29 +56,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const currentEmail = user?.email;
       const currentRole = user?.rol;
+
+      // Copiar el token JWT al nuevo entorno ANTES de cambiar la empresa
+      // para que getApiHeaders() pueda enviarlo en las llamadas de catálogo.
+      const currentToken = await AsyncStorage.getItem(`jwt_token_${company}`);
+      if (currentToken) {
+        await AsyncStorage.setItem(`jwt_token_${newCompany}`, currentToken);
+      }
+
       await CompanyService.setActiveCompany(newCompany);
       setCompanyState(newCompany);
       
       let currentUser = await AuthService.getCurrentUser();
 
-      // Siempre actualizamos el usuario desde la base de datos al cambiar de empresa
+      // Siempre actualizamos el usuario desde el backend al cambiar de empresa
       // para garantizar que el rol y otros datos estén sincronizados.
       if (currentEmail) {
-        const { data: dbUser, error } = await supabase
-          .from('usuarios')
-          .select('*')
-          .eq('email', currentEmail.trim().toLowerCase())
-          .maybeSingle();
+        const allUsers = await CatalogService.getUsuarios();
+        const dbUser = allUsers.find((u: Usuario) => u.email?.trim().toLowerCase() === currentEmail.trim().toLowerCase());
 
-        if (dbUser && !error) {
-          // Si el rol en la sesión activa es diferente al de la base de datos (por falta de sincronización previa),
+        if (dbUser) {
+          // Si el rol en la sesión activa es diferente al del usuario (por falta de sincronización previa),
           // mantenemos el rol activo y lo sincronizamos en la base de datos de la nueva empresa
           if (currentRole && dbUser.rol !== currentRole) {
             try {
-              await supabase
-                .from('usuarios')
-                .update({ rol: currentRole })
-                .eq('id', dbUser.id);
+              await CatalogService.actualizarUsuario(dbUser.id, { rol: currentRole });
               dbUser.rol = currentRole;
             } catch (syncErr) {
               console.warn('Could not sync user role across company:', syncErr);
@@ -85,9 +88,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           await AsyncStorage.setItem(`logged_user_${newCompany}`, JSON.stringify(dbUser));
+          
           currentUser = dbUser as Usuario;
         } else {
           await AsyncStorage.removeItem(`logged_user_${newCompany}`);
+          await AsyncStorage.removeItem(`jwt_token_${newCompany}`);
           currentUser = null;
         }
       }
@@ -110,13 +115,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let currentUser = null;
 
       if (currentEmail) {
-        const { data: dbUser, error } = await supabase
-          .from('usuarios')
-          .select('*')
-          .eq('email', currentEmail.trim().toLowerCase())
-          .maybeSingle();
+        const allUsers = await CatalogService.getUsuarios();
+        const dbUser = allUsers.find((u: Usuario) => u.email?.trim().toLowerCase() === currentEmail.trim().toLowerCase());
 
-        if (dbUser && !error) {
+        if (dbUser) {
           await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(dbUser));
           currentUser = dbUser as Usuario;
         } else {
@@ -173,12 +175,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       PushNotificationService.registerForPushNotificationsAsync().then(token => {
         if (token) {
           // Update user row in DB with this token
-          supabase.from('usuarios')
-            .update({ expo_push_token: token })
-            .eq('id', user.id)
-            .then(({ error }) => {
-              if (error) console.error('Error saving push token:', error);
-            });
+          CatalogService.actualizarUsuario(user.id, { expo_push_token: token } as any).catch(err => {
+            console.error('Error saving push token:', err);
+          });
         }
       });
     }

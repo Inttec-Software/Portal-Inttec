@@ -18,6 +18,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
+import { CatalogService } from '@/services/catalogService';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import {
   supabase,
@@ -195,21 +197,17 @@ export default function EditarGastoForm() {
 
   const loadCatalogos = async () => {
     try {
-      const [catRes, subRes, cliRes, usrRes, sucRes, provRes] = await Promise.all([
-        supabase.from('categorias').select('*').order('nombre'),
-        supabase.from('subcategorias').select('*').order('nombre'),
-        supabase.from('clientes').select('*').order('nombre'),
-        supabase.from('usuarios').select('*').order('nombre'),
-        supabase.from('sucursales_cliente').select('*').order('nombre'),
-        supabase.from('proveedores').select('*').order('nombre'),
-      ]);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/form-catalogs`, { headers });
+      if (!res.ok) throw new Error('Error al cargar catálogos del formulario');
+      const data = await res.json();
 
-      if (catRes.data) setCategorias(catRes.data);
-      if (subRes.data) setSubcategorias(subRes.data);
-      if (cliRes.data) setClientes(cliRes.data);
-      if (usrRes.data) setAllUsers(usrRes.data);
-      if (sucRes.data) setSucursalesCliente(sucRes.data);
-      if (provRes.data) setProveedores(provRes.data);
+      if (data.categorias) setCategorias(data.categorias);
+      if (data.subcategorias) setSubcategorias(data.subcategorias);
+      if (data.clientes) setClientes(data.clientes);
+      if (data.usuarios) setAllUsers(data.usuarios);
+      if (data.sucursales) setSucursalesCliente(data.sucursales);
+      if (data.proveedores) setProveedores(data.proveedores);
     } catch (err) {
       console.error('Error loading catalogs:', err);
     }
@@ -230,19 +228,12 @@ export default function EditarGastoForm() {
 
       if (id) {
         try {
-          const { data, error } = await supabase
-            .from('gastos')
-            .select(`
-              *,
-              subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-              proveedor_rel:proveedores(id, nombre),
-              cliente_rel:clientes(id, nombre),
-              sucursal_rel:sucursales_cliente(id, nombre)
-            `)
-            .eq('id', id)
-            .single();
+          const headers = await getApiHeaders();
+          const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${id}`, { headers });
+          if (!res.ok) throw new Error('Error al obtener el gasto');
+          const resData = await res.json();
+          const data = resData.gasto;
 
-          if (error) throw error;
           if (data) {
             // Pre-fill state
             if (data.foto_url) setImageUri(data.foto_url);
@@ -518,25 +509,15 @@ export default function EditarGastoForm() {
 
   const handleAddNewCliente = async (nombre: string) => {
     try {
-      const { data, error } = await supabase
-        .from('clientes')
-        .insert([{ nombre: nombre.trim() }])
-        .select();
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const newCli = data[0];
-        setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-        if (newCli) {
-          setSelectedCliente(newCli.nombre);
-          setSucursal('');
-        }
-      } else {
-        const { data: allCli } = await supabase.from('clientes').select('*').order('nombre');
-        if (allCli) {
-          setClientes(allCli);
-          setSelectedCliente(nombre.trim());
-          setSucursal('');
-        }
+      const newCli = await CatalogService.crearCliente({ nombre: nombre.trim() });
+      if (newCli) {
+        setClientes(prev => {
+          const exists = prev.find(p => p.id === newCli.id);
+          if (exists) return prev;
+          return [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre));
+        });
+        setSelectedCliente(newCli.nombre);
+        setSucursal('');
       }
       setClienteSearch('');
       setShowCliDropdown(false);
@@ -554,22 +535,20 @@ export default function EditarGastoForm() {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('sucursales_cliente')
-        .insert([{ cliente_id: currentCliente.id, nombre: nombre.trim().toUpperCase() }])
-        .select();
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const newSuc = data[0];
-        setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      const newSuc = await CatalogService.crearSucursal({ 
+        cliente_id: currentCliente.id, 
+        nombre: nombre.trim().toUpperCase() 
+      });
+      
+      if (newSuc) {
+        setSucursalesCliente(prev => {
+          const exists = prev.find(p => p.id === newSuc.id);
+          if (exists) return prev;
+          return [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre));
+        });
         setSucursal(newSuc.nombre);
-      } else {
-        const { data: allSuc } = await supabase.from('sucursales_cliente').select('*').order('nombre');
-        if (allSuc) {
-          setSucursalesCliente(allSuc);
-          setSucursal(nombre.trim().toUpperCase());
-        }
       }
+      
       setSucursalSearch('');
       setShowSucursalDropdown(false);
       showAlert('Éxito', `Sucursal "${nombre.trim().toUpperCase()}" agregada y vinculada a ${currentCliente.nombre}.`);
@@ -747,22 +726,19 @@ export default function EditarGastoForm() {
 
 
       // Obtener el venta_id actual antes de actualizar para saber si estaba vinculado
-      const { data: oldGasto } = await supabase
-        .from('gastos')
-        .select('venta_id')
-        .eq('id', id)
-        .single();
+      const headers = await getApiHeaders();
 
-      const { error: dbError } = await supabase
-        .from('gastos')
-        .update(updateData)
-        .eq('id', id);
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          updatePayload: updateData
+        })
+      });
 
-      if (dbError) throw dbError;
-
-      // Si el gasto estaba vinculado a una venta, recalculamos sus totales
-      if (oldGasto && oldGasto.venta_id) {
-        await recalculateVentaTotals(oldGasto.venta_id);
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Error al guardar el gasto');
       }
 
       showAlert('Éxito', 'Gasto modificado correctamente y enviado a revisión.');
@@ -851,6 +827,7 @@ export default function EditarGastoForm() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled={true}
         >
           <Pressable
             onPress={() => {
@@ -1895,9 +1872,10 @@ export default function EditarGastoForm() {
                 <TouchableOpacity
                   style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                   onPress={() => {
+                    Keyboard.dismiss();
                     setShowCatDropdown(!showCatDropdown);
-                  setShowSubDropdown(false);
-                  setShowCliDropdown(false);
+                    setShowSubDropdown(false);
+                    setShowCliDropdown(false);
                   }}
                 >
                   <Text style={{ color: selectedCategoria ? themeColors.text : themeColors.textSecondary }}>
@@ -1906,25 +1884,36 @@ export default function EditarGastoForm() {
                   <Ionicons name={showCatDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
                 {showCatDropdown && (
-                  <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                  <View style={{ width: '100%', zIndex: 1000 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
-                        {categorias.map((cat) => (
+                      <ScrollView
+                        nestedScrollEnabled={true}
+                        style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                        keyboardShouldPersistTaps="always"
+                        showsVerticalScrollIndicator={true}
+                        bounces={false}
+                      >
+                        {categorias.map((cat, index, array) => (
                           <TouchableOpacity
                             key={cat.id}
-                            style={styles.dropdownItem}
+                            style={[
+                              styles.dropdownItem,
+                              index === array.length - 1 && { borderBottomWidth: 0 },
+                              { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                            ]}
                             onPress={() => {
                               setSelectedCategoria(cat.nombre);
                               setSelectedSubcategoria(''); // Limpiar subcategoría al cambiar de categoría
                               setShowCatDropdown(false);
                             }}
                           >
-                            <Text style={{ color: themeColors.text }}>{cat.nombre}</Text>
+                            <Ionicons name="folder-open-outline" size={24} color={themeColors.primary} />
+                            <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cat.nombre}</Text>
                           </TouchableOpacity>
                         ))}
                       </ScrollView>
                     </View>
-                  </Pressable>
+                  </View>
                 )}
               </View>
 
@@ -1935,6 +1924,7 @@ export default function EditarGastoForm() {
                   <TouchableOpacity
                     style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                     onPress={() => {
+                      Keyboard.dismiss();
                       setShowSubDropdown(!showSubDropdown);
                       setShowCatDropdown(false);
                       setShowCliDropdown(false);
@@ -1946,20 +1936,31 @@ export default function EditarGastoForm() {
                     <Ionicons name={showSubDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                   </TouchableOpacity>
                   {showSubDropdown && (
-                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+                    <View style={{ width: '100%', zIndex: 1000 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
+                        <ScrollView
+                          nestedScrollEnabled={true}
+                          style={{ maxHeight: 160, paddingHorizontal: Spacing.half }}
+                          keyboardShouldPersistTaps="always"
+                          showsVerticalScrollIndicator={true}
+                          bounces={false}
+                        >
                           {filteredSubcategorias.length > 0 ? (
-                            filteredSubcategorias.map((sub) => (
+                            filteredSubcategorias.map((sub, index, array) => (
                               <TouchableOpacity
                                 key={sub.id}
-                                style={styles.dropdownItem}
+                                style={[
+                                  styles.dropdownItem,
+                                  index === array.length - 1 && { borderBottomWidth: 0 },
+                                  { flexDirection: 'row', alignItems: 'center', gap: Spacing.one }
+                                ]}
                                 onPress={() => {
                                   setSelectedSubcategoria(sub.nombre);
                                   setShowSubDropdown(false);
                                 }}
                               >
-                                <Text style={{ color: themeColors.text }}>{sub.nombre}</Text>
+                                <Ionicons name="pricetag-outline" size={24} color={themeColors.primary} />
+                                <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{sub.nombre}</Text>
                               </TouchableOpacity>
                             ))
                           ) : (
@@ -1969,7 +1970,7 @@ export default function EditarGastoForm() {
                           )}
                         </ScrollView>
                       </View>
-                    </Pressable>
+                    </View>
                   )}
                 </View>
               )}

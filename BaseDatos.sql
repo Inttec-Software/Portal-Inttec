@@ -543,3 +543,253 @@ CREATE TABLE IF NOT EXISTS public.devoluciones_empleado (
 
 -- 4. Agregar proveedor principal a productos
 ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS proveedor_id UUID REFERENCES public.proveedores(id);
+
+
+
+-- =========================================================================
+-- ESTRUCTURA DE BASE DE DATOS: MÓDULO DE DOCUMENTOS Y FIRMAS DIGITALES
+-- =========================================================================
+
+-- 1. Tabla de Documentos y Plantillas de la Empresa (Emitidos por Admin)
+CREATE TABLE IF NOT EXISTS public.documentos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  titulo text NOT NULL,
+  descripcion text,
+  contenido_html text,
+  archivo_pdf_url text, -- URL del archivo PDF original subido por el admin (si aplica)
+  tipo_documento text NOT NULL DEFAULT 'TEXTO' CHECK (tipo_documento IN ('TEXTO', 'PDF')),
+  creador_id uuid REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  creador_nombre text NOT NULL,
+  requiere_todos boolean DEFAULT true,
+  estado text NOT NULL DEFAULT 'PUBLICADO' CHECK (estado IN ('BORRADOR', 'PUBLICADO', 'ARCHIVADO')),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT documentos_pkey PRIMARY KEY (id)
+);
+
+-- Si la tabla ya existía, agregar columnas para soporte de PDF original:
+ALTER TABLE public.documentos ADD COLUMN IF NOT EXISTS archivo_pdf_url text;
+ALTER TABLE public.documentos ADD COLUMN IF NOT EXISTS tipo_documento text DEFAULT 'TEXTO';
+ALTER TABLE public.documentos ADD COLUMN IF NOT EXISTS posicion_firma text DEFAULT 'AL_FINAL';
+
+-- 2. Tabla de Asignaciones y Firmas por Empleado (Audit Log & Evidencia)
+CREATE TABLE IF NOT EXISTS public.documentos_firmados (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  documento_id uuid NOT NULL REFERENCES public.documentos(id) ON DELETE CASCADE,
+  empleado_id uuid NOT NULL REFERENCES public.usuarios(id) ON DELETE CASCADE,
+  empleado_nombre text NOT NULL,
+  empleado_email text,
+  estado text NOT NULL DEFAULT 'PENDIENTE' CHECK (estado IN ('PENDIENTE', 'FIRMADO', 'RECHAZADO')),
+  firma_base64 text,
+  firma_url text,
+  pdf_firmado_url text,
+  ip_registro text,
+  ubicacion_gps text,
+  dispositivo_info text,
+  hash_sha256 text,
+  motivo_rechazo text,
+  firmado_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT documentos_firmados_pkey PRIMARY KEY (id),
+  CONSTRAINT uq_documento_empleado UNIQUE (documento_id, empleado_id)
+);
+
+-- Permisos y Grantes para los roles de Supabase
+GRANT ALL ON TABLE public.documentos TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.documentos_firmados TO anon, authenticated, service_role;
+
+
+
+-- =========================================================================
+-- ESQUEMA BASE DE DATOS: MÓDULO DE FACTURAS RECIBIDAS (CFDI SAT)
+-- =========================================================================
+
+-- 1. Tabla Principal de Facturas Recibidas (Comprobantes de Proveedores)
+CREATE TABLE IF NOT EXISTS public.facturas_recibidas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  uuid text NOT NULL UNIQUE,
+  rfc_emisor text NOT NULL,
+  nombre_emisor text NOT NULL,
+  rfc_receptor text NOT NULL,
+  fecha_emision timestamp with time zone NOT NULL,
+  subtotal numeric DEFAULT 0,
+  descuento numeric DEFAULT 0,
+  iva numeric DEFAULT 0,
+  retencion_isr numeric DEFAULT 0,
+  retencion_iva numeric DEFAULT 0,
+  total numeric DEFAULT 0,
+  moneda text DEFAULT 'MXN',
+  tipo_comprobante text DEFAULT 'I', -- 'I': Ingreso, 'E': Egreso, 'P': Pago, 'N': Nómina
+  estado_sat text DEFAULT 'VIGENTE', -- 'VIGENTE', 'CANCELADO'
+  xml_url text,
+  pdf_url text,
+  conciliado_gasto_id uuid,
+  conceptos_json jsonb DEFAULT '[]'::jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+
+  CONSTRAINT facturas_recibidas_pkey PRIMARY KEY (id),
+  CONSTRAINT facturas_recibidas_gasto_fkey FOREIGN KEY (conciliado_gasto_id) REFERENCES public.gastos(id) ON DELETE SET NULL
+);
+
+-- Índices de alto rendimiento para facturas_recibidas
+CREATE INDEX IF NOT EXISTS idx_facturas_recibidas_uuid ON public.facturas_recibidas(uuid);
+CREATE INDEX IF NOT EXISTS idx_facturas_recibidas_rfc_emisor ON public.facturas_recibidas(rfc_emisor);
+CREATE INDEX IF NOT EXISTS idx_facturas_recibidas_rfc_receptor ON public.facturas_recibidas(rfc_receptor);
+CREATE INDEX IF NOT EXISTS idx_facturas_recibidas_fecha ON public.facturas_recibidas(fecha_emision DESC);
+CREATE INDEX IF NOT EXISTS idx_facturas_recibidas_estado ON public.facturas_recibidas(estado_sat);
+
+-- 2. Tabla de Control de Solicitudes Asíncronas de Descarga Masiva del SAT
+CREATE TABLE IF NOT EXISTS public.sat_descarga_solicitudes (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  id_solicitud text NOT NULL UNIQUE,
+  rfc text NOT NULL,
+  fecha_inicio timestamp with time zone NOT NULL,
+  fecha_fin timestamp with time zone NOT NULL,
+  tipo_solicitud text DEFAULT 'RECIBIDOS', -- 'RECIBIDOS', 'EMITIDOS'
+  estado_sat text DEFAULT 'PENDIENTE', -- 'PENDIENTE' (1), 'EN_PROCESO' (2), 'TERMINADA' (3), 'ERROR' (4), 'RECHAZADA' (5)
+  codigo_estatus text,
+  mensaje_sat text,
+  paquetes_ids text[] DEFAULT '{}',
+  paquetes_descargados text[] DEFAULT '{}',
+  total_facturas_procesadas integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+
+  CONSTRAINT sat_descarga_solicitudes_pkey PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sat_solicitudes_id_solicitud ON public.sat_descarga_solicitudes(id_solicitud);
+CREATE INDEX IF NOT EXISTS idx_sat_solicitudes_estado ON public.sat_descarga_solicitudes(estado_sat);
+CREATE INDEX IF NOT EXISTS idx_sat_solicitudes_rfc ON public.sat_descarga_solicitudes(rfc);
+
+-- 3. Habilitar RLS
+ALTER TABLE public.facturas_recibidas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sat_descarga_solicitudes ENABLE ROW LEVEL SECURITY;
+
+-- Políticas de seguridad
+DO $$
+BEGIN
+  -- Políticas para facturas_recibidas
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'facturas_recibidas' AND policyname = 'Permitir lectura a usuarios autenticados'
+  ) THEN
+    CREATE POLICY "Permitir lectura a usuarios autenticados"
+      ON public.facturas_recibidas
+      FOR SELECT
+      TO authenticated, anon
+      USING (true);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'facturas_recibidas' AND policyname = 'Permitir insercion y edicion a service_role y authenticated'
+  ) THEN
+    CREATE POLICY "Permitir insercion y edicion a service_role y authenticated"
+      ON public.facturas_recibidas
+      FOR ALL
+      TO service_role, authenticated
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+
+  -- Políticas para sat_descarga_solicitudes
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'sat_descarga_solicitudes' AND policyname = 'Permitir lectura solicitudes a autenticados'
+  ) THEN
+    CREATE POLICY "Permitir lectura solicitudes a autenticados"
+      ON public.sat_descarga_solicitudes
+      FOR SELECT
+      TO authenticated, anon
+      USING (true);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'sat_descarga_solicitudes' AND policyname = 'Permitir insercion y edicion solicitudes a service_role y authenticated'
+  ) THEN
+    CREATE POLICY "Permitir insercion y edicion solicitudes a service_role y authenticated"
+      ON public.sat_descarga_solicitudes
+      FOR ALL
+      TO service_role, authenticated
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END $$;
+
+-- 4. Creación del Storage Bucket para los XMLs si no existe
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('facturas_recibidas', 'facturas_recibidas', true)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Lectura publica facturas_recibidas'
+  ) THEN
+    CREATE POLICY "Lectura publica facturas_recibidas"
+      ON storage.objects FOR SELECT
+      TO anon, authenticated
+      USING (bucket_id = 'facturas_recibidas');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Permitir carga facturas_recibidas'
+  ) THEN
+    CREATE POLICY "Permitir carga facturas_recibidas"
+      ON storage.objects FOR INSERT
+      TO anon, authenticated, service_role
+      WITH CHECK (bucket_id = 'facturas_recibidas');
+  END IF;
+END $$;
+
+
+
+-- =========================================================================
+-- AUTOMATIZACIÓN DIARIA DE SINCRONIZACIÓN CON EL SAT (6:00 AM)
+-- =========================================================================
+-- Este script programa un Cron Job en la base de datos de Supabase
+-- para invocar la Edge Function 'sync-facturas-recibidas' todos los días
+-- a las 6:00 AM (Hora Centro de México / 12:00 UTC).
+--
+-- Requisitos en Supabase: Extensiones 'pg_cron' y 'pg_net'.
+-- =========================================================================
+
+-- 1. Habilitar extensiones de Cron y llamadas HTTP
+CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
+
+-- Otorgar permisos de ejecución a postgres
+GRANT USAGE ON SCHEMA cron TO postgres;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA cron TO postgres;
+
+-- 2. Eliminar programación anterior si ya existía para evitar duplicados
+DO $$
+BEGIN
+  PERFORM cron.unschedule('sync-facturas-sat-diario-6am');
+EXCEPTION WHEN OTHERS THEN
+  -- Ignorar si no existía el job previo
+END $$;
+
+-- 3. Crear el Cron Job para ejecutarse a las 12:00 UTC (06:00 AM Hora CDMX UTC-6)
+-- Cron syntax: minuto hora dia_mes mes dia_semana
+-- '0 12 * * *' = Todos los días a las 12:00:00 UTC (06:00 AM México)
+
+SELECT cron.schedule(
+  'sync-facturas-sat-diario-6am',
+  '0 12 * * *',
+  $$
+  SELECT net.http_post(
+    url := 'https://etpdebclhaxbpbuwxdmy.supabase.co/functions/v1/sync-facturas-recibidas',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'apikey', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0cGRlYmNsaGF4YnBidXd4ZG15Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDQ5Nzg0MywiZXhwIjoyMDk2MDczODQzfQ.g1vYd_BiKcoEdNrTnN-jyQpXp-zqIoIPNu73l389u9s',
+      'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV0cGRlYmNsaGF4YnBidXd4ZG15Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDQ5Nzg0MywiZXhwIjoyMDk2MDczODQzfQ.g1vYd_BiKcoEdNrTnN-jyQpXp-zqIoIPNu73l389u9s'
+    ),
+    body := jsonb_build_object('action', 'sync')
+  ) AS request_id;
+  $$
+);
+
+-- =========================================================================
+-- CONSULTA PARA VERIFICAR LOS CRON JOBS ACTIVOS
+-- =========================================================================
+SELECT jobid, jobname, schedule, active FROM cron.job;

@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { GeminiService } from '@/services/gemini';
 import { useAuth } from '@/context/AuthContext';
 import { logger } from '@/utils/logger';
@@ -50,27 +51,12 @@ export default function EmployeeChatIA() {
       try {
         setIsLoadingData(true);
 
-        const safeQuery = async (queryPromise: any) => {
-          try {
-            const { data, error } = await queryPromise;
-            if (error) return [];
-            return data || [];
-          } catch {
-            return [];
-          }
-        };
-
-        const [misGastos, misAsistencias, misGasolinas] = await Promise.all([
-          safeQuery(supabase.from('gastos').select(`
-            *,
-            subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-            proveedor_rel:proveedores(id, nombre),
-            cliente_rel:clientes(id, nombre),
-            sucursal_rel:sucursales_cliente(id, nombre)
-          `).eq('empleado_id', user.id).order('created_at', { ascending: false }).limit(500)),
-          safeQuery(supabase.from('asistencias').select('*').eq('usuario_id', user.id).order('fecha', { ascending: false }).limit(100)),
-          safeQuery(supabase.from('registro_gasolina').select('*').eq('empleado_id', user.id).order('fecha', { ascending: false }).limit(100))
-        ]);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/chat-ia/employee-context?userId=${user.id}`, { headers });
+        if (!res.ok) throw new Error('Error de red al cargar contexto');
+        
+        const json = await res.json();
+        const contextData = json.context || {};
 
         setEmployeeData({
           empleado_actual: {
@@ -79,9 +65,9 @@ export default function EmployeeChatIA() {
             email: user.email,
             rol: user.rol
           },
-          mis_gastos_registrados: misGastos,
-          mis_asistencias: misAsistencias,
-          mis_cargas_gasolina: misGasolinas
+          mis_gastos_registrados: contextData.mis_gastos_registrados || [],
+          mis_asistencias: contextData.mis_asistencias || [],
+          mis_cargas_gasolina: contextData.mis_cargas_gasolina || []
         });
 
       } catch (err) {

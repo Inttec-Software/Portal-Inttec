@@ -286,8 +286,10 @@ CREATE TABLE IF NOT EXISTS public.productos (
   precio_unitario numeric DEFAULT 0,
   impuesto_porcentaje numeric DEFAULT 16,
   clave_facturacion text,
+  proveedor_id uuid,
   CONSTRAINT productos_pkey PRIMARY KEY (id),
-  CONSTRAINT productos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias_productos(id)
+  CONSTRAINT productos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias_productos(id),
+  CONSTRAINT productos_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id)
 );
 
 CREATE TABLE IF NOT EXISTS public.alias_proveedor_producto (

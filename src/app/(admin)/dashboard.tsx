@@ -28,6 +28,7 @@ interface ModuleConfig {
 
 const MODULES: ModuleConfig[] = [
   { id: 'ventas', name: 'Ventas', icon: 'cart', route: '/(admin)/ventas', color: '#ff6b6b' },
+  { id: 'facturacion', name: 'Facturación CFDI', icon: 'receipt-outline', route: '/(admin)/facturacion', color: '#0984e3' },
   { id: 'gastos', name: 'Gastos', icon: 'cash', route: '/(admin)/gastos', color: '#feca57' },
   { id: 'facturas_recibidas', name: 'Facturas Recibidas', icon: 'receipt', route: '/(admin)/facturas-recibidas', color: '#2e86de' },
   { id: 'cotizaciones', name: 'Cotizaciones', icon: 'document-text', route: '/(admin)/cotizaciones', color: '#54a0ff' },

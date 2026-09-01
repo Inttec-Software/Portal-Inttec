@@ -16,6 +16,7 @@ import { useAuth } from '@/context/AuthContext';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { supabase } from '@/services/supabase';
+import { CatalogService } from '@/services/catalogService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function EmpleadoPerfilScreen() {
@@ -61,14 +62,8 @@ export default function EmpleadoPerfilScreen() {
         if (authError) throw authError;
       }
 
-      // 2. Update in usuarios table
-      // Inttec
-      const { error: errorInttec } = await supabase
-        .from('usuarios')
-        .update(updates)
-        .eq('id', user.id);
-        
-      if (errorInttec) throw errorInttec;
+      // 2. Update in usuarios table via API
+      await CatalogService.actualizarUsuario(user.id, updates);
 
       // 3. Update local user state
       const updatedUser = { ...user, ...updates };

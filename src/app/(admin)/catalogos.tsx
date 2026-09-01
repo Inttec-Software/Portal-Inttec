@@ -24,6 +24,7 @@ import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 
 export default function CatalogosManager() {
   const router = useRouter();
@@ -89,22 +90,17 @@ export default function CatalogosManager() {
   async function loadData() {
     setIsLoading(true);
     try {
-      const [catRes, subRes, cliRes, provRes] = await Promise.all([
-        supabase.from('categorias').select('*').order('nombre'),
-        supabase.from('subcategorias').select('*').order('nombre'),
-        supabase.from('clientes').select('*').order('nombre'),
-        supabase.from('proveedores').select('*').order('nombre'),
-      ]);
-
-      if (catRes.error) throw catRes.error;
-      if (subRes.error) throw subRes.error;
-      if (cliRes.error) throw cliRes.error;
-      if (provRes.error) throw provRes.error;
-
-      setCategorias(catRes.data || []);
-      setSubcategorias(subRes.data || []);
-      setClientes(cliRes.data || []);
-      setProveedores(provRes.data || []);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/catalogos/all`, { headers });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error cargando catálogos');
+      }
+      const data = await res.json();
+      setCategorias(data.categorias || []);
+      setSubcategorias(data.subcategorias || []);
+      setClientes(data.clientes || []);
+      setProveedores(data.proveedores || []);
     } catch (err: any) {
       console.error('Error loading catalogs data:', err);
       Alert.alert('Error', err.message || 'No se pudieron recuperar los catálogos.');
@@ -281,19 +277,19 @@ export default function CatalogosManager() {
     setClientStats({ totalGastos: 0, montoGastos: 0, totalVentas: 0, montoVentas: 0, rentabilidad: 0, margen: 0 });
 
     try {
-      const [gastosRes, ventasRes] = await Promise.all([
-        supabase.from('gastos').select('monto').eq('cliente_id', cliente.id).neq('status', 'REJECTED'),
-        supabase.from('ventas').select('precio_total_facturado, costo_total').eq('cliente', cliente.nombre)
-      ]);
-
-      const gastosData = gastosRes.data || [];
-      const ventasData = ventasRes.data || [];
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/catalogos/summary/${cliente.id}?clienteNombre=${encodeURIComponent(cliente.nombre)}`, { headers });
+      if (!res.ok) throw new Error('Error al cargar stats');
+      const data = await res.json();
+      
+      const gastosData = data.gastos || [];
+      const ventasData = data.ventas || [];
 
       const totalGastos = gastosData.length;
-      const montoGastos = gastosData.reduce((sum, g) => sum + (Number(g.monto) || 0), 0);
+      const montoGastos = gastosData.reduce((sum: number, g: any) => sum + (Number(g.monto) || 0), 0);
 
       const totalVentas = ventasData.length;
-      const montoVentas = ventasData.reduce((sum, v) => sum + (Number(v.precio_total_facturado) || Number(v.costo_total) || 0), 0);
+      const montoVentas = ventasData.reduce((sum: number, v: any) => sum + (Number(v.precio_total_facturado) || Number(v.costo_total) || 0), 0);
       const rentabilidad = montoVentas - montoGastos;
       const margen = montoVentas > 0 ? (rentabilidad / montoVentas) * 100 : 0;
 
@@ -322,12 +318,10 @@ export default function CatalogosManager() {
   const loadClientSucursales = async (clienteId: string) => {
     setIsLoadingSucursales(true);
     try {
-      const { data, error } = await supabase
-        .from('sucursales_cliente')
-        .select('*')
-        .eq('cliente_id', clienteId)
-        .order('nombre');
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/catalogos/sucursales/${clienteId}`, { headers });
+      if (!res.ok) throw new Error('Error al cargar sucursales');
+      const data = await res.json();
       setClientSucursales(data || []);
     } catch (err: any) {
       console.error('Error fetching sucursales:', err);

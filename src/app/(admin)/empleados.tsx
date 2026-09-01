@@ -268,19 +268,7 @@ export default function AdminEmpleadosScreen() {
         updates.password = profilePassword.trim();
       }
 
-      const { error: errorInttec } = await inttecClient
-        .from('usuarios')
-        .update(updates)
-        .eq('id', adminUser.id);
-      if (errorInttec) throw errorInttec;
-
-      const { error: errorDaravisa } = await daravisaClient
-        .from('usuarios')
-        .update(updates)
-        .eq('id', adminUser.id);
-      if (errorDaravisa) {
-        logger.error('Error actualizando perfil en Daravisa:', errorDaravisa);
-      }
+      await CatalogService.actualizarUsuario(adminUser.id, updates);
 
       // Actualizar el estado local y AsyncStorage
       const updatedUser: Usuario = {
@@ -318,7 +306,7 @@ export default function AdminEmpleadosScreen() {
           cliente_rel:clientes(id, nombre),
           sucursal_rel:sucursales_cliente(id, nombre)
         `).order('created_at', { ascending: false }),
-        supabase.from('usuarios').select('*').order('nombre'),
+        CatalogService.getUsuarios(),
         VehiculoService.getVehiculos(false),
         VehiculoService.getRegistrosGasolina(),
         supabase.from('categorias').select('*'),
@@ -344,11 +332,9 @@ export default function AdminEmpleadosScreen() {
         sucRes.data || []
       );
 
-      if (usersRes.error) throw usersRes.error;
-
       setGastos(enrichedGastos);
-      setProveedoresCatalog(provRes.data || []);
-      setPersonal(sortUsuariosByRoleAndName(usersRes.data || []));
+setProveedoresCatalog(provRes.data || []);
+      setPersonal(sortUsuariosByRoleAndName(usersRes || []));
       setVehiculos(vehList);
       setRegistrosGasolina(gasLogs);
     } catch (err: any) {
