@@ -9,6 +9,7 @@ module.exports = {
     userInterfaceStyle: "automatic",
     ios: {
       bundleIdentifier: "com.alexisef23.appmovil",
+      appleTeamId: "2345ZRS7HS",
       icon: "./assets/expo.icon",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false
