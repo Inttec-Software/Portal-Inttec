@@ -49,6 +49,7 @@ export default function AdminLayout() {
 
   const quickLinks = [
     { route: '/(admin)/ventas', icon: 'cart-outline', color: '#ff6b6b', name: 'Ventas' },
+    { route: '/(admin)/facturacion', icon: 'receipt-outline', color: '#0984e3', name: 'Facturación CFDI' },
     { route: '/(admin)/gastos', icon: 'cash-outline', color: '#feca57', name: 'Gastos' },
     { route: '/(admin)/facturas-recibidas', icon: 'receipt-outline', color: '#2e86de', name: 'Facturas Recibidas' },
     { route: '/(admin)/cotizaciones', icon: 'document-text-outline', color: '#54a0ff', name: 'Cotizaciones' },
