@@ -44,15 +44,33 @@ let prodServList: IndexedProdServ[] = [];
 let unidadList: IndexedUnidad[] = [];
 let isLoaded = false;
 
+function resolveCatalogPath(filename: string): string | null {
+  const candidates = [
+    path.join(__dirname, '../../', filename),                // Dev: src/modules/sat -> src/
+    path.join(__dirname, '../../../src/', filename),         // Prod dist: dist/modules/sat -> src/
+    path.join(__dirname, '../..', filename),                 // Alternative dist/
+    path.join(process.cwd(), 'src', filename),               // CWD backend/src/
+    path.join(process.cwd(), 'backend', 'src', filename),    // CWD project_root/backend/src/
+    path.join(process.cwd(), filename)                       // Direct CWD
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 // Carga e indexación en memoria en el inicio del servidor
 function loadSatCatalogs() {
   if (isLoaded) return;
   try {
-    const prodServPath = path.join(__dirname, '../../c_ClaveProdServ.json');
-    const unidadPath = path.join(__dirname, '../../c_ClaveUnidad.json');
+    const prodServPath = resolveCatalogPath('c_ClaveProdServ.json');
+    const unidadPath = resolveCatalogPath('c_ClaveUnidad.json');
 
-    if (fs.existsSync(prodServPath)) {
-      console.log('📦 [SAT Catalog] Cargando catálogo completo c_ClaveProdServ (52,000+ claves)...');
+    if (prodServPath) {
+      console.log(`📦 [SAT Catalog] Cargando catálogo completo c_ClaveProdServ desde: ${prodServPath}...`);
       const rawData = fs.readFileSync(prodServPath, 'utf8');
       const parsed: RawProdServ[] = JSON.parse(rawData);
 
@@ -65,11 +83,11 @@ function loadSatCatalogs() {
 
       console.log(`✅ [SAT Catalog] ${prodServList.length} claves de productos y servicios cargadas en memoria.`);
     } else {
-      console.warn('⚠️ [SAT Catalog] Archivo c_ClaveProdServ.json no encontrado en:', prodServPath);
+      console.warn('⚠️ [SAT Catalog] Archivo c_ClaveProdServ.json no encontrado en ninguna ruta candidata.');
     }
 
-    if (fs.existsSync(unidadPath)) {
-      console.log('📦 [SAT Catalog] Cargando catálogo completo c_ClaveUnidad (2,400+ unidades)...');
+    if (unidadPath) {
+      console.log(`📦 [SAT Catalog] Cargando catálogo completo c_ClaveUnidad desde: ${unidadPath}...`);
       const rawData = fs.readFileSync(unidadPath, 'utf8');
       const parsed: RawUnidad[] = JSON.parse(rawData);
 
@@ -82,6 +100,8 @@ function loadSatCatalogs() {
       }));
 
       console.log(`✅ [SAT Catalog] ${unidadList.length} claves de unidades cargadas en memoria.`);
+    } else {
+      console.warn('⚠️ [SAT Catalog] Archivo c_ClaveUnidad.json no encontrado en ninguna ruta candidata.');
     }
 
     isLoaded = true;
