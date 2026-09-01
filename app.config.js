@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: "Portal Inttec & Daravisa",
     slug: "portal-inttec",
-    version: "1.3.5",
+    version: "1.3.6",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "appmovil",
@@ -10,12 +10,15 @@ module.exports = {
     ios: {
       bundleIdentifier: "com.alexisef23.appmovil",
       icon: "./assets/expo.icon",
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false
+      },
       config: {
         googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""
       }
     },
     android: {
-      versionCode: 60,
+      versionCode: 61,
       adaptiveIcon: {
         backgroundColor: "#E6F4FE",
         foregroundImage: "./assets/images/android-icon-foreground.png",
