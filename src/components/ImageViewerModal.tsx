@@ -85,9 +85,7 @@ export default function ImageViewerModal({
     if (Platform.OS !== 'web' || !visible) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      } else if (e.key === '+' || e.key === '=') {
+      if (e.key === '+' || e.key === '=') {
         zoomRef.current?.zoomIn(0.5);
       } else if (e.key === '-' || e.key === '_') {
         zoomRef.current?.zoomOut(0.5);
