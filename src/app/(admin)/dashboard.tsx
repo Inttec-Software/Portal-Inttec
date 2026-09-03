@@ -161,6 +161,17 @@ export default function AdminDashboardGrid() {
                 <Ionicons name="notifications-outline" size={22} color={themeColors.text} />
               </TouchableOpacity>
 
+              {/* Checador */}
+              <TouchableOpacity
+                onPress={() => router.push('/(admin)/asistencia')}
+                style={[
+                  styles.logoutBtn,
+                  { backgroundColor: scheme === 'dark' ? 'rgba(29, 209, 161, 0.15)' : 'rgba(29, 209, 161, 0.1)', borderRadius: 20 }
+                ]}
+              >
+                <Ionicons name="finger-print" size={22} color={themeColors.success || '#1dd1a1'} />
+              </TouchableOpacity>
+
               {/* Perfil */}
               <TouchableOpacity
                 onPress={() => router.push('/(admin)/perfil')}
