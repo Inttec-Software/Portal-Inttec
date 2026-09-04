@@ -47,6 +47,7 @@ export default function TareasScreen() {
   
   // Estado Acordeones
   const [myTasksExpanded, setMyTasksExpanded] = useState(true);
+  const [createdTasksExpanded, setCreatedTasksExpanded] = useState(false);
   const [otherTasksExpanded, setOtherTasksExpanded] = useState(false);
 
   useEffect(() => {
@@ -154,8 +155,9 @@ export default function TareasScreen() {
   };
 
   // Agrupar en Acordeón
-  const myTasks = sortTasks(filtered.filter(t => t.responsable_id === user?.id));
-  const otherTasks = sortTasks(filtered.filter(t => t.responsable_id !== user?.id));
+  const myTasks = sortTasks(filtered.filter(t => t.responsable_id === user?.id || (t.corresponsables && t.corresponsables.some((c: any) => c.usuario_id === user?.id))));
+  const createdByMe = sortTasks(filtered.filter(t => t.creado_por === user?.id && t.responsable_id !== user?.id && !(t.corresponsables && t.corresponsables.some((c: any) => c.usuario_id === user?.id))));
+  const otherTasks = sortTasks(filtered.filter(t => t.responsable_id !== user?.id && !(t.corresponsables && t.corresponsables.some((c: any) => c.usuario_id === user?.id)) && t.creado_por !== user?.id));
 
   const handleUpdateTaskDate = async (taskItem: any, newDate: Date) => {
     if (!taskItem || !newDate || isNaN(newDate.getTime())) return;
@@ -293,9 +295,10 @@ export default function TareasScreen() {
             </TouchableOpacity>
 
             <View style={styles.footerItem}>
-              <Ionicons name="person-outline" size={14} color={themeColors.textSecondary} style={{ marginRight: 4 }} />
+              <Ionicons name="people-outline" size={14} color={themeColors.textSecondary} style={{ marginRight: 4 }} />
               <Text style={[styles.footerText, { color: themeColors.textSecondary }]} numberOfLines={1}>
                 {item.responsable_nombre}
+                {item.corresponsables && item.corresponsables.length > 0 ? ` (+${item.corresponsables.length})` : ''}
               </Text>
             </View>
           </View>
@@ -416,6 +419,28 @@ export default function TareasScreen() {
             </View>
           )}
 
+          {/* SECCIÓN: TAREAS CREADAS POR MÍ */}
+          {createdByMe.length > 0 && (
+            <View style={styles.sectionContainer}>
+              <TouchableOpacity 
+                style={styles.sectionHeader}
+                onPress={() => setCreatedTasksExpanded(!createdTasksExpanded)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
+                  Tareas creadas por mí ({createdByMe.length})
+                </Text>
+                <Ionicons name={createdTasksExpanded ? 'chevron-down' : 'chevron-forward'} size={20} color={themeColors.textSecondary} />
+              </TouchableOpacity>
+              
+              {createdTasksExpanded && (
+                <View style={[styles.gridContainer, isWeb && styles.gridWeb]}>
+                  {createdByMe.map(renderTask)}
+                </View>
+              )}
+            </View>
+          )}
+
           {/* SECCIÓN: TAREAS DE OTROS */}
           {otherTasks.length > 0 && (
             <View style={styles.sectionContainer}>
@@ -439,7 +464,7 @@ export default function TareasScreen() {
           )}
 
           {/* EMPTY STATE */}
-          {myTasks.length === 0 && otherTasks.length === 0 && (
+          {myTasks.length === 0 && otherTasks.length === 0 && createdByMe.length === 0 && (
             <View style={styles.emptyContainer}>
               <Ionicons name="checkmark-done-circle-outline" size={60} color={themeColors.border} />
               <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>

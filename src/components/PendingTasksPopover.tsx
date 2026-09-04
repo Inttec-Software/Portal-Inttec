@@ -62,7 +62,11 @@ export default function PendingTasksPopover({ visible, onClose }: PendingTasksPo
         };
 
         const pending = (data || [])
-          .filter((t: any) => t.status !== 'Completada' && t.status !== 'Cancelada')
+          .filter((t: any) => 
+            t.status !== 'Completada' && 
+            t.status !== 'Cancelada' && 
+            (t.responsable_id === user?.id || (t.corresponsables && t.corresponsables.some((c:any) => c.usuario_id === user?.id)))
+          )
           .slice(0, 5);
 
         const formattedTasks = pending.map((t: any) => ({
