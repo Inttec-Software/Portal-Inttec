@@ -98,7 +98,12 @@ export const getAdminReportes = async (req: Request, res: Response) => {
       gastos: enrichedGastos,
       usuarios: usersRes.data || [],
       vehiculos: vehiculosRes.data || [],
-      registrosGasolina: gasolinaRes.data || []
+      registrosGasolina: gasolinaRes.data || [],
+      proveedores: provRes.data || [],
+      clientes: cliRes.data || [],
+      sucursales: sucRes.data || [],
+      categorias: catRes.data || [],
+      subcategorias: subRes.data || []
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });

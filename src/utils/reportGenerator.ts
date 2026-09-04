@@ -96,30 +96,22 @@ export const ReportGenerator = {
       if (g.status === 'REJECTED') badgeColor = '#F44336';
       if (g.status === 'ACTION_REQUIRED') badgeColor = '#2196F3';
 
-      const { alert, reason } = hasPolicyAlert(g);
-      let rowStyle = '';
-      let alertLabel = '';
-      if (alert) {
-        // Fondo rojo suave y texto rojo oscuro para resaltar alertas
-        rowStyle = `style="background-color: #ffebee; color: #b71c1c;"`;
-        alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">⚠️ ALERTA: ${reason}</div>`;
-        alertLabel = `<div style="color: #b71c1c; font-size: 8px; font-weight: bold; margin-top: 4px;">⚠️  ALERTA: ${reason}</div>`;
-      }
-
       const provName = GastoHelper.getProveedor(g) || 'N/A';
       const catName = GastoHelper.getCategoria(g) || 'N/A';
       const subName = GastoHelper.getSubcategoria(g) || '';
       const sucName = GastoHelper.getSucursal(g) || 'Sin Sucursal';
 
+      const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
+      
       tableRows += `
-        <tr ${rowStyle}>
+        <tr>
           <td>${fecha}</td>
           <td>${g.empleado_nombre || 'Desconocido'}</td>
           <td>${provName} <br/><small style="color: #666;">${sucName}</small></td>
           <td>
             ${catName}${subName ? ` - ${subName}` : ''}
-            ${alertLabel}
           </td>
+          <td style="font-size: 9px; max-width: 120px; overflow: hidden; text-overflow: ellipsis;" title="${commentText}">${commentText || 'N/A'}</td>
           <td>${g.metodo_pago}${g.tipo_tarjeta ? ` (${g.tipo_tarjeta})` : ''}</td>
           <td><span class="status-badge" style="background-color: ${badgeColor};">${g.status}</span></td>
           <td style="text-align: right; font-weight: bold;">${montoFormatted}</td>
@@ -321,10 +313,11 @@ export const ReportGenerator = {
         <table>
           <thead>
             <tr>
-              <th style="width: 12%">Fecha</th>
-              <th style="width: 20%">Empleado</th>
-              <th style="width: 18%">Proveedor / Sucursal</th>
-              <th style="width: 20%">Categoría</th>
+              <th style="width: 10%">Fecha</th>
+              <th style="width: 15%">Empleado</th>
+              <th style="width: 15%">Proveedor / Sucursal</th>
+              <th style="width: 15%">Categoría</th>
+              <th style="width: 15%">Comentarios</th>
               <th style="width: 12%">Pago</th>
               <th style="width: 8%">Estado</th>
               <th style="width: 10%; text-align: right;">Monto</th>
@@ -408,7 +401,7 @@ export const ReportGenerator = {
 
     // Encabezados
     let csvContent = '\uFEFF'; // BOM para que Excel abra UTF-8 correctamente
-    csvContent += 'ID,Fecha,Empleado Nombre,Monto,Categoria,Subcategoria,Proveedor,Cliente,Servicio/Proyecto,Detalle,Sucursal,Metodo Pago,Tipo Tarjeta,Estado Factura,Motivo Sin Factura,Status,Alerta Politica\n';
+    csvContent += 'ID,Fecha,Empleado Nombre,Monto,Categoria,Subcategoria,Proveedor,Cliente,Servicio/Proyecto,Detalle,Sucursal,Metodo Pago,Tipo Tarjeta,Estado Factura,Motivo Sin Factura,Status,Comentarios\n';
 
     // Rellenar filas
     gastos.forEach((g) => {
@@ -419,14 +412,14 @@ export const ReportGenerator = {
         return `"${cleaned}"`;
       };
 
-      const { alert, reason } = hasPolicyAlert(g);
-
       let estadoFactura = 'No Facturado';
       if (g.facturado === true) {
         estadoFactura = 'Facturado';
       } else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) {
         estadoFactura = 'Pendiente de Entregar';
       }
+
+      const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
 
       const row = [
         g.id,
@@ -445,7 +438,7 @@ export const ReportGenerator = {
         escape(estadoFactura),
         escape(g.motivo_sin_factura),
         g.status,
-        alert ? escape(`ALERTA: ${reason}`) : '',
+        escape(commentText),
       ].join(',');
 
       csvContent += row + '\n';
