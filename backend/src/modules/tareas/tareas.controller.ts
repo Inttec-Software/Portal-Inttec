@@ -13,12 +13,20 @@ export const getTareas = async (req: Request, res: Response): Promise<void> => {
       .select(`
         *,
         creador:usuarios!tareas_creado_por_fkey(nombre),
-        responsable:usuarios!tareas_responsable_id_fkey(nombre)
+        responsable:usuarios!tareas_responsable_id_fkey(nombre),
+        corresponsables:tarea_corresponsables(usuario_id, usuarios(nombre))
       `)
       .order('fecha_compromiso', { ascending: true });
 
     if (user?.rol === 'EMPLEADO') {
-      query = query.or(`responsable_id.eq.${user.id},creado_por.eq.${user.id}`);
+      const { data: corrData } = await supabase.from('tarea_corresponsables').select('tarea_id').eq('usuario_id', user.id);
+      const corrIds = corrData?.map(c => c.tarea_id) || [];
+      
+      let orCondition = `responsable_id.eq.${user.id},creado_por.eq.${user.id}`;
+      if (corrIds.length > 0) {
+        orCondition += `,id.in.(${corrIds.join(',')})`;
+      }
+      query = query.or(orCondition);
     }
 
     const { data, error } = await query;
@@ -50,9 +58,13 @@ export const getTareas = async (req: Request, res: Response): Promise<void> => {
 
       return {
         ...t,
-        creado_por: Array.isArray(t.creador) ? t.creador[0]?.nombre : (t.creador as any)?.nombre,
+        creado_por_nombre: Array.isArray(t.creador) ? t.creador[0]?.nombre : (t.creador as any)?.nombre,
         responsable_nombre: Array.isArray(t.responsable) ? t.responsable[0]?.nombre : (t.responsable as any)?.nombre,
-        vinculo_nombre
+        vinculo_nombre,
+        corresponsables: (t.corresponsables as any[])?.map((c: any) => ({
+          usuario_id: c.usuario_id,
+          usuario_nombre: Array.isArray(c.usuarios) ? c.usuarios[0]?.nombre : c.usuarios?.nombre
+        })) || []
       };
     });
 
@@ -99,9 +111,13 @@ export const getTareaById = async (req: Request, res: Response): Promise<void> =
 
     res.json({
       ...taskData,
-      creado_por: Array.isArray(taskData.creador) ? taskData.creador[0]?.nombre : (taskData.creador as any)?.nombre,
+      creado_por_nombre: Array.isArray(taskData.creador) ? taskData.creador[0]?.nombre : (taskData.creador as any)?.nombre,
       responsable_nombre: Array.isArray(taskData.responsable) ? taskData.responsable[0]?.nombre : (taskData.responsable as any)?.nombre,
       vinculo_nombre,
+      corresponsables: (taskData.corresponsables as any[])?.map((c: any) => ({
+        usuario_id: c.usuario_id,
+        usuario_nombre: Array.isArray(c.usuarios) ? c.usuarios[0]?.nombre : c.usuarios?.nombre
+      })) || [],
       notas: notesData || []
     });
   } catch (error: any) {

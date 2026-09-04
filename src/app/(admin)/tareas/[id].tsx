@@ -181,7 +181,9 @@ export default function TaskDetailScreen() {
   if (!task) return null;
 
   const semaforoColor = getSemaforoColor(task.fecha_compromiso, task.status);
-  const canComplete = user?.id === task.creado_por || user?.id === task.responsable_id;
+  const canComplete = user?.id === task.creado_por || 
+                      user?.id === task.responsable_id || 
+                      (task.corresponsables && task.corresponsables.some((c: any) => c.usuario_id === user?.id));
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['bottom', 'left', 'right']}>
@@ -299,6 +301,18 @@ export default function TaskDetailScreen() {
                   <Text style={[styles.metaValue, { color: themeColors.text }]}>{task.responsable_nombre}</Text>
                 </View>
               </View>
+
+              {task.corresponsables && task.corresponsables.length > 0 && (
+                <View style={[styles.metaItem, { flex: 1 }]}>
+                  <Ionicons name="people" size={16} color={themeColors.textSecondary} />
+                  <View>
+                    <Text style={[styles.metaLabel, { color: themeColors.textSecondary }]}>Corresponsables</Text>
+                    <Text style={[styles.metaValue, { color: themeColors.text }]}>
+                      {task.corresponsables.map((c: any) => c.usuario_nombre).join(', ')}
+                    </Text>
+                  </View>
+                </View>
+              )}
             </View>
 
             {Platform.OS === 'web' && (
