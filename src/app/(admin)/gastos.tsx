@@ -358,11 +358,6 @@ export default function AdminGastosScreen() {
 
     checkAdmin();
 
-    const interval = setInterval(() => {
-      refreshData(true);
-    }, 30000);
-
-    return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company, env]);
 

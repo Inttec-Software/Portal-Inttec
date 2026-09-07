@@ -74,6 +74,7 @@ export default function FacturasRecibidasScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [facturas, setFacturas] = useState<FacturaRecibida[]>([]);
   const [satSolicitudes, setSatSolicitudes] = useState<SatSolicitud[]>([]);
+  const [syncStatus, setSyncStatus] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPeriodo, setFilterPeriodo] = useState<'mes_actual' | 'mes_anterior' | 'todos'>('mes_actual');
   const [filterEstado, setFilterEstado] = useState<'todos' | 'VIGENTE' | 'CANCELADO'>('todos');
@@ -82,6 +83,12 @@ export default function FacturasRecibidasScreen() {
   const [selectedFactura, setSelectedFactura] = useState<FacturaRecibida | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [showSolicitudesModal, setShowSolicitudesModal] = useState(false);
+  const [verifyingSolId, setVerifyingSolId] = useState<string | null>(null);
+  const [syncPeriodType, setSyncPeriodType] = useState<'30_dias' | 'anio_actual' | 'custom'>('30_dias');
+  const [customFechaInicio, setCustomFechaInicio] = useState('');
+  const [customFechaFin, setCustomFechaFin] = useState('');
   const [xmlInputText, setXmlInputText] = useState('');
   const [importingXml, setImportingXml] = useState(false);
   const [syncingSat, setSyncingSat] = useState(false);
@@ -91,7 +98,23 @@ export default function FacturasRecibidasScreen() {
   useEffect(() => {
     fetchFacturas();
     fetchSatSolicitudes();
+    fetchSyncStatus();
   }, []);
+
+  const fetchSyncStatus = async () => {
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/facturas-recibidas/sync-status`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status) {
+          setSyncStatus(json.status);
+        }
+      }
+    } catch {
+      // Ignorar fallo silencioso
+    }
+  };
 
   const fetchFacturas = async () => {
     try {
@@ -136,6 +159,7 @@ export default function FacturasRecibidasScreen() {
     setRefreshing(true);
     fetchFacturas();
     fetchSatSolicitudes();
+    fetchSyncStatus();
   };
 
   // Filtrado de datos
@@ -218,7 +242,7 @@ export default function FacturasRecibidasScreen() {
   };
 
   // Sincronización SAT WebService Directo
-  const handleSyncSat = async () => {
+  const handleSyncSat = async (overrideOptions?: { action?: string; fecha_inicio?: string; fecha_fin?: string }) => {
     const timestamp = new Date().toLocaleTimeString();
     console.log(`\n======================================================`);
     console.log(`🚀 [SAT SYNC ${timestamp}] Botón 'Sincronizar SAT' presionado.`);
@@ -227,11 +251,15 @@ export default function FacturasRecibidasScreen() {
     try {
       setSyncingSat(true);
 
+      const payload: any = { action: overrideOptions?.action || 'sync' };
+      if (overrideOptions?.fecha_inicio) payload.fecha_inicio = overrideOptions.fecha_inicio;
+      if (overrideOptions?.fecha_fin) payload.fecha_fin = overrideOptions.fecha_fin;
+
       const startTime = Date.now();
-      console.log(`📤 [SAT SYNC] Invocando función con payload: { action: 'sync' }`);
+      console.log(`📤 [SAT SYNC] Invocando función con payload:`, payload);
 
       const { data, error } = await supabase.functions.invoke('sync-facturas-recibidas', {
-        body: { action: 'sync' }
+        body: payload
       });
 
       const elapsed = Date.now() - startTime;
@@ -277,12 +305,14 @@ export default function FacturasRecibidasScreen() {
         if (res?.facturasProcesadas > 0) {
           msg = `¡Se descargaron y procesaron ${res.facturasProcesadas} facturas del SAT con éxito!`;
         } else if (res?.nuevaSolicitudCreada) {
-          msg = `Solicitud enviada al SAT con éxito (ID: ${res.idNuevaSolicitud}). El SAT tarda entre 5 y 60 minutos en empaquetar los XMLs.`;
+          msg = `Solicitud enviada al SAT con éxito (ID: ${res.idNuevaSolicitud}). El SAT tarda entre 10 y 60 minutos en empaquetar los XMLs. El servicio automático los descargará en cuanto estén listos.`;
         }
         console.log(`✅ [SAT SYNC] Sincronización finalizada exitosamente:`, msg);
         showAlert('Sincronización SAT', msg);
+        setShowSyncModal(false);
         fetchFacturas();
         fetchSatSolicitudes();
+        fetchSyncStatus();
       } else {
         console.warn(`⚠️ [SAT SYNC] La función no reportó éxito:`, data?.message || data?.error);
         showAlert('Aviso SAT', data?.message || data?.error || 'No se pudo completar la sincronización.');
@@ -297,6 +327,44 @@ export default function FacturasRecibidasScreen() {
       setSyncingSat(false);
       console.log(`🏁 [SAT SYNC] Proceso de sincronización terminado.`);
       console.log(`======================================================\n`);
+    }
+  };
+
+  const handleExecuteSyncModal = () => {
+    if (syncPeriodType === '30_dias') {
+      handleSyncSat({ action: 'sync' });
+    } else if (syncPeriodType === 'anio_actual') {
+      const currentYear = new Date().getFullYear();
+      handleSyncSat({
+        action: 'solicitar',
+        fecha_inicio: `${currentYear}-01-01T00:00:00`,
+        fecha_fin: new Date().toISOString().substring(0, 10) + 'T23:59:59'
+      });
+    } else if (syncPeriodType === 'custom') {
+      if (!customFechaInicio.trim()) {
+        showAlert('Atención', 'Por favor ingresa la fecha de inicio en formato AAAA-MM-DD (ej. 2026-01-01)');
+        return;
+      }
+      const fInicio = customFechaInicio.includes('T') ? customFechaInicio : `${customFechaInicio.trim()}T00:00:00`;
+      const fFin = customFechaFin.trim() 
+        ? (customFechaFin.includes('T') ? customFechaFin : `${customFechaFin.trim()}T23:59:59`)
+        : (new Date().toISOString().substring(0, 10) + 'T23:59:59');
+
+      handleSyncSat({
+        action: 'solicitar',
+        fecha_inicio: fInicio,
+        fecha_fin: fFin
+      });
+    }
+  };
+
+  const handleVerifySingleSolicitud = async (solicitud: SatSolicitud) => {
+    try {
+      setVerifyingSolId(solicitud.id);
+      await handleSyncSat({ action: 'sync' });
+      await fetchSatSolicitudes();
+    } finally {
+      setVerifyingSolId(null);
     }
   };
 
@@ -354,6 +422,17 @@ export default function FacturasRecibidasScreen() {
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
+              style={[styles.actionBtn, { backgroundColor: '#3b5998' }]}
+              onPress={() => {
+                fetchSatSolicitudes();
+                setShowSolicitudesModal(true);
+              }}
+            >
+              <Ionicons name="list-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+              <Text style={styles.actionBtnText}>Estado de Solicitudes</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={[styles.actionBtn, { backgroundColor: themeColors.accent }]}
               onPress={() => setShowImportModal(true)}
             >
@@ -363,7 +442,7 @@ export default function FacturasRecibidasScreen() {
 
             <TouchableOpacity
               style={[styles.actionBtn, { backgroundColor: '#10ac84' }]}
-              onPress={handleSyncSat}
+              onPress={() => setShowSyncModal(true)}
               disabled={syncingSat}
             >
               {syncingSat ? (
@@ -378,19 +457,57 @@ export default function FacturasRecibidasScreen() {
           </View>
         </View>
 
+        {/* Barra Informativa de Sincronización Automática SAT */}
+        <View style={[styles.autoSyncBar, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, flexWrap: 'wrap', gap: 8 }}>
+            <View style={[styles.syncStatusDot, { backgroundColor: syncStatus?.lastStatus === 'error' ? '#ff6b6b' : '#1dd1a1' }]} />
+            <Text style={[styles.autoSyncText, { color: themeColors.text }]}>
+              Sincronización Automática: <Text style={{ fontWeight: 'bold', color: '#10ac84' }}>Activa</Text> (cada 30 min)
+            </Text>
+            {syncStatus?.lastSyncTime && (
+              <Text style={[styles.autoSyncSubText, { color: themeColors.textSecondary }]}>
+                • Última revisión: {formatDate(syncStatus.lastSyncTime)} ({new Date(syncStatus.lastSyncTime).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })})
+              </Text>
+            )}
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity
+              onPress={() => {
+                fetchSatSolicitudes();
+                setShowSolicitudesModal(true);
+              }}
+              style={styles.viewSolLinkBtn}
+            >
+              <Text style={[styles.viewSolLinkText, { color: themeColors.accent }]}>Ver historial</Text>
+              <Ionicons name="chevron-forward" size={14} color={themeColors.accent} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={fetchSyncStatus} style={{ padding: 4 }}>
+              <Ionicons name="refresh" size={16} color={themeColors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Banner de Solicitudes SAT en Proceso */}
-        {satSolicitudes.length > 0 && (
-          <View style={[styles.satBanner, { backgroundColor: '#54a0ff15', borderColor: '#54a0ff' }]}>
+        {satSolicitudes.filter(s => s.estado_sat === 'PENDIENTE' || s.estado_sat === 'EN_PROCESO').length > 0 && (
+          <TouchableOpacity
+            style={[styles.satBanner, { backgroundColor: '#54a0ff15', borderColor: '#54a0ff' }]}
+            onPress={() => {
+              fetchSatSolicitudes();
+              setShowSolicitudesModal(true);
+            }}
+            activeOpacity={0.8}
+          >
             <Ionicons name="time-outline" size={22} color="#54a0ff" style={{ marginRight: 10 }} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.satBannerTitle, { color: '#2e86de' }]}>
-                Descarga en proceso en el SAT ({satSolicitudes.length} solicitud{satSolicitudes.length > 1 ? 'es' : ''})
+                Descarga en proceso en el SAT ({satSolicitudes.filter(s => s.estado_sat === 'PENDIENTE' || s.estado_sat === 'EN_PROCESO').length} solicitud{satSolicitudes.filter(s => s.estado_sat === 'PENDIENTE' || s.estado_sat === 'EN_PROCESO').length > 1 ? 'es' : ''})
               </Text>
               <Text style={[styles.satBannerSub, { color: themeColors.textSecondary }]}>
-                El SAT está agrupando los paquetes de comprobantes solicitados. Al presionar "Sincronizar SAT" o de forma periódica se descargarán automáticamente.
+                El SAT está empaquetando los comprobantes. Toca aquí para ver el estado detallado o consultar manualmente.
               </Text>
             </View>
-          </View>
+            <Ionicons name="chevron-forward" size={20} color="#2e86de" />
+          </TouchableOpacity>
         )}
 
         {/* KPI Cards */}
@@ -755,6 +872,276 @@ export default function FacturasRecibidasScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal de Selección de Período de Sincronización SAT */}
+      <Modal statusBarTranslucent={true} visible={showSyncModal} animationType="fade" transparent={true} onRequestClose={() => setShowSyncModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { backgroundColor: themeColors.backgroundElement }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Sincronización con el SAT</Text>
+                <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
+                  Selecciona el período de comprobantes fiscales a solicitar
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowSyncModal(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 16 }}>
+              {/* Opción 1: Últimos 30 días */}
+              <TouchableOpacity
+                style={[
+                  styles.syncOptionCard,
+                  { backgroundColor: themeColors.background, borderColor: syncPeriodType === '30_dias' ? themeColors.accent : themeColors.border }
+                ]}
+                onPress={() => setSyncPeriodType('30_dias')}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={syncPeriodType === '30_dias' ? 'radio-button-on' : 'radio-button-off'}
+                  size={20}
+                  color={syncPeriodType === '30_dias' ? themeColors.accent : themeColors.textSecondary}
+                  style={{ marginRight: 10 }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.syncOptionTitle, { color: themeColors.text }]}>Últimos 30 Días (Recomendado)</Text>
+                  <Text style={[styles.syncOptionSub, { color: themeColors.textSecondary }]}>
+                    Consulta comprobantes emitidos en el último mes y procesa paquetes pendientes.
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Opción 2: Todo el Año Actual */}
+              <TouchableOpacity
+                style={[
+                  styles.syncOptionCard,
+                  { backgroundColor: themeColors.background, borderColor: syncPeriodType === 'anio_actual' ? themeColors.accent : themeColors.border }
+                ]}
+                onPress={() => setSyncPeriodType('anio_actual')}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={syncPeriodType === 'anio_actual' ? 'radio-button-on' : 'radio-button-off'}
+                  size={20}
+                  color={syncPeriodType === 'anio_actual' ? themeColors.accent : themeColors.textSecondary}
+                  style={{ marginRight: 10 }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.syncOptionTitle, { color: themeColors.text }]}>Todo el Año Actual ({new Date().getFullYear()})</Text>
+                  <Text style={[styles.syncOptionSub, { color: themeColors.textSecondary }]}>
+                    Solicita todas las facturas recibidas desde el 01 de enero de {new Date().getFullYear()} hasta hoy.
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Opción 3: Rango Personalizado */}
+              <TouchableOpacity
+                style={[
+                  styles.syncOptionCard,
+                  { backgroundColor: themeColors.background, borderColor: syncPeriodType === 'custom' ? themeColors.accent : themeColors.border }
+                ]}
+                onPress={() => setSyncPeriodType('custom')}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={syncPeriodType === 'custom' ? 'radio-button-on' : 'radio-button-off'}
+                  size={20}
+                  color={syncPeriodType === 'custom' ? themeColors.accent : themeColors.textSecondary}
+                  style={{ marginRight: 10 }}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.syncOptionTitle, { color: themeColors.text }]}>Rango Personalizado</Text>
+                  <Text style={[styles.syncOptionSub, { color: themeColors.textSecondary }]}>
+                    Define manualmente la fecha de inicio y fin (ej. para un trimestre específico).
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Inputs para Rango Personalizado */}
+              {syncPeriodType === 'custom' && (
+                <View style={[styles.customDateContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.dateInputLabel, { color: themeColors.textSecondary }]}>Fecha Inicio (AAAA-MM-DD):</Text>
+                    <TextInput
+                      style={[styles.dateInput, { backgroundColor: themeColors.backgroundElement, color: themeColors.text, borderColor: themeColors.border }]}
+                      placeholder="2026-01-01"
+                      placeholderTextColor={themeColors.textSecondary}
+                      value={customFechaInicio}
+                      onChangeText={setCustomFechaInicio}
+                    />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={[styles.dateInputLabel, { color: themeColors.textSecondary }]}>Fecha Fin (AAAA-MM-DD):</Text>
+                    <TextInput
+                      style={[styles.dateInput, { backgroundColor: themeColors.backgroundElement, color: themeColors.text, borderColor: themeColors.border }]}
+                      placeholder="2026-09-07"
+                      placeholderTextColor={themeColors.textSecondary}
+                      value={customFechaFin}
+                      onChangeText={setCustomFechaFin}
+                    />
+                  </View>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={[styles.importSubmitBtn, { backgroundColor: '#10ac84', marginTop: 16 }]}
+                onPress={handleExecuteSyncModal}
+                disabled={syncingSat}
+              >
+                {syncingSat ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.importSubmitText}>Iniciar Sincronización SAT</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de Historial y Estado de Solicitudes SAT */}
+      <Modal statusBarTranslucent={true} visible={showSolicitudesModal} animationType="slide" transparent={true} onRequestClose={() => setShowSolicitudesModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { backgroundColor: themeColors.backgroundElement, maxHeight: '90%' }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Estado de Solicitudes SAT</Text>
+                <Text style={[styles.modalSubtitle, { color: themeColors.textSecondary }]}>
+                  Historial de peticiones de Descarga Masiva ({satSolicitudes.length} registradas)
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <TouchableOpacity
+                  onPress={fetchSatSolicitudes}
+                  style={[styles.solRefreshBtn, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
+                >
+                  <Ionicons name="refresh" size={18} color={themeColors.accent} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowSolicitudesModal(false)}>
+                  <Ionicons name="close" size={24} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView style={{ padding: 16 }}>
+              {/* Nota Explicativa */}
+              <View style={[styles.solInfoCard, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                <Ionicons name="information-circle-outline" size={20} color={themeColors.accent} style={{ marginRight: 8 }} />
+                <Text style={[styles.solInfoText, { color: themeColors.textSecondary }]}>
+                  El SAT genera paquetes de descarga que tardan de 15 a 60 minutos en procesarse. El servicio en segundo plano los verifica automáticamente cada 30 minutos.
+                </Text>
+              </View>
+
+              {satSolicitudes.length === 0 ? (
+                <View style={[styles.emptyContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border, marginVertical: 20 }]}>
+                  <Ionicons name="cloud-download-outline" size={40} color={themeColors.textSecondary} />
+                  <Text style={[styles.emptyTitle, { color: themeColors.text }]}>No hay solicitudes registradas</Text>
+                  <Text style={[styles.emptySubtitle, { color: themeColors.textSecondary }]}>
+                    Presiona "Sincronizar SAT" para generar tu primera solicitud de descarga masiva.
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ gap: 12, paddingBottom: 24 }}>
+                  {satSolicitudes.map((sol) => {
+                    let badgeBg = '#54a0ff20';
+                    let badgeColor = '#2e86de';
+                    let iconName: any = 'time-outline';
+
+                    if (sol.estado_sat === 'TERMINADA') {
+                      badgeBg = '#1dd1a120';
+                      badgeColor = '#10ac84';
+                      iconName = 'checkmark-circle-outline';
+                    } else if (sol.estado_sat === 'PENDIENTE') {
+                      badgeBg = '#feca5720';
+                      badgeColor = '#d97706';
+                      iconName = 'hourglass-outline';
+                    } else if (sol.estado_sat === 'EXPIRADA') {
+                      badgeBg = '#8395a720';
+                      badgeColor = '#576574';
+                      iconName = 'alert-circle-outline';
+                    } else if (sol.estado_sat === 'RECHAZADA' || sol.estado_sat === 'ERROR') {
+                      badgeBg = '#ff6b6b20';
+                      badgeColor = '#ee5253';
+                      iconName = 'close-circle-outline';
+                    }
+
+                    const isPending = sol.estado_sat === 'PENDIENTE' || sol.estado_sat === 'EN_PROCESO';
+
+                    return (
+                      <View
+                        key={sol.id}
+                        style={[
+                          styles.solicitudItemCard,
+                          { backgroundColor: themeColors.background, borderColor: isPending ? '#54a0ff' : themeColors.border }
+                        ]}
+                      >
+                        <View style={styles.solItemHeader}>
+                          <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text style={[styles.solIdText, { color: themeColors.text }]} numberOfLines={1}>
+                              ID: {sol.id_solicitud}
+                            </Text>
+                            <Text style={[styles.solDateText, { color: themeColors.textSecondary }]}>
+                              Período: {formatDate(sol.fecha_inicio)} – {formatDate(sol.fecha_fin)}
+                            </Text>
+                          </View>
+                          <View style={[styles.solBadge, { backgroundColor: badgeBg }]}>
+                            <Ionicons name={iconName} size={14} color={badgeColor} style={{ marginRight: 4 }} />
+                            <Text style={[styles.solBadgeText, { color: badgeColor }]}>{sol.estado_sat}</Text>
+                          </View>
+                        </View>
+
+                        <View style={[styles.solItemBody, { borderTopColor: themeColors.border }]}>
+                          <View style={styles.solMetaRow}>
+                            <Text style={[styles.solMetaLabel, { color: themeColors.textSecondary }]}>Facturas Procesadas:</Text>
+                            <Text style={[styles.solMetaVal, { color: themeColors.text, fontWeight: 'bold' }]}>
+                              {sol.total_facturas_procesadas || 0} comprobantes
+                            </Text>
+                          </View>
+
+                          {sol.mensaje_sat && (
+                            <View style={styles.solMetaRow}>
+                              <Text style={[styles.solMetaLabel, { color: themeColors.textSecondary }]}>Mensaje SAT:</Text>
+                              <Text style={[styles.solMetaVal, { color: themeColors.text }]} numberOfLines={2}>
+                                {sol.mensaje_sat}
+                              </Text>
+                            </View>
+                          )}
+
+                          <View style={styles.solMetaRow}>
+                            <Text style={[styles.solMetaLabel, { color: themeColors.textSecondary }]}>Fecha Solicitud:</Text>
+                            <Text style={[styles.solMetaVal, { color: themeColors.textSecondary }]}>
+                              {formatDate(sol.created_at)} ({new Date(sol.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })})
+                            </Text>
+                          </View>
+                        </View>
+
+                        {isPending && (
+                          <TouchableOpacity
+                            style={[styles.solVerifyBtn, { backgroundColor: '#54a0ff' }]}
+                            onPress={() => handleVerifySingleSolicitud(sol)}
+                            disabled={verifyingSolId === sol.id || syncingSat}
+                          >
+                            {verifyingSolId === sol.id ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <>
+                                <Ionicons name="refresh-circle-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
+                                <Text style={styles.solVerifyBtnText}>Verificar Estado con el SAT Ahora</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -781,6 +1168,28 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.medium,
   },
   actionBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
+
+  autoSyncBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    marginBottom: Spacing.four,
+  },
+  syncStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  autoSyncText: {
+    fontSize: 13,
+  },
+  autoSyncSubText: {
+    fontSize: 12,
+  },
 
   satBanner: {
     flexDirection: 'row',
@@ -869,4 +1278,135 @@ const styles = StyleSheet.create({
   xmlTextArea: { height: 160, borderWidth: 1, borderRadius: BorderRadius.medium, padding: 12, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 12 },
   importSubmitBtn: { marginTop: 16, padding: 14, borderRadius: BorderRadius.medium, alignItems: 'center' },
   importSubmitText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+
+  syncOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1.5,
+    marginBottom: 10,
+  },
+  syncOptionTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  syncOptionSub: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  customDateContainer: {
+    flexDirection: 'row',
+    padding: 12,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  dateInputLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  dateInput: {
+    height: 38,
+    borderWidth: 1,
+    borderRadius: BorderRadius.small,
+    paddingHorizontal: 8,
+    fontSize: 13,
+  },
+
+  viewSolLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  viewSolLinkText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginRight: 2,
+  },
+  solRefreshBtn: {
+    padding: 6,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+  },
+  solInfoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  solInfoText: {
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 16,
+  },
+  solicitudItemCard: {
+    padding: 14,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1.5,
+    marginBottom: 10,
+  },
+  solItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  solIdText: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  solDateText: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  solBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  solBadgeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  solItemBody: {
+    paddingTop: 8,
+    borderTopWidth: 1,
+    gap: 4,
+  },
+  solMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  solMetaLabel: {
+    fontSize: 12,
+  },
+  solMetaVal: {
+    fontSize: 12,
+  },
+  solVerifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: BorderRadius.small,
+    marginTop: 10,
+  },
+  solVerifyBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
 });
+
+
