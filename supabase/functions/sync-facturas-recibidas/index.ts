@@ -346,14 +346,29 @@ serve(async (req: any) => {
     };
 
     // -------------------------------------------------------------------------
-    // FASE 1: Verificar y Procesar Solicitudes Previas Pendientes
+    // FASE 1: Limpiar Expiradas (>72h) y Verificar Solicitudes Previas Pendientes
     // -------------------------------------------------------------------------
-    console.log(`🔍 [EDGE FUNCTION] Consultando solicitudes pendientes en Base de Datos...`);
+    const tresDiasAtras = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+    
+    // Marcar como EXPIRADA cualquier solicitud de más de 72 horas (el SAT borra los paquetes tras 72h)
+    await supabase
+      .from("sat_descarga_solicitudes")
+      .update({
+        estado_sat: "EXPIRADA",
+        mensaje_sat: "Solicitud expirada (superó el límite de 72 horas del SAT)",
+        updated_at: new Date().toISOString(),
+      })
+      .in("estado_sat", ["PENDIENTE", "EN_PROCESO"])
+      .lt("created_at", tresDiasAtras);
+
+    console.log(`🔍 [EDGE FUNCTION] Consultando solicitudes pendientes recientes en Base de Datos...`);
     const { data: solicitudesPendientes, error: solError } = await supabase
       .from("sat_descarga_solicitudes")
       .select("*")
       .in("estado_sat", ["PENDIENTE", "EN_PROCESO"])
-      .order("created_at", { ascending: true });
+      .gte("created_at", tresDiasAtras)
+      .order("created_at", { ascending: false })
+      .limit(2);
 
     if (solError) {
       console.error(`❌ [EDGE FUNCTION] Error consultando solicitudes pendientes:`, solError.message);
@@ -468,7 +483,9 @@ serve(async (req: any) => {
       const debeCrearNueva = action === "solicitar" || !solicitudesRecientes || solicitudesRecientes.length === 0;
 
       if (debeCrearNueva) {
-        const fechaFin = new Date().toISOString().substring(0, 10) + "T23:59:59";
+        const fechaFin =
+          reqData.fecha_fin ||
+          new Date().toISOString().substring(0, 10) + "T23:59:59";
         const fechaInicio =
           reqData.fecha_inicio ||
           new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10) + "T00:00:00";

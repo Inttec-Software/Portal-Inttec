@@ -101,6 +101,11 @@ app.get('/', (req, res) => {
   });
 });
 
+import { SatSyncService } from './services/satSyncService';
+
 app.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`Servidor corriendo en http://0.0.0.0:${PORT}`);
+  // Iniciar servicio en segundo plano de sincronización automática con el SAT
+  SatSyncService.startScheduler();
 });
+

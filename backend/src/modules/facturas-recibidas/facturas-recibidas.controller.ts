@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getSupabaseClient } from '../../config/supabase';
+import { SatSyncService } from '../../services/satSyncService';
 
 // === GET /api/facturas-recibidas ===
 export const getFacturasRecibidas = async (req: Request, res: Response) => {
@@ -33,12 +34,19 @@ export const getSatSolicitudes = async (req: Request, res: Response) => {
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const client = getSupabaseClient(tenant.company, tenant.env);
 
-    const { data, error } = await client
+    const isPendingOnly = req.query.pending === 'true';
+    let query = client
       .from('sat_descarga_solicitudes')
       .select('*')
-      .in('estado_sat', ['PENDIENTE', 'EN_PROCESO'])
-      .order('created_at', { ascending: false })
-      .limit(3);
+      .order('created_at', { ascending: false });
+
+    if (isPendingOnly) {
+      query = query.in('estado_sat', ['PENDIENTE', 'EN_PROCESO']).limit(5);
+    } else {
+      query = query.limit(50);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
     return res.json({ solicitudes: data || [] });
@@ -89,3 +97,29 @@ export const importFactura = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+// === GET /api/facturas-recibidas/sync-status ===
+export const getSatSyncStatus = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    const company = tenant?.company || 'inttec';
+    const status = SatSyncService.getStatus(company);
+    return res.json({ success: true, status });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// === POST /api/facturas-recibidas/sync-now ===
+export const triggerSatSync = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const result = await SatSyncService.syncCompany(tenant.company, tenant.env);
+    return res.json({ success: true, result });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+
