@@ -369,15 +369,9 @@ export default function EmpleadoGastos() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company, env]);
 
-  useEffect(() => {
-    if (!user) return;
-
-    const interval = setInterval(() => {
-      refreshData(user.id, true);
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [user]);
+    useEffect(() => {
+      if (!user) return;
+    }, [user]);
 
   async function refreshData(userId: string, silent = false) {
     if (!silent) {

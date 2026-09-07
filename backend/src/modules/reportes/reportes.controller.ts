@@ -9,7 +9,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const client = getSupabaseClient(company, env);
 
-    const [gastosRes, usersRes, vehiculosRes, gasolinaRes, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
+    const [gastosRes, usersRes, vehiculosRes, gasolinaRes, provRes] = await Promise.all([
       client.from('gastos').select(`
         *,
         subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
@@ -20,69 +20,42 @@ export const getAdminReportes = async (req: Request, res: Response) => {
       client.from('usuarios').select('*').order('nombre'),
       client.from('vehiculos').select('*').eq('archivado', false).order('marca'),
       client.from('registro_gasolina').select('*, vehiculos(marca, modelo)').order('created_at', { ascending: false }),
-      client.from('categorias').select('*'),
-      client.from('subcategorias').select('*'),
-      client.from('proveedores').select('*'),
-      client.from('clientes').select('*'),
-      client.from('sucursales_cliente').select('*'),
+      client.from('proveedores').select('id, nombre, rfc').order('nombre')
     ]);
 
     if (usersRes.error) throw usersRes.error;
 
-    // Enriquecer gastos como se hacía en el frontend
-    const enriquecerGastos = (rawGastos: any[]) => {
-      const categorias = catRes.data || [];
-      const subcategorias = subRes.data || [];
-      const proveedores = provRes.data || [];
-      const clientes = cliRes.data || [];
-      const sucursales = sucRes.data || [];
+    // Enriquecer gastos usando relaciones precargadas
+    const formatGasto = (g: any) => {
+      let cat = 'Sin clasificar';
+      let subcat = 'Sin clasificar';
+      let prov = '';
+      let cli = '';
+      let suc = '';
+      
+      let catRel = null;
 
-      return rawGastos.map(g => {
-        let cat = '';
-        let subcat = '';
-        let prov = '';
-        let cli = '';
-        let suc = '';
-
-        if (g.subcategoria_rel) {
-          subcat = g.subcategoria_rel.nombre;
-          if (g.subcategoria_rel.categorias) {
-            cat = g.subcategoria_rel.categorias.nombre;
-          }
-        } else if (g.subcategoria_id) {
-          const s = subcategorias.find((x: any) => x.id === g.subcategoria_id);
-          if (s) {
-            subcat = s.nombre;
-            const c = categorias.find((x: any) => x.id === s.categoria_id);
-            if (c) cat = c.nombre;
-          }
-        } else {
-          cat = 'Sin clasificar';
+      if (g.subcategoria_rel) {
+        subcat = g.subcategoria_rel.nombre;
+        if (g.subcategoria_rel.categorias) {
+          cat = g.subcategoria_rel.categorias.nombre;
+          catRel = g.subcategoria_rel.categorias;
         }
+      }
+      if (g.proveedor_rel) prov = g.proveedor_rel.nombre;
+      if (g.cliente_rel) cli = g.cliente_rel.nombre;
+      if (g.sucursal_rel) suc = g.sucursal_rel.nombre;
 
-        if (g.proveedor_rel) {
-          prov = g.proveedor_rel.nombre;
-        } else if (g.proveedor_id) {
-          const p = proveedores.find((x: any) => x.id === g.proveedor_id);
-          if (p) prov = p.nombre;
-        }
-
-        if (g.cliente_rel) {
-          cli = g.cliente_rel.nombre;
-        } else if (g.cliente_id) {
-          const c = clientes.find((x: any) => x.id === g.cliente_id);
-          if (c) cli = c.nombre;
-        }
-
-        if (g.sucursal_rel) {
-          suc = g.sucursal_rel.nombre;
-        } else if (g.sucursal_id) {
-          const sc = sucursales.find((x: any) => x.id === g.sucursal_id);
-          if (sc) suc = sc.nombre;
-        }
-
-        return { ...g, cat, subcat, prov, cli, suc };
-      });
+      return {
+        ...g,
+        cat, subcat, prov, cli, suc, // Props legadas
+        categoria_nombre: cat,
+        subcategoria_nombre: subcat,
+        proveedor_nombre: prov,
+        cliente_nombre: cli,
+        sucursal_nombre: suc,
+        categoria_rel: catRel,
+      };
     };
 
     let rawGastos = gastosRes.data || [];
@@ -92,18 +65,14 @@ export const getAdminReportes = async (req: Request, res: Response) => {
       rawGastos = fallbackRes.data || [];
     }
 
-    const enrichedGastos = enriquecerGastos(rawGastos);
+    const enrichedGastos = rawGastos.map(formatGasto);
 
     return res.json({
       gastos: enrichedGastos,
       usuarios: usersRes.data || [],
       vehiculos: vehiculosRes.data || [],
       registrosGasolina: gasolinaRes.data || [],
-      proveedores: provRes.data || [],
-      clientes: cliRes.data || [],
-      sucursales: sucRes.data || [],
-      categorias: catRes.data || [],
-      subcategorias: subRes.data || []
+      proveedores: provRes.data || []
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -120,89 +89,35 @@ export const getEmpleadoGastos = async (req: Request, res: Response) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'No autorizado' });
 
-    const [gastosRes, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
-      client.from('gastos').select(`
+    const gastosRes = await client.from('gastos').select(`
         *,
         subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
         proveedor_rel:proveedores(id, nombre),
         cliente_rel:clientes(id, nombre),
         sucursal_rel:sucursales_cliente(id, nombre)
-      `).eq('empleado_id', userId).order('created_at', { ascending: false }),
-      client.from('categorias').select('*'),
-      client.from('subcategorias').select('*'),
-      client.from('proveedores').select('*'),
-      client.from('clientes').select('*'),
-      client.from('sucursales_cliente').select('*'),
-    ]);
+      `).eq('empleado_id', userId).order('created_at', { ascending: false });
 
     const rawGastos = gastosRes.data || [];
-    const categorias = catRes.data || [];
-    const subcategorias = subRes.data || [];
-    const proveedores = provRes.data || [];
-    const clientes = cliRes.data || [];
-    const sucursales = sucRes.data || [];
 
-    const gastosEnriquecidos = rawGastos.map(g => {
-      let cat = '';
-      let subcat = '';
+    const formatGasto = (g: any) => {
+      let cat = 'Sin clasificar';
+      let subcat = 'Sin clasificar';
       let prov = '';
       let cli = '';
       let suc = '';
       
-      let subRel = g.subcategoria_rel;
       let catRel = null;
-      let provRel = g.proveedor_rel;
-      let cliRel = g.cliente_rel;
-      let sucRel = g.sucursal_rel;
 
       if (g.subcategoria_rel) {
         subcat = g.subcategoria_rel.nombre;
         if (g.subcategoria_rel.categorias) {
           cat = g.subcategoria_rel.categorias.nombre;
+          catRel = g.subcategoria_rel.categorias;
         }
-      } else if (g.subcategoria_id) {
-        const s = subcategorias.find((x: any) => x.id === g.subcategoria_id);
-        if (s) {
-          subcat = s.nombre;
-          subRel = { id: s.id, nombre: s.nombre, categoria_id: s.categoria_id };
-          const c = categorias.find((x: any) => x.id === s.categoria_id);
-          if (c) {
-            cat = c.nombre;
-            subRel.categoria_rel = { id: c.id, nombre: c.nombre };
-            catRel = subRel.categoria_rel;
-          }
-        }
-      } else {
-        cat = 'Sin clasificar';
-        subcat = 'Sin clasificar';
       }
-
       if (g.proveedor_rel) prov = g.proveedor_rel.nombre;
-      else if (g.proveedor_id) {
-        const p = proveedores.find((x: any) => x.id === g.proveedor_id);
-        if (p) {
-          prov = p.nombre;
-          provRel = { id: p.id, nombre: p.nombre };
-        }
-      }
-
       if (g.cliente_rel) cli = g.cliente_rel.nombre;
-      else if (g.cliente_id) {
-        const c = clientes.find((x: any) => x.id === g.cliente_id);
-        if (c) {
-          cli = c.nombre;
-          cliRel = { id: c.id, nombre: c.nombre };
-        }
-      }
-
       if (g.sucursal_rel) suc = g.sucursal_rel.nombre;
-      else if (g.sucursal_id) {
-        const s = sucursales.find((x: any) => x.id === g.sucursal_id);
-        if (s) {
-          suc = s.nombre;
-          sucRel = { id: s.id, nombre: s.nombre };
-        }
-      }
 
       return {
         ...g,
@@ -211,13 +126,11 @@ export const getEmpleadoGastos = async (req: Request, res: Response) => {
         proveedor_nombre: prov,
         cliente_nombre: cli,
         sucursal_nombre: suc,
-        subcategoria_rel: subRel,
         categoria_rel: catRel,
-        proveedor_rel: provRel,
-        cliente_rel: cliRel,
-        sucursal_rel: sucRel
       };
-    });
+    };
+
+    const gastosEnriquecidos = rawGastos.map(formatGasto);
 
     return res.json({ gastos: gastosEnriquecidos });
   } catch (error: any) {
