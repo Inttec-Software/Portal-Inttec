@@ -214,6 +214,17 @@ export default function ExpenseCard({
   );
 }
 
+export default React.memo(ExpenseCard, (prevProps, nextProps) => {
+  return (
+    prevProps.gasto.id === nextProps.gasto.id &&
+    prevProps.gasto.status === nextProps.gasto.status &&
+    prevProps.gasto.facturado === nextProps.gasto.facturado &&
+    prevProps.gasto.motivo_sin_factura === nextProps.gasto.motivo_sin_factura &&
+    prevProps.gasto.proveedor_id === nextProps.gasto.proveedor_id &&
+    prevProps.showEmployeeName === nextProps.showEmployeeName
+  );
+});
+
 const styles = StyleSheet.create({
   card: {
     borderRadius: BorderRadius.large,
@@ -221,7 +232,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.two,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
   },
