@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,7 +16,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import { AuthService } from '@/services/supabase';
+import { TareasService } from '@/services/tareasService';
 import PendingTasksPopover from '@/components/PendingTasksPopover';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface ModuleConfig {
   id: string;
@@ -54,6 +56,54 @@ export default function AdminDashboardGrid() {
   const { user, company, changeCompany, setUser } = useAuth();
 
   const isMobile = width < 600;
+
+  const [pendingTasksCount, setPendingTasksCount] = useState(0);
+  const [hasNewTasks, setHasNewTasks] = useState(false);
+  const [currentPendingIds, setCurrentPendingIds] = useState<string[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const fetchPendingTasks = async () => {
+        if (!user) return;
+        try {
+          const data = await TareasService.getTareas();
+          const pending = (data || []).filter((t: any) => 
+            t.status !== 'Completada' && 
+            t.status !== 'Cancelada' && 
+            (t.responsable_id === user.id || (t.corresponsables && t.corresponsables.some((c:any) => c.usuario_id === user.id)))
+          );
+          setPendingTasksCount(pending.length);
+          
+          const pendingIds = pending.map((t: any) => t.id);
+          setCurrentPendingIds(pendingIds);
+
+          if (pending.length > 0) {
+            const seenTasksJson = await AsyncStorage.getItem(`seen_tasks_${user.id}`);
+            const seenTasks = seenTasksJson ? JSON.parse(seenTasksJson) : [];
+            const hasNew = pendingIds.some((id: string) => !seenTasks.includes(id));
+            setHasNewTasks(hasNew);
+          } else {
+            setHasNewTasks(false);
+          }
+        } catch (error) {
+          console.error('Error fetching tasks for badge', error);
+        }
+      };
+      fetchPendingTasks();
+    }, [user])
+  );
+
+  const handleOpenTasksPopover = async () => {
+    setShowTasksPopover(true);
+    if (hasNewTasks && user && currentPendingIds.length > 0) {
+      try {
+        await AsyncStorage.setItem(`seen_tasks_${user.id}`, JSON.stringify(currentPendingIds));
+        setHasNewTasks(false);
+      } catch (error) {
+        console.error('Error saving seen tasks', error);
+      }
+    }
+  };
 
   const handleModulePress = (route: string) => {
     router.replace(route as any);
@@ -153,13 +203,26 @@ export default function AdminDashboardGrid() {
 
               {/* Notificaciones */}
               <TouchableOpacity
-                onPress={() => setShowTasksPopover(true)}
+                onPress={handleOpenTasksPopover}
                 style={[
                   styles.logoutBtn,
-                  { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)', borderRadius: 20 }
+                  { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)', borderRadius: 20, position: 'relative' }
                 ]}
               >
                 <Ionicons name="notifications-outline" size={22} color={themeColors.text} />
+                {pendingTasksCount > 0 && (
+                  <View style={{
+                    position: 'absolute',
+                    top: 2,
+                    right: 4,
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: hasNewTasks ? themeColors.danger : themeColors.warning,
+                    borderWidth: 1,
+                    borderColor: scheme === 'dark' ? '#0f172a' : '#f8fafc'
+                  }} />
+                )}
               </TouchableOpacity>
 
               {/* Checador */}
