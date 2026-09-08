@@ -1735,7 +1735,6 @@ export const ReportGenerator = {
         c.usuario_nombre ||
         (userId ? userNamesMap.get(userId) : null) ||
         'No especificado / Almacén';
-
       const row = [
         c.id,
         fecha,
