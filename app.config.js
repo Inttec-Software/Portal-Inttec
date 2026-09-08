@@ -36,7 +36,7 @@ module.exports = {
       }
     },
     web: {
-      output: "static",
+      output: "spa",
       favicon: "./assets/images/favicon.png"
     },
     plugins: [
@@ -54,8 +54,6 @@ module.exports = {
         }
       ],
       "expo-secure-store",
-      "expo-sharing",
-      "@react-native-community/datetimepicker",
       [
         "expo-image-picker",
         {
@@ -78,8 +76,7 @@ module.exports = {
       ]
     ],
     experiments: {
-      typedRoutes: true,
-      reactCompiler: true
+      typedRoutes: true
     },
     extra: {
       router: {},

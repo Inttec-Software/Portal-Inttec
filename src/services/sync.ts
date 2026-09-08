@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { supabase, CompanyService } from './supabase';
-import * as FileSystem from 'expo-file-system';
+import { Paths, File, EncodingType } from 'expo-file-system';
 
 const getOfflineQueueKey = () => `offline_gastos_queue_${CompanyService.getActiveCompany()}`;
 
@@ -108,8 +108,9 @@ export const SyncService = {
     if (newItem.base64Foto) {
       try {
         let rawBase64 = newItem.base64Foto.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '');
-        const fileUri = FileSystem.documentDirectory + `foto_${newItem.id}.${newItem.fotoExt || 'jpg'}`;
-        await FileSystem.writeAsStringAsync(fileUri, rawBase64, { encoding: FileSystem.EncodingType.Base64 });
+        const fileUri = Paths.document.uri + `foto_${newItem.id}.${newItem.fotoExt || 'jpg'}`;
+        const file = new File(fileUri);
+        await file.write(rawBase64, { encoding: EncodingType.Base64 });
         newItem.localFotoUri = fileUri;
         newItem.base64Foto = null; // Liberar memoria
       } catch (err) {
@@ -120,8 +121,9 @@ export const SyncService = {
     if (newItem.base64Factura) {
       try {
         let rawBase64 = newItem.base64Factura.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '');
-        const fileUri = FileSystem.documentDirectory + `factura_${newItem.id}.${newItem.facturaExt || 'pdf'}`;
-        await FileSystem.writeAsStringAsync(fileUri, rawBase64, { encoding: FileSystem.EncodingType.Base64 });
+        const fileUri = Paths.document.uri + `factura_${newItem.id}.${newItem.facturaExt || 'pdf'}`;
+        const file = new File(fileUri);
+        await file.write(rawBase64, { encoding: EncodingType.Base64 });
         newItem.localFacturaUri = fileUri;
         newItem.base64Factura = null; // Liberar memoria
       } catch (err) {
@@ -176,8 +178,8 @@ export const SyncService = {
 
           let b64Foto = item.base64Foto;
           if (!b64Foto && item.localFotoUri) {
-             try {
-               b64Foto = await FileSystem.readAsStringAsync(item.localFotoUri, { encoding: FileSystem.EncodingType.Base64 });
+           try {
+               b64Foto = await new File(item.localFotoUri).text();
              } catch (e) {
                console.warn('No se pudo leer foto local:', e);
              }
@@ -207,8 +209,8 @@ export const SyncService = {
 
           let b64Factura = item.base64Factura;
           if (!b64Factura && item.localFacturaUri) {
-             try {
-               b64Factura = await FileSystem.readAsStringAsync(item.localFacturaUri, { encoding: FileSystem.EncodingType.Base64 });
+           try {
+               b64Factura = await new File(item.localFacturaUri).text();
              } catch (e) {
                console.warn('No se pudo leer factura local:', e);
              }
@@ -294,10 +296,10 @@ export const SyncService = {
           
           // 4. Limpiar archivos locales si fue exitoso
           if (item.localFotoUri) {
-             FileSystem.deleteAsync(item.localFotoUri, { idempotent: true }).catch(() => {});
+             try { new File(item.localFotoUri).delete(); } catch (_) {}
           }
           if (item.localFacturaUri) {
-             FileSystem.deleteAsync(item.localFacturaUri, { idempotent: true }).catch(() => {});
+             try { new File(item.localFacturaUri).delete(); } catch (_) {}
           }
 
           syncedCount++;
