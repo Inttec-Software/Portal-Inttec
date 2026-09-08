@@ -26,6 +26,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
+import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
@@ -1463,12 +1464,10 @@ setProveedoresCatalog(provRes.data || []);
   const handleExportConsumosPDF = async () => {
     setIsFetchingConsumos(true);
     try {
-      const { data, error } = await supabase
-        .from('movimientos_inventario')
-        .select('*, producto:productos(nombre_oficial), usuario:usuarios!creado_por(nombre)')
-        .eq('tipo', 'SALIDA')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
       await ReportGenerator.exportConsumosToPDF(data || [], 'Reporte de Consumos de Materiales');
     } catch (err: any) {
       showAlert('Error PDF Consumos', err.message || 'No se pudo generar el reporte.');
@@ -1480,12 +1479,10 @@ setProveedoresCatalog(provRes.data || []);
   const handleExportConsumosCSV = async () => {
     setIsFetchingConsumos(true);
     try {
-      const { data, error } = await supabase
-        .from('movimientos_inventario')
-        .select('*, producto:productos(nombre_oficial), usuario:usuarios!creado_por(nombre)')
-        .eq('tipo', 'SALIDA')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
       await ReportGenerator.exportConsumosToCSV(data || [], 'reporte_consumos_general.csv');
     } catch (err: any) {
       showAlert('Error CSV Consumos', err.message || 'No se pudo generar el reporte.');

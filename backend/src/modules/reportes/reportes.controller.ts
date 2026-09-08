@@ -249,9 +249,17 @@ export const getExportData = async (req: Request, res: Response) => {
       if (catRes.error) throw catRes.error;
       return res.json({ productos: prodRes.data || [], categorias: catRes.data || [] });
     } else if (type === 'consumos') {
-      const { data, error } = await client.from('movimientos_inventario').select('*, producto:productos(nombre_oficial)').eq('tipo', 'SALIDA').order('fecha', { ascending: false });
-      if (error) throw error;
-      return res.json(data || []);
+      const [movRes, userRes] = await Promise.all([
+        client.from('movimientos_inventario').select('*, producto:productos(nombre_oficial, sku_interno, precio_unitario)').eq('tipo', 'SALIDA').order('fecha', { ascending: false }),
+        client.from('usuarios').select('id, nombre, email')
+      ]);
+      if (movRes.error) throw movRes.error;
+      const userMap = new Map((userRes.data || []).map((u: any) => [u.id, u]));
+      const dataWithUsers = (movRes.data || []).map((m: any) => ({
+        ...m,
+        usuario: userMap.get(m.creado_por || m.empleado_id) || null
+      }));
+      return res.json(dataWithUsers);
     } else if (type === 'ventas') {
       const { data, error } = await client.from('ventas').select('*').order('fecha', { ascending: false });
       if (error) throw error;

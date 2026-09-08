@@ -20,9 +20,9 @@ export const getDashboardData = async (req: Request, res: Response) => {
       client.from('categorias_productos').select('*').order('nombre'),
       client.from('proveedores').select('*').order('nombre'),
       client.from('productos').select('*').order('nombre_oficial'),
-      client.from('movimientos_inventario').select('*, producto:productos(nombre_oficial)').eq('tipo', 'SALIDA').order('fecha', { ascending: false }).limit(50),
+      client.from('movimientos_inventario').select('*, producto:productos(nombre_oficial, sku_interno, precio_unitario)').eq('tipo', 'SALIDA').order('fecha', { ascending: false }).limit(50),
       client.from('clientes').select('*').order('nombre'),
-      client.from('usuarios').select('id, nombre').in('rol', ['EMPLEADO', 'DEV']).order('nombre')
+      client.from('usuarios').select('id, nombre, rol, email').order('nombre')
     ]);
 
     if (categoriasRes.error) throw categoriasRes.error;
@@ -32,13 +32,19 @@ export const getDashboardData = async (req: Request, res: Response) => {
     if (clientesRes.error) throw clientesRes.error;
     if (usuariosRes.error) throw usuariosRes.error;
 
+    const userMap = new Map((usuariosRes.data || []).map((u: any) => [u.id, u]));
+    const historialWithUser = (historialRes.data || []).map((m: any) => ({
+      ...m,
+      usuario: userMap.get(m.creado_por || m.empleado_id) || null
+    }));
+
     return res.json({
       categorias: categoriasRes.data || [],
       proveedores: proveedoresRes.data || [],
       productos: productosRes.data || [],
-      historial_consumo: historialRes.data || [],
+      historial_consumo: historialWithUser,
       clientes: clientesRes.data || [],
-      usuarios: usuariosRes.data || []
+      usuarios: (usuariosRes.data || []).filter((u: any) => ['EMPLEADO', 'DEV'].includes(u.rol))
     });
   } catch (error: any) {
     console.error('Error in getDashboardData:', error);

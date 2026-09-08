@@ -1455,6 +1455,7 @@ export default function AdminGastosScreen() {
       const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
+      await ReportGenerator.exportConsumosToCSV(data || [], 'reporte_consumos_general.csv');
     } catch (err: any) {
       showAlert('Error CSV Consumos', err.message || 'No se pudo generar el reporte.');
     } finally {

@@ -1372,6 +1372,7 @@ async function loadAllData() {
               contentContainerStyle={styles.listContent}
               renderItem={({ item }) => {
                 const cat = categorias.find(c => c.id === item.categoria_id);
+                const precioFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(item.precio_unitario || 0);
                 return (
                   <View style={[styles.listItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                     <View style={{ flex: 1, gap: 2 }}>
@@ -1380,14 +1381,19 @@ async function loadAllData() {
                       <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>
                         {cat ? cat.nombre : 'Sin Categoría'}
                       </Text>
-                      <Text
-                        style={[
-                          styles.stockText,
-                          { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success },
-                        ]}
-                      >
-                        Stock: {item.stock_actual} piezas
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                        <Text
+                          style={[
+                            styles.stockText,
+                            { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success },
+                          ]}
+                        >
+                          Stock: {item.stock_actual} pzas
+                        </Text>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>
+                          • {precioFmt}
+                        </Text>
+                      </View>
                     </View>
                     <View style={{ flexDirection: 'row', gap: Spacing.two, alignItems: 'center' }}>
                       {/* Ajuste rápido de stock */}
@@ -1656,7 +1662,7 @@ async function loadAllData() {
                           {item.producto ? item.producto.nombre_oficial : 'Producto Eliminado'}
                         </Text>
                         <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4 }}>
-                          Ref: {item.folio_factura || 'N/A'}{item.usuario?.nombre ? ` | Empleado: ${item.usuario.nombre}` : ''} | Fecha: {dateStr}
+                          Ref: {item.folio_factura || 'N/A'}{item.usuario?.nombre ? ` | Retirado por: ${item.usuario.nombre}` : ''} | Fecha: {dateStr}
                         </Text>
                       </View>
                       <View style={{ backgroundColor: themeColors.danger + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: BorderRadius.small }}>
