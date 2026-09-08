@@ -12,7 +12,7 @@ interface ExpenseCardProps {
   showEmployeeName?: boolean;
 }
 
-export default function ExpenseCard({
+function ExpenseCard({
   gasto,
   onPress,
   onDelete,
@@ -214,7 +214,7 @@ export default function ExpenseCard({
   );
 }
 
-export default React.memo(ExpenseCard, (prevProps, nextProps) => {
+const ExpenseCardMemo = React.memo(ExpenseCard, (prevProps, nextProps) => {
   return (
     prevProps.gasto.id === nextProps.gasto.id &&
     prevProps.gasto.status === nextProps.gasto.status &&
@@ -224,6 +224,8 @@ export default React.memo(ExpenseCard, (prevProps, nextProps) => {
     prevProps.showEmployeeName === nextProps.showEmployeeName
   );
 });
+
+export default ExpenseCardMemo;
 
 const styles = StyleSheet.create({
   card: {
