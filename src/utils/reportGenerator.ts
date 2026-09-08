@@ -2581,6 +2581,7 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
                       <tr><td class="label-col">Método de Pago:</td><td class="value-col">${facturaData.payment_method || 'PUE'}</td></tr>
                       <tr><td class="label-col">Forma de Pago:</td><td class="value-col">${facturaData.payment_form || '01'}</td></tr>
                       <tr><td class="label-col">Moneda:</td><td class="value-col">MXN</td></tr>
+                      ${venta.orden_compra ? `<tr><td class="label-col">Orden de compra:</td><td class="value-col">${venta.orden_compra}</td></tr>` : ''}
                   </table>
               </div>
           </div>

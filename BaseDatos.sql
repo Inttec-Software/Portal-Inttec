@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS public.ventas (
   saldo_pendiente numeric DEFAULT 0,
   estado_pago text DEFAULT 'PENDIENTE DE PAGO'::text,
   folio text,
+  orden_compra text,
   CONSTRAINT ventas_pkey PRIMARY KEY (id),
   CONSTRAINT ventas_cotizacion_id_fkey FOREIGN KEY (cotizacion_id) REFERENCES public.cotizaciones(id),
   CONSTRAINT ventas_registrado_por_fkey FOREIGN KEY (registrado_por) REFERENCES public.usuarios(id)

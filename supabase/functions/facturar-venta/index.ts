@@ -127,6 +127,8 @@ serve(async (req) => {
       const formaPagoFinal = effectiveCondiciones.forma_pago || '03';
       const metodoPagoFinal = effectiveCondiciones.metodo_pago_cfdi || 'PUE';
 
+      const ordenCompraFinal = effectiveCondiciones.orden_compra || null;
+
       // Crear venta en base de datos para guardar el registro de la factura
       const { data: createdVenta, error: createVentaError } = await supabaseClient
         .from('ventas')
@@ -142,6 +144,7 @@ serve(async (req) => {
           precio_total_facturado: totalCalculado,
           estado_pago: 'PAGADO',
           cfdi_estado: 'PENDIENTE',
+          orden_compra: ordenCompraFinal,
         })
         .select()
         .single();

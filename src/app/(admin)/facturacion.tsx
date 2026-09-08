@@ -58,6 +58,7 @@ interface FacturaEmitida {
   cfdi_xml_url?: string;
   precio_total_facturado: number;
   created_at?: string;
+  orden_compra?: string;
 }
 
 const REGIMENES_FISCALES = [
@@ -118,6 +119,7 @@ export default function FacturacionScreen() {
   const [serie, setSerie] = useState('F');
   const [folio, setFolio] = useState('');
   const [moneda, setMoneda] = useState('MXN');
+  const [ordenCompra, setOrdenCompra] = useState('');
 
   // 3. Partidas
   const [partidas, setPartidas] = useState<FacturaPartida[]>([
@@ -208,7 +210,7 @@ export default function FacturacionScreen() {
       // 2. Fallback directo a Supabase
       const { data } = await supabase
         .from('ventas')
-        .select('id, cliente, fecha, factura_referencia, folio, cfdi_uuid, cfdi_estado, cfdi_xml_url, precio_total_facturado, created_at')
+        .select('id, cliente, fecha, factura_referencia, folio, cfdi_uuid, cfdi_estado, cfdi_xml_url, precio_total_facturado, created_at, orden_compra')
         .order('created_at', { ascending: false });
 
       if (data) {
@@ -303,6 +305,7 @@ export default function FacturacionScreen() {
     setMetodoPago('PUE');
     setSerie('F');
     setFolio(String(Date.now()).slice(-5));
+    setOrdenCompra('');
     setPartidas([
       {
         id: '1',
@@ -335,6 +338,10 @@ export default function FacturacionScreen() {
       showAlert('Validación', 'Agrega al menos una partida a la factura.');
       return;
     }
+    if (!ordenCompra.trim()) {
+      showAlert('Validación', 'Ingresa la Orden de compra.');
+      return;
+    }
 
     const invalidPartida = partidas.find(p => !p.descripcion.trim() || (parseFloat(p.cantidad) || 0) <= 0);
     if (invalidPartida) {
@@ -358,6 +365,7 @@ export default function FacturacionScreen() {
           metodo_pago_cfdi: metodoPago,
           serie: serie.trim().toUpperCase(),
           folio: folio.trim(),
+          orden_compra: ordenCompra.trim(),
         },
         custom_partidas: partidas.map(p => ({
           descripcion: p.descripcion.trim(),
@@ -408,6 +416,7 @@ export default function FacturacionScreen() {
         cliente: clienteNombre || 'PUBLICO EN GENERAL',
         fecha: new Date().toISOString(),
         precio_total_facturado: financialTotals.total,
+        orden_compra: ordenCompra.trim(),
       };
 
       const fakeFacturaData = {
@@ -855,6 +864,9 @@ export default function FacturacionScreen() {
               </View>
               <View style={{ flex: 0.8 }}>
                 <CustomInput label="Moneda" value={moneda} onChangeText={setMoneda} placeholder="MXN" autoCapitalize="characters" />
+              </View>
+              <View style={{ flex: 1.5 }}>
+                <CustomInput label="Orden de compra *" value={ordenCompra} onChangeText={setOrdenCompra} placeholder="Ej. OC-2023-001" />
               </View>
             </View>
           </View>
