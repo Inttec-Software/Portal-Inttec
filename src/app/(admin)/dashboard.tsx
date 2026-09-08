@@ -36,6 +36,7 @@ const MODULES: ModuleConfig[] = [
   { id: 'inventario', name: 'Inventario', icon: 'cube', route: '/(admin)/inventario', color: '#48dbfb' },
   { id: 'empleados', name: 'Empleados', icon: 'people', route: '/(admin)/empleados', color: '#1dd1a1' },
   { id: 'vehiculos', name: 'Flota', icon: 'car', route: '/(admin)/vehiculos', color: '#ff9ff3' },
+  { id: 'herramientas', name: 'Herramientas', icon: 'build', route: '/(admin)/herramientas', color: '#00cec9' },
   { id: 'evidencias', name: 'Evidencias', icon: 'briefcase', route: '/(admin)/evidencias', color: '#ff5252' },
   { id: 'reportes', name: 'Reportes', icon: 'document-text', route: '/(admin)/reportes', color: '#10ac84' },
   { id: 'catalogos', name: 'Catálogos', icon: 'list', route: '/(admin)/catalogos', color: '#5f27cd' },

@@ -1,4 +1,4 @@
-﻿-- Extensiones necesarias para UUIDs y Hashes de Contraseña
+-- Extensiones necesarias para UUIDs y Hashes de Contraseña
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -753,3 +753,87 @@ SELECT cron.schedule(
 -- CONSULTA PARA VERIFICAR LOS CRON JOBS ACTIVOS
 -- =========================================================================
 SELECT jobid, jobname, schedule, active FROM cron.job;
+
+-- =========================================================================
+-- ESTRUCTURA DE BASE DE DATOS: MÓDULO DE HERRAMIENTAS Y CHECKLISTS
+-- =========================================================================
+
+-- 1. Catálogo Maestro de Herramientas
+CREATE TABLE IF NOT EXISTS public.herramientas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  codigo text NOT NULL UNIQUE,
+  nombre text NOT NULL,
+  categoria text DEFAULT 'Manual',
+  descripcion text,
+  numero_serie text,
+  foto_url text,
+  estado text DEFAULT 'NUEVO' CHECK (estado IN ('NUEVO', 'BUENO', 'REGULAR', 'DANADO', 'EN_REPARACION', 'BAJA')),
+  activo boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT herramientas_pkey PRIMARY KEY (id)
+);
+
+-- 2. Kit de Herramientas por Empleado (Personal)
+CREATE TABLE IF NOT EXISTS public.inventario_herramientas_empleado (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  empleado_id uuid NOT NULL REFERENCES public.usuarios(id) ON DELETE CASCADE,
+  herramienta_id uuid NOT NULL REFERENCES public.herramientas(id) ON DELETE CASCADE,
+  cantidad integer NOT NULL DEFAULT 1 CHECK (cantidad > 0),
+  condicion text DEFAULT 'NUEVO' CHECK (condicion IN ('NUEVO', 'BUENO', 'REGULAR', 'DANADO')),
+  notas text,
+  fecha_asignacion timestamp with time zone DEFAULT now(),
+  asignado_por uuid REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT inventario_herramientas_empleado_pkey PRIMARY KEY (id),
+  CONSTRAINT uq_herramienta_empleado UNIQUE (empleado_id, herramienta_id)
+);
+
+-- 3. Kit de Herramientas por Vehículo
+CREATE TABLE IF NOT EXISTS public.inventario_herramientas_vehiculo (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  vehiculo_id uuid NOT NULL REFERENCES public.vehiculos(id) ON DELETE CASCADE,
+  herramienta_id uuid NOT NULL REFERENCES public.herramientas(id) ON DELETE CASCADE,
+  cantidad integer NOT NULL DEFAULT 1 CHECK (cantidad > 0),
+  condicion text DEFAULT 'NUEVO' CHECK (condicion IN ('NUEVO', 'BUENO', 'REGULAR', 'DANADO')),
+  notas text,
+  fecha_asignacion timestamp with time zone DEFAULT now(),
+  asignado_por uuid REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT inventario_herramientas_vehiculo_pkey PRIMARY KEY (id),
+  CONSTRAINT uq_herramienta_vehiculo UNIQUE (vehiculo_id, herramienta_id)
+);
+
+-- 4. Checklists de Herramientas de Vehículo al Inicio de Trabajo
+CREATE TABLE IF NOT EXISTS public.checklists_vehiculo_herramientas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  vehiculo_id uuid NOT NULL REFERENCES public.vehiculos(id) ON DELETE CASCADE,
+  empleado_id uuid NOT NULL REFERENCES public.usuarios(id) ON DELETE CASCADE,
+  fecha date NOT NULL DEFAULT CURRENT_DATE,
+  hora time with time zone DEFAULT now(),
+  items jsonb NOT NULL DEFAULT '[]'::jsonb,
+  total_herramientas integer DEFAULT 0,
+  total_presentes integer DEFAULT 0,
+  total_faltantes integer DEFAULT 0,
+  total_danadas integer DEFAULT 0,
+  observaciones_generales text,
+  ubicacion_gps text,
+  foto_evidencia_url text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT checklists_vehiculo_herramientas_pkey PRIMARY KEY (id)
+);
+
+-- Índices de Rendimiento
+CREATE INDEX IF NOT EXISTS idx_herramientas_categoria ON public.herramientas(categoria);
+CREATE INDEX IF NOT EXISTS idx_herramientas_codigo ON public.herramientas(codigo);
+CREATE INDEX IF NOT EXISTS idx_inv_herramientas_emp_empleado ON public.inventario_herramientas_empleado(empleado_id);
+CREATE INDEX IF NOT EXISTS idx_inv_herramientas_veh_vehiculo ON public.inventario_herramientas_vehiculo(vehiculo_id);
+CREATE INDEX IF NOT EXISTS idx_checklists_vehiculo ON public.checklists_vehiculo_herramientas(vehiculo_id);
+CREATE INDEX IF NOT EXISTS idx_checklists_empleado ON public.checklists_vehiculo_herramientas(empleado_id);
+CREATE INDEX IF NOT EXISTS idx_checklists_fecha ON public.checklists_vehiculo_herramientas(fecha DESC);
+
+-- Permisos
+GRANT ALL ON TABLE public.herramientas TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.inventario_herramientas_empleado TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.inventario_herramientas_vehiculo TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.checklists_vehiculo_herramientas TO anon, authenticated, service_role;
+

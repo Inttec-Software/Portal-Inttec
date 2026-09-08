@@ -705,6 +705,44 @@ export default function EmpleadoGastos() {
         </View>
       </View>
 
+      {/* Banner / Acceso Rápido a Checklist de Herramientas */}
+      <View style={{ paddingHorizontal: Spacing.three, marginBottom: Spacing.two }}>
+        <TouchableOpacity
+          onPress={() => router.push('/(empleado)/herramientas' as any)}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: scheme === 'dark' ? '#00cec920' : '#e6fffa',
+            borderColor: '#00cec9',
+            borderWidth: 1,
+            borderRadius: BorderRadius.medium,
+            padding: Spacing.two,
+            gap: 10,
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={{
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: '#00cec9',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}>
+            <Ionicons name="build" size={20} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.text }}>
+              Kit de Herramientas & Checklist
+            </Text>
+            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>
+              Revisa las herramientas de tu camioneta antes de iniciar ruta
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={themeColors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
       {/* Tabs */}
       <View style={styles.tabsContainer}>
         <TouchableOpacity
