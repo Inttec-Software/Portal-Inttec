@@ -102,9 +102,7 @@ export default function EditarGastoForm() {
   const [comentarioProveedor, setComentarioProveedor] = useState('');
   const [facturado, setFacturado] = useState<boolean | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [facturaUri, setFacturaUri] = useState<string | null>(null);
-  const [_facturaBase64, setFacturaBase64] = useState<string | null>(null);
-  const [_facturaExt, setFacturaExt] = useState<string | null>(null);
+  const [facturasFiles, setFacturasFiles] = useState<{ uri: string; base64: string; ext: string }[]>([]);
   const [motivoSinFactura, setMotivoSinFactura] = useState('');
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
 
@@ -124,7 +122,7 @@ export default function EditarGastoForm() {
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
   const [sucursalSearch, setSucursalSearch] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
-  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | null>(null);
+  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
   const [alertaPolitica, setAlertaPolitica] = useState<string | null>(null);
@@ -298,7 +296,15 @@ export default function EditarGastoForm() {
             }
             
             setMotivoSinFactura(data.motivo_sin_factura || '');
-            if (data.factura_url) setFacturaUri(data.factura_url);
+            if (data.factura_url) {
+              const urls = data.factura_url.split(',').filter(Boolean);
+              setFacturasFiles(urls.map((url: string) => ({
+                  uri: url,
+                  base64: '',
+                  ext: url.split('.').pop() || 'jpg',
+                  isRemote: true
+              })));
+            }
             
             const hasShared = data.justificacion && (
               data.justificacion.includes('[Consumo compartido con:') ||
@@ -466,50 +472,72 @@ export default function EditarGastoForm() {
   const _handleCaptureFactura = async () => {
     const hasPermission = await requestCameraPermission();
     if (!hasPermission) return;
-
     try {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: Platform.OS !== 'web',
-        quality: 0.5,
+        quality: 0.7,
         base64: true,
       });
-
       if (!result.canceled && result.assets?.[0]) {
-        setFacturaUri(result.assets[0].uri);
-        setFacturaBase64(result.assets[0].base64 || null);
-        setFacturaExt('jpg');
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setFacturasFiles(prev => [...prev, { uri: optimized.uri, base64: optimized.base64 || '', ext: 'jpg' }]);
       }
     } catch (err) {
       console.error('Invoice camera capture error:', err);
-      if (Platform.OS === 'web') {
-        await handleSelectFacturaGallery();
-      } else {
-        showAlert('Error', 'No se pudo abrir la cámara.');
-      }
+      if (Platform.OS === 'web') { await handleSelectFacturaGallery(); } else { showAlert('Error', 'No se pudo abrir la cámara.'); }
     }
   };
 
   const handleSelectFacturaGallery = async () => {
     const hasPermission = await requestLibraryPermission();
     if (!hasPermission) return;
-
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.5,
+        quality: 0.7,
         base64: true,
       });
-
       if (!result.canceled && result.assets?.[0]) {
-        setFacturaUri(result.assets[0].uri);
-        setFacturaBase64(result.assets[0].base64 || null);
-        setFacturaExt('jpg');
+        const optimized = await optimizeImage(result.assets[0].uri);
+        setFacturasFiles(prev => [...prev, { uri: optimized.uri, base64: optimized.base64 || '', ext: 'jpg' }]);
       }
     } catch (err) {
       console.error('Invoice gallery select error:', err);
       showAlert('Error', 'No se pudo abrir la galería.');
+    }
+  };
+
+  const _handleSelectFacturaDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        const ext = file.name ? file.name.split('.').pop()?.toLowerCase() || 'jpg' : 'jpg';
+        let base64Str = '';
+        if (Platform.OS === 'web') {
+           const res = await fetch(file.uri);
+           const blob = await res.blob();
+           base64Str = await new Promise((resolve, reject) => {
+             const reader = new FileReader();
+             reader.onloadend = () => {
+               if (typeof reader.result === 'string') {
+                 resolve(reader.result.split(',')[1] || '');
+               } else { resolve(''); }
+             };
+             reader.onerror = reject;
+             reader.readAsDataURL(blob);
+           });
+        } else {
+           base64Str = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+        }
+        setFacturasFiles(prev => [...prev, { uri: file.uri, base64: base64Str, ext: ext === 'pdf' ? 'pdf' : 'jpg' }]);
+      }
+    } catch (err) {
+      console.error('Invoice document select error:', err);
+      showAlert('Error', 'No se pudo abrir el selector de documentos.');
     }
   };
 
@@ -743,12 +771,41 @@ export default function EditarGastoForm() {
         publicUrl = urlData.publicUrl;
       }
 
+      let publicInvoiceUrl = '';
+      if (facturado && facturasFiles.length > 0) {
+        try {
+          const uploadedUrls: string[] = [];
+          for (let i = 0; i < facturasFiles.length; i++) {
+            const f = facturasFiles[i];
+            if ((f as any).isRemote && f.uri) {
+              uploadedUrls.push(f.uri);
+            } else if (f.base64) {
+              const ext = f.ext || 'jpg';
+              const contentType = ext === 'pdf' ? 'application/pdf' : (ext === 'xml' ? 'text/xml' : 'image/jpeg');
+              const fileName = `${currentUser.id}/factura_${Date.now()}_${i}.${ext}`;
+              const arrayBuffer = base64ToArrayBuffer(f.base64);
 
+              const { error: uploadError } = await supabase.storage
+                .from('tickets')
+                .upload(fileName, arrayBuffer, { contentType, upsert: true });
+
+              if (!uploadError) {
+                const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+                if (urlData?.publicUrl) uploadedUrls.push(urlData.publicUrl);
+              }
+            }
+          }
+          publicInvoiceUrl = uploadedUrls.join(',');
+        } catch (invErr) {
+          console.warn('Error al subir facturas en editar-gasto (admin):', invErr);
+        }
+      }
 
       const updateData: any = {
         ...gastoPayload,
         status: 'PENDING',
         rejection_feedback: null,
+        factura_url: facturado ? (publicInvoiceUrl || null) : null,
       };
 
       if (imageBase64) {
@@ -814,7 +871,7 @@ export default function EditarGastoForm() {
       }
 
       if (metodoPago !== 'efectivo' && !tipoTarjeta) {
-        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX).');
+        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, Mercado Pago).');
         return;
       }
       if (facturado === null) {
@@ -1809,7 +1866,7 @@ export default function EditarGastoForm() {
                   <View>
                     <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13, marginBottom: Spacing.one }]}>Selecciona la Tarjeta *</Text>
                     <View style={styles.paymentSelector}>
-                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX'] as const).map((card) => (
+                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX', 'MERCADO PAGO'] as const).map((card) => (
                         <TouchableOpacity
                           key={card}
                           onPress={() => setTipoTarjeta(card)}
@@ -1865,9 +1922,7 @@ export default function EditarGastoForm() {
                     onPress={() => {
                       setFacturado(false);
                       setFacturaStatus('PENDIENTE');
-                      setFacturaUri(null);
-                      setFacturaBase64(null);
-                      setFacturaExt(null);
+                      setFacturasFiles([]);
                     }}
                     style={[
                       styles.paymentOption,
@@ -1889,9 +1944,7 @@ export default function EditarGastoForm() {
                     onPress={() => {
                       setFacturado(false);
                       setFacturaStatus('NO');
-                      setFacturaUri(null);
-                      setFacturaBase64(null);
-                      setFacturaExt(null);
+                      setFacturasFiles([]);
                     }}
                     style={[
                       styles.paymentOption,
@@ -1910,6 +1963,96 @@ export default function EditarGastoForm() {
                   </TouchableOpacity>
                 </View>
               </View>
+
+              {facturado === true && (
+                <View style={{ marginBottom: Spacing.two, marginTop: 4 }}>
+                  <Text style={[styles.selectorLabel, { color: themeColors.text, marginBottom: 8 }]}>
+                    Archivos de Factura Adjuntos ({facturasFiles.length})
+                  </Text>
+
+                  {facturasFiles.length > 0 && (
+                    <View style={{ gap: 8, marginBottom: 12 }}>
+                      {facturasFiles.map((file, idx) => (
+                        <View
+                          key={idx}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            backgroundColor: themeColors.backgroundElement,
+                            padding: 10,
+                            borderRadius: BorderRadius.medium,
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                            <Ionicons
+                              name={file.ext === 'pdf' ? 'document-text-outline' : 'image-outline'}
+                              size={22}
+                              color={themeColors.accent}
+                            />
+                            <Text
+                              numberOfLines={1}
+                              style={{ color: themeColors.text, fontSize: 12, fontWeight: '600', flex: 1 }}
+                            >
+                              Factura #{idx + 1} ({file.ext.toUpperCase()})
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              setFacturasFiles(prev => prev.filter((_, i) => i !== idx));
+                            }}
+                            style={{ padding: 4 }}
+                          >
+                            <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TouchableOpacity
+                      onPress={_handleCaptureFactura}
+                      style={{
+                        flex: 1,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        backgroundColor: themeColors.backgroundElement,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        borderRadius: BorderRadius.medium,
+                        paddingVertical: 10,
+                      }}
+                    >
+                      <Ionicons name="camera-outline" size={18} color={themeColors.accent} />
+                      <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600' }}>Cámara</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={_handleSelectFacturaDocument}
+                      style={{
+                        flex: 1,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        backgroundColor: themeColors.backgroundElement,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        borderRadius: BorderRadius.medium,
+                        paddingVertical: 10,
+                      }}
+                    >
+                      <Ionicons name="document-attach-outline" size={18} color={themeColors.accent} />
+                      <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600' }}>Adjuntar Archivo</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
               {facturado === false && facturaStatus === 'PENDIENTE' && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning, marginBottom: Spacing.two, padding: Spacing.two, borderRadius: BorderRadius.medium }]}>

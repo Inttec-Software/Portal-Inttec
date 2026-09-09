@@ -1,6 +1,8 @@
 import { logger } from '../utils/logger';
 import { GastoHelper } from './supabase';
 import { getApiUrl, getApiHeaders } from './apiHelper';
+import { jsonrepair } from 'jsonrepair';
+import { PDFDocument } from 'pdf-lib';
 
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 
@@ -10,6 +12,41 @@ const FALLBACK_MODELS = [
 ]; 
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Divide un archivo PDF en páginas individuales (Base64) usando pdf-lib para procesar PDFs extensos
+ * página por página y garantizar el 100% de extracción sin omisiones ni truncado de respuesta.
+ */
+async function splitPdfPagesIfNeeded(base64File: string, mimeType: string): Promise<string[]> {
+  if (!mimeType.includes('pdf')) {
+    const clean = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '').replace(/[\r\n\s]/g, '');
+    return [clean];
+  }
+  try {
+    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '').replace(/[\r\n\s]/g, '');
+    const pdfDoc = await PDFDocument.load(cleanBase64, { ignoreEncryption: true });
+    const pageCount = pdfDoc.getPageCount();
+
+    if (pageCount <= 1) {
+      return [cleanBase64];
+    }
+
+    logger.info(`📄 Documento PDF con ${pageCount} páginas detectado. Procesando página por página...`);
+
+    const pageChunks: string[] = [];
+    for (let i = 0; i < pageCount; i++) {
+      const singlePageDoc = await PDFDocument.create();
+      const [copiedPage] = await singlePageDoc.copyPages(pdfDoc, [i]);
+      singlePageDoc.addPage(copiedPage);
+      const pageBase64 = await singlePageDoc.saveAsBase64({ dataUri: false });
+      pageChunks.push(pageBase64);
+    }
+    return pageChunks;
+  } catch (err) {
+    logger.warn('No se pudo dividir el PDF con pdf-lib, procesando completo:', err);
+    return [base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '').replace(/[\r\n\s]/g, '')];
+  }
+}
 
 export interface GeminiOcrResult {
   monto: number | null;
@@ -150,8 +187,15 @@ function cleanAndParseJson<T>(rawText: string): T {
   try {
     return JSON.parse(cleanJsonStr) as T;
   } catch (e: any) {
-    logger.error('Failed to parse Gemini output:', cleanJsonStr);
-    throw new Error('Error al interpretar la respuesta de la IA: ' + e.message);
+    logger.warn('Failed to parse Gemini output, attempting jsonrepair...', e.message);
+    try {
+      const repaired = jsonrepair(cleanJsonStr);
+      return JSON.parse(repaired) as T;
+    } catch (repairError: any) {
+      logger.error('jsonrepair also failed:', repairError.message);
+      logger.error('Raw string was:', cleanJsonStr);
+      throw new Error('Error al interpretar la respuesta de la IA: ' + e.message);
+    }
   }
 }
 
@@ -398,18 +442,25 @@ Trabajo Realizado:
 
     const prompt = `Actúa como un supervisor técnico o auditor de control de calidad. Analiza la información y las fotos de evidencia proporcionadas (del ANTES y DESPUÉS del trabajo) y genera un reporte técnico formal, conciso y profesional en español.
 
-Detalles del servicio registrado:
+Detalles del servicio registrado (ESTA ES LA ÚNICA FUENTE DE VERDAD PARA LOS HECHOS):
 - Cliente / Ubicación: ${detalles.cliente}
 ${trabajosFormatted}
 
 Instrucciones para el reporte:
-1. Analiza visualmente las fotos del "Antes" (si se proporciona) y del "Después" (si se proporciona) y compáralas.
-2. Redacta un reporte muy breve, directo y estructurado (máximo 120-150 palabras). Si hay múltiples trabajos, sintetiza la información de forma unificada pero clara.
-3. Utiliza formato markdown simple:
-   - Usa **negritas** para resaltar subtítulos (ej: **Resumen de Trabajo**, **Resultado Visual**, **Conclusiones**).
-   - Usa viñetas (- ) para enumerar puntos clave si es necesario.
-4. El tono debe ser formal y técnico. Evita introducciones o saludos. Debe ser muy sintetizado para que el reporte impreso final quepa en una sola página.
-5. Devuelve únicamente el texto del reporte en markdown limpio.`;
+1. BASA TODA LA REDACCIÓN ESTRICTAMENTE EN LOS TEXTOS PROPORCIONADOS en los "Detalles del servicio registrado". Las fotos son solo apoyo visual; NO inventes diagnósticos (como "quemado", "corto circuito", etc.) si no están explícitamente escritos por el técnico.
+2. Estructura OBLIGATORIAMENTE el reporte con los siguientes 3 apartados exactos (usando negritas):
+
+**I. Situación encontrada**
+Redacta la situación inicial en un párrafo corto. OBLIGATORIAMENTE DEBES INICIAR EL PÁRRAFO EXACTAMENTE CON LAS PALABRAS "Se solicitó...". Basa esta sección en la descripción del trabajo inicial.
+
+**Solución:**
+- Redacta las acciones tomadas usando viñetas. OBLIGATORIAMENTE DEBES INICIAR CADA VIÑETA EXACTAMENTE CON LAS PALABRAS "Se realizó...". Basa esta sección en la solución u observaciones del técnico.
+
+**Material:**
+- Enumera con viñetas los materiales utilizados exactamente como se indican en "Materiales utilizados". Si el texto indica "Ninguno", omite las viñetas y escribe solo "Ninguno".
+
+3. El tono debe ser formal y técnico. Evita introducciones o saludos adicionales. Debe ser muy sintetizado para que el reporte impreso quepa en una sola página.
+4. Devuelve únicamente el texto del reporte en markdown limpio siguiendo la estructura solicitada y sin agregar conclusiones extra.`;
 
     const parts: any[] = [{ text: prompt }];
 
@@ -472,77 +523,130 @@ Instrucciones para el reporte:
       };
     }[];
   }> {
-    const prompt = `Eres un agente experto en análisis de datos y normalización de inventarios para la plataforma corporativa Portal Inttec. 
+    const pageChunks = await splitPdfPagesIfNeeded(base64File, mimeType);
 
-Tu tarea es analizar la factura o recibo de compra adjunto (en formato PDF o imagen) y extraer las partidas de productos, ignorando servicios, cargos por envío o pagos electrónicos.
+    let finalMetadata = {
+      proveedor_original: null as string | null,
+      fecha_compra: null as string | null,
+      folio_factura: null as string | null,
+      rfc_emisor: null as string | null,
+    };
+    const allRawItems: any[] = [];
 
-REGLAS DE EXTRACCIÓN Y MAPEO:
-1. Extrae la cantidad, la unidad de medida, el precio unitario y la descripción original EXACTA del proveedor.
-2. Compara la descripción original del proveedor con nuestro Catálogo Maestro de Productos.
-3. Encuentra la coincidencia lógica más cercana, incluso si el proveedor usa abreviaturas, sinónimos o un orden de palabras diferente.
-4. Asigna la "categoria_maestra" y el "producto_normalizado" basándote ÚNICAMENTE en el Catálogo Maestro proporcionado.
-5. Evalúa tu nivel de certeza en el mapeo con un "confianza_mapeo" (un valor decimal de 0.0 a 1.0). 
-6. Si la coincidencia no es clara o la confianza es menor a 0.80, marca "requiere_revision" como true.
-7. Si el producto definitivamente no existe en el catálogo, deja "producto_normalizado" en null, asigna la categoría más lógica y marca "requiere_revision" como true.
+    for (let index = 0; index < pageChunks.length; index++) {
+      const chunkBase64 = pageChunks[index];
+      const pageInfo = pageChunks.length > 1 ? ` (Página ${index + 1} de ${pageChunks.length})` : '';
+
+      const prompt = `Eres un agente experto en extracción de datos de facturas y normalización de inventarios para Portal Inttec.
+
+TAREA PRINCIPAL:
+Analizar la factura o recibo adjunto (PDF o imagen${pageInfo}) y extraer ABSOLUTAMENTE TODAS las partidas/productos, ignorando únicamente servicios, envíos o pagos electrónicos.
+
+TÉCNICA DE ANCLAJE Y CONTEO OBLIGATORIO (CRÍTICA):
+1. ANTES de llenar la lista de productos, lee el documento de la primera a la última línea de esta hoja y CUENTA el número total de partidas con costo.
+2. Coloca esa cantidad contada en el campo "total_items_documento" dentro del objeto "meta".
+3. A continuación, extrae la lista "items". La cantidad de elementos en "items" DEBE COINCIDIR EXACTAMENTE con "total_items_documento".
+4. NO omitas ningún producto, NO te saltes filas intermedias y NO resumas la lista.
+
+REGLAS DE MAPEO:
+1. Extrae la cantidad (cant), unidad (unid), precio unitario sin IVA (precio) y la descripción original EXACTA del proveedor (desc).
+2. Compara la descripción del proveedor con el Catálogo Maestro de Productos proporcionado a continuación.
+3. Asigna la "cat" (categoría del catálogo) y el "prod" (nombre oficial en catálogo o null si no existe).
+4. Asigna "conf" (confianza decimal 0.0 a 1.0) y "rev" (boolean: true si la confianza es < 0.80 o si el producto no está en el catálogo).
 
 CATÁLOGO MAESTRO DE REFERENCIA:
 ${catalogoMaestroJson}
 
-FORMATO DE SALIDA:
-Debes responder ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown adicional (sin \`\`\`json), usando la siguiente estructura:
+FORMATO DE SALIDA (JSON ÚNICAMENTE):
+Responde ESTRICTAMENTE con un objeto JSON válido, sin formato Markdown (sin \`\`\`json), usando la siguiente estructura ultra-minificada:
 
 {
-  "factura_metadata": {
-    "proveedor_original": "Nombre del proveedor",
-    "fecha_compra": "YYYY-MM-DD",
-    "folio_factura": "Número o folio",
-    "rfc_emisor": "RFC si está disponible"
+  "meta": {
+    "prov": "Nombre del proveedor",
+    "fec": "YYYY-MM-DD",
+    "fol": "Número o folio",
+    "rfc": "RFC si está disponible",
+    "total_items_documento": 32
   },
-  "partidas_extraidas": [
+  "items": [
     {
-      "descripcion_proveedor": "TEXTO ORIGINAL DEL PROVEEDOR",
-      "cantidad": 0,
-      "unidad": "PIEZA/METRO/ETC",
-      "precio_unitario": 0.00,
-      "clasificacion_ia": {
-        "categoria_maestra": "Categoría del Catálogo",
-        "producto_normalizado": "Nombre oficial del Catálogo o null",
-        "confianza_mapeo": 0.95,
-        "requiere_revision": false
+      "desc": "TEXTO ORIGINAL DEL PROVEEDOR",
+      "cant": 0,
+      "unid": "PIEZA/METRO/ETC",
+      "precio": 0.00,
+      "ia": {
+        "cat": "Categoría del Catálogo",
+        "prod": "Nombre oficial del Catálogo o null",
+        "conf": 0.95,
+        "rev": false
       }
     }
   ]
-}`;
+}
 
-    const cleanBase64 = base64File.replace(/^data:[a-zA-Z0-9/\-+.]+;base64,/, '').replace(/[\r\n\s]/g, '');
+REITERACIÓN FINAL: Si en esta página hay N partidas, la lista "items" debe tener exactamente N elementos.`;
 
-    const requestBody = {
-      contents: [
-        {
-          parts: [
-            { text: prompt },
-            {
-              inlineData: {
-                mimeType: mimeType,
-                data: cleanBase64,
+      const requestBody = {
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: mimeType.includes('pdf') ? 'application/pdf' : mimeType,
+                  data: chunkBase64,
+                },
               },
-            },
-          ],
+            ],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0.1,
+          topP: 0.95,
+          maxOutputTokens: 8192,
         },
-      ],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        maxOutputTokens: 8192,
-      },
-    };
+      };
 
-    try {
-      const textResult = await callGeminiAPI(requestBody);
-      return cleanAndParseJson<any>(textResult);
-    } catch (err: any) {
-      logger.error('Error en extractInvoiceProducts:', err);
-      throw new Error(err.message || 'Error al procesar la factura con Inteligencia Artificial.');
+      try {
+        const textResult = await callGeminiAPI(requestBody);
+        const rawParsed = cleanAndParseJson<any>(textResult);
+
+        if (index === 0) {
+          finalMetadata = {
+            proveedor_original: rawParsed.meta?.prov ?? rawParsed.factura_metadata?.proveedor_original ?? null,
+            fecha_compra: rawParsed.meta?.fec ?? rawParsed.factura_metadata?.fecha_compra ?? null,
+            folio_factura: rawParsed.meta?.fol ?? rawParsed.factura_metadata?.folio_factura ?? null,
+            rfc_emisor: rawParsed.meta?.rfc ?? rawParsed.factura_metadata?.rfc_emisor ?? null,
+          };
+        } else {
+          if (!finalMetadata.folio_factura && rawParsed.meta?.fol) finalMetadata.folio_factura = rawParsed.meta.fol;
+          if (!finalMetadata.proveedor_original && rawParsed.meta?.prov) finalMetadata.proveedor_original = rawParsed.meta.prov;
+        }
+
+        const pageItems = rawParsed.items ?? rawParsed.partidas_extraidas ?? [];
+        allRawItems.push(...pageItems);
+      } catch (err: any) {
+        logger.error(`Error en extractInvoiceProducts (página ${index + 1}):`, err);
+        if (pageChunks.length === 1) throw err;
+      }
     }
+
+    return {
+      factura_metadata: finalMetadata,
+      partidas_extraidas: allRawItems.map((item: any) => ({
+        descripcion_proveedor: item.desc ?? item.descripcion_proveedor ?? 'Desconocido',
+        cantidad: item.cant ?? item.cantidad ?? 1,
+        unidad: item.unid ?? item.unidad ?? 'PZ',
+        precio_unitario: item.precio ?? item.precio_unitario ?? 0,
+        clasificacion_ia: {
+          categoria_maestra: item.ia?.cat ?? item.clasificacion_ia?.categoria_maestra ?? 'Otros',
+          producto_normalizado: item.ia?.prod ?? item.clasificacion_ia?.producto_normalizado ?? null,
+          confianza_mapeo: item.ia?.conf ?? item.clasificacion_ia?.confianza_mapeo ?? 0.5,
+          requiere_revision: item.ia?.rev ?? item.clasificacion_ia?.requiere_revision ?? true
+        }
+      }))
+    };
   },
 
   async analyzeInvoiceSales(

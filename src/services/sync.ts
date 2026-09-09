@@ -31,6 +31,7 @@ export interface OfflineGastoItem {
   estado?: string | null;
   facturado?: boolean | null;
   base64Factura?: string | null;
+  base64Facturas?: { base64: string; ext?: string }[] | null;
   localFacturaUri?: string | null; // URL local guardada en disco
   facturaExt?: string | null;
   motivo_sin_factura?: string | null;
@@ -207,35 +208,52 @@ export const SyncService = {
             publicUrl = urlData.publicUrl;
           }
 
-          let b64Factura = item.base64Factura;
-          if (!b64Factura && item.localFacturaUri) {
-           try {
-               b64Factura = await new File(item.localFacturaUri).text();
-             } catch (e) {
-               console.warn('No se pudo leer factura local:', e);
-             }
+          const facturasList: { base64: string; ext?: string }[] = [];
+          if (Array.isArray(item.base64Facturas)) {
+            facturasList.push(...item.base64Facturas);
+          } else {
+            let b64Factura = item.base64Factura;
+            if (!b64Factura && item.localFacturaUri) {
+              try {
+                b64Factura = await new File(item.localFacturaUri).text();
+              } catch (e) {
+                console.warn('No se pudo leer factura local:', e);
+              }
+            }
+            if (b64Factura) {
+              facturasList.push({ base64: b64Factura, ext: item.facturaExt || undefined });
+            }
           }
 
-          // 1.5 Subir factura a Supabase Storage si existe
-          if (b64Factura) {
-            const ext = item.facturaExt || 'jpg';
-            const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-            const fileName = `${item.empleado_id}/factura_${Date.now()}.${ext}`;
-            const arrayBuffer = base64ToArrayBuffer(b64Factura);
+          // 1.5 Subir facturas a Supabase Storage si existen
+          if (facturasList.length > 0) {
+            const uploadedInvoiceUrls: string[] = [];
+            for (let i = 0; i < facturasList.length; i++) {
+              const fItem = facturasList[i];
+              const ext = fItem.ext || 'jpg';
+              const contentType = ext === 'pdf' ? 'application/pdf' : (ext === 'xml' ? 'text/xml' : 'image/jpeg');
+              const fileName = `${item.empleado_id}/factura_${Date.now()}_${i}.${ext}`;
+              const arrayBuffer = base64ToArrayBuffer(fItem.base64);
 
-            const { data: _uploadData, error: uploadError } = await supabase.storage
-              .from('tickets')
-              .upload(fileName, arrayBuffer, {
-                contentType: contentType,
-                upsert: true,
-              });
+              const { data: _uploadData, error: uploadError } = await supabase.storage
+                .from('tickets')
+                .upload(fileName, arrayBuffer, {
+                  contentType: contentType,
+                  upsert: true,
+                });
 
-            if (uploadError) {
-              throw new Error(`Storage invoice upload error: ${uploadError.message}`);
+              if (uploadError) {
+                console.error(`Storage invoice upload error [${i}]:`, uploadError.message);
+              } else {
+                const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+                if (urlData?.publicUrl) {
+                  uploadedInvoiceUrls.push(urlData.publicUrl);
+                }
+              }
             }
-
-            const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-            publicInvoiceUrl = urlData.publicUrl;
+            if (uploadedInvoiceUrls.length > 0) {
+              publicInvoiceUrl = uploadedInvoiceUrls.join(',');
+            }
           }
 
           // 2. Insertar registro en Supabase Gastos Table

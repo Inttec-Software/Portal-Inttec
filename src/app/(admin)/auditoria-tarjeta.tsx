@@ -37,6 +37,7 @@ const TARJETAS = [
   { key: 'MARRIOT', label: 'Marriott', color: '#B5121B' },
   { key: 'BANORTE', label: 'Banorte',  color: '#C8102E' },
   { key: 'INVEX',   label: 'Invex',    color: '#F48220' },
+  { key: 'MERCADO PAGO', label: 'Mercado Pago', color: '#00B1EA' },
 ];
 
 const TIPOS_PAGO = [
@@ -70,7 +71,7 @@ const AMOUNT_TOLERANCE = 0.05;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TarjetaKey = 'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX';
+type TarjetaKey = 'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO';
 type MetodoPagoKey = 'tarjeta_credito' | 'tarjeta_debito' | 'tarjeta';
 
 interface MatchedTransaction {

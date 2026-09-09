@@ -263,6 +263,10 @@ export const GastoHelper = {
     if (!g) return '';
     return g.sucursal_rel?.nombre || g.sucursal || '';
   },
+  getFacturaUrls: (g: Gasto | null | undefined): string[] => {
+    if (!g || !g.factura_url) return [];
+    return g.factura_url.split(',').map(u => u.trim()).filter(Boolean);
+  },
   GASTOS_SELECT_QUERY: `*, subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)), proveedor_rel:proveedores(id, nombre), cliente_rel:clientes(id, nombre), sucursal_rel:sucursales_cliente(id, nombre)`
 };
 

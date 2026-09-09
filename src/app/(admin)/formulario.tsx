@@ -89,9 +89,7 @@ export default function GastoForm() {
   const [facturaStatus, setFacturaStatus] = useState<'SI' | 'PENDIENTE' | 'NO' | null>(null);
   const [comentarioPendiente, setComentarioPendiente] = useState('');
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [facturaUri, setFacturaUri] = useState<string | null>(null);
-  const [facturaBase64, setFacturaBase64] = useState<string | null>(null);
-  const [facturaExt, setFacturaExt] = useState<string | null>(null);
+  const [facturasFiles, setFacturasFiles] = useState<{ uri: string; base64: string; ext: string }[]>([]);
   const [motivoSinFactura, setMotivoSinFactura] = useState('');
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
 
@@ -108,7 +106,7 @@ export default function GastoForm() {
   const [detalleServicioProyecto, setDetalleServicioProyecto] = useState('');
   const [sucursal, setSucursal] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
-  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | null>(null);
+  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
   const [alertaPolitica, setAlertaPolitica] = useState<string | null>(null);
@@ -386,52 +384,72 @@ export default function GastoForm() {
   const _handleCaptureFactura = async () => {
     const hasPermission = await requestCameraPermission();
     if (!hasPermission) return;
-
     try {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: Platform.OS !== 'web',
-        quality: 0.5,
+        quality: 0.7,
         base64: true,
       });
-
       if (!result.canceled && result.assets?.[0]) {
         const optimized = await optimizeImage(result.assets[0].uri);
-        setFacturaUri(optimized.uri);
-        setFacturaBase64(optimized.base64 || null);
-        setFacturaExt('jpg');
+        setFacturasFiles(prev => [...prev, { uri: optimized.uri, base64: optimized.base64 || '', ext: 'jpg' }]);
       }
     } catch (err) {
       console.error('Invoice camera capture error:', err);
-      if (Platform.OS === 'web') {
-        await handleSelectFacturaGallery();
-      } else {
-        showAlert('Error', 'No se pudo abrir la cámara.');
-      }
+      if (Platform.OS === 'web') { await handleSelectFacturaGallery(); } else { showAlert('Error', 'No se pudo abrir la cámara.'); }
     }
   };
 
   const handleSelectFacturaGallery = async () => {
     const hasPermission = await requestLibraryPermission();
     if (!hasPermission) return;
-
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.5,
+        quality: 0.7,
         base64: true,
       });
-
       if (!result.canceled && result.assets?.[0]) {
         const optimized = await optimizeImage(result.assets[0].uri);
-        setFacturaUri(optimized.uri);
-        setFacturaBase64(optimized.base64 || null);
-        setFacturaExt('jpg');
+        setFacturasFiles(prev => [...prev, { uri: optimized.uri, base64: optimized.base64 || '', ext: 'jpg' }]);
       }
     } catch (err) {
       console.error('Invoice gallery select error:', err);
       showAlert('Error', 'No se pudo abrir la galería.');
+    }
+  };
+
+  const _handleSelectFacturaDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        const ext = file.name ? file.name.split('.').pop()?.toLowerCase() || 'jpg' : 'jpg';
+        let base64Str = '';
+        if (Platform.OS === 'web') {
+           const res = await fetch(file.uri);
+           const blob = await res.blob();
+           base64Str = await new Promise((resolve, reject) => {
+             const reader = new FileReader();
+             reader.onloadend = () => {
+               if (typeof reader.result === 'string') {
+                 resolve(reader.result.split(',')[1] || '');
+               } else { resolve(''); }
+             };
+             reader.onerror = reject;
+             reader.readAsDataURL(blob);
+           });
+        } else {
+           base64Str = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+        }
+        setFacturasFiles(prev => [...prev, { uri: file.uri, base64: base64Str, ext: ext === 'pdf' ? 'pdf' : 'jpg' }]);
+      }
+    } catch (err) {
+      console.error('Invoice document select error:', err);
+      showAlert('Error', 'No se pudo abrir el selector de documentos.');
     }
   };
 
@@ -808,24 +826,30 @@ export default function GastoForm() {
         }
 
         // Subir factura si se seleccionó una
+        // Subir factura si se seleccionó una
         let publicInvoiceUrl = '';
-        if (facturado && facturaBase64) {
+        if (facturado && facturasFiles.length > 0) {
           try {
-            const ext = facturaExt || 'jpg';
-            const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-            const fileName = `${currentUser.id}/factura_${Date.now()}.${ext}`;
-            const arrayBuffer = base64ToArrayBuffer(facturaBase64);
+            const uploadedUrls: string[] = [];
+            for (let i = 0; i < facturasFiles.length; i++) {
+              const f = facturasFiles[i];
+              const ext = f.ext || 'jpg';
+              const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
+              const fileName = `${currentUser.id}/factura_${Date.now()}_${i}.${ext}`;
+              const arrayBuffer = base64ToArrayBuffer(f.base64);
 
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('tickets')
-              .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
+              const { data: uploadData, error: uploadError } = await supabase.storage
+                .from('tickets')
+                .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
 
-            if (!uploadError) {
-              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-              publicInvoiceUrl = urlData.publicUrl;
-            } else {
-              console.warn('Invoice storage upload skipped or failed:', uploadError);
+              if (!uploadError) {
+                const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+                uploadedUrls.push(urlData.publicUrl);
+              } else {
+                console.warn('Invoice storage upload skipped or failed:', uploadError);
+              }
             }
+            publicInvoiceUrl = uploadedUrls.join(',');
           } catch (invErr) {
             console.warn('Invoice storage upload exception (continuing):', invErr);
           }
@@ -906,8 +930,8 @@ export default function GastoForm() {
               justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${i + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`,
               base64Foto: imageBase64 || undefined,
               fotoExt: imageExt,
-              base64Factura: facturaBase64 || undefined,
-              facturaExt: facturaExt,
+              base64Factura: facturasFiles.length > 0 ? JSON.stringify(facturasFiles) : undefined,
+              facturaExt: "json",
               vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
               kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
               litros: esGasolina ? Number(litrosGasolina) : undefined,
@@ -918,8 +942,8 @@ export default function GastoForm() {
             ...gastoPayload,
             base64Foto: imageBase64 || undefined,
             fotoExt: imageExt,
-            base64Factura: facturaBase64 || undefined,
-            facturaExt: facturaExt,
+            base64Factura: facturasFiles.length > 0 ? JSON.stringify(facturasFiles) : undefined,
+            facturaExt: "json",
             vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
             kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
             litros: esGasolina ? Number(litrosGasolina) : undefined,
@@ -966,7 +990,7 @@ export default function GastoForm() {
       }
 
       if (metodoPago !== 'efectivo' && !tipoTarjeta) {
-        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX).');
+        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, Mercado Pago).');
         return;
       }
       if (facturado === null) {
@@ -2086,7 +2110,7 @@ export default function GastoForm() {
                   <View>
                     <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13, marginBottom: Spacing.one }]}>Selecciona la Tarjeta *</Text>
                     <View style={styles.paymentSelector}>
-                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX'] as const).map((card) => (
+                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX', 'MERCADO PAGO'] as const).map((card) => (
                         <TouchableOpacity
                           key={card}
                           onPress={() => setTipoTarjeta(card)}
@@ -2144,9 +2168,7 @@ export default function GastoForm() {
                       setFacturado(false);
                       setFacturaStatus('PENDIENTE');
                       setMotivoSinFactura('PENDIENTE_ENTREGA');
-                      setFacturaUri(null);
-                      setFacturaBase64(null);
-                      setFacturaExt(null);
+                      setFacturasFiles([]);
                     }}
                     style={[
                       styles.paymentOption,
@@ -2168,9 +2190,7 @@ export default function GastoForm() {
                     onPress={() => {
                       setFacturado(false);
                       setFacturaStatus('NO');
-                      setFacturaUri(null);
-                      setFacturaBase64(null);
-                      setFacturaExt(null);
+                      setFacturasFiles([]);
                     }}
                     style={[
                       styles.paymentOption,
