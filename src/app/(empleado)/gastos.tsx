@@ -1160,31 +1160,57 @@ export default function EmpleadoGastos() {
 
                   {selectedGasto.facturado ? (
                     <View style={styles.detailItem}>
-                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Archivo de Factura</Text>
-                      {selectedGasto.factura_url || (selectedGasto.isOffline && (selectedGasto as any).base64Factura) ? (
-                        <TouchableOpacity
-                          style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15' }]}
-                          onPress={() => {
-                            const url = selectedGasto.factura_url;
-                            if (url && url.toLowerCase().includes('.pdf')) {
-                              Linking.openURL(url).catch(() => {
-                                Alert.alert('Error', 'No se pudo abrir el archivo PDF.');
-                              });
-                            } else {
-                              const imgUrl = url || `data:image/jpeg;base64,${(selectedGasto as any).base64Factura}`;
-                              setActivePreviewUrl(imgUrl);
-                              setViewerVisible(true);
-                            }
-                          }}
-                        >
-                          <Ionicons name="image" size={18} color={themeColors.accent} />
-                          <Text style={[styles.invoiceLinkText, { color: themeColors.accent }]}>
-                            Ver Factura
-                          </Text>
-                        </TouchableOpacity>
-                      ) : (
-                        <Text style={[styles.detailValue, { color: themeColors.textSecondary }]}>Sin archivo adjunto</Text>
-                      )}
+                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>
+                        Facturas Adjuntas ({GastoHelper.getFacturaUrls(selectedGasto).length})
+                      </Text>
+                      {(() => {
+                        const urls = GastoHelper.getFacturaUrls(selectedGasto);
+                        if (urls.length > 0) {
+                          return (
+                            <View style={{ gap: 6, marginTop: 4 }}>
+                              {urls.map((url, idx) => (
+                                <TouchableOpacity
+                                  key={idx}
+                                  style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15' }]}
+                                  onPress={() => {
+                                    if (url.toLowerCase().includes('.pdf')) {
+                                      Linking.openURL(url).catch(() => {
+                                        Alert.alert('Error', 'No se pudo abrir el archivo PDF.');
+                                      });
+                                    } else {
+                                      setActivePreviewUrl(url);
+                                      setViewerVisible(true);
+                                    }
+                                  }}
+                                >
+                                  <Ionicons name={url.toLowerCase().includes('.pdf') ? 'document-text-outline' : 'image-outline'} size={18} color={themeColors.accent} />
+                                  <Text style={[styles.invoiceLinkText, { color: themeColors.accent }]}>
+                                    {urls.length > 1 ? `Ver Factura #${idx + 1}` : 'Ver Factura'}
+                                  </Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          );
+                        } else if (selectedGasto.isOffline && (selectedGasto as any).base64Factura) {
+                          return (
+                            <TouchableOpacity
+                              style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15' }]}
+                              onPress={() => {
+                                const imgUrl = `data:image/jpeg;base64,${(selectedGasto as any).base64Factura}`;
+                                setActivePreviewUrl(imgUrl);
+                                setViewerVisible(true);
+                              }}
+                            >
+                              <Ionicons name="image" size={18} color={themeColors.accent} />
+                              <Text style={[styles.invoiceLinkText, { color: themeColors.accent }]}>Ver Factura (Offline)</Text>
+                            </TouchableOpacity>
+                          );
+                        } else {
+                          return (
+                            <Text style={[styles.detailValue, { color: themeColors.textSecondary }]}>Sin archivo adjunto</Text>
+                          );
+                        }
+                      })()}
                     </View>
                   ) : (
                     <View style={styles.detailItem}>

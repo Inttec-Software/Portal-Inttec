@@ -32,6 +32,7 @@ export interface ReportProducto {
   nombre_oficial: string;
   categoria_id: string;
   stock_actual: number;
+  precio_unitario?: number;
   activo: boolean;
 }
 
@@ -39,6 +40,20 @@ export interface ReportCategoria {
   id: string;
   nombre: string;
 }
+
+/**
+ * Escapes values for CSV export and protects against Excel formula injection (#¿NOMBRE? or #NAME? errors)
+ * when text starts with '=', '+', '-', or '@'.
+ */
+const escapeCSVCell = (text?: string | number | null): string => {
+  if (text === null || text === undefined || text === '') return '""';
+  let str = String(text).replace(/"/g, '""');
+  if (/^[\=\+\-\@]/.test(str)) {
+    str = `'${str}`;
+  }
+  return `"${str}"`;
+};
+
 
 /**
  * Detecta si un gasto tiene alguna alerta de política (como alcohol, tabaco o montos sospechosos)
@@ -406,12 +421,6 @@ export const ReportGenerator = {
     // Rellenar filas
     gastos.forEach((g) => {
       const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
-      const escape = (text?: string | null) => {
-        if (!text) return '';
-        const cleaned = text.replace(/"/g, '""');
-        return `"${cleaned}"`;
-      };
-
       let estadoFactura = 'No Facturado';
       if (g.facturado === true) {
         estadoFactura = 'Facturado';
@@ -424,21 +433,21 @@ export const ReportGenerator = {
       const row = [
         g.id,
         fecha,
-        escape(g.empleado_nombre),
+        escapeCSVCell(g.empleado_nombre),
         g.monto,
-        escape(GastoHelper.getCategoria(g)),
-        escape(GastoHelper.getSubcategoria(g)),
-        escape(GastoHelper.getProveedor(g)),
-        escape(GastoHelper.getCliente(g)),
-        escape(g.tipo_servicio_proyecto),
-        escape(g.detalle_servicio_proyecto),
-        escape(GastoHelper.getSucursal(g)),
+        escapeCSVCell(GastoHelper.getCategoria(g)),
+        escapeCSVCell(GastoHelper.getSubcategoria(g)),
+        escapeCSVCell(GastoHelper.getProveedor(g)),
+        escapeCSVCell(GastoHelper.getCliente(g)),
+        escapeCSVCell(g.tipo_servicio_proyecto),
+        escapeCSVCell(g.detalle_servicio_proyecto),
+        escapeCSVCell(GastoHelper.getSucursal(g)),
         g.metodo_pago,
-        escape(g.tipo_tarjeta),
-        escape(estadoFactura),
-        escape(g.motivo_sin_factura),
+        escapeCSVCell(g.tipo_tarjeta),
+        escapeCSVCell(estadoFactura),
+        escapeCSVCell(g.motivo_sin_factura),
         g.status,
-        escape(commentText),
+        escapeCSVCell(commentText),
       ].join(',');
 
       csvContent += row + '\n';
@@ -651,11 +660,6 @@ export const ReportGenerator = {
       throw new Error('No hay registros de gasolina para exportar.');
     }
 
-    const escape = (text?: string | null) => {
-      if (!text) return '';
-      return `"${String(text).replace(/"/g, '""')}"`;
-    };
-
     let csvContent = '\uFEFF'; // BOM para Excel UTF-8
     csvContent += 'Fecha,Empresa Registradora,Conductor,Vehículo Marca,Vehículo Modelo,Placas,Km Anterior,Km Actual,Distancia Recorrida (km),Litros,Rendimiento (km/L),Costo Total (MXN),Observaciones\n';
 
@@ -664,18 +668,18 @@ export const ReportGenerator = {
       const fecha = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : r.fecha;
       const row = [
         fecha,
-        escape(r.empresa_origen || 'N/A'),
-        escape(r.empleado_nombre),
-        escape(r.vehiculo_marca),
-        escape(r.vehiculo_modelo),
-        escape(r.vehiculo_placas),
+        escapeCSVCell(r.empresa_origen || 'N/A'),
+        escapeCSVCell(r.empleado_nombre),
+        escapeCSVCell(r.vehiculo_marca),
+        escapeCSVCell(r.vehiculo_modelo),
+        escapeCSVCell(r.vehiculo_placas),
         r.kilometraje_anterior ?? 'N/A',
         r.kilometraje_actual || 0,
         r.distancia_recorrida ?? 'N/A',
         Number(r.litros || 0).toFixed(2),
         r.rendimiento_km_l ? `${r.rendimiento_km_l} km/L` : 'N/A',
         Number(r.costo_total || 0).toFixed(2),
-        escape(r.observaciones),
+        escapeCSVCell(r.observaciones),
       ].join(',');
       csvContent += row + '\n';
     });
@@ -996,20 +1000,14 @@ export const ReportGenerator = {
 
     asistencias.forEach((a) => {
       const empleadoNombre = empleadosMap.get(a.empleado_id) || 'Desconocido';
-      const escape = (text?: string | null) => {
-        if (!text) return '';
-        const cleaned = text.replace(/"/g, '""');
-        return `"${cleaned}"`;
-      };
-
       const row = [
         a.id,
         a.fecha || '',
-        escape(empleadoNombre),
+        escapeCSVCell(empleadoNombre),
         a.hora_entrada || '',
-        escape(a.direccion_entrada),
+        escapeCSVCell(a.direccion_entrada),
         a.hora_salida || '',
-        escape(a.direccion_salida),
+        escapeCSVCell(a.direccion_salida),
       ].join(',');
 
       csvContent += row + '\n';
@@ -1069,6 +1067,8 @@ export const ReportGenerator = {
       const statusLabel = p.activo ? 'Activo' : 'Inactivo';
       const statusColor = p.activo ? '#4CAF50' : '#F44336';
       const stockColor = p.stock_actual === 0 ? '#F44336' : p.stock_actual <= 5 ? '#FFC107' : '#333';
+      const precioUnitario = Number(p.precio_unitario || (p as any).precio || 0);
+      const valorTotal = Number(p.stock_actual || 0) * precioUnitario;
 
       tableRows += `
         <tr>
@@ -1076,13 +1076,16 @@ export const ReportGenerator = {
           <td style="font-weight: bold;">${p.nombre_oficial || 'N/A'}</td>
           <td>${categoriaNombre}</td>
           <td style="text-align: right; font-weight: bold; color: ${stockColor};">${p.stock_actual} pzas</td>
+          <td style="text-align: right;">$${precioUnitario.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="text-align: right; font-weight: bold; color: #0d1b2a;">$${valorTotal.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td><span style="color: ${statusColor}; font-weight: bold;">${statusLabel}</span></td>
         </tr>
       `;
     });
 
-    const totalStock = productos.reduce((sum, p) => sum + Number(p.stock_actual), 0);
+    const totalStock = productos.reduce((sum, p) => sum + Number(p.stock_actual || 0), 0);
     const activeProducts = productos.filter((p) => p.activo).length;
+    const granTotalValor = productos.reduce((sum, p) => sum + (Number(p.stock_actual || 0) * Number(p.precio_unitario || (p as any).precio || 0)), 0);
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -1119,12 +1122,6 @@ export const ReportGenerator = {
             color: #777;
             font-size: 12px;
             margin-top: 5px;
-          }
-          .summary-grid {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 25px;
-            gap: 15px;
           }
           .summary-card {
             flex: 1;
@@ -1178,63 +1175,51 @@ export const ReportGenerator = {
             font-weight: 900;
             font-style: italic;
             font-size: 38px;
-            color: #0d1b2a;
-            line-height: 1;
-            letter-spacing: 0.5px;
-          }
-          .logo-tagline {
-            font-weight: 700;
-            font-size: 7px;
-            color: #777;
-            letter-spacing: 0.8px;
-            margin-top: 2px;
-            text-transform: uppercase;
-          }
-          .logo-img {
-            width: 300px;
-            height: 100px;
-            object-fit: contain;
+            letter-spacing: 1px;
           }
         </style>
       </head>
       <body>
-        <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #0d1b2a; padding-bottom: 15px; margin-bottom: 20px; border: none;">
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: none;">
           <tr>
-            <td style="vertical-align: middle; border: none; padding: 0;">
-              <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
-              <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
+            <td style="border: none; padding: 0; vertical-align: top;">
+              <h1 class="title">${title}</h1>
+              <div class="subtitle">Generado el ${new Date().toLocaleDateString('es-MX')} - ${branding.name}</div>
             </td>
-            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
-              <table style="display: inline-table; border-collapse: collapse; border: none;">
-                <tr>
-                  
-                  <td style="vertical-align: middle; border: none; padding: 0;">
-                    <img class="logo-img" src="${branding.logo}" />
-                  </td>
-                </tr>
-              </table>
+            <td style="border: none; padding: 0; text-align: right; vertical-align: top;">
+              ${
+                branding.logo
+                  ? `<img src="${branding.logo}" style="max-height: 50px; max-width: 180px; object-fit: contain;" />`
+                  : `<div class="logo-brand">${branding.name}</div>`
+              }
             </td>
           </tr>
         </table>
 
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; border: none;">
           <tr>
-            <td style="width: 33%; padding-right: 10px; border: none;">
+            <td style="width: 25%; padding-right: 5px; border: none;">
               <div class="summary-card">
                 <div class="label">Total Artículos Catálogo</div>
                 <div class="value">${productos.length}</div>
               </div>
             </td>
-            <td style="width: 33%; padding-left: 5px; padding-right: 5px; border: none;">
+            <td style="width: 25%; padding-left: 5px; padding-right: 5px; border: none;">
               <div class="summary-card">
                 <div class="label">Productos Activos</div>
                 <div class="value" style="color: #4CAF50;">${activeProducts}</div>
               </div>
             </td>
-            <td style="width: 33%; padding-left: 10px; border: none;">
+            <td style="width: 25%; padding-left: 5px; padding-right: 5px; border: none;">
               <div class="summary-card">
-                <div class="label">Total Existencias Stock</div>
+                <div class="label">Existencias Stock</div>
                 <div class="value" style="color: #1b4965;">${totalStock}</div>
+              </div>
+            </td>
+            <td style="width: 25%; padding-left: 5px; border: none;">
+              <div class="summary-card">
+                <div class="label">Valor Total Inventario</div>
+                <div class="value" style="color: #2b6cb0;">$${granTotalValor.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               </div>
             </td>
           </tr>
@@ -1243,16 +1228,27 @@ export const ReportGenerator = {
         <table>
           <thead>
             <tr>
-              <th style="width: 15%">SKU Interno</th>
-              <th style="width: 40%">Nombre Oficial</th>
-              <th style="width: 20%">Categoría</th>
-              <th style="width: 15%; text-align: right;">Existencias</th>
-              <th style="width: 10%">Estado</th>
+              <th style="width: 14%">SKU Interno</th>
+              <th style="width: 32%">Nombre Oficial</th>
+              <th style="width: 16%">Categoría</th>
+              <th style="width: 10%; text-align: right;">Stock</th>
+              <th style="width: 12%; text-align: right;">Precio Unit.</th>
+              <th style="width: 12%; text-align: right;">Valor Total</th>
+              <th style="width: 4%; text-align: center;">Estado</th>
             </tr>
           </thead>
           <tbody>
             ${tableRows}
           </tbody>
+          <tfoot>
+            <tr style="background-color: #f1f3f5; font-weight: bold; border-top: 2px solid #0d1b2a;">
+              <td colspan="3">VALOR TOTAL CONSOLIDADO DE INVENTARIO</td>
+              <td style="text-align: right;">${totalStock} pzas</td>
+              <td style="text-align: right;">-</td>
+              <td style="text-align: right; color: #0d1b2a;">$${granTotalValor.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN</td>
+              <td></td>
+            </tr>
+          </tfoot>
         </table>
 
         <div class="footer">
@@ -1328,21 +1324,20 @@ export const ReportGenerator = {
     const categoriasMap = new Map(categorias.map((c) => [c.id, c.nombre]));
 
     let csvContent = '\uFEFF'; // BOM
-    csvContent += 'SKU Interno,Nombre Oficial,Categoría,Stock Actual,Estado (Activo)\n';
+    csvContent += 'SKU Interno,Nombre Oficial,Categoría,Stock Actual,Precio Unitario ($),Valor Total ($),Estado (Activo)\n';
 
     productos.forEach((p) => {
       const categoriaNombre = categoriasMap.get(p.categoria_id) || 'N/A';
-      const escape = (text?: string | null) => {
-        if (!text) return '';
-        const cleaned = text.replace(/"/g, '""');
-        return `"${cleaned}"`;
-      };
+      const precioUnitario = Number(p.precio_unitario || (p as any).precio || 0);
+      const valorTotal = Number(p.stock_actual || 0) * precioUnitario;
 
       const row = [
-        escape(p.sku_interno),
-        escape(p.nombre_oficial),
-        escape(categoriaNombre),
+        escapeCSVCell(p.sku_interno),
+        escapeCSVCell(p.nombre_oficial),
+        escapeCSVCell(categoriaNombre),
         p.stock_actual,
+        precioUnitario.toFixed(2),
+        valorTotal.toFixed(2),
         p.activo ? 'Activo' : 'Inactivo',
       ].join(',');
 
@@ -1657,19 +1652,13 @@ export const ReportGenerator = {
       const fecha = c.fecha ? c.fecha.split('T')[0] : '';
       const productoNombre = c.producto?.nombre_oficial || 'Producto Eliminado';
       const empleadoNombre = c.usuario?.nombre || (c.creado_por ? 'Empleado Registrado' : 'No especificado / Admin');
-      const escape = (text?: string | null) => {
-        if (!text) return '';
-        const cleaned = text.replace(/"/g, '""');
-        return `"${cleaned}"`;
-      };
-
       const row = [
         c.id,
         fecha,
-        escape(productoNombre),
-        escape(empleadoNombre),
+        escapeCSVCell(productoNombre),
+        escapeCSVCell(empleadoNombre),
         c.cantidad,
-        escape(c.folio_factura),
+        escapeCSVCell(c.folio_factura),
       ].join(',');
 
       csvContent += row + '\n';
@@ -1985,21 +1974,15 @@ export const ReportGenerator = {
 
     ventas.forEach((v) => {
       const fecha = v.fecha || '';
-      const escape = (text?: string | null) => {
-        if (!text) return '';
-        const cleaned = text.replace(/"/g, '""');
-        return `"${cleaned}"`;
-      };
-
       const margenPercent = ((v.margen_porcentual || 0) * 100).toFixed(2);
 
       const row = [
         v.id,
         fecha,
-        escape(v.cliente),
-        escape(v.factura_referencia),
-        escape(v.tipo_proyecto),
-        escape(v.sucursal),
+        escapeCSVCell(v.cliente),
+        escapeCSVCell(v.factura_referencia),
+        escapeCSVCell(v.tipo_proyecto),
+        escapeCSVCell(v.sucursal),
         Number(v.precio_total_facturado || 0).toFixed(2),
         Number(v.costo_total || 0).toFixed(2),
         Number(v.utilidad_bruta || 0).toFixed(2),
