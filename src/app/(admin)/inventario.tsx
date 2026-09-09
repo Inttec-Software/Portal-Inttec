@@ -151,6 +151,7 @@ export default function InventarioDashboard() {
   const [folioFactura, setFolioFactura] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [stagingItems, setStagingItems] = useState<FacturaItemStaging[]>([]);
+  const [folioDuplicado, setFolioDuplicado] = useState(false);
   const [isSavingAIImport, setIsSavingAIImport] = useState(false);
   const [selectedEmpleadoRetribucion, setSelectedEmpleadoRetribucion] = useState('');
   const [retribucionesData, setRetribucionesData] = useState<any[]>([]);
@@ -172,6 +173,28 @@ export default function InventarioDashboard() {
   useEffect(() => {
     loadAllData();
   }, []);
+
+  useEffect(() => {
+    const verificarFolio = async () => {
+      if (!folioFactura || !folioFactura.trim()) {
+        setFolioDuplicado(false);
+        return;
+      }
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/inventario/verificar-folio?folio=${encodeURIComponent(folioFactura.trim())}`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          setFolioDuplicado(data.existe);
+        }
+      } catch (err) {
+        console.error('Error al verificar folio:', err);
+      }
+    };
+    
+    const timeoutId = setTimeout(verificarFolio, 500);
+    return () => clearTimeout(timeoutId);
+  }, [folioFactura]);
 
     const handleOpenVerifyModal = (evidencia: any) => {
     setVerifyingEvidencia(evidencia);
@@ -969,6 +992,10 @@ async function loadAllData() {
       showAlert('Validación', 'No hay ítems para procesar.');
       return;
     }
+    if (folioDuplicado) {
+      showAlert('Error', 'El folio de factura ingresado ya ha sido registrado previamente en el sistema. Cambia el folio para continuar.');
+      return;
+    }
 
     setIsSavingAIImport(true);
     console.log('Iniciando handleSaveAIImport...');
@@ -1068,8 +1095,28 @@ async function loadAllData() {
               ListHeaderComponent={
                 <>
                   {/* VISTA 2: IMPORTACIÓN POR IA */}
-       <View style={{ padding: 16, backgroundColor: themeColors.backgroundElement, borderBottomWidth: 1, borderColor: themeColors.border, marginBottom: 16 }}>
-<Text style={[styles.sectionTitle, { color: themeColors.text }]}>Extraer Factura con IA</Text>
+        <View style={{ padding: 16, backgroundColor: themeColors.backgroundElement, borderBottomWidth: 1, borderColor: themeColors.border, marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.half, flexWrap: 'wrap', gap: 8 }}>
+            <Text style={[styles.sectionTitle, { color: themeColors.text, marginBottom: 0 }]}>Extraer Factura con IA</Text>
+            {stagingItems.length > 0 && (
+              <View style={{
+                backgroundColor: themeColors.accent + '20',
+                borderColor: themeColors.accent,
+                borderWidth: 1,
+                paddingHorizontal: 12,
+                paddingVertical: 5,
+                borderRadius: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6
+              }}>
+                <Ionicons name="cube-outline" size={16} color={themeColors.accent} />
+                <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                  {`${stagingItems.length} ${stagingItems.length === 1 ? 'producto' : 'productos'}`}
+                </Text>
+              </View>
+            )}
+          </View>
           <Text style={[styles.description, { color: themeColors.textSecondary }]}>
             Sube un PDF de factura o imagen de recibo para extraer los productos, su cantidad y mapear su SKU en tu catálogo oficial mediante IA.
           </Text>
@@ -1117,10 +1164,18 @@ async function loadAllData() {
                   placeholder="Ej. FACT-2023"
                   value={folioFactura}
                   onChangeText={setFolioFactura}
+                  error={folioDuplicado ? 'Este folio ya fue registrado previamente.' : undefined}
                 />
               </View>
 
-              <Text style={[styles.subTitle, { color: themeColors.text }]}>Borrador de Staging Extraído:</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: Spacing.one }}>
+                <Text style={[styles.subTitle, { color: themeColors.text, marginBottom: 0 }]}>Borrador de Staging Extraído:</Text>
+                <View style={{ backgroundColor: themeColors.primary + '18', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                  <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 13 }}>
+                    {`${stagingItems.length} ${stagingItems.length === 1 ? 'producto' : 'productos'}`}
+                  </Text>
+                </View>
+              </View>
 
               {stagingItems.map(item => (
                 <View
@@ -1267,7 +1322,7 @@ async function loadAllData() {
                   style={{ flex: 1 }}
                 />
                 <CustomButton
-                  title="Procesar y Guardar"
+                  title={`Procesar y Guardar (${stagingItems.length} ${stagingItems.length === 1 ? 'producto' : 'productos'})`}
                   variant="success"
                   loading={isSavingAIImport}
                   onPress={handleSaveAIImport}

@@ -581,7 +581,9 @@ export default function ReportesScreen() {
       if (uploadError) throw uploadError;
 
       const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-      const publicInvoiceUrl = urlData.publicUrl;
+      const newInvoiceUrl = urlData.publicUrl;
+      const existingUrls = GastoHelper.getFacturaUrls(selectedGasto);
+      const combinedUrls = [...existingUrls, newInvoiceUrl].join(',');
 
       // Actualizar en base de datos a través de la API
       const headers = await getApiHeaders();
@@ -590,7 +592,7 @@ export default function ReportesScreen() {
         headers,
         body: JSON.stringify({
           facturado: true,
-          factura_url: publicInvoiceUrl,
+          factura_url: combinedUrls,
           motivo_sin_factura: null
         })
       });
@@ -601,7 +603,7 @@ export default function ReportesScreen() {
       const updatedGasto = {
         ...selectedGasto,
         facturado: true,
-        factura_url: publicInvoiceUrl,
+        factura_url: combinedUrls,
         motivo_sin_factura: null
       };
       setSelectedGasto(updatedGasto);
@@ -830,16 +832,16 @@ export default function ReportesScreen() {
     }
   };
 
-  const handleDeleteAdminInvoice = async () => {
+  const handleDeleteAdminInvoice = async (targetIndex?: number) => {
     if (!selectedGasto) return;
 
     if (Platform.OS === 'web') {
-      if (!window.confirm('¿Estás seguro de eliminar el archivo de factura?')) return;
+      if (!window.confirm('¿Estás seguro de eliminar esta factura?')) return;
     } else {
       const confirmed = await new Promise((resolve) => {
         Alert.alert(
           'Eliminar Factura',
-          '¿Estás seguro de que deseas eliminar la factura adjunta?',
+          '¿Estás seguro de que deseas eliminar esta factura adjunta?',
           [
             { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
             { text: 'Eliminar', onPress: () => resolve(true), style: 'destructive' },
@@ -851,10 +853,19 @@ export default function ReportesScreen() {
 
     setIsUploadingInvoice(true);
     try {
+      const currentUrls = GastoHelper.getFacturaUrls(selectedGasto);
+      let newFacturaUrl: string | null = null;
+      if (typeof targetIndex === 'number' && currentUrls.length > 1) {
+        const remaining = currentUrls.filter((_, i) => i !== targetIndex);
+        newFacturaUrl = remaining.join(',');
+      } else {
+        newFacturaUrl = null;
+      }
+
       const { error: dbError } = await supabase
         .from('gastos')
         .update({
-          factura_url: null
+          factura_url: newFacturaUrl
         })
         .eq('id', selectedGasto.id);
 
@@ -862,12 +873,12 @@ export default function ReportesScreen() {
 
       const updatedGasto = {
         ...selectedGasto,
-        factura_url: null
+        factura_url: newFacturaUrl
       };
       setSelectedGasto(updatedGasto);
       setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
 
-      showAlert('Éxito', 'Se ha eliminado la factura del gasto.');
+      showAlert('Éxito', 'Factura eliminada correctamente.');
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo eliminar la factura.');
     } finally {
@@ -2938,80 +2949,85 @@ export default function ReportesScreen() {
                           {/* Secciones según el toggle */}
                           {selectedGasto.facturado ? (
                             <View style={{ gap: Spacing.one }}>
-                              <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 2 }}>Archivo de Factura:</Text>
-                              {selectedGasto.factura_url ? (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
-                                  <TouchableOpacity
-                                    style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15', flex: 1, height: 40, justifyContent: 'center', borderRadius: BorderRadius.small }]}
-                                    onPress={() => {
-                                      const url = selectedGasto.factura_url!;
-                                      if (url.toLowerCase().includes('.pdf')) {
-                                        Linking.openURL(url).catch(() => {
-                                          Alert.alert('Error', 'No se pudo abrir el archivo PDF.');
-                                        });
-                                      } else {
-                                        setActivePreviewUrl(url);
-                                        setViewerVisible(true);
-                                      }
-                                    }}
-                                  >
-                                    <Ionicons name="image-outline" size={18} color={themeColors.accent} />
-                                    <Text style={[styles.invoiceLinkText, { color: themeColors.accent }]}>
-                                      Ver Factura Adjunta
-                                    </Text>
-                                  </TouchableOpacity>
-                                  
-                                  <TouchableOpacity
-                                    style={{
-                                      backgroundColor: themeColors.danger + '15',
-                                      padding: Spacing.one,
-                                      borderRadius: BorderRadius.small,
-                                      borderWidth: 1,
-                                      borderColor: themeColors.danger + '40',
-                                      height: 40,
-                                      justifyContent: 'center',
-                                      alignItems: 'center',
-                                      aspectRatio: 1
-                                    }}
-                                    onPress={handleDeleteAdminInvoice}
-                                    disabled={isUploadingInvoice}
-                                  >
-                                    <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
-                                  </TouchableOpacity>
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 2 }}>
+                                Archivos de Factura Adjuntos ({GastoHelper.getFacturaUrls(selectedGasto).length}):
+                              </Text>
+                              {(() => {
+                                const urls = GastoHelper.getFacturaUrls(selectedGasto);
+                                if (urls.length > 0) {
+                                  return (
+                                    <View style={{ gap: 8 }}>
+                                      {urls.map((url, idx) => (
+                                        <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+                                          <TouchableOpacity
+                                            style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15', flex: 1, height: 40, justifyContent: 'center', borderRadius: BorderRadius.small }]}
+                                            onPress={() => {
+                                              if (url.toLowerCase().includes('.pdf')) {
+                                                Linking.openURL(url).catch(() => {
+                                                  Alert.alert('Error', 'No se pudo abrir el archivo PDF.');
+                                                });
+                                              } else {
+                                                setActivePreviewUrl(url);
+                                                setViewerVisible(true);
+                                              }
+                                            }}
+                                          >
+                                            <Ionicons name={url.toLowerCase().includes('.pdf') ? 'document-text-outline' : 'image-outline'} size={18} color={themeColors.accent} />
+                                            <Text style={[styles.invoiceLinkText, { color: themeColors.accent }]}>
+                                              {urls.length > 1 ? `Ver Factura #${idx + 1}` : 'Ver Factura Adjunta'}
+                                            </Text>
+                                          </TouchableOpacity>
+
+                                          <TouchableOpacity
+                                            style={{
+                                              backgroundColor: themeColors.danger + '15',
+                                              padding: Spacing.one,
+                                              borderRadius: BorderRadius.small,
+                                              borderWidth: 1,
+                                              borderColor: themeColors.danger + '40',
+                                              height: 40,
+                                              justifyContent: 'center',
+                                              alignItems: 'center',
+                                              aspectRatio: 1
+                                            }}
+                                            onPress={() => handleDeleteAdminInvoice(idx)}
+                                            disabled={isUploadingInvoice}
+                                          >
+                                            <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                                          </TouchableOpacity>
+                                        </View>
+                                      ))}
+                                    </View>
+                                  );
+                                }
+                                return (
+                                  <Text style={{ color: themeColors.danger, fontSize: 12, fontStyle: 'italic', marginBottom: 4 }}>⚠️ Falta factura correspondiente</Text>
+                                );
+                              })()}
+
+                              {/* Botones para anexar más facturas */}
+                              {isUploadingInvoice ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one, padding: Spacing.one, marginTop: 4 }}>
+                                  <ActivityIndicator size="small" color={themeColors.accent} />
+                                  <Text style={{ color: themeColors.text, fontSize: 12 }}>Subiendo factura a Supabase...</Text>
                                 </View>
                               ) : (
-                                <View style={{ gap: Spacing.one }}>
-                                  <Text style={{ color: themeColors.danger, fontSize: 12, fontStyle: 'italic', marginBottom: 4 }}>⚠️ Falta factura correspondiente</Text>
-                                  {isUploadingInvoice ? (
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.one, padding: Spacing.one }}>
-                                      <ActivityIndicator size="small" color={themeColors.accent} />
-                                      <Text style={{ color: themeColors.text, fontSize: 12 }}>Subiendo archivo a Supabase...</Text>
-                                    </View>
-                                  ) : (
-                                    <View style={{ flexDirection: 'row', gap: Spacing.one }}>
-                                      <TouchableOpacity
-                                        onPress={handleCaptureAdminInvoice}
-                                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 38, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }}
-                                      >
-                                        <Ionicons name="camera-sharp" size={16} color={themeColors.text} />
-                                        <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600' }}>Cámara</Text>
-                                      </TouchableOpacity>
-                                      <TouchableOpacity
-                                        onPress={handleSelectAdminInvoiceGallery}
-                                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 38, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }}
-                                      >
-                                        <Ionicons name="images-sharp" size={16} color={themeColors.text} />
-                                        <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600' }}>Galería</Text>
-                                      </TouchableOpacity>
-                                      <TouchableOpacity
-                                        onPress={handleSelectAdminInvoiceDocument}
-                                        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, height: 38, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }}
-                                      >
-                                        <Ionicons name="document-text-sharp" size={16} color={themeColors.text} />
-                                        <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600' }}>PDF</Text>
-                                      </TouchableOpacity>
-                                    </View>
-                                  )}
+                                <View style={{ flexDirection: 'row', gap: Spacing.one, marginTop: 6 }}>
+                                  <TouchableOpacity
+                                    style={{ flex: 1, backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border, padding: Spacing.one, borderRadius: BorderRadius.small, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                                    onPress={handleCaptureAdminInvoice}
+                                  >
+                                    <Ionicons name="camera-outline" size={16} color={themeColors.text} />
+                                    <Text style={{ color: themeColors.text, fontSize: 11, fontWeight: '600' }}>+ Añadir Foto</Text>
+                                  </TouchableOpacity>
+
+                                  <TouchableOpacity
+                                    style={{ flex: 1, backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border, padding: Spacing.one, borderRadius: BorderRadius.small, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                                    onPress={handleSelectAdminInvoiceDocument}
+                                  >
+                                    <Ionicons name="document-attach-outline" size={16} color={themeColors.text} />
+                                    <Text style={{ color: themeColors.text, fontSize: 11, fontWeight: '600' }}>+ Añadir Archivo</Text>
+                                  </TouchableOpacity>
                                 </View>
                               )}
                             </View>

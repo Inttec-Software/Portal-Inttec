@@ -66,8 +66,7 @@ export const aprobarDevolucion = async (req: Request, res: Response) => {
             tipo: 'ENTRADA',
             cantidad: m.devolver,
             folio_factura: `DEVOLUCIÓN MANUAL ${dev.id.substring(0,8)}`,
-            creado_por: user?.id,
-            empresa: company
+            creado_por: user?.id
           }]);
         }
       }
@@ -165,8 +164,7 @@ export const addStock = async (req: Request, res: Response) => {
       producto_id: id,
       cantidad,
       tipo: 'ENTRADA',
-      motivo,
-      empresa: company
+      motivo
     }]);
     if (movErr) throw movErr;
 
@@ -213,8 +211,7 @@ export const guardarConsumo = async (req: Request, res: Response) => {
         empleado_id: esAsignacionEmpleado ? destinoId : (user ? user.id : null),
         cantidad: item.qty,
         tipo: 'SALIDA',
-        motivo: motivoGeneral,
-        empresa: company
+        motivo: motivoGeneral
       }]);
       if (movErr) throw movErr;
     }
@@ -233,6 +230,19 @@ export const guardarImportacion = async (req: Request, res: Response) => {
     const { company, env, user } = tenant;
     const client = getSupabaseClient(company, env);
     const { mappedItems, proveedorId, folioFactura } = req.body;
+
+    if (folioFactura && folioFactura.trim() !== '') {
+      const { data: existingMov, error: existingErr } = await client
+        .from('movimientos_inventario')
+        .select('id')
+        .eq('folio_factura', folioFactura.trim())
+        .limit(1);
+
+      if (existingErr) throw existingErr;
+      if (existingMov && existingMov.length > 0) {
+        return res.status(400).json({ error: `Ya existe un registro previo en el inventario con el folio de factura: ${folioFactura.trim()}` });
+      }
+    }
 
     for (const item of mappedItems) {
       let finalProductId = item.matchedProductId;
@@ -280,14 +290,14 @@ export const guardarImportacion = async (req: Request, res: Response) => {
       }
 
       if (finalProductId) {
-        await client.from('movimientos_inventario').insert([{
+        const { error: movErr } = await client.from('movimientos_inventario').insert([{
           producto_id: finalProductId,
           cantidad: item.cantidad,
           tipo: 'ENTRADA',
           folio_factura: folioFactura,
-          creado_por: user?.id,
-          empresa: company
+          creado_por: user?.id
         }]);
+        if (movErr) throw movErr;
       }
     }
 
@@ -319,3 +329,31 @@ export const crearCatalogo = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+// 9. Verificar si el folio de factura ya existe (GET /api/inventario/verificar-folio)
+export const verificarFolioFactura = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+    const folio = req.query.folio as string;
+
+    if (!folio || folio.trim() === '') {
+      return res.json({ existe: false });
+    }
+
+    const { data, error } = await client
+      .from('movimientos_inventario')
+      .select('id')
+      .eq('folio_factura', folio.trim())
+      .limit(1);
+
+    if (error) throw error;
+    return res.json({ existe: data && data.length > 0 });
+  } catch (error: any) {
+    console.error('Error verificando folio:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
