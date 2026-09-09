@@ -36,6 +36,22 @@ interface ClienteCatalogo {
   uso_cfdi?: string;
 }
 
+interface ProductoCatalogo {
+  id: string;
+  sku_interno?: string;
+  nombre_oficial: string;
+  stock_actual?: number;
+  precio_unitario?: number;
+  precio?: number;
+  sat_code?: string;
+  clave_sat?: string;
+  clave_facturacion?: string;
+  clave_unidad?: string;
+  unidad?: string;
+  categoria_id?: string;
+  activo?: boolean;
+}
+
 interface FacturaPartida {
   id: string;
   descripcion: string;
@@ -106,6 +122,12 @@ export default function FacturacionScreen() {
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
 
+  // Catálogo de Productos / Inventario
+  const [productos, setProductos] = useState<ProductoCatalogo[]>([]);
+  const [categorias, setCategorias] = useState<Array<{ id: string; nombre: string }>>([]);
+  const [isLoadingProductos, setIsLoadingProductos] = useState(false);
+  const [activeDropdownIndex, setActiveDropdownIndex] = useState<number | null>(null);
+
   // 1. Datos del Receptor
   const [clienteNombre, setClienteNombre] = useState('');
   const [clienteRfc, setClienteRfc] = useState('XAXX010101000');
@@ -146,6 +168,7 @@ export default function FacturacionScreen() {
 
   useEffect(() => {
     fetchClientes();
+    fetchProductos();
     fetchHistorialFacturas();
     // Folio por defecto
     setFolio(String(Date.now()).slice(-5));
@@ -156,6 +179,51 @@ export default function FacturacionScreen() {
       window.alert(`${title}\n\n${message}`);
     } else {
       Alert.alert(title, message);
+    }
+  };
+
+  const fetchProductos = async () => {
+    try {
+      setIsLoadingProductos(true);
+      // 1. Fetch categorias
+      try {
+        const { data: catData } = await supabase
+          .from('categorias_productos')
+          .select('id, nombre')
+          .order('nombre');
+        if (catData) setCategorias(catData);
+      } catch (_) {}
+
+      // 2. Intentar API backend
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/inventario/dashboard`, { headers });
+        if (res.ok) {
+          const json = await res.json();
+          const items = json.productos || [];
+          if (Array.isArray(items) && items.length > 0) {
+            setProductos(items);
+            if (json.categorias && Array.isArray(json.categorias)) {
+              setCategorias(json.categorias);
+            }
+            return;
+          }
+        }
+      } catch (_) {}
+
+      // 3. Fallback directo a Supabase
+      const { data } = await supabase
+        .from('productos')
+        .select('*')
+        .order('nombre_oficial');
+
+      if (data) {
+        setProductos(data);
+      }
+    } catch (err) {
+      console.warn('Error fetching productos:', err);
+    } finally {
+      setIsLoadingProductos(false);
     }
   };
 
@@ -250,6 +318,42 @@ export default function FacturacionScreen() {
     if (c.regimen_fiscal) setClienteRegimen(c.regimen_fiscal);
     if (c.uso_cfdi) setClienteUso(c.uso_cfdi);
     setIsClientModalOpen(false);
+  };
+
+  const getFilteredProductsForPartida = (searchText: string) => {
+    if (!searchText || !searchText.trim()) {
+      return productos.slice(0, 30);
+    }
+    const q = searchText.toLowerCase().trim();
+    return productos.filter(p => {
+      const nombre = (p.nombre_oficial || (p as any).nombre || '').toLowerCase();
+      const sku = (p.sku_interno || '').toLowerCase();
+      const catNombre = (p.categoria_id ? categoriasMap.get(p.categoria_id) || '' : '').toLowerCase();
+      return nombre.includes(q) || sku.includes(q) || catNombre.includes(q);
+    }).slice(0, 30);
+  };
+
+  const handleSelectProductForPartida = (index: number, prod: ProductoCatalogo) => {
+    const desc = prod.nombre_oficial || (prod as any).nombre || '';
+    const precio = String(prod.precio_unitario || prod.precio || '0');
+    const claveSat = prod.sat_code || prod.clave_sat || prod.clave_facturacion || '01010101';
+    const claveUnidad = prod.clave_unidad || 'H87';
+    const unidad = prod.unidad || 'Pieza';
+
+    setPartidas(prev => {
+      const next = [...prev];
+      next[index] = {
+        ...next[index],
+        descripcion: desc,
+        precio_unitario: precio !== '0' ? precio : next[index].precio_unitario,
+        clave_sat: claveSat,
+        clave_unidad: claveUnidad,
+        unidad: unidad,
+      };
+      return next;
+    });
+
+    setActiveDropdownIndex(null);
   };
 
   const handleAddPartida = () => {
@@ -596,6 +700,10 @@ export default function FacturacionScreen() {
     );
   }, [clientes, clientSearch]);
 
+  const categoriasMap = useMemo(() => {
+    return new Map(categorias.map(c => [c.id, c.nombre]));
+  }, [categorias]);
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: themeColors.background }} edges={['bottom', 'left', 'right']}>
       {/* Header y Selector de Pestañas */}
@@ -872,7 +980,17 @@ export default function FacturacionScreen() {
           </View>
 
           {/* SECCIÓN 3: PARTIDAS / CONCEPTOS A FACTURAR */}
-          <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: themeColors.backgroundElement,
+                borderColor: themeColors.border,
+                position: 'relative',
+                zIndex: activeDropdownIndex !== null ? 9999 : 1,
+              },
+            ]}
+          >
             <View style={styles.cardHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="cart" size={18} color="#0284c7" />
@@ -880,13 +998,15 @@ export default function FacturacionScreen() {
                   3. Partidas / Conceptos a Facturar ({partidas.length})
                 </Text>
               </View>
-              <TouchableOpacity onPress={handleAddPartida} style={[styles.quickSelectBtn, { borderColor: '#10b981', backgroundColor: '#10b98115' }]}>
-                <Ionicons name="add-circle" size={16} color="#10b981" />
-                <Text style={{ color: '#10b981', fontSize: 12, fontWeight: '700' }}>Agregar Partida</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                <TouchableOpacity onPress={handleAddPartida} style={[styles.quickSelectBtn, { borderColor: '#10b981', backgroundColor: '#10b98115' }]}>
+                  <Ionicons name="add-circle" size={15} color="#10b981" />
+                  <Text style={{ color: '#10b981', fontSize: 12, fontWeight: '700' }}>Agregar Partida</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <View style={{ gap: Spacing.two }}>
+            <View style={{ gap: Spacing.two, position: 'relative', zIndex: activeDropdownIndex !== null ? 9999 : 1 }}>
               {partidas.map((item, index) => {
                 const cant = parseFloat(item.cantidad) || 0;
                 const pu = parseFloat(item.precio_unitario) || 0;
@@ -895,18 +1015,29 @@ export default function FacturacionScreen() {
                 const totalPartida = subtotalPartida + ivaPartida;
 
                 return (
-                  <View key={item.id || index} style={[styles.partidaBox, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
+                  <View
+                    key={item.id || index}
+                    style={[
+                      styles.partidaBox,
+                      {
+                        borderColor: themeColors.border,
+                        backgroundColor: themeColors.background,
+                        position: 'relative',
+                        zIndex: activeDropdownIndex === index ? 99999 : partidas.length - index,
+                      },
+                    ]}
+                  >
                     <View style={styles.partidaHeader}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
                         <View style={[styles.partidaNumBadge, { backgroundColor: '#0284c7' }]}>
                           <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>#{index + 1}</Text>
                         </View>
-                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: themeColors.text }}>
+                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: themeColors.text, flex: 1 }} numberOfLines={1}>
                           {item.descripcion || 'Nuevo Concepto'}
                         </Text>
                       </View>
 
-                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <TouchableOpacity onPress={() => handleDuplicatePartida(index)} style={styles.partidaIconBtn}>
                           <Ionicons name="copy-outline" size={16} color={themeColors.textSecondary} />
                         </TouchableOpacity>
@@ -916,13 +1047,159 @@ export default function FacturacionScreen() {
                       </View>
                     </View>
 
-                    {/* Descripción */}
-                    <CustomInput
-                      label="Descripción del Producto o Servicio *"
-                      value={item.descripcion}
-                      onChangeText={val => handleUpdatePartida(index, 'descripcion', val)}
-                      placeholder="Ej. Servicio de instalación y configuración de GPS 4G"
-                    />
+                    {/* Descripción con Menú en Cascada del Catálogo */}
+                    <View style={{ position: 'relative', zIndex: activeDropdownIndex === index ? 99999 : 1, marginBottom: 8 }}>
+                      <Text style={[styles.fieldLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>
+                        Descripción del Producto o Servicio *
+                      </Text>
+                      <View style={[styles.cascadeInputContainer, { backgroundColor: themeColors.background, borderColor: activeDropdownIndex === index ? '#0284c7' : themeColors.border }]}>
+                        <TextInput
+                          style={[styles.cascadeTextInput, { color: themeColors.text }]}
+                          value={item.descripcion}
+                          onChangeText={val => {
+                            handleUpdatePartida(index, 'descripcion', val);
+                            setActiveDropdownIndex(index);
+                          }}
+                          onFocus={() => setActiveDropdownIndex(index)}
+                          placeholder="Escribe o selecciona del catálogo en cascada..."
+                          placeholderTextColor={themeColors.textSecondary}
+                        />
+                        {!!item.descripcion && (
+                          <TouchableOpacity
+                            onPress={() => {
+                              handleUpdatePartida(index, 'descripcion', '');
+                              setActiveDropdownIndex(index);
+                            }}
+                            style={{ padding: 4 }}
+                          >
+                            <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (activeDropdownIndex === index) {
+                              setActiveDropdownIndex(null);
+                            } else {
+                              setActiveDropdownIndex(index);
+                            }
+                          }}
+                          style={{ padding: 4 }}
+                        >
+                          <Ionicons
+                            name={activeDropdownIndex === index ? 'chevron-up' : 'chevron-down'}
+                            size={18}
+                            color="#0284c7"
+                          />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Menú de Cascada Flotante */}
+                      {activeDropdownIndex === index && (
+                        <View style={[styles.cascadeDropdownMenu, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                          <View style={[styles.cascadeDropdownHeader, { borderBottomColor: themeColors.border, backgroundColor: themeColors.background }]}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="cube" size={13} color="#0284c7" />
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.textSecondary, letterSpacing: 0.3 }}>
+                                CATÁLOGO DE INVENTARIO ({getFilteredProductsForPartida(item.descripcion).length})
+                              </Text>
+                            </View>
+                            <TouchableOpacity
+                              onPress={() => setActiveDropdownIndex(null)}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              style={{ padding: 4 }}
+                            >
+                              <Ionicons name="close" size={16} color={themeColors.textSecondary} />
+                            </TouchableOpacity>
+                          </View>
+
+                          {getFilteredProductsForPartida(item.descripcion).length === 0 ? (
+                            <View style={{ padding: 16, alignItems: 'center' }}>
+                              <Ionicons name="search-outline" size={20} color={themeColors.textSecondary} style={{ marginBottom: 4, opacity: 0.6 }} />
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+                                Sin coincidencias en inventario
+                              </Text>
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2, opacity: 0.8 }}>
+                                Puedes seguir escribiendo tu concepto personalizado.
+                              </Text>
+                            </View>
+                          ) : (
+                            <ScrollView
+                              nestedScrollEnabled={true}
+                              keyboardShouldPersistTaps="handled"
+                              style={{ maxHeight: 240 }}
+                            >
+                              {getFilteredProductsForPartida(item.descripcion).map(prod => {
+                                const stock = Number(prod.stock_actual || 0);
+                                const stockColor = stock === 0 ? '#ef4444' : stock <= 5 ? '#f59e0b' : '#10b981';
+                                const catName = prod.categoria_id ? categoriasMap.get(prod.categoria_id) : null;
+                                const precioVal = Number(prod.precio_unitario || prod.precio || 0);
+                                const precioFormatted = new Intl.NumberFormat('es-MX', {
+                                  style: 'currency',
+                                  currency: 'MXN',
+                                }).format(precioVal);
+
+                                return (
+                                  <TouchableOpacity
+                                    key={prod.id}
+                                    activeOpacity={0.7}
+                                    onPress={() => handleSelectProductForPartida(index, prod)}
+                                    style={[styles.cascadeItem, { borderBottomColor: themeColors.border + '35' }]}
+                                  >
+                                    <View style={{ flex: 1, marginRight: 12 }}>
+                                      <Text
+                                        style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, lineHeight: 17, marginBottom: 4 }}
+                                        numberOfLines={2}
+                                        ellipsizeMode="tail"
+                                      >
+                                        {prod.nombre_oficial || (prod as any).nombre}
+                                      </Text>
+
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                        {prod.sku_interno ? (
+                                          <View style={[styles.skuBadge, { backgroundColor: themeColors.border + '60' }]}>
+                                            <Text style={{ fontSize: 9, color: themeColors.textSecondary, fontWeight: '700' }}>
+                                              {prod.sku_interno}
+                                            </Text>
+                                          </View>
+                                        ) : null}
+
+                                        {catName && (
+                                          <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>
+                                            📁 {catName}
+                                          </Text>
+                                        )}
+
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stockColor }} />
+                                          <Text style={{ fontSize: 10, color: stockColor, fontWeight: '700' }}>
+                                            Stock: {stock}
+                                          </Text>
+                                        </View>
+
+                                        {(prod.sat_code || prod.clave_sat || prod.clave_facturacion) ? (
+                                          <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>
+                                            SAT: {prod.sat_code || prod.clave_sat || prod.clave_facturacion}
+                                          </Text>
+                                        ) : null}
+                                      </View>
+                                    </View>
+
+                                    <View style={{ alignItems: 'flex-end', justifyContent: 'center', flexShrink: 0, minWidth: 70 }}>
+                                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#10b981' }}>
+                                        {precioFormatted}
+                                      </Text>
+                                      <Text style={{ fontSize: 9, color: themeColors.textSecondary, marginTop: 1 }}>
+                                        /{prod.unidad || 'pza'}
+                                      </Text>
+                                    </View>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </ScrollView>
+                          )}
+                        </View>
+                      )}
+                    </View>
 
                     {/* Buscadores Interactivos del SAT */}
                     <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: 10, marginTop: 4 }}>
@@ -972,7 +1249,17 @@ export default function FacturacionScreen() {
           </View>
 
           {/* SECCIÓN 4: RESUMEN FINANCIERO Y ACCIONES */}
-          <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: themeColors.backgroundElement,
+                borderColor: themeColors.border,
+                position: 'relative',
+                zIndex: 0,
+              },
+            ]}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
               <Ionicons name="calculator" size={18} color="#0284c7" />
               <Text style={[styles.cardTitle, { color: themeColors.text }]}>4. Resumen de Totales Fiscales</Text>
@@ -1420,5 +1707,59 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     borderWidth: 1,
+  },
+  skuBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  cascadeInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    minHeight: 44,
+  },
+  cascadeTextInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+  },
+  cascadeDropdownMenu: {
+    position: 'absolute',
+    top: 68,
+    left: 0,
+    right: 0,
+    borderWidth: 1,
+    borderRadius: 12,
+    zIndex: 99999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 12px 32px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.08)',
+      },
+    }),
+    overflow: 'hidden',
+  },
+  cascadeDropdownHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+  },
+  cascadeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
   },
 });
