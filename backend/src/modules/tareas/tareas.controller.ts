@@ -103,11 +103,20 @@ export const getTareaById = async (req: Request, res: Response): Promise<void> =
       if (ventaData) vinculo_nombre = `${ventaData.cliente} - ${ventaData.factura_referencia}`;
     }
 
-    const { data: notesData } = await supabase
+    const { data: notesData, error: notesError } = await supabase
       .from('tarea_notas')
       .select('*, usuario:usuarios!tarea_notas_usuario_id_fkey(nombre)')
       .eq('tarea_id', id)
-      .order('creado_en', { ascending: true });
+      .order('created_at', { ascending: false });
+
+    if (notesError) {
+      console.error('[getTareaById] Error fetching tarea_notas:', notesError);
+    }
+
+    const formattedNotes = (notesData || []).map((n: any) => ({
+      ...n,
+      usuario_nombre: Array.isArray(n.usuario) ? n.usuario[0]?.nombre : (n.usuario?.nombre || 'Usuario')
+    }));
 
     res.json({
       ...taskData,
@@ -118,7 +127,7 @@ export const getTareaById = async (req: Request, res: Response): Promise<void> =
         usuario_id: c.usuario_id,
         usuario_nombre: Array.isArray(c.usuarios) ? c.usuarios[0]?.nombre : c.usuarios?.nombre
       })) || [],
-      notas: notesData || []
+      notas: formattedNotes
     });
   } catch (error: any) {
     res.status(500).json({ message: error.message });
@@ -223,7 +232,12 @@ export const addNota = async (req: Request, res: Response): Promise<void> => {
 
     if (error) throw error;
 
-    res.json(data);
+    const formattedNote = {
+      ...data,
+      usuario_nombre: Array.isArray(data.usuario) ? data.usuario[0]?.nombre : (data.usuario?.nombre || req.user?.nombre || 'Usuario')
+    };
+
+    res.json(formattedNote);
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }

@@ -411,25 +411,39 @@ export default function TaskDetailScreen() {
           </View>
         )}
 
-        <View style={styles.timeline}>
-          {notes.map((note, index) => (
-            <View key={note.id} style={styles.timelineItem}>
-              <View style={styles.timelineLeft}>
-                <View style={[styles.timelineDot, { backgroundColor: themeColors.accent }]} />
-                {index !== notes.length - 1 && <View style={[styles.timelineLine, { backgroundColor: themeColors.border }]} />}
-              </View>
-              <View style={[styles.noteCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                <View style={styles.noteHeader}>
-                  <Text style={[styles.noteAuthor, { color: themeColors.text }]}>{note.usuario_nombre}</Text>
-                  <Text style={[styles.noteDate, { color: themeColors.textSecondary }]}>
-                    {new Date(note.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                  </Text>
+        {notes.length === 0 ? (
+          <View style={{ padding: Spacing.four, alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="chatbubble-ellipses-outline" size={36} color={themeColors.textSecondary} style={{ opacity: 0.5, marginBottom: 8 }} />
+            <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center' }}>
+              No hay notas ni avances registrados aún.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.timeline}>
+            {notes.map((note, index) => {
+              const author = note.usuario_nombre || (Array.isArray(note.usuario) ? note.usuario[0]?.nombre : note.usuario?.nombre) || 'Usuario';
+              const dateRaw = note.created_at || note.creado_en;
+              const dateFormatted = dateRaw ? new Date(dateRaw).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '';
+              return (
+                <View key={note.id || index} style={styles.timelineItem}>
+                  <View style={styles.timelineLeft}>
+                    <View style={[styles.timelineDot, { backgroundColor: themeColors.accent }]} />
+                    {index !== notes.length - 1 && <View style={[styles.timelineLine, { backgroundColor: themeColors.border }]} />}
+                  </View>
+                  <View style={[styles.noteCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                    <View style={styles.noteHeader}>
+                      <Text style={[styles.noteAuthor, { color: themeColors.text }]}>{author}</Text>
+                      <Text style={[styles.noteDate, { color: themeColors.textSecondary }]}>
+                        {dateFormatted}
+                      </Text>
+                    </View>
+                    <Text style={[styles.noteText, { color: themeColors.text }]}>{note.comentario}</Text>
+                  </View>
                 </View>
-                <Text style={[styles.noteText, { color: themeColors.text }]}>{note.comentario}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
+              );
+            })}
+          </View>
+        )}
 
       </ScrollView>
     </SafeAreaView>
