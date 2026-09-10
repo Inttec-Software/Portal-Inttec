@@ -148,12 +148,12 @@ export default function FacturacionScreen() {
   const [partidas, setPartidas] = useState<FacturaPartida[]>([
     {
       id: '1',
-      descripcion: 'Servicio de telemetría y rastreo satelital',
+      descripcion: '',
       cantidad: '1',
-      precio_unitario: '1000',
-      clave_sat: '81111811',
-      clave_unidad: 'E48',
-      unidad: 'Servicio',
+      precio_unitario: '0',
+      clave_sat: '01010101',
+      clave_unidad: 'H87',
+      unidad: 'Pieza',
       objeto_imp: '02',
     },
   ]);
