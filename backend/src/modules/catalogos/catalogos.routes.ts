@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createCatalogo, updateCatalogo, deleteCatalogo, getAllCatalogos, getSucursales, getClienteSummary } from './catalogos.controller';
+import { createCatalogo, updateCatalogo, deleteCatalogo, getAllCatalogos, getClientes, getSucursales, getClienteSummary } from './catalogos.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
 
@@ -9,6 +9,7 @@ router.use(verifyToken);
 router.use(tenantMiddleware);
 
 router.get('/all', getAllCatalogos);
+router.get('/clientes', getClientes);
 router.get('/sucursales/:clienteId', getSucursales);
 router.get('/summary/:clienteId', getClienteSummary);
 

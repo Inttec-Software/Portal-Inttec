@@ -17,7 +17,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase } from '@/services/supabase';
+import { supabase, CompanyService, inttecClient, daravisaClient } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
 import CustomInput from '@/components/CustomInput';
@@ -120,6 +120,7 @@ export default function FacturacionScreen() {
   // Catálogo de Clientes
   const [clientes, setClientes] = useState<ClienteCatalogo[]>([]);
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+  const [isLoadingClientes, setIsLoadingClientes] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
 
   // Catálogo de Productos / Inventario
@@ -229,31 +230,56 @@ export default function FacturacionScreen() {
 
   const fetchClientes = async () => {
     try {
-      // 1. Intentar API backend
+      setIsLoadingClientes(true);
+      // 1. Intentar API backend (/api/catalogos/clientes)
       try {
         const headers = await getApiHeaders();
         const res = await fetch(`${getApiUrl()}/api/catalogos/clientes`, { headers });
         if (res.ok) {
           const json = await res.json();
-          const items = json.data || json || [];
+          const items = Array.isArray(json) ? json : (json.data || json.clientes || []);
           if (Array.isArray(items) && items.length > 0) {
             setClientes(items);
             return;
           }
         }
-      } catch (_) {}
+      } catch (err) {
+        console.warn('Error fetching /api/catalogos/clientes:', err);
+      }
 
-      // 2. Fallback directo a Supabase
-      const { data } = await supabase
+      // 2. Intentar API backend (/api/catalogos/all)
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/catalogos/all`, { headers });
+        if (res.ok) {
+          const json = await res.json();
+          const items = json.clientes || json.data || [];
+          if (Array.isArray(items) && items.length > 0) {
+            setClientes(items);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching /api/catalogos/all:', err);
+      }
+
+      // 3. Fallback directo a Supabase con el cliente de la compañía activa
+      const activeComp = CompanyService.getActiveCompany();
+      const client = activeComp === 'daravisa' ? daravisaClient : inttecClient;
+      const { data, error } = await client
         .from('clientes')
         .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi')
         .order('nombre');
 
-      if (data) {
+      if (!error && data && data.length > 0) {
         setClientes(data);
+      } else if (error) {
+        console.warn('Supabase fallback error fetching clientes:', error);
       }
     } catch (err) {
       console.warn('Error fetching clientes:', err);
+    } finally {
+      setIsLoadingClientes(false);
     }
   };
 
@@ -789,6 +815,9 @@ export default function FacturacionScreen() {
                 onPress={() => {
                   setClientSearch('');
                   setIsClientModalOpen(true);
+                  if (clientes.length === 0) {
+                    fetchClientes();
+                  }
                 }}
                 style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15' }]}
               >
@@ -1466,10 +1495,18 @@ export default function FacturacionScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: themeColors.text }]}>Seleccionar Cliente del Catálogo</Text>
-              <TouchableOpacity onPress={() => setIsClientModalOpen(false)}>
-                <Ionicons name="close" size={22} color={themeColors.text} />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="people" size={20} color="#0284c7" />
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Seleccionar Cliente del Catálogo</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <TouchableOpacity onPress={fetchClientes} disabled={isLoadingClientes} style={{ padding: 4 }}>
+                  <Ionicons name="refresh" size={20} color={isLoadingClientes ? themeColors.textSecondary : "#0284c7"} />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setIsClientModalOpen(false)} style={{ padding: 4 }}>
+                  <Ionicons name="close" size={22} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={[styles.searchBox, { borderColor: themeColors.border, backgroundColor: themeColors.background, marginBottom: 12 }]}>
@@ -1482,29 +1519,67 @@ export default function FacturacionScreen() {
                 onChangeText={setClientSearch}
                 autoFocus
               />
+              {!!clientSearch && (
+                <TouchableOpacity onPress={() => setClientSearch('')}>
+                  <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+              )}
             </View>
 
-            <ScrollView style={{ maxHeight: 400 }}>
-              <View style={{ gap: 6 }}>
-                {clientesFiltrados.map(c => (
-                  <TouchableOpacity
-                    key={c.id}
-                    onPress={() => handleSelectClient(c)}
-                    style={[styles.clientOptionItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text }}>
-                        {c.razon_social || c.nombre}
-                      </Text>
-                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
-                        RFC: {c.rfc || 'Sin RFC'} | CP: {c.codigo_postal || 'N/D'} | Régimen: {c.regimen_fiscal || '601'}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#0284c7" />
-                  </TouchableOpacity>
-                ))}
+            {isLoadingClientes ? (
+              <View style={{ padding: 32, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <ActivityIndicator size="small" color="#0284c7" />
+                <Text style={{ fontSize: 13, color: themeColors.textSecondary }}>Cargando catálogo de clientes...</Text>
               </View>
-            </ScrollView>
+            ) : clientesFiltrados.length === 0 ? (
+              <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                <Ionicons name="alert-circle-outline" size={36} color={themeColors.textSecondary} style={{ opacity: 0.6 }} />
+                <Text style={{ fontSize: 13, color: themeColors.textSecondary, textAlign: 'center' }}>
+                  {clientSearch.trim()
+                    ? `No se encontraron clientes que coincidan con "${clientSearch}".`
+                    : 'No hay clientes disponibles en el catálogo.'}
+                </Text>
+                <TouchableOpacity
+                  onPress={fetchClientes}
+                  style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', marginTop: 4 }]}
+                >
+                  <Ionicons name="refresh" size={14} color="#0284c7" />
+                  <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: '700' }}>Recargar Clientes</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 400 }}>
+                <View style={{ gap: 6 }}>
+                  {clientesFiltrados.map(c => {
+                    const displayTitle = c.razon_social && c.razon_social !== c.nombre
+                      ? `${c.razon_social} (${c.nombre})`
+                      : (c.razon_social || c.nombre || 'Cliente');
+                    return (
+                      <TouchableOpacity
+                        key={c.id}
+                        onPress={() => handleSelectClient(c)}
+                        style={[styles.clientOptionItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+                      >
+                        <View style={{ flex: 1, paddingRight: 8 }}>
+                          <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text }}>
+                            {displayTitle}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                            RFC: <Text style={{ fontWeight: '600', color: themeColors.text }}>{c.rfc || 'Sin RFC'}</Text> | CP: {c.codigo_postal || 'N/D'} | Régimen: {c.regimen_fiscal || '601'}
+                          </Text>
+                          {c.uso_cfdi && (
+                            <Text style={{ fontSize: 10, color: '#0284c7', marginTop: 1 }}>
+                              Uso CFDI: {c.uso_cfdi}
+                            </Text>
+                          )}
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color="#0284c7" />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>

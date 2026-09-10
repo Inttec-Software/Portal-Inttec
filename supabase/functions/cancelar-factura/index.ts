@@ -13,14 +13,15 @@ serve(async (req) => {
   }
 
   try {
-    const { venta_id, motivo = '02', folio_sustitucion = '' } = await req.json()
+    const body = await req.json().catch(() => ({}))
+    const { venta_id, motivo = '02', folio_sustitucion = '' } = body
     if (!venta_id) throw new Error('Falta el ID de la venta (venta_id)')
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
     const FINKOK_USERNAME = Deno.env.get('FINKOK_USERNAME') || ''
     const FINKOK_PASSWORD = Deno.env.get('FINKOK_PASSWORD') || ''
-    const FINKOK_ENV = (Deno.env.get('FINKOK_ENV') || 'sandbox').toLowerCase()
+    const FINKOK_ENV = (body.finkok_env || Deno.env.get('FINKOK_ENV') || 'production').toLowerCase()
     const isProduction = FINKOK_ENV === 'production'
     
     if (!FINKOK_USERNAME || !FINKOK_PASSWORD) {

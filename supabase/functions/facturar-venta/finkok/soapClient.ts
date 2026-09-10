@@ -1,5 +1,11 @@
 // @ts-nocheck
 
+function extractTag(xml: string, tag: string): string | null {
+  const regex = new RegExp(`<(?:[a-zA-Z0-9_-]+:)?${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:[a-zA-Z0-9_-]+:)?${tag}>`, 'i');
+  const match = xml.match(regex);
+  return match ? match[1] : null;
+}
+
 export async function signStampFinkok(
   xmlString: string,
   finkokUsername: string,
@@ -42,29 +48,32 @@ export async function signStampFinkok(
     throw new Error(`Finkok HTTP Error ${response.status}: ${responseText}`);
   }
   
-  const faultStringMatch = responseText.match(/<faultstring>(.*?)<\/faultstring>/i);
-  if (faultStringMatch) {
-    throw new Error(`Finkok Fault: ${faultStringMatch[1]}`);
+  const faultString = extractTag(responseText, 'faultstring');
+  if (faultString) {
+    throw new Error(`Finkok Fault: ${faultString.trim()}`);
   }
 
   // Verificar si hay incidencias/errores reportados por Finkok / SAT
-  const incidenciasMatch = responseText.match(/<Incidencias>([\s\S]*?)<\/Incidencias>/i);
-  if (incidenciasMatch && incidenciasMatch[1].includes('<IdIncidencia>')) {
-    const msgMatch = incidenciasMatch[1].match(/<MensajeIncidencia>(.*?)<\/MensajeIncidencia>/i);
-    const codigoMatch = incidenciasMatch[1].match(/<CodigoError>(.*?)<\/CodigoError>/i);
-    const errorMsg = msgMatch ? msgMatch[1] : 'Error desconocido al timbrar';
-    const codigo = codigoMatch ? `[${codigoMatch[1]}] ` : '';
-    throw new Error(`Incidencia Finkok / SAT: ${codigo}${errorMsg}`);
+  const incidenciasContent = extractTag(responseText, 'Incidencias');
+  if (incidenciasContent) {
+    const codigoError = extractTag(incidenciasContent, 'CodigoError');
+    const mensajeIncidencia = extractTag(incidenciasContent, 'MensajeIncidencia');
+
+    if (codigoError || mensajeIncidencia) {
+      const codigo = codigoError ? `[${codigoError.trim()}] ` : '';
+      const msg = mensajeIncidencia ? mensajeIncidencia.trim() : 'Error desconocido al timbrar';
+      throw new Error(`Incidencia Finkok / SAT: ${codigo}${msg}`);
+    }
   }
 
   // Extraer XML timbrado
-  const xmlTimbradoMatch = responseText.match(/<xml>([\s\S]*?)<\/xml>/i);
-  if (!xmlTimbradoMatch || !xmlTimbradoMatch[1]) {
-    const debugResponse = responseText.substring(0, 500);
+  let xmlTimbrado = extractTag(responseText, 'xml');
+  if (!xmlTimbrado || !xmlTimbrado.trim()) {
+    const debugResponse = responseText.substring(0, 300);
     throw new Error(`No se recibió el XML timbrado de Finkok. Respuesta: ${debugResponse}`);
   }
 
-  let xmlTimbrado = xmlTimbradoMatch[1].trim();
+  xmlTimbrado = xmlTimbrado.trim();
   // Si viene con entidades escapadas como &lt;cfdi:Comprobante... des-escapar
   if (xmlTimbrado.startsWith('&lt;')) {
     xmlTimbrado = xmlTimbrado
@@ -76,10 +85,9 @@ export async function signStampFinkok(
   }
 
   // Extraer UUID
-  let uuid = null;
-  const uuidTagMatch = responseText.match(/<UUID>(.*?)<\/UUID>/i);
-  if (uuidTagMatch && uuidTagMatch[1]) {
-    uuid = uuidTagMatch[1].trim();
+  let uuid = extractTag(responseText, 'UUID');
+  if (uuid) {
+    uuid = uuid.trim();
   } else {
     const uuidAttrMatch = xmlTimbrado.match(/UUID="([0-9a-fA-F-]{36})"/i);
     if (uuidAttrMatch) {
@@ -142,21 +150,25 @@ export async function signCancelFinkok(
     throw new Error(`Finkok Cancel HTTP Error ${response.status}: ${responseText}`);
   }
 
-  const faultStringMatch = responseText.match(/<faultstring>(.*?)<\/faultstring>/i);
-  if (faultStringMatch) {
-    throw new Error(`Finkok Fault al Cancelar: ${faultStringMatch[1]}`);
+  const faultString = extractTag(responseText, 'faultstring');
+  if (faultString) {
+    throw new Error(`Finkok Fault al Cancelar: ${faultString.trim()}`);
   }
 
   // Verificar incidencias
-  const incidenciasMatch = responseText.match(/<Incidencias>([\s\S]*?)<\/Incidencias>/i);
-  if (incidenciasMatch && incidenciasMatch[1].includes('<IdIncidencia>')) {
-    const msgMatch = incidenciasMatch[1].match(/<MensajeIncidencia>(.*?)<\/MensajeIncidencia>/i);
-    const errorMsg = msgMatch ? msgMatch[1] : 'Error desconocido al cancelar';
-    throw new Error(`Error SAT/Finkok al cancelar: ${errorMsg}`);
+  const incidenciasContent = extractTag(responseText, 'Incidencias');
+  if (incidenciasContent) {
+    const mensajeIncidencia = extractTag(incidenciasContent, 'MensajeIncidencia');
+    const codigoError = extractTag(incidenciasContent, 'CodigoError');
+    if (mensajeIncidencia || codigoError) {
+      const codigo = codigoError ? `[${codigoError.trim()}] ` : '';
+      const msg = mensajeIncidencia ? mensajeIncidencia.trim() : 'Error desconocido al cancelar';
+      throw new Error(`Error SAT/Finkok al cancelar: ${codigo}${msg}`);
+    }
   }
 
-  const estatusMatch = responseText.match(/<EstatusUUID>(.*?)<\/EstatusUUID>/i);
-  const estatus = estatusMatch ? estatusMatch[1] : '201'; // 201: Solicitud de cancelación recibida
+  const estatusMatch = extractTag(responseText, 'EstatusUUID');
+  const estatus = estatusMatch ? estatusMatch.trim() : '201'; // 201: Solicitud de cancelación recibida
 
   return {
     success: true,
