@@ -905,8 +905,10 @@ setProveedoresCatalog(provRes.data || []);
   const handleToggleAdminFacturado = async (val: boolean) => {
     if (!selectedGasto) return;
     try {
-      // Si se marca como No Facturado (val === false), limpiamos el estado de 'PENDIENTE_ENTREGA'
-      let newMotivo = val ? null : (selectedGasto.motivo_sin_factura === 'PENDIENTE_ENTREGA' ? null : selectedGasto.motivo_sin_factura);
+      // Si se marca como No Facturado (val === false):
+      // Si el motivo actual era un texto de factura pendiente (ej. 'PENDIENTE_ENTREGA: ...'), se limpia a null
+      const isPendiente = !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE');
+      let newMotivo = val ? null : (isPendiente ? null : selectedGasto.motivo_sin_factura);
       
       const updateObj: Partial<Gasto> = {
         facturado: val,
@@ -1612,10 +1614,10 @@ setProveedoresCatalog(provRes.data || []);
     
     if (facturaFilter === 'FACTURADOS') return g.facturado === true;
     if (facturaFilter === 'PENDIENTE_ENTREGA') {
-      return !g.facturado && (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente'));
+      return !g.facturado && !!g.motivo_sin_factura && g.motivo_sin_factura.toUpperCase().includes('PENDIENTE');
     }
     if (facturaFilter === 'NO_FACTURADOS') {
-      return !g.facturado && g.motivo_sin_factura !== 'PENDIENTE_ENTREGA' && !g.motivo_sin_factura?.toLowerCase().includes('pendiente');
+      return !g.facturado && (!g.motivo_sin_factura || !g.motivo_sin_factura.toUpperCase().includes('PENDIENTE'));
     }
     return true; // TODOS
   });
@@ -3101,55 +3103,62 @@ setProveedoresCatalog(provRes.data || []);
                               </Text>
                             </TouchableOpacity>
 
-                            <TouchableOpacity
-                              onPress={async () => {
-                                try {
-                                  const updateObj = { facturado: false, motivo_sin_factura: 'PENDIENTE_ENTREGA', factura_url: null };
-                                  const { error: dbError } = await supabase.from('gastos').update(updateObj).eq('id', selectedGasto.id);
-                                  if (dbError) throw dbError;
-                                  const updated = { ...selectedGasto, ...updateObj };
-                                  setSelectedGasto(updated);
-                                  setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updated : g));
-                                  setLocalMotivo('PENDIENTE_ENTREGA');
-                                } catch (err: any) {
-                                  showAlert('Error', err.message);
-                                }
-                              }}
-                              style={{
-                                flex: 1.2,
-                                height: 38,
-                                borderRadius: BorderRadius.small,
-                                borderWidth: 1,
-                                borderColor: (!selectedGasto.facturado && selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? 'transparent' : themeColors.border,
-                                backgroundColor: (!selectedGasto.facturado && selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? themeColors.warning : themeColors.backgroundElement,
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                paddingHorizontal: 4
-                              }}
-                            >
-                              <Text style={{ color: (!selectedGasto.facturado && selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
-                                ⏳ Pend. Factura
-                              </Text>
-                            </TouchableOpacity>
+                            {(() => {
+                              const isPendiente = !selectedGasto.facturado && !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE');
+                              return (
+                                <>
+                                  <TouchableOpacity
+                                    onPress={async () => {
+                                      try {
+                                        const updateObj = { facturado: false, motivo_sin_factura: 'PENDIENTE_ENTREGA', factura_url: null };
+                                        const { error: dbError } = await supabase.from('gastos').update(updateObj).eq('id', selectedGasto.id);
+                                        if (dbError) throw dbError;
+                                        const updated = { ...selectedGasto, ...updateObj };
+                                        setSelectedGasto(updated);
+                                        setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updated : g));
+                                        setLocalMotivo('PENDIENTE_ENTREGA');
+                                      } catch (err: any) {
+                                        showAlert('Error', err.message);
+                                      }
+                                    }}
+                                    style={{
+                                      flex: 1.2,
+                                      height: 38,
+                                      borderRadius: BorderRadius.small,
+                                      borderWidth: 1,
+                                      borderColor: isPendiente ? 'transparent' : themeColors.border,
+                                      backgroundColor: isPendiente ? themeColors.warning : themeColors.backgroundElement,
+                                      justifyContent: 'center',
+                                      alignItems: 'center',
+                                      paddingHorizontal: 4
+                                    }}
+                                  >
+                                    <Text style={{ color: isPendiente ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                      ⏳ Pend. Factura
+                                    </Text>
+                                  </TouchableOpacity>
 
-                            <TouchableOpacity
-                              onPress={() => handleToggleAdminFacturado(false)}
-                              style={{
-                                flex: 1,
-                                height: 38,
-                                borderRadius: BorderRadius.small,
-                                borderWidth: 1,
-                                borderColor: (!selectedGasto.facturado && !selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? 'transparent' : themeColors.border,
-                                backgroundColor: (!selectedGasto.facturado && !selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? themeColors.accent : themeColors.backgroundElement,
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                paddingHorizontal: 4
-                              }}
-                            >
-                              <Text style={{ color: (!selectedGasto.facturado && !selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
-                                ❌ No Facturado
-                              </Text>
-                            </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={() => handleToggleAdminFacturado(false)}
+                                    style={{
+                                      flex: 1,
+                                      height: 38,
+                                      borderRadius: BorderRadius.small,
+                                      borderWidth: 1,
+                                      borderColor: (!selectedGasto.facturado && !isPendiente) ? 'transparent' : themeColors.border,
+                                      backgroundColor: (!selectedGasto.facturado && !isPendiente) ? themeColors.accent : themeColors.backgroundElement,
+                                      justifyContent: 'center',
+                                      alignItems: 'center',
+                                      paddingHorizontal: 4
+                                    }}
+                                  >
+                                    <Text style={{ color: (!selectedGasto.facturado && !isPendiente) ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                      ❌ No Facturado
+                                    </Text>
+                                  </TouchableOpacity>
+                                </>
+                              );
+                            })()}
                           </View>
 
                           {/* Secciones según el toggle */}
