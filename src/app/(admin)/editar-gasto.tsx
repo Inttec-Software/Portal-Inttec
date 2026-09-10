@@ -32,6 +32,7 @@ import {
   AuthService,
   SucursalCliente,
   recalculateVentaTotals,
+  GastoHelper,
 } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { PushNotificationService } from '@/services/pushNotifications';
@@ -214,8 +215,10 @@ export default function EditarGastoForm() {
       if (data.usuarios) setAllUsers(data.usuarios);
       if (data.sucursales) setSucursalesCliente(data.sucursales);
       if (data.proveedores) setProveedores(data.proveedores);
+      return data;
     } catch (err) {
       console.error('Error loading catalogs:', err);
+      return null;
     }
   };
 
@@ -229,27 +232,43 @@ export default function EditarGastoForm() {
         return;
       }
       setCurrentUser(user);
-      await loadCatalogos();
+      const catalogs = await loadCatalogos();
 
       if (id) {
         try {
-          const { data, error } = await supabase
-            .from('gastos')
-            .select(`
-              *,
-              subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-              proveedor_rel:proveedores(id, nombre),
-              cliente_rel:clientes(id, nombre),
-              sucursal_rel:sucursales_cliente(id, nombre)
-            `)
-            .eq('id', id)
-            .single();
+          let data: any = null;
+          try {
+            const headers = await getApiHeaders();
+            const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${id}`, { headers });
+            if (res.ok) {
+              const resData = await res.json();
+              data = resData.gasto;
+            }
+          } catch (apiErr) {
+            console.warn('API error, falling back to supabase direct:', apiErr);
+          }
 
-          if (error) throw error;
+          if (!data) {
+            const { data: dbData, error } = await supabase
+              .from('gastos')
+              .select(`
+                *,
+                subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
+                proveedor_rel:proveedores(id, nombre),
+                cliente_rel:clientes(id, nombre),
+                sucursal_rel:sucursales_cliente(id, nombre)
+              `)
+              .eq('id', id)
+              .single();
+
+            if (error) throw error;
+            data = dbData;
+          }
+
           if (data) {
             // Pre-fill state
             if (data.foto_url) setImageUri(data.foto_url);
-            setMonto(data.monto.toString());
+            if (data.monto !== undefined && data.monto !== null) setMonto(data.monto.toString());
             
             if (data.fecha_comprobante) {
               const parts = data.fecha_comprobante.split('-'); // YYYY-MM-DD
@@ -263,7 +282,7 @@ export default function EditarGastoForm() {
               }
             }
 
-            const resolvedProveedor = data.proveedor_rel?.nombre || data.proveedor || '';
+            const resolvedProveedor = GastoHelper.getProveedor(data);
             setProveedor(resolvedProveedor);
             if (!resolvedProveedor && data.justificacion) {
               const provMatch = data.justificacion.match(/\[Proveedor a agregar:\s*([^\]]+)\]/);
@@ -273,13 +292,35 @@ export default function EditarGastoForm() {
             }
             setTipoServicioProyecto(data.tipo_servicio_proyecto as any || null);
             setDetalleServicioProyecto(data.detalle_servicio_proyecto || '');
-            setSucursal(data.sucursal_rel?.nombre || data.sucursal || '');
+
+            const resolvedCliente = GastoHelper.getCliente(data);
+            setSelectedCliente(resolvedCliente);
+
+            const resolvedSucursal = GastoHelper.getSucursal(data);
+            setSucursal(resolvedSucursal);
+
             setMetodoPago(data.metodo_pago as any || 'efectivo');
             setTipoTarjeta(data.tipo_tarjeta as any || null);
             setJustificacion(cleanJustificacion(data.justificacion));
-            setSelectedCategoria(data.subcategoria_rel?.categoria_rel?.nombre || data.categoria_rel?.nombre || data.categoria || '');
-            setSelectedSubcategoria(data.subcategoria_rel?.nombre || data.subcategoria || '');
-            setSelectedCliente(data.cliente_rel?.nombre || data.cliente || '');
+
+            // Categoría y Subcategoría robustas
+            let resolvedCat = GastoHelper.getCategoria(data);
+            let resolvedSub = GastoHelper.getSubcategoria(data);
+
+            if ((!resolvedCat || !resolvedSub) && data.subcategoria_id && catalogs?.subcategorias) {
+              const foundSub = catalogs.subcategorias.find((s: any) => s.id === data.subcategoria_id);
+              if (foundSub) {
+                if (!resolvedSub) resolvedSub = foundSub.nombre;
+                if (!resolvedCat && catalogs.categorias) {
+                  const foundCat = catalogs.categorias.find((c: any) => c.id === foundSub.categoria_id);
+                  if (foundCat) resolvedCat = foundCat.nombre;
+                }
+              }
+            }
+
+            if (resolvedCat) setSelectedCategoria(resolvedCat);
+            if (resolvedSub) setSelectedSubcategoria(resolvedSub);
+
             if (data.motivo_sin_factura?.startsWith('PENDIENTE_ENTREGA')) {
               setFacturado(false);
               setFacturaStatus('PENDIENTE');
@@ -290,18 +331,21 @@ export default function EditarGastoForm() {
             } else if (data.facturado === false) {
               setFacturado(false);
               setFacturaStatus('NO');
-            } else {
+              setMotivoSinFactura(data.motivo_sin_factura || '');
+            } else if (data.facturado === true) {
               setFacturado(true);
               setFacturaStatus('SI');
+            } else {
+              setFacturado(null);
             }
             
             setMotivoSinFactura(data.motivo_sin_factura || '');
             if (data.factura_url) {
               const urls = data.factura_url.split(',').filter(Boolean);
               setFacturasFiles(urls.map((url: string) => ({
-                  uri: url,
+                  uri: url.trim(),
                   base64: '',
-                  ext: url.split('.').pop() || 'jpg',
+                  ext: url.trim().split('.').pop() || 'jpg',
                   isRemote: true
               })));
             }
@@ -310,18 +354,37 @@ export default function EditarGastoForm() {
               data.justificacion.includes('[Consumo compartido con:') ||
               data.justificacion.includes('[Propina incluida')
             );
-            const isMeal = (data.categoria && (
-              data.categoria.toLowerCase().includes('alimento') ||
-              data.categoria.toLowerCase().includes('comida') ||
-              data.categoria.toLowerCase().includes('consumo')
+            const isMeal = (resolvedCat && (
+              resolvedCat.toLowerCase().includes('alimento') ||
+              resolvedCat.toLowerCase().includes('comida') ||
+              resolvedCat.toLowerCase().includes('consumo')
             )) || hasShared;
             setEsComida(!!isMeal);
 
-            // Si el gasto ya fue guardado antes y tenía propina, es difícil inferir de la justificación, 
-            // pero podemos asumir que incluyePropina = true para que no requiera el montoPropina forzado.
+            if (data.justificacion) {
+              const sharedMatch = data.justificacion.match(/\[Consumo compartido con:\s*([^\]\(\n]+)/);
+              if (sharedMatch) {
+                const names = sharedMatch[1].split(',').map((n: string) => n.trim().toLowerCase());
+                const usersList = catalogs?.usuarios || [];
+                const matchedUsers = usersList.filter((u: any) => names.some((n: string) => u.nombre?.toLowerCase().includes(n) || n.includes(u.nombre?.toLowerCase())));
+                if (matchedUsers.length > 0) {
+                  setSelectedEmpleados(matchedUsers);
+                }
+              }
+              const propinaMatch = data.justificacion.match(/\[Propina incluida en ticket:\s*(Sí|Si|No)\]/i);
+              if (propinaMatch) {
+                setIncluyePropina(propinaMatch[1].toLowerCase().startsWith('s'));
+              }
+              const montoPropinaMatch = data.justificacion.match(/\[Monto de propina dejado aparte:\s*\$?([0-9.]+)/i);
+              if (montoPropinaMatch) {
+                setMontoPropina(montoPropinaMatch[1]);
+              }
+            }
+
             setIncluyePropina(true); 
           }
-        } catch {
+        } catch (err: any) {
+          console.error('Error al cargar gasto:', err);
           showAlert('Error', 'No se pudo cargar el gasto a editar.');
           router.replace('/(admin)/gastos');
         } finally {

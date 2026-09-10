@@ -3,7 +3,7 @@ import { cacheDirectory, writeAsStringAsync, EncodingType } from 'expo-file-syst
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Platform, Alert } from 'react-native';
-import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
+import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService, supabase, inttecClient, daravisaClient } from '../services/supabase';
 import { Cotizacion } from '@/types/ventas';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
@@ -1062,13 +1062,19 @@ export const ReportGenerator = {
     const categoriasMap = new Map(categorias.map((c) => [c.id, c.nombre]));
 
     let tableRows = '';
+    let totalValor = 0;
+
     productos.forEach((p) => {
       const categoriaNombre = categoriasMap.get(p.categoria_id) || 'N/A';
       const statusLabel = p.activo ? 'Activo' : 'Inactivo';
       const statusColor = p.activo ? '#4CAF50' : '#F44336';
       const stockColor = p.stock_actual === 0 ? '#F44336' : p.stock_actual <= 5 ? '#FFC107' : '#333';
       const precioUnitario = Number(p.precio_unitario || (p as any).precio || 0);
-      const valorTotal = Number(p.stock_actual || 0) * precioUnitario;
+      const valorTotalItem = Number(p.stock_actual || 0) * precioUnitario;
+      totalValor += valorTotalItem;
+
+      const precioFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(precioUnitario);
+      const valorTotalFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(valorTotalItem);
 
       tableRows += `
         <tr>
@@ -1076,8 +1082,8 @@ export const ReportGenerator = {
           <td style="font-weight: bold;">${p.nombre_oficial || 'N/A'}</td>
           <td>${categoriaNombre}</td>
           <td style="text-align: right; font-weight: bold; color: ${stockColor};">${p.stock_actual} pzas</td>
-          <td style="text-align: right;">$${precioUnitario.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td style="text-align: right; font-weight: bold; color: #0d1b2a;">$${valorTotal.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td style="text-align: right; color: #555;">${precioFmt}</td>
+          <td style="text-align: right; font-weight: bold; color: #0d1b2a;">${valorTotalFmt}</td>
           <td><span style="color: ${statusColor}; font-weight: bold;">${statusLabel}</span></td>
         </tr>
       `;
@@ -1085,7 +1091,7 @@ export const ReportGenerator = {
 
     const totalStock = productos.reduce((sum, p) => sum + Number(p.stock_actual || 0), 0);
     const activeProducts = productos.filter((p) => p.activo).length;
-    const granTotalValor = productos.reduce((sum, p) => sum + (Number(p.stock_actual || 0) * Number(p.precio_unitario || (p as any).precio || 0)), 0);
+    const totalValorFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(totalValor);
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -1198,28 +1204,28 @@ export const ReportGenerator = {
 
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; border: none;">
           <tr>
-            <td style="width: 25%; padding-right: 5px; border: none;">
+            <td style="width: 25%; padding-right: 6px; border: none;">
               <div class="summary-card">
                 <div class="label">Total Artículos Catálogo</div>
                 <div class="value">${productos.length}</div>
               </div>
             </td>
-            <td style="width: 25%; padding-left: 5px; padding-right: 5px; border: none;">
+            <td style="width: 25%; padding-left: 3px; padding-right: 3px; border: none;">
               <div class="summary-card">
                 <div class="label">Productos Activos</div>
                 <div class="value" style="color: #4CAF50;">${activeProducts}</div>
               </div>
             </td>
-            <td style="width: 25%; padding-left: 5px; padding-right: 5px; border: none;">
+            <td style="width: 25%; padding-left: 3px; padding-right: 3px; border: none;">
               <div class="summary-card">
-                <div class="label">Existencias Stock</div>
-                <div class="value" style="color: #1b4965;">${totalStock}</div>
+                <div class="label">Total Existencias Stock</div>
+                <div class="value" style="color: #1b4965;">${totalStock} pzas</div>
               </div>
             </td>
-            <td style="width: 25%; padding-left: 5px; border: none;">
+            <td style="width: 25%; padding-left: 6px; border: none;">
               <div class="summary-card">
                 <div class="label">Valor Total Inventario</div>
-                <div class="value" style="color: #2b6cb0;">$${granTotalValor.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div class="value" style="color: #2e7d32;">${totalValorFmt}</div>
               </div>
             </td>
           </tr>
@@ -1228,13 +1234,13 @@ export const ReportGenerator = {
         <table>
           <thead>
             <tr>
-              <th style="width: 14%">SKU Interno</th>
+              <th style="width: 13%">SKU</th>
               <th style="width: 32%">Nombre Oficial</th>
-              <th style="width: 16%">Categoría</th>
+              <th style="width: 15%">Categoría</th>
               <th style="width: 10%; text-align: right;">Stock</th>
-              <th style="width: 12%; text-align: right;">Precio Unit.</th>
+              <th style="width: 12%; text-align: right;">P. Unitario</th>
               <th style="width: 12%; text-align: right;">Valor Total</th>
-              <th style="width: 4%; text-align: center;">Estado</th>
+              <th style="width: 6%">Estado</th>
             </tr>
           </thead>
           <tbody>
@@ -1245,7 +1251,7 @@ export const ReportGenerator = {
               <td colspan="3">VALOR TOTAL CONSOLIDADO DE INVENTARIO</td>
               <td style="text-align: right;">${totalStock} pzas</td>
               <td style="text-align: right;">-</td>
-              <td style="text-align: right; color: #0d1b2a;">$${granTotalValor.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MXN</td>
+              <td style="text-align: right; color: #0d1b2a;">${totalValorFmt} MXN</td>
               <td></td>
             </tr>
           </tfoot>
@@ -1324,7 +1330,7 @@ export const ReportGenerator = {
     const categoriasMap = new Map(categorias.map((c) => [c.id, c.nombre]));
 
     let csvContent = '\uFEFF'; // BOM
-    csvContent += 'SKU Interno,Nombre Oficial,Categoría,Stock Actual,Precio Unitario ($),Valor Total ($),Estado (Activo)\n';
+    csvContent += 'SKU Interno,Nombre Oficial,Categoría,Stock Actual,Precio Unitario,Valor Total,Estado (Activo)\n';
 
     productos.forEach((p) => {
       const categoriaNombre = categoriasMap.get(p.categoria_id) || 'N/A';
@@ -1389,19 +1395,56 @@ export const ReportGenerator = {
     }
     const branding = await getCompanyBranding();
 
+    // Identificar IDs de usuarios faltantes para buscar sus nombres si no vienen precargados
+    const missingUserIds = new Set<string>();
+    consumos.forEach((c) => {
+      const hasName = c.usuario?.nombre || c.empleado?.nombre || c.empleado_nombre || c.usuario_nombre;
+      if (!hasName) {
+        if (c.creado_por && typeof c.creado_por === 'string' && c.creado_por.length > 10) missingUserIds.add(c.creado_por);
+        if (c.empleado_id && typeof c.empleado_id === 'string' && c.empleado_id.length > 10) missingUserIds.add(c.empleado_id);
+      }
+    });
+
+    const userNamesMap = new Map<string, string>();
+    if (missingUserIds.size > 0) {
+      try {
+        const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
+        const { data: usersData } = await client
+          .from('usuarios')
+          .select('id, nombre')
+          .in('id', Array.from(missingUserIds));
+
+        if (usersData) {
+          usersData.forEach((u: any) => {
+            if (u.id && u.nombre) userNamesMap.set(u.id, u.nombre);
+          });
+        }
+      } catch (err) {
+        console.warn('[reportGenerator] Error resolving user names for consumos PDF:', err);
+      }
+    }
+
     let tableRows = '';
     consumos.forEach((c) => {
       const fecha = c.fecha ? c.fecha.split('T')[0] : '';
       const productoNombre = c.producto?.nombre_oficial || 'Producto Eliminado';
-      const empleadoNombre = c.usuario?.nombre || (c.creado_por ? 'Empleado Registrado' : 'No especificado / Admin');
+      const sku = c.producto?.sku_interno ? ` (${c.producto.sku_interno})` : '';
+      const userId = c.creado_por || c.empleado_id;
+      const empleadoNombre =
+        c.usuario?.nombre ||
+        c.empleado?.nombre ||
+        c.empleado_nombre ||
+        c.usuario_nombre ||
+        (userId ? userNamesMap.get(userId) : null) ||
+        'No especificado / Almacén';
       const cantidad = c.cantidad || 0;
-      const referencia = c.folio_factura || 'N/A';
+      const referencia = c.folio_factura || c.motivo || 'N/A';
 
       tableRows += `
         <tr>
           <td>${fecha}</td>
-          <td style="font-weight: bold;">${productoNombre}</td>
-          <td style="color: #2b2d42; font-weight: 500;">${empleadoNombre}</td>
+          <td style="font-weight: bold;">${productoNombre}<span style="font-size: 10px; color: #666; font-weight: normal;">${sku}</span></td>
+          <td style="color: #0d1b2a; font-weight: 700;">👤 ${empleadoNombre}</td>
           <td style="text-align: right; font-weight: bold; color: #F44336;">-${cantidad} pzas</td>
           <td>${referencia}</td>
         </tr>
@@ -1565,10 +1608,10 @@ export const ReportGenerator = {
           <thead>
             <tr>
               <th style="width: 12%">Fecha</th>
-              <th style="width: 32%">Producto</th>
-              <th style="width: 24%">Empleado</th>
+              <th style="width: 30%">Producto</th>
+              <th style="width: 26%">Retirado Por (Empleado)</th>
               <th style="width: 12%; text-align: right;">Cantidad</th>
-              <th style="width: 20%">Referencia/Trabajo</th>
+              <th style="width: 20%">Referencia / Motivo</th>
             </tr>
           </thead>
           <tbody>
@@ -1611,16 +1654,19 @@ export const ReportGenerator = {
         return;
       }
 
-      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
-      const pdfFileName = `reporte_consumos_${Date.now()}.pdf`;
-      const safeUri = `${cacheDirectory}${pdfFileName}`;
-      
-      await writeAsStringAsync(safeUri, base64 || '', {
-        encoding: EncodingType.Base64,
+      const { uri } = await Print.printToFileAsync({
+        html: htmlContent,
+        base64: false,
       });
 
+      const pdfFileName = `reporte_consumos_${Date.now()}.pdf`;
+      const safeUri = `${cacheDirectory}${pdfFileName}`;
+      await writeAsStringAsync(safeUri, await (await fetch(uri)).text(), {
+        encoding: EncodingType.UTF8,
+      }).catch(() => {});
+
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(safeUri, {
+        await Sharing.shareAsync(uri, {
           mimeType: 'application/pdf',
           dialogTitle: 'Exportar Reporte Consumos PDF',
           UTI: 'com.adobe.pdf',
@@ -1629,7 +1675,7 @@ export const ReportGenerator = {
         throw new Error('La función de compartir no está disponible.');
       }
     } catch (error: any) {
-      logger.error('Error generating consumptions PDF:', error);
+      logger.error('Error generating consumos PDF:', error);
       throw new Error(error.message || 'Error al generar el reporte de consumos.');
     }
   },
@@ -1645,20 +1691,58 @@ export const ReportGenerator = {
       throw new Error('No hay registros de consumo para exportar.');
     }
 
+    // Identificar IDs de usuarios faltantes para buscar sus nombres si no vienen precargados
+    const missingUserIds = new Set<string>();
+    consumos.forEach((c) => {
+      const hasName = c.usuario?.nombre || c.empleado?.nombre || c.empleado_nombre || c.usuario_nombre;
+      if (!hasName) {
+        if (c.creado_por && typeof c.creado_por === 'string' && c.creado_por.length > 10) missingUserIds.add(c.creado_por);
+        if (c.empleado_id && typeof c.empleado_id === 'string' && c.empleado_id.length > 10) missingUserIds.add(c.empleado_id);
+      }
+    });
+
+    const userNamesMap = new Map<string, string>();
+    if (missingUserIds.size > 0) {
+      try {
+        const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
+        const { data: usersData } = await client
+          .from('usuarios')
+          .select('id, nombre')
+          .in('id', Array.from(missingUserIds));
+
+        if (usersData) {
+          usersData.forEach((u: any) => {
+            if (u.id && u.nombre) userNamesMap.set(u.id, u.nombre);
+          });
+        }
+      } catch (err) {
+        console.warn('[reportGenerator] Error resolving user names for consumos CSV:', err);
+      }
+    }
+
     let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Movimiento,Fecha,Producto,Empleado,Cantidad,Referencia/Trabajo\n';
+    csvContent += 'ID Movimiento,Fecha,Producto,SKU,Retirado Por (Empleado),Cantidad,Referencia / Motivo\n';
 
     consumos.forEach((c) => {
       const fecha = c.fecha ? c.fecha.split('T')[0] : '';
       const productoNombre = c.producto?.nombre_oficial || 'Producto Eliminado';
-      const empleadoNombre = c.usuario?.nombre || (c.creado_por ? 'Empleado Registrado' : 'No especificado / Admin');
+      const sku = c.producto?.sku_interno || '';
+      const userId = c.creado_por || c.empleado_id;
+      const empleadoNombre =
+        c.usuario?.nombre ||
+        c.empleado?.nombre ||
+        c.empleado_nombre ||
+        c.usuario_nombre ||
+        (userId ? userNamesMap.get(userId) : null) ||
+        'No especificado / Almacén';
       const row = [
         c.id,
         fecha,
         escapeCSVCell(productoNombre),
+        escapeCSVCell(sku),
         escapeCSVCell(empleadoNombre),
         c.cantidad,
-        escapeCSVCell(c.folio_factura),
+        escapeCSVCell(c.folio_factura || c.motivo),
       ].join(',');
 
       csvContent += row + '\n';
@@ -2496,6 +2580,7 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
                       <tr><td class="label-col">Método de Pago:</td><td class="value-col">${facturaData.payment_method || 'PUE'}</td></tr>
                       <tr><td class="label-col">Forma de Pago:</td><td class="value-col">${facturaData.payment_form || '01'}</td></tr>
                       <tr><td class="label-col">Moneda:</td><td class="value-col">MXN</td></tr>
+                      ${venta.orden_compra ? `<tr><td class="label-col">Orden de compra:</td><td class="value-col">${venta.orden_compra}</td></tr>` : ''}
                   </table>
               </div>
           </div>

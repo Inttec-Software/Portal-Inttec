@@ -20,9 +20,9 @@ export const getDashboardData = async (req: Request, res: Response) => {
       client.from('categorias_productos').select('*').order('nombre'),
       client.from('proveedores').select('*').order('nombre'),
       client.from('productos').select('*').order('nombre_oficial'),
-      client.from('movimientos_inventario').select('*, producto:productos(nombre_oficial)').eq('tipo', 'SALIDA').order('fecha', { ascending: false }).limit(50),
+      client.from('movimientos_inventario').select('*, producto:productos(nombre_oficial, sku_interno, precio_unitario)').eq('tipo', 'SALIDA').order('fecha', { ascending: false }).limit(50),
       client.from('clientes').select('*').order('nombre'),
-      client.from('usuarios').select('id, nombre').in('rol', ['EMPLEADO', 'DEV']).order('nombre')
+      client.from('usuarios').select('id, nombre, rol, email').order('nombre')
     ]);
 
     if (categoriasRes.error) throw categoriasRes.error;
@@ -32,13 +32,19 @@ export const getDashboardData = async (req: Request, res: Response) => {
     if (clientesRes.error) throw clientesRes.error;
     if (usuariosRes.error) throw usuariosRes.error;
 
+    const userMap = new Map((usuariosRes.data || []).map((u: any) => [u.id, u]));
+    const historialWithUser = (historialRes.data || []).map((m: any) => ({
+      ...m,
+      usuario: userMap.get(m.creado_por || m.empleado_id) || null
+    }));
+
     return res.json({
       categorias: categoriasRes.data || [],
       proveedores: proveedoresRes.data || [],
       productos: productosRes.data || [],
-      historial_consumo: historialRes.data || [],
+      historial_consumo: historialWithUser,
       clientes: clientesRes.data || [],
-      usuarios: usuariosRes.data || []
+      usuarios: (usuariosRes.data || []).filter((u: any) => ['EMPLEADO', 'DEV'].includes(u.rol))
     });
   } catch (error: any) {
     console.error('Error in getDashboardData:', error);
@@ -356,4 +362,67 @@ export const verificarFolioFactura = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+// 10. Eliminación Masiva de Productos (POST /api/inventario/productos/bulk-delete)
+export const bulkDeleteProductos = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Se requiere un arreglo de IDs de productos.' });
+    }
+
+    const { error } = await client.from('productos').update({ activo: false }).in('id', ids);
+    if (error) throw error;
+
+    return res.json({ success: true, count: ids.length });
+  } catch (error: any) {
+    console.error('Error in bulkDeleteProductos:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// 11. Actualización Masiva de Productos (POST /api/inventario/productos/bulk-update)
+export const bulkUpdateProductos = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+    const { ids, updates } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Se requiere un arreglo de IDs de productos.' });
+    }
+
+    if (!updates || typeof updates !== 'object' || Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No se enviaron campos válidos para actualizar.' });
+    }
+
+    const allowedFields = ['categoria_id', 'proveedor_id', 'stock_actual', 'precio_unitario', 'activo'];
+    const cleanUpdates: any = {};
+    for (const key of allowedFields) {
+      if (updates[key] !== undefined) {
+        cleanUpdates[key] = updates[key];
+      }
+    }
+
+    if (Object.keys(cleanUpdates).length === 0) {
+      return res.status(400).json({ error: 'No hay campos válidos para actualizar en lote.' });
+    }
+
+    const { error } = await client.from('productos').update(cleanUpdates).in('id', ids);
+    if (error) throw error;
+
+    return res.json({ success: true, count: ids.length });
+  } catch (error: any) {
+    console.error('Error in bulkUpdateProductos:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 

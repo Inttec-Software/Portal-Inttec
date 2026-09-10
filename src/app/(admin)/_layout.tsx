@@ -57,6 +57,7 @@ export default function AdminLayout() {
     { route: '/(admin)/inventario', icon: 'cube-outline', color: '#48dbfb', name: 'Inventario' },
     { route: '/(admin)/empleados', icon: 'people-outline', color: '#1dd1a1', name: 'Empleados' },
     { route: '/(admin)/vehiculos', icon: 'car-outline', color: '#ff9ff3', name: 'Flota' },
+    { route: '/(admin)/herramientas', icon: 'build-outline', color: '#00cec9', name: 'Herramientas' },
     { route: '/(admin)/evidencias', icon: 'briefcase-outline', color: '#ff5252', name: 'Evidencias' },
     { route: '/(admin)/reportes', icon: 'document-text-outline', color: '#10ac84', name: 'Reportes' },
     { route: '/(admin)/catalogos', icon: 'list-outline', color: '#5f27cd', name: 'Catálogos' },

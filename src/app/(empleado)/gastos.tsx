@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,12 +14,13 @@ import {
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
 import { SyncService, OfflineGastoItem } from '@/services/sync';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
+import { TareasService } from '@/services/tareasService';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
@@ -47,6 +48,53 @@ export default function EmpleadoGastos() {
   const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
   const [isSyncing, setIsSyncing] = useState(false);
   const [showTasksPopover, setShowTasksPopover] = useState(false);
+  const [pendingTasksCount, setPendingTasksCount] = useState(0);
+  const [hasNewTasks, setHasNewTasks] = useState(false);
+  const [currentPendingIds, setCurrentPendingIds] = useState<string[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const fetchPendingTasks = async () => {
+        if (!user) return;
+        try {
+          const data = await TareasService.getTareas();
+          const pending = (data || []).filter((t: any) => 
+            t.status !== 'Completada' && 
+            t.status !== 'Cancelada' && 
+            (t.responsable_id === user.id || (t.corresponsables && t.corresponsables.some((c:any) => c.usuario_id === user.id)))
+          );
+          setPendingTasksCount(pending.length);
+          
+          const pendingIds = pending.map((t: any) => t.id);
+          setCurrentPendingIds(pendingIds);
+
+          if (pending.length > 0) {
+            const seenTasksJson = await AsyncStorage.getItem(`seen_tasks_${user.id}`);
+            const seenTasks = seenTasksJson ? JSON.parse(seenTasksJson) : [];
+            const hasNew = pendingIds.some((id: string) => !seenTasks.includes(id));
+            setHasNewTasks(hasNew);
+          } else {
+            setHasNewTasks(false);
+          }
+        } catch (error) {
+          console.error('Error fetching tasks for badge', error);
+        }
+      };
+      fetchPendingTasks();
+    }, [user])
+  );
+
+  const handleOpenTasksPopover = async () => {
+    setShowTasksPopover(true);
+    if (hasNewTasks && user && currentPendingIds.length > 0) {
+      try {
+        await AsyncStorage.setItem(`seen_tasks_${user.id}`, JSON.stringify(currentPendingIds));
+        setHasNewTasks(false);
+      } catch (error) {
+        console.error('Error saving seen tasks', error);
+      }
+    }
+  };
 
   // Modal de Detalles
   const [selectedGasto, setSelectedGasto] = useState<(Gasto & { isOffline?: boolean }) | null>(null);
@@ -565,10 +613,23 @@ export default function EmpleadoGastos() {
 
         <View style={styles.headerActions}>
           <TouchableOpacity
-            onPress={() => setShowTasksPopover(true)}
-            style={[styles.headerIconBtn, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)' }]}
+            onPress={handleOpenTasksPopover}
+            style={[styles.headerIconBtn, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)', position: 'relative' }]}
           >
             <Ionicons name="notifications-outline" size={20} color={themeColors.text} />
+            {pendingTasksCount > 0 && (
+              <View style={{
+                position: 'absolute',
+                top: 2,
+                right: 4,
+                width: 10,
+                height: 10,
+                borderRadius: 5,
+                backgroundColor: hasNewTasks ? themeColors.danger : themeColors.warning,
+                borderWidth: 1,
+                borderColor: scheme === 'dark' ? '#0f172a' : '#f8fafc'
+              }} />
+            )}
           </TouchableOpacity>
 
           {user?.rol === 'DEV' && (
@@ -703,6 +764,44 @@ export default function EmpleadoGastos() {
             {formatCurrency(totalAprobado)}
           </Text>
         </View>
+      </View>
+
+      {/* Banner / Acceso Rápido a Checklist de Herramientas */}
+      <View style={{ paddingHorizontal: Spacing.three, marginBottom: Spacing.two }}>
+        <TouchableOpacity
+          onPress={() => router.push('/(empleado)/herramientas' as any)}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: scheme === 'dark' ? '#00cec920' : '#e6fffa',
+            borderColor: '#00cec9',
+            borderWidth: 1,
+            borderRadius: BorderRadius.medium,
+            padding: Spacing.two,
+            gap: 10,
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={{
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: '#00cec9',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}>
+            <Ionicons name="build" size={20} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.text }}>
+              Kit de Herramientas & Checklist
+            </Text>
+            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>
+              Revisa las herramientas de tu camioneta antes de iniciar ruta
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={themeColors.textSecondary} />
+        </TouchableOpacity>
       </View>
 
       {/* Tabs */}

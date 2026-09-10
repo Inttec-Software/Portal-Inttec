@@ -26,6 +26,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
+import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
@@ -904,8 +905,10 @@ setProveedoresCatalog(provRes.data || []);
   const handleToggleAdminFacturado = async (val: boolean) => {
     if (!selectedGasto) return;
     try {
-      // Si se marca como No Facturado (val === false), limpiamos el estado de 'PENDIENTE_ENTREGA'
-      let newMotivo = val ? null : (selectedGasto.motivo_sin_factura === 'PENDIENTE_ENTREGA' ? null : selectedGasto.motivo_sin_factura);
+      // Si se marca como No Facturado (val === false):
+      // Si el motivo actual era un texto de factura pendiente (ej. 'PENDIENTE_ENTREGA: ...'), se limpia a null
+      const isPendiente = !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE');
+      let newMotivo = val ? null : (isPendiente ? null : selectedGasto.motivo_sin_factura);
       
       const updateObj: Partial<Gasto> = {
         facturado: val,
@@ -1463,12 +1466,10 @@ setProveedoresCatalog(provRes.data || []);
   const handleExportConsumosPDF = async () => {
     setIsFetchingConsumos(true);
     try {
-      const { data, error } = await supabase
-        .from('movimientos_inventario')
-        .select('*, producto:productos(nombre_oficial), usuario:usuarios!creado_por(nombre)')
-        .eq('tipo', 'SALIDA')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
       await ReportGenerator.exportConsumosToPDF(data || [], 'Reporte de Consumos de Materiales');
     } catch (err: any) {
       showAlert('Error PDF Consumos', err.message || 'No se pudo generar el reporte.');
@@ -1480,12 +1481,10 @@ setProveedoresCatalog(provRes.data || []);
   const handleExportConsumosCSV = async () => {
     setIsFetchingConsumos(true);
     try {
-      const { data, error } = await supabase
-        .from('movimientos_inventario')
-        .select('*, producto:productos(nombre_oficial), usuario:usuarios!creado_por(nombre)')
-        .eq('tipo', 'SALIDA')
-        .order('fecha', { ascending: false });
-      if (error) throw error;
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
       await ReportGenerator.exportConsumosToCSV(data || [], 'reporte_consumos_general.csv');
     } catch (err: any) {
       showAlert('Error CSV Consumos', err.message || 'No se pudo generar el reporte.');
@@ -1615,10 +1614,10 @@ setProveedoresCatalog(provRes.data || []);
     
     if (facturaFilter === 'FACTURADOS') return g.facturado === true;
     if (facturaFilter === 'PENDIENTE_ENTREGA') {
-      return !g.facturado && (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente'));
+      return !g.facturado && !!g.motivo_sin_factura && g.motivo_sin_factura.toUpperCase().includes('PENDIENTE');
     }
     if (facturaFilter === 'NO_FACTURADOS') {
-      return !g.facturado && g.motivo_sin_factura !== 'PENDIENTE_ENTREGA' && !g.motivo_sin_factura?.toLowerCase().includes('pendiente');
+      return !g.facturado && (!g.motivo_sin_factura || !g.motivo_sin_factura.toUpperCase().includes('PENDIENTE'));
     }
     return true; // TODOS
   });
@@ -2927,25 +2926,27 @@ setProveedoresCatalog(provRes.data || []);
                         {GastoHelper.getProveedor(selectedGasto) || '⚠️ En blanco (Sin asignar)'}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 6,
-                        paddingVertical: 7,
-                        paddingHorizontal: 12,
-                        borderRadius: BorderRadius.medium,
-                        backgroundColor: themeColors.accent + '20',
-                        borderWidth: 1,
-                        borderColor: themeColors.accent,
-                      }}
-                    >
-                      <Ionicons name="pencil" size={15} color={themeColors.accent} />
-                      <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
-                        {GastoHelper.getProveedor(selectedGasto) ? 'Cambiar' : 'Asignar'}
-                      </Text>
-                    </TouchableOpacity>
+                    {selectedGasto.status === 'APPROVED' && (
+                      <TouchableOpacity
+                        onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                          paddingVertical: 7,
+                          paddingHorizontal: 12,
+                          borderRadius: BorderRadius.medium,
+                          backgroundColor: themeColors.accent + '20',
+                          borderWidth: 1,
+                          borderColor: themeColors.accent,
+                        }}
+                      >
+                        <Ionicons name="pencil" size={15} color={themeColors.accent} />
+                        <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                          {GastoHelper.getProveedor(selectedGasto) ? 'Cambiar' : 'Asignar'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {(!GastoHelper.getProveedor(selectedGasto) || !GastoHelper.getProveedor(selectedGasto).trim()) && (
@@ -3104,55 +3105,62 @@ setProveedoresCatalog(provRes.data || []);
                               </Text>
                             </TouchableOpacity>
 
-                            <TouchableOpacity
-                              onPress={async () => {
-                                try {
-                                  const updateObj = { facturado: false, motivo_sin_factura: 'PENDIENTE_ENTREGA', factura_url: null };
-                                  const { error: dbError } = await supabase.from('gastos').update(updateObj).eq('id', selectedGasto.id);
-                                  if (dbError) throw dbError;
-                                  const updated = { ...selectedGasto, ...updateObj };
-                                  setSelectedGasto(updated);
-                                  setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updated : g));
-                                  setLocalMotivo('PENDIENTE_ENTREGA');
-                                } catch (err: any) {
-                                  showAlert('Error', err.message);
-                                }
-                              }}
-                              style={{
-                                flex: 1.2,
-                                height: 38,
-                                borderRadius: BorderRadius.small,
-                                borderWidth: 1,
-                                borderColor: (!selectedGasto.facturado && selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? 'transparent' : themeColors.border,
-                                backgroundColor: (!selectedGasto.facturado && selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? themeColors.warning : themeColors.backgroundElement,
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                paddingHorizontal: 4
-                              }}
-                            >
-                              <Text style={{ color: (!selectedGasto.facturado && selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
-                                ⏳ Pend. Factura
-                              </Text>
-                            </TouchableOpacity>
+                            {(() => {
+                              const isPendiente = !selectedGasto.facturado && !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE');
+                              return (
+                                <>
+                                  <TouchableOpacity
+                                    onPress={async () => {
+                                      try {
+                                        const updateObj = { facturado: false, motivo_sin_factura: 'PENDIENTE_ENTREGA', factura_url: null };
+                                        const { error: dbError } = await supabase.from('gastos').update(updateObj).eq('id', selectedGasto.id);
+                                        if (dbError) throw dbError;
+                                        const updated = { ...selectedGasto, ...updateObj };
+                                        setSelectedGasto(updated);
+                                        setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updated : g));
+                                        setLocalMotivo('PENDIENTE_ENTREGA');
+                                      } catch (err: any) {
+                                        showAlert('Error', err.message);
+                                      }
+                                    }}
+                                    style={{
+                                      flex: 1.2,
+                                      height: 38,
+                                      borderRadius: BorderRadius.small,
+                                      borderWidth: 1,
+                                      borderColor: isPendiente ? 'transparent' : themeColors.border,
+                                      backgroundColor: isPendiente ? themeColors.warning : themeColors.backgroundElement,
+                                      justifyContent: 'center',
+                                      alignItems: 'center',
+                                      paddingHorizontal: 4
+                                    }}
+                                  >
+                                    <Text style={{ color: isPendiente ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                      ⏳ Pend. Factura
+                                    </Text>
+                                  </TouchableOpacity>
 
-                            <TouchableOpacity
-                              onPress={() => handleToggleAdminFacturado(false)}
-                              style={{
-                                flex: 1,
-                                height: 38,
-                                borderRadius: BorderRadius.small,
-                                borderWidth: 1,
-                                borderColor: (!selectedGasto.facturado && !selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? 'transparent' : themeColors.border,
-                                backgroundColor: (!selectedGasto.facturado && !selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? themeColors.accent : themeColors.backgroundElement,
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                paddingHorizontal: 4
-                              }}
-                            >
-                              <Text style={{ color: (!selectedGasto.facturado && !selectedGasto.motivo_sin_factura?.includes('PENDIENTE')) ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
-                                ❌ No Facturado
-                              </Text>
-                            </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={() => handleToggleAdminFacturado(false)}
+                                    style={{
+                                      flex: 1,
+                                      height: 38,
+                                      borderRadius: BorderRadius.small,
+                                      borderWidth: 1,
+                                      borderColor: (!selectedGasto.facturado && !isPendiente) ? 'transparent' : themeColors.border,
+                                      backgroundColor: (!selectedGasto.facturado && !isPendiente) ? themeColors.accent : themeColors.backgroundElement,
+                                      justifyContent: 'center',
+                                      alignItems: 'center',
+                                      paddingHorizontal: 4
+                                    }}
+                                  >
+                                    <Text style={{ color: (!selectedGasto.facturado && !isPendiente) ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                      ❌ No Facturado
+                                    </Text>
+                                  </TouchableOpacity>
+                                </>
+                              );
+                            })()}
                           </View>
 
                           {/* Secciones según el toggle */}

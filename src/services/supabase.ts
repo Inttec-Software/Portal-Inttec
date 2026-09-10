@@ -191,6 +191,8 @@ export interface Usuario {
   created_at?: string;
 }
 
+export type EstadoReembolsoGasto = 'NORMAL' | 'PENDIENTE_REEMBOLSO' | 'REEMBOLSADO';
+
 export interface Gasto {
   id: string;
   empleado_id: string;
@@ -217,6 +219,7 @@ export interface Gasto {
   tipo_tarjeta?: string | null;
   ubicacion_registro?: string | null;
   estado?: string | null;
+  estado_reembolso?: EstadoReembolsoGasto | null;
   facturado?: boolean | null;
   factura_url?: string | null;
   motivo_sin_factura?: string | null;
@@ -266,6 +269,12 @@ export const GastoHelper = {
   getFacturaUrls: (g: Gasto | null | undefined): string[] => {
     if (!g || !g.factura_url) return [];
     return g.factura_url.split(',').map(u => u.trim()).filter(Boolean);
+  },
+  getEstadoReembolsoLabel: (g: Gasto | null | undefined): string => {
+    if (!g) return 'Normal';
+    if (g.estado_reembolso === 'PENDIENTE_REEMBOLSO') return 'Pendiente de Reembolso';
+    if (g.estado_reembolso === 'REEMBOLSADO') return 'Reembolsado';
+    return 'Normal';
   },
   GASTOS_SELECT_QUERY: `*, subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)), proveedor_rel:proveedores(id, nombre), cliente_rel:clientes(id, nombre), sucursal_rel:sucursales_cliente(id, nombre)`
 };
@@ -1085,5 +1094,352 @@ export const DocumentoService = {
     }
   }
 };
+
+// =========================================================================
+// MÓDULO DE HERRAMIENTAS, KITS Y CHECKLISTS DE VEHÍCULOS
+// =========================================================================
+
+export interface Herramienta {
+  id: string;
+  codigo: string;
+  nombre: string;
+  categoria: string;
+  descripcion?: string | null;
+  numero_serie?: string | null;
+  foto_url?: string | null;
+  estado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE';
+  activo: boolean;
+  created_at?: string;
+  custodia_actual?: {
+    tipo: 'EMPLEADO' | 'VEHICULO' | 'BODEGA';
+    descripcion: string;
+    entidad?: any;
+    fecha_asignacion?: string;
+  };
+  ultimo_usuario?: {
+    nombre: string;
+    tipo: 'ASIGNACION_PERSONAL' | 'CHECKLIST_VEHICULO' | 'SIN_REGISTRO';
+    fecha?: string;
+    detalles?: string;
+    condicion_reportada?: string;
+  };
+}
+
+export interface TrazabilidadHerramienta {
+  herramienta: Herramienta;
+  custodia_actual: {
+    tipo: 'EMPLEADO' | 'VEHICULO' | 'BODEGA';
+    nombre?: string;
+    email?: string;
+    vehiculo?: any;
+    descripcion?: string;
+    fecha_asignacion?: string;
+    condicion?: string;
+    notas?: string;
+  };
+  historial_checklists: Array<{
+    id: string;
+    tipo: string;
+    fecha: string;
+    hora?: string;
+    usuario: string;
+    vehiculo: string;
+    presente: boolean;
+    estado_reportado: string;
+    observaciones?: string;
+    ubicacion_gps?: string | null;
+  }>;
+}
+
+export interface HerramientaEmpleado {
+  id: string;
+  empleado_id: string;
+  herramienta_id: string;
+  cantidad: number;
+  condicion: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+  notas?: string | null;
+  fecha_asignacion?: string;
+  updated_at?: string;
+  herramienta?: Herramienta;
+  empleado?: {
+    id: string;
+    nombre: string;
+    email: string;
+    rol: string;
+  };
+}
+
+export interface HerramientaVehiculo {
+  id: string;
+  vehiculo_id: string;
+  herramienta_id: string;
+  cantidad: number;
+  condicion: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+  notas?: string | null;
+  fecha_asignacion?: string;
+  updated_at?: string;
+  herramienta?: Herramienta;
+  vehiculo?: {
+    id: string;
+    marca: string;
+    modelo: string;
+    placas: string;
+    numero_economico?: string | null;
+  };
+}
+
+export interface ChecklistItem {
+  herramienta_id: string;
+  nombre: string;
+  codigo: string;
+  presente: boolean;
+  estado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+  observaciones?: string;
+}
+
+export interface ChecklistVehiculoHerramientas {
+  id: string;
+  vehiculo_id: string;
+  empleado_id: string;
+  fecha: string;
+  hora?: string;
+  items: ChecklistItem[];
+  total_herramientas: number;
+  total_presentes: number;
+  total_faltantes: number;
+  total_danadas: number;
+  observaciones_generales?: string | null;
+  ubicacion_gps?: string | null;
+  foto_evidencia_url?: string | null;
+  created_at?: string;
+  vehiculo?: {
+    id: string;
+    marca: string;
+    modelo: string;
+    placas: string;
+    numero_economico?: string | null;
+  };
+  empleado?: {
+    id: string;
+    nombre: string;
+    email?: string;
+  };
+}
+
+export const HerramientasService = {
+  // Catálogo Maestro
+  async getHerramientas(soloActivos = true, categoria?: string): Promise<Herramienta[]> {
+    const headers = await getApiHeaders();
+    let url = `${getApiUrl()}/api/herramientas?soloActivos=${soloActivos}`;
+    if (categoria) url += `&categoria=${encodeURIComponent(categoria)}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error('Error al obtener catálogo de herramientas');
+    return res.json();
+  },
+
+  async getSiguienteCodigo(): Promise<string> {
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/herramientas/siguiente-codigo`, { headers });
+      if (!res.ok) return 'H-1';
+      const data = await res.json();
+      return data.codigo || 'H-1';
+    } catch {
+      return 'H-1';
+    }
+  },
+
+  async crearHerramienta(herramienta: Omit<Herramienta, 'id' | 'created_at'>): Promise<Herramienta> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(herramienta),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || 'Error al crear herramienta');
+    }
+    return res.json();
+  },
+
+  async actualizarHerramienta(id: string, updates: Partial<Herramienta>): Promise<Herramienta> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || 'Error al actualizar herramienta');
+    }
+    return res.json();
+  },
+
+  async eliminarHerramienta(id: string): Promise<void> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || 'Error al eliminar herramienta');
+    }
+  },
+
+  // Kits de Empleados
+  async getKitsEmpleados(empleadoId?: string): Promise<HerramientaEmpleado[]> {
+    const headers = await getApiHeaders();
+    let url = `${getApiUrl()}/api/herramientas/empleados`;
+    if (empleadoId) url += `?empleado_id=${empleadoId}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || errJson?.message || 'Error al obtener kits de empleados');
+    }
+    return res.json();
+  },
+
+  async asignarHerramientaEmpleado(params: {
+    empleado_id: string;
+    herramienta_id: string;
+    cantidad?: number;
+    condicion?: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+    notas?: string;
+  }): Promise<HerramientaEmpleado> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/empleados/asignar`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || errJson?.message || 'Error al asignar herramienta al empleado');
+    }
+    return res.json();
+  },
+
+  async desasignarHerramientaEmpleado(id: string): Promise<void> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/empleados/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || errJson?.message || 'Error al desasignar herramienta del empleado');
+    }
+  },
+
+  // Kits de Vehículos
+  async getKitsVehiculos(vehiculoId?: string): Promise<HerramientaVehiculo[]> {
+    const headers = await getApiHeaders();
+    let url = `${getApiUrl()}/api/herramientas/vehiculos`;
+    if (vehiculoId) url += `?vehiculo_id=${vehiculoId}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || errJson?.message || 'Error al obtener kits de vehículos');
+    }
+    return res.json();
+  },
+
+  async asignarHerramientaVehiculo(params: {
+    vehiculo_id: string;
+    herramienta_id: string;
+    cantidad?: number;
+    condicion?: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+    notas?: string;
+  }): Promise<HerramientaVehiculo> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/vehiculos/asignar`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || errJson?.message || 'Error al asignar herramienta al vehículo');
+    }
+    return res.json();
+  },
+
+  async desasignarHerramientaVehiculo(id: string): Promise<void> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/vehiculos/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || errJson?.message || 'Error al desasignar herramienta del vehículo');
+    }
+  },
+
+  // Checklists
+  async getChecklists(params?: {
+    vehiculo_id?: string;
+    empleado_id?: string;
+    fecha?: string;
+    limit?: number;
+  }): Promise<ChecklistVehiculoHerramientas[]> {
+    const headers = await getApiHeaders();
+    const query = new URLSearchParams();
+    if (params?.vehiculo_id) query.append('vehiculo_id', params.vehiculo_id);
+    if (params?.empleado_id) query.append('empleado_id', params.empleado_id);
+    if (params?.fecha) query.append('fecha', params.fecha);
+    if (params?.limit) query.append('limit', params.limit.toString());
+
+    const url = `${getApiUrl()}/api/herramientas/checklists?${query.toString()}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || errJson?.message || 'Error al obtener checklists de herramientas');
+    }
+    return res.json();
+  },
+
+  async crearChecklist(checklist: {
+    vehiculo_id: string;
+    empleado_id?: string;
+    items: ChecklistItem[];
+    observaciones_generales?: string;
+    ubicacion_gps?: string | null;
+    foto_evidencia_url?: string | null;
+  }): Promise<ChecklistVehiculoHerramientas> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/checklists`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(checklist),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || 'Error al registrar checklist de herramientas');
+    }
+    return res.json();
+  },
+
+  async getUltimoChecklistVehiculo(vehiculoId: string): Promise<ChecklistVehiculoHerramientas | null> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/checklists/ultimo/${vehiculoId}`, { headers });
+    if (!res.ok) return null;
+    return res.json();
+  },
+
+  async getTrazabilidadHerramienta(id: string): Promise<TrazabilidadHerramienta> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/${id}/trazabilidad`, { headers });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || 'Error al obtener la trazabilidad de la herramienta');
+    }
+    return res.json();
+  },
+};
+
 
 

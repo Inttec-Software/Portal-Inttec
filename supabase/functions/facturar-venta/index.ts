@@ -127,6 +127,8 @@ serve(async (req) => {
       const formaPagoFinal = effectiveCondiciones.forma_pago || '03';
       const metodoPagoFinal = effectiveCondiciones.metodo_pago_cfdi || 'PUE';
 
+      const ordenCompraFinal = effectiveCondiciones.orden_compra || null;
+
       // Crear venta en base de datos para guardar el registro de la factura
       const { data: createdVenta, error: createVentaError } = await supabaseClient
         .from('ventas')
@@ -142,6 +144,7 @@ serve(async (req) => {
           precio_total_facturado: totalCalculado,
           estado_pago: 'PAGADO',
           cfdi_estado: 'PENDIENTE',
+          orden_compra: ordenCompraFinal,
         })
         .select()
         .single();
@@ -182,7 +185,7 @@ serve(async (req) => {
     // Configurar Finkok
     const FINKOK_USERNAME = Deno.env.get('FINKOK_USERNAME')
     const FINKOK_PASSWORD = Deno.env.get('FINKOK_PASSWORD')
-    const FINKOK_ENV = (Deno.env.get('FINKOK_ENV') || 'sandbox').toLowerCase()
+    const FINKOK_ENV = (body.finkok_env || Deno.env.get('FINKOK_ENV') || 'production').toLowerCase()
     const isProduction = FINKOK_ENV === 'production';
 
     if (!FINKOK_USERNAME || !FINKOK_PASSWORD) {
@@ -197,12 +200,25 @@ serve(async (req) => {
     const xmlSinSellar = await buildUnsignedCFDI(venta, cliente, partidas, isProduction);
 
     // 5. Solicitar sellado y timbrado a Finkok (SOAP sign_stamp)
-    const { success, uuid: sat_uuid, xml: xmlTimbrado } = await signStampFinkok(
-      xmlSinSellar,
-      FINKOK_USERNAME,
-      FINKOK_PASSWORD,
-      isProduction
-    );
+    let stampResult;
+    try {
+      stampResult = await signStampFinkok(
+        xmlSinSellar,
+        FINKOK_USERNAME,
+        FINKOK_PASSWORD,
+        isProduction
+      );
+    } catch (stampErr: any) {
+      if (!isProduction && stampErr.message?.includes('[300]')) {
+        throw new Error(
+          'Finkok Demo rechazó las credenciales (Código 300: Usuario o contraseña inválidos). ' +
+          'La cuenta registrada es de Producción. Configura FINKOK_ENV=production o sube tus CSD en Finkok.'
+        );
+      }
+      throw stampErr;
+    }
+
+    const { success, uuid: sat_uuid, xml: xmlTimbrado } = stampResult;
 
     if (!success || !sat_uuid) {
       throw new Error('Finkok no devolvió un UUID fiscal válido');

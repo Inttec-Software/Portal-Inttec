@@ -20,6 +20,7 @@ import retiroMaterialRoutes from './modules/retiro-material/retiro-material.rout
 import devolucionesRoutes from './modules/devoluciones/devoluciones.routes';
 import documentosRoutes from './modules/documentos/documentos.routes';
 import satRoutes from './modules/sat/sat.routes';
+import herramientasRoutes from './modules/herramientas/herramientas.routes';
 
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -92,6 +93,7 @@ app.use('/api/retiro-material', retiroMaterialRoutes);
 app.use('/api/devoluciones', devolucionesRoutes);
 app.use('/api/documentos', documentosRoutes);
 app.use('/api/sat', satRoutes);
+app.use('/api/herramientas', herramientasRoutes);
 
 // Ruta base
 app.get('/', (req, res) => {

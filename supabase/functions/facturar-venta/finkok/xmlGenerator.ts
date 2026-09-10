@@ -23,6 +23,7 @@ export interface CFDIParams {
   Total: number;
   LugarExpedicion: string; // Código postal del emisor
   Moneda?: string; // Default MXN
+  OrdenCompra?: string;
   Emisor: {
     Rfc: string;
     Nombre: string;
@@ -59,6 +60,10 @@ export function buildCFDI40XML(params: CFDIParams, noCertificado: string = "", c
 
   if (params.Serie) xml += ` Serie="${escapeXML(params.Serie)}"`;
   if (params.Folio) xml += ` Folio="${escapeXML(params.Folio)}"`;
+
+  if (params.OrdenCompra) {
+    xml += ` CondicionesDePago="Orden de Compra: ${escapeXML(params.OrdenCompra)}"`;
+  }
 
   xml += ` Fecha="${params.Fecha}" Sello="" FormaPago="${formaPago}" NoCertificado="${noCertificado}" Certificado="${certificadoBase64}" SubTotal="${params.SubTotal.toFixed(2)}" Moneda="${moneda}" Total="${params.Total.toFixed(2)}" TipoDeComprobante="I" Exportacion="01" MetodoPago="${metodoPago}" LugarExpedicion="${escapeXML(params.LugarExpedicion)}">`;
 

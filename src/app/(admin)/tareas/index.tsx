@@ -21,6 +21,7 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/services/supabase';
 import { TareasService } from '@/services/tareasService';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import EditarTareaModal from '@/components/EditarTareaModal';
 
 export default function TareasScreen() {
   const router = useRouter();
@@ -34,7 +35,8 @@ export default function TareasScreen() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Date Editing state
+  // Task Editing state
+  const [editingTaskModal, setEditingTaskModal] = useState<any | null>(null);
   const [editingTaskForDate, setEditingTaskForDate] = useState<any | null>(null);
   const [showDatePickerModal, setShowDatePickerModal] = useState(false);
   const [isUpdatingCardDate, setIsUpdatingCardDate] = useState<string | null>(null);
@@ -51,20 +53,20 @@ export default function TareasScreen() {
   const [otherTasksExpanded, setOtherTasksExpanded] = useState(false);
 
   useEffect(() => {
-    const fetchTasks = async () => {
-      setLoading(true);
-      try {
-        const formattedTasks = await TareasService.getTareas();
-        setTasks(formattedTasks);
-      } catch (error) {
-        console.error('Error al obtener tareas', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
     fetchTasks();
   }, [user?.id, user?.nombre]);
+
+  const fetchTasks = async () => {
+    setLoading(true);
+    try {
+      const formattedTasks = await TareasService.getTareas();
+      setTasks(formattedTasks);
+    } catch (error) {
+      console.error('Error al obtener tareas', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const parseLocalDate = (dateString: string) => {
     if (!dateString) return new Date();
@@ -266,7 +268,7 @@ export default function TareasScreen() {
             <TouchableOpacity
               onPress={(e) => {
                 e.stopPropagation();
-                handleOpenDateEdit(item);
+                setEditingTaskModal(item);
               }}
               activeOpacity={0.7}
               style={{
@@ -284,7 +286,7 @@ export default function TareasScreen() {
               {isUpdatingThis ? (
                 <ActivityIndicator size="small" color={themeColors.accent} style={{ transform: [{ scale: 0.7 }] }} />
               ) : (
-                <Ionicons name="calendar-outline" size={13} color={themeColors.accent} />
+                <Ionicons name="create-outline" size={13} color={themeColors.accent} />
               )}
               <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>
                 {parseLocalDate(item.fecha_compromiso).toLocaleDateString()}
@@ -511,6 +513,15 @@ export default function TareasScreen() {
             }
           }}
           onDismiss={() => setShowDatePickerModal(false)}
+        />
+      )}
+
+      {editingTaskModal && (
+        <EditarTareaModal
+          visible={!!editingTaskModal}
+          onClose={() => setEditingTaskModal(null)}
+          onSuccess={fetchTasks}
+          task={editingTaskModal}
         />
       )}
     </SafeAreaView>

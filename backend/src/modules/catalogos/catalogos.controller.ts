@@ -69,6 +69,25 @@ export const getAllCatalogos = async (req: Request, res: Response) => {
   }
 };
 
+export const getClientes = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+
+    const { data, error } = await client
+      .from('clientes')
+      .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi')
+      .order('nombre');
+
+    if (error) throw error;
+    return res.json(data || []);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 export const getSucursales = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
