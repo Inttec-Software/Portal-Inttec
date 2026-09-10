@@ -52,6 +52,7 @@ export default function EmpleadoLayout() {
     { route: '/(empleado)/retiro-material', icon: 'cart-outline', color: '#ff7f50', name: 'Retiro Material' },
     { route: '/(empleado)/devoluciones', icon: 'return-up-back-outline', color: '#2ed573', name: 'Devoluciones' },
     { route: '/(empleado)/vehiculos', icon: 'car-outline', color: '#ff9ff3', name: 'Vehículos' },
+    { route: '/(empleado)/herramientas', icon: 'build-outline', color: '#00cec9', name: 'Herramientas' },
     { route: '/(empleado)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
     { route: '/(empleado)/documentos', icon: 'create-outline', color: '#0284c7', name: 'Documentos' },
     { route: '/(empleado)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },

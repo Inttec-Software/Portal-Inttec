@@ -104,6 +104,7 @@ export async function buildUnsignedCFDI(ventaData: any, clienteData: any, partid
     FormaPago: formaPago,
     MetodoPago: metodoPago,
     Moneda: 'MXN',
+    OrdenCompra: ventaData.orden_compra || undefined,
     SubTotal: subTotal,
     Total: total,
     LugarExpedicion: emisorCP,
