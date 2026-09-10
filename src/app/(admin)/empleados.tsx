@@ -2926,25 +2926,27 @@ setProveedoresCatalog(provRes.data || []);
                         {GastoHelper.getProveedor(selectedGasto) || '⚠️ En blanco (Sin asignar)'}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 6,
-                        paddingVertical: 7,
-                        paddingHorizontal: 12,
-                        borderRadius: BorderRadius.medium,
-                        backgroundColor: themeColors.accent + '20',
-                        borderWidth: 1,
-                        borderColor: themeColors.accent,
-                      }}
-                    >
-                      <Ionicons name="pencil" size={15} color={themeColors.accent} />
-                      <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
-                        {GastoHelper.getProveedor(selectedGasto) ? 'Cambiar' : 'Asignar'}
-                      </Text>
-                    </TouchableOpacity>
+                    {selectedGasto.status === 'APPROVED' && (
+                      <TouchableOpacity
+                        onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                          paddingVertical: 7,
+                          paddingHorizontal: 12,
+                          borderRadius: BorderRadius.medium,
+                          backgroundColor: themeColors.accent + '20',
+                          borderWidth: 1,
+                          borderColor: themeColors.accent,
+                        }}
+                      >
+                        <Ionicons name="pencil" size={15} color={themeColors.accent} />
+                        <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                          {GastoHelper.getProveedor(selectedGasto) ? 'Cambiar' : 'Asignar'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {(!GastoHelper.getProveedor(selectedGasto) || !GastoHelper.getProveedor(selectedGasto).trim()) && (
