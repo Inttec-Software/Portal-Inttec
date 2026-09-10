@@ -97,6 +97,22 @@ export default function InventarioDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
 
+  // Selección múltiple para acciones en lote
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [bulkEditModalVisible, setBulkEditModalVisible] = useState(false);
+  const [isSavingBulkEdit, setIsSavingBulkEdit] = useState(false);
+
+  // Campos para Edición Masiva
+  const [bulkUpdateCategory, setBulkUpdateCategory] = useState(false);
+  const [bulkCategoryId, setBulkCategoryId] = useState('');
+  const [bulkUpdateProveedor, setBulkUpdateProveedor] = useState(false);
+  const [bulkProveedorId, setBulkProveedorId] = useState('');
+  const [bulkUpdateStock, setBulkUpdateStock] = useState(false);
+  const [bulkStockValue, setBulkStockValue] = useState('');
+  const [bulkUpdatePrice, setBulkUpdatePrice] = useState(false);
+  const [bulkPriceValue, setBulkPriceValue] = useState('');
+
   // Selector Centralizado
   const [selectorVisible, setSelectorVisible] = useState(false);
   const [selectorTitle, setSelectorTitle] = useState('');
@@ -453,6 +469,186 @@ async function loadAllData() {
   const filteredSelectorOptions = selectorOptions.filter(opt =>
     opt.label.toLowerCase().includes(selectorSearch.toLowerCase())
   );
+
+  // --- Acciones en Lote (Bulk Actions) ---
+  const toggleSelectProduct = (id: string) => {
+    setSelectedProductIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    const activeIds = filteredProducts.map(p => p.id);
+    const areAllSelected = activeIds.length > 0 && activeIds.every(id => selectedProductIds.includes(id));
+    if (areAllSelected) {
+      setSelectedProductIds(prev => prev.filter(id => !activeIds.includes(id)));
+    } else {
+      const newSet = new Set([...selectedProductIds, ...activeIds]);
+      setSelectedProductIds(Array.from(newSet));
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedProductIds([]);
+  };
+
+  const executeBulkDelete = async () => {
+    if (selectedProductIds.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/productos/bulk-delete`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ids: selectedProductIds })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al desactivar los productos seleccionados');
+      }
+
+      showAlert('Éxito', `Se desactivaron ${selectedProductIds.length} productos del catálogo.`);
+      setSelectedProductIds([]);
+      await loadAllData();
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudieron desactivar los productos.');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedProductIds.length === 0) return;
+    const msg = `¿Estás seguro de que deseas desactivar los ${selectedProductIds.length} productos seleccionados del catálogo activo?`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) {
+        executeBulkDelete();
+      }
+    } else {
+      Alert.alert(
+        'Confirmar Eliminación Masiva',
+        msg,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Desactivar', style: 'destructive', onPress: executeBulkDelete }
+        ]
+      );
+    }
+  };
+
+  const handleOpenBulkEdit = () => {
+    if (selectedProductIds.length === 0) return;
+    if (selectedProductIds.length === 1) {
+      const singleProduct = productos.find(p => p.id === selectedProductIds[0]);
+      if (singleProduct) {
+        handleOpenEditModal(singleProduct);
+        return;
+      }
+    }
+    setBulkUpdateCategory(false);
+    setBulkCategoryId(categorias[0]?.id || '');
+    setBulkUpdateProveedor(false);
+    setBulkProveedorId(proveedores[0]?.id || '');
+    setBulkUpdateStock(false);
+    setBulkStockValue('');
+    setBulkUpdatePrice(false);
+    setBulkPriceValue('');
+    setBulkEditModalVisible(true);
+  };
+
+  const openBulkCategorySelector = () => {
+    setSelectorTitle('Seleccionar Categoría para Edición Masiva');
+    setSelectorSearch('');
+    setSelectorOptions(
+      categorias.map(c => ({ id: c.id, label: c.nombre }))
+    );
+    setOnSelectOption(() => (id: string) => {
+      setBulkCategoryId(id);
+    });
+    setSelectorVisible(true);
+  };
+
+  const openBulkProveedorSelector = () => {
+    setSelectorTitle('Seleccionar Proveedor para Edición Masiva');
+    setSelectorSearch('');
+    setSelectorOptions(
+      proveedores.map(p => ({ id: p.id, label: `${p.nombre} (${p.rfc})` }))
+    );
+    setOnSelectOption(() => (id: string) => {
+      setBulkProveedorId(id);
+    });
+    setSelectorVisible(true);
+  };
+
+  const handleSaveBulkEdit = async () => {
+    if (!bulkUpdateCategory && !bulkUpdateProveedor && !bulkUpdateStock && !bulkUpdatePrice) {
+      showAlert('Validación', 'Por favor activa y especifica al menos un campo a modificar.');
+      return;
+    }
+
+    const updates: any = {};
+    if (bulkUpdateCategory) {
+      if (!bulkCategoryId) {
+        showAlert('Validación', 'Selecciona una categoría válida.');
+        return;
+      }
+      updates.categoria_id = bulkCategoryId;
+    }
+
+    if (bulkUpdateProveedor) {
+      if (!bulkProveedorId) {
+        showAlert('Validación', 'Selecciona un proveedor válido.');
+        return;
+      }
+      updates.proveedor_id = bulkProveedorId;
+    }
+
+    if (bulkUpdateStock) {
+      const stockNum = parseInt(bulkStockValue, 10);
+      if (isNaN(stockNum) || stockNum < 0) {
+        showAlert('Validación', 'El stock debe ser un número entero mayor o igual a 0.');
+        return;
+      }
+      updates.stock_actual = stockNum;
+    }
+
+    if (bulkUpdatePrice) {
+      const priceNum = parseFloat(bulkPriceValue);
+      if (isNaN(priceNum) || priceNum < 0) {
+        showAlert('Validación', 'El precio debe ser un número mayor o igual a 0.');
+        return;
+      }
+      updates.precio_unitario = priceNum;
+    }
+
+    setIsSavingBulkEdit(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/productos/bulk-update`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ids: selectedProductIds,
+          updates
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al actualizar los productos en lote');
+      }
+
+      showAlert('Éxito', `Se actualizaron ${selectedProductIds.length} productos correctamente.`);
+      setBulkEditModalVisible(false);
+      setSelectedProductIds([]);
+      await loadAllData();
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudieron actualizar los productos.');
+    } finally {
+      setIsSavingBulkEdit(false);
+    }
+  };
 
   // --- CRUD Manual ---
   const handleOpenCreateModal = () => {
@@ -1354,12 +1550,53 @@ async function loadAllData() {
               </TouchableOpacity>
             </View>
           </View>
-          <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+          <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
             <CustomButton
               title="➕ Agregar Producto Manualmente"
               onPress={handleOpenCreateModal}
               style={{ backgroundColor: themeColors.primary }}
             />
+          </View>
+
+          {/* Barra de Selección Masiva */}
+          <View style={{ paddingHorizontal: 16, paddingBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 }}
+              onPress={toggleSelectAll}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={
+                  filteredProducts.length > 0 && filteredProducts.every(p => selectedProductIds.includes(p.id))
+                    ? 'checkbox'
+                    : filteredProducts.some(p => selectedProductIds.includes(p.id))
+                    ? 'remove-circle-outline'
+                    : 'square-outline'
+                }
+                size={22}
+                color={
+                  filteredProducts.some(p => selectedProductIds.includes(p.id))
+                    ? themeColors.primary
+                    : themeColors.textSecondary
+                }
+              />
+              <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                {filteredProducts.length > 0 && filteredProducts.every(p => selectedProductIds.includes(p.id))
+                  ? 'Deseleccionar todos'
+                  : `Seleccionar todos (${filteredProducts.length})`}
+              </Text>
+            </TouchableOpacity>
+
+            {selectedProductIds.length > 0 && (
+              <TouchableOpacity
+                onPress={clearSelection}
+                style={{ paddingVertical: 4, paddingHorizontal: 8 }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.danger }}>
+                  Limpiar ({selectedProductIds.length})
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
                 </>
               }
@@ -1369,13 +1606,39 @@ async function loadAllData() {
               windowSize={5}
               removeClippedSubviews={true}
               keyExtractor={item => item.id}
-              contentContainerStyle={styles.listContent}
+              contentContainerStyle={[styles.listContent, selectedProductIds.length > 0 && { paddingBottom: 110 }]}
               renderItem={({ item }) => {
                 const cat = categorias.find(c => c.id === item.categoria_id);
                 const precioFmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(item.precio_unitario || 0);
+                const isSelected = selectedProductIds.includes(item.id);
                 return (
-                  <View style={[styles.listItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                    <View style={{ flex: 1, gap: 2 }}>
+                  <View
+                    style={[
+                      styles.listItem,
+                      {
+                        backgroundColor: isSelected
+                          ? (scheme === 'dark' ? 'rgba(76, 175, 80, 0.12)' : '#f1f8e9')
+                          : themeColors.backgroundElement,
+                        borderColor: isSelected ? themeColors.primary : themeColors.border,
+                        borderWidth: isSelected ? 1.5 : 1,
+                      }
+                    ]}
+                  >
+                    {/* Checkbox de Selección */}
+                    <TouchableOpacity
+                      style={styles.checkboxContainer}
+                      onPress={() => toggleSelectProduct(item.id)}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Ionicons
+                        name={isSelected ? 'checkbox' : 'square-outline'}
+                        size={22}
+                        color={isSelected ? themeColors.primary : themeColors.textSecondary}
+                      />
+                    </TouchableOpacity>
+
+                    <View style={{ flex: 1, gap: 2, marginLeft: 8 }}>
                       <Text style={styles.skuText}>{item.sku_interno}</Text>
                       <Text style={[styles.itemText, { color: themeColors.text }]}>{item.nombre_oficial}</Text>
                       <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>
@@ -2104,6 +2367,205 @@ async function loadAllData() {
           </View>
         </View>
       </Modal>
+      {/* ========== MODAL EDICIÓN MASIVA ========== */}
+      <Modal statusBarTranslucent={true} animationType="fade"
+        transparent={true}
+        visible={bulkEditModalVisible}
+        onRequestClose={() => setBulkEditModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, maxHeight: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Edición Masiva</Text>
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
+                  {`${selectedProductIds.length} ${selectedProductIds.length === 1 ? 'producto seleccionado' : 'productos seleccionados'}`}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setBulkEditModalVisible(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={{ gap: Spacing.two, paddingBottom: Spacing.two }} keyboardShouldPersistTaps="handled">
+              <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginBottom: 4 }}>
+                Activa y configura únicamente los campos que deseas modificar simultáneamente para todos los productos seleccionados:
+              </Text>
+
+              {/* 1. Categoría */}
+              <View style={[styles.bulkFieldCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                <TouchableOpacity
+                  style={styles.bulkFieldHeader}
+                  onPress={() => setBulkUpdateCategory(!bulkUpdateCategory)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={bulkUpdateCategory ? 'checkbox' : 'square-outline'}
+                    size={20}
+                    color={bulkUpdateCategory ? themeColors.primary : themeColors.textSecondary}
+                  />
+                  <Text style={[styles.bulkFieldTitle, { color: themeColors.text }]}>Cambiar Categoría</Text>
+                </TouchableOpacity>
+                {bulkUpdateCategory && (
+                  <View style={{ marginTop: Spacing.one }}>
+                    <TouchableOpacity
+                      style={[styles.dropdownTrigger, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
+                      onPress={openBulkCategorySelector}
+                    >
+                      <Text style={{ color: bulkCategoryId ? themeColors.text : themeColors.textSecondary }}>
+                        {categorias.find(c => c.id === bulkCategoryId)?.nombre || 'Selecciona la categoría'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={18} color={themeColors.text} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+
+              {/* 2. Proveedor */}
+              <View style={[styles.bulkFieldCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                <TouchableOpacity
+                  style={styles.bulkFieldHeader}
+                  onPress={() => setBulkUpdateProveedor(!bulkUpdateProveedor)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={bulkUpdateProveedor ? 'checkbox' : 'square-outline'}
+                    size={20}
+                    color={bulkUpdateProveedor ? themeColors.primary : themeColors.textSecondary}
+                  />
+                  <Text style={[styles.bulkFieldTitle, { color: themeColors.text }]}>Cambiar Proveedor</Text>
+                </TouchableOpacity>
+                {bulkUpdateProveedor && (
+                  <View style={{ marginTop: Spacing.one }}>
+                    <TouchableOpacity
+                      style={[styles.dropdownTrigger, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
+                      onPress={openBulkProveedorSelector}
+                    >
+                      <Text style={{ color: bulkProveedorId ? themeColors.text : themeColors.textSecondary }}>
+                        {proveedores.find(p => p.id === bulkProveedorId)?.nombre || 'Selecciona el proveedor'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={18} color={themeColors.text} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+
+              {/* 3. Stock */}
+              <View style={[styles.bulkFieldCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                <TouchableOpacity
+                  style={styles.bulkFieldHeader}
+                  onPress={() => setBulkUpdateStock(!bulkUpdateStock)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={bulkUpdateStock ? 'checkbox' : 'square-outline'}
+                    size={20}
+                    color={bulkUpdateStock ? themeColors.primary : themeColors.textSecondary}
+                  />
+                  <Text style={[styles.bulkFieldTitle, { color: themeColors.text }]}>Establecer Stock</Text>
+                </TouchableOpacity>
+                {bulkUpdateStock && (
+                  <View style={{ marginTop: Spacing.one }}>
+                    <CustomInput
+                      label="Nuevo Stock para todos los seleccionados"
+                      placeholder="Ej. 50"
+                      keyboardType="numeric"
+                      value={bulkStockValue}
+                      onChangeText={(val) => setBulkStockValue(val.replace(/[^0-9]/g, ''))}
+                    />
+                  </View>
+                )}
+              </View>
+
+              {/* 4. Precio Unitario */}
+              <View style={[styles.bulkFieldCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                <TouchableOpacity
+                  style={styles.bulkFieldHeader}
+                  onPress={() => setBulkUpdatePrice(!bulkUpdatePrice)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={bulkUpdatePrice ? 'checkbox' : 'square-outline'}
+                    size={20}
+                    color={bulkUpdatePrice ? themeColors.primary : themeColors.textSecondary}
+                  />
+                  <Text style={[styles.bulkFieldTitle, { color: themeColors.text }]}>Establecer Precio Unitario</Text>
+                </TouchableOpacity>
+                {bulkUpdatePrice && (
+                  <View style={{ marginTop: Spacing.one }}>
+                    <CustomInput
+                      label="Nuevo Precio Unitario"
+                      placeholder="0.00"
+                      keyboardType="numeric"
+                      value={bulkPriceValue}
+                      onChangeText={setBulkPriceValue}
+                    />
+                    {bulkPriceValue ? (
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4 }}>
+                        Precio con IVA (16%): {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format((parseFloat(bulkPriceValue) || 0) * 1.16)}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
+              </View>
+
+              <CustomButton
+                title={`Aplicar Cambios (${selectedProductIds.length})`}
+                onPress={handleSaveBulkEdit}
+                loading={isSavingBulkEdit}
+                style={{ marginTop: Spacing.two }}
+              />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Floating Bulk Action Bar */}
+      {selectedProductIds.length > 0 && activeTab === 'importacion' && (
+        <View style={[styles.bulkActionBar, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <View style={styles.bulkActionInfo}>
+            <View style={[styles.bulkBadge, { backgroundColor: themeColors.primary }]}>
+              <Text style={styles.bulkBadgeText}>{selectedProductIds.length}</Text>
+            </View>
+            <Text style={[styles.bulkActionText, { color: themeColors.text }]} numberOfLines={1}>
+              {selectedProductIds.length === 1 ? '1 seleccionado' : `${selectedProductIds.length} seleccionados`}
+            </Text>
+          </View>
+          <View style={styles.bulkActionButtons}>
+            <TouchableOpacity
+              style={[styles.bulkBtn, { backgroundColor: themeColors.accent }]}
+              onPress={handleOpenBulkEdit}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="create-outline" size={16} color="#fff" />
+              <Text style={styles.bulkBtnText}>Editar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.bulkBtn, { backgroundColor: themeColors.danger }]}
+              onPress={handleBulkDelete}
+              disabled={isBulkDeleting}
+              activeOpacity={0.8}
+            >
+              {isBulkDeleting ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="trash-outline" size={16} color="#fff" />
+                  <Text style={styles.bulkBtnText}>Eliminar</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.bulkBtnClose, { borderColor: themeColors.border }]}
+              onPress={clearSelection}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={18} color={themeColors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       </View>
     </SafeAreaView>
   );
@@ -2483,5 +2945,94 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
+  },
+  // Checkboxes & Bulk Action Bar
+  checkboxContainer: {
+    paddingRight: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bulkActionBar: {
+    position: 'absolute',
+    bottom: Spacing.three,
+    left: Spacing.four,
+    right: Spacing.four,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1.5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
+    zIndex: 100,
+  },
+  bulkActionInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  bulkBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bulkBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  bulkActionText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  bulkActionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bulkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.small,
+  },
+  bulkBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  bulkBtnClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 2,
+  },
+  bulkFieldCard: {
+    padding: Spacing.two,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    marginBottom: Spacing.one,
+  },
+  bulkFieldHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bulkFieldTitle: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
