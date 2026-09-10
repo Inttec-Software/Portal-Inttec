@@ -191,6 +191,8 @@ export interface Usuario {
   created_at?: string;
 }
 
+export type EstadoReembolsoGasto = 'NORMAL' | 'PENDIENTE_REEMBOLSO' | 'REEMBOLSADO';
+
 export interface Gasto {
   id: string;
   empleado_id: string;
@@ -217,6 +219,7 @@ export interface Gasto {
   tipo_tarjeta?: string | null;
   ubicacion_registro?: string | null;
   estado?: string | null;
+  estado_reembolso?: EstadoReembolsoGasto | null;
   facturado?: boolean | null;
   factura_url?: string | null;
   motivo_sin_factura?: string | null;
@@ -266,6 +269,12 @@ export const GastoHelper = {
   getFacturaUrls: (g: Gasto | null | undefined): string[] => {
     if (!g || !g.factura_url) return [];
     return g.factura_url.split(',').map(u => u.trim()).filter(Boolean);
+  },
+  getEstadoReembolsoLabel: (g: Gasto | null | undefined): string => {
+    if (!g) return 'Normal';
+    if (g.estado_reembolso === 'PENDIENTE_REEMBOLSO') return 'Pendiente de Reembolso';
+    if (g.estado_reembolso === 'REEMBOLSADO') return 'Reembolsado';
+    return 'Normal';
   },
   GASTOS_SELECT_QUERY: `*, subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)), proveedor_rel:proveedores(id, nombre), cliente_rel:clientes(id, nombre), sucursal_rel:sucursales_cliente(id, nombre)`
 };

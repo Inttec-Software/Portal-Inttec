@@ -111,6 +111,7 @@ export default function ReportesScreen() {
   const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
   const [prevSelectedGastoId, setPrevSelectedGastoId] = useState<string | undefined>(undefined);
   const [localMotivo, setLocalMotivo] = useState('');
+  const [isUpdatingEstadoReembolso, setIsUpdatingEstadoReembolso] = useState(false);
 
   if (selectedGasto?.id !== prevSelectedGastoId) {
     setPrevSelectedGastoId(selectedGasto?.id);
@@ -921,6 +922,34 @@ export default function ReportesScreen() {
       setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo cambiar el estado de facturación.');
+    }
+  };
+
+  const handleUpdateEstadoReembolso = async (nuevoEstado: 'NORMAL' | 'PENDIENTE_REEMBOLSO' | 'REEMBOLSADO') => {
+    if (!selectedGasto) return;
+    setIsUpdatingEstadoReembolso(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ estado_reembolso: nuevoEstado })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || 'Error al actualizar estado de reembolso');
+      }
+
+      const updatedGasto = {
+        ...selectedGasto,
+        estado_reembolso: nuevoEstado
+      };
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo actualizar el estado de reembolso.');
+    } finally {
+      setIsUpdatingEstadoReembolso(false);
     }
   };
 
@@ -1988,15 +2017,16 @@ export default function ReportesScreen() {
                 <ScrollView style={{ flex: 1 }}>
                   <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
                     <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Empleado</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '16%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Sucursal</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Fecha</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Estado</Text>
-                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Autorizado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Categoría</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Empleado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Sucursal</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Fecha</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Estado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Reembolso</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Autorizado</Text>
                       <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
-                      <View style={{ width: '10%', alignItems: 'center' }}>
+                      <View style={{ width: '8%', alignItems: 'center' }}>
                         <Ionicons name="settings-outline" size={14} color={themeColors.text} />
                       </View>
                     </View>
@@ -2033,23 +2063,36 @@ export default function ReportesScreen() {
                               hovered && { backgroundColor: themeColors.backgroundSelected }
                             ] as any}
                           >
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '12%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '12%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
-                            <Text style={[styles.tableCell, { width: '16%', color: themeColors.textSecondary }]} numberOfLines={1}>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '11%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '11%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
+                            <Text style={[styles.tableCell, { width: '14%', color: themeColors.textSecondary }]} numberOfLines={1}>
                               {GastoHelper.getProveedor(item)} {GastoHelper.getProveedor(item) && GastoHelper.getCliente(item) ? ' | ' : ''} {GastoHelper.getCliente(item)}
                             </Text>
-                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '11%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '10%' }]}>{fecha}</Text>
-                            <View style={{ width: '9%' }}>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
+                            <Text style={[styles.tableCell, { color: themeColors.text, width: '9%' }]}>{fecha}</Text>
+                            <View style={{ width: '8%' }}>
                                <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                                  <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColor }}>{statusText}</Text>
                                </View>
                             </View>
-                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%', fontSize: 11 }]} numberOfLines={1}>
+                            <View style={{ width: '11%' }}>
+                              {item.estado_reembolso === 'PENDIENTE_REEMBOLSO' ? (
+                                <View style={{ backgroundColor: themeColors.warning + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start', borderWidth: 1, borderColor: themeColors.warning + '40' }}>
+                                  <Text style={{ fontSize: 9, fontWeight: 'bold', color: themeColors.warning }}>⏳ Pend. Reemb.</Text>
+                                </View>
+                              ) : item.estado_reembolso === 'REEMBOLSADO' ? (
+                                <View style={{ backgroundColor: '#8b5cf618', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#8b5cf640' }}>
+                                  <Text style={{ fontSize: 9, fontWeight: 'bold', color: '#8b5cf6' }}>↩️ Reembolsado</Text>
+                                </View>
+                              ) : (
+                                <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>-</Text>
+                              )}
+                            </View>
+                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '8%', fontSize: 11 }]} numberOfLines={1}>
                               {item.rejection_feedback?.match(/\[(?:Aprobado|Devuelto|Rechazado) por (.*?)\]/)?.[1] || '-'}
                             </Text>
                             <Text style={[styles.tableCell, { width: '10%', fontWeight: '700', color: themeColors.text, textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
-                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+                            <View style={{ width: '8%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
                               <TouchableOpacity
                                 onPress={(e) => {
                                   e.stopPropagation();
@@ -3045,6 +3088,74 @@ export default function ReportesScreen() {
                               />
                             </View>
                           )}
+                        </View>
+
+                        {/* ESTADO DE REEMBOLSO (ADMIN) */}
+                        <View style={[styles.detailItem, { marginTop: Spacing.one, borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: Spacing.two }]}>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary, fontWeight: '700', marginBottom: Spacing.one }]}>
+                            ESTADO DE REEMBOLSO (ADMIN)
+                          </Text>
+                          <View style={{ flexDirection: 'row', gap: Spacing.one }}>
+                            <TouchableOpacity
+                              onPress={() => handleUpdateEstadoReembolso('NORMAL')}
+                              disabled={isUpdatingEstadoReembolso}
+                              style={{
+                                flex: 1,
+                                height: 38,
+                                borderRadius: BorderRadius.small,
+                                borderWidth: 1,
+                                borderColor: (!selectedGasto.estado_reembolso || selectedGasto.estado_reembolso === 'NORMAL') ? 'transparent' : themeColors.border,
+                                backgroundColor: (!selectedGasto.estado_reembolso || selectedGasto.estado_reembolso === 'NORMAL') ? themeColors.accent : themeColors.backgroundElement,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                paddingHorizontal: 4
+                              }}
+                            >
+                              <Text style={{ color: (!selectedGasto.estado_reembolso || selectedGasto.estado_reembolso === 'NORMAL') ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                ✓ Normal
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => handleUpdateEstadoReembolso('PENDIENTE_REEMBOLSO')}
+                              disabled={isUpdatingEstadoReembolso}
+                              style={{
+                                flex: 1.2,
+                                height: 38,
+                                borderRadius: BorderRadius.small,
+                                borderWidth: 1,
+                                borderColor: selectedGasto.estado_reembolso === 'PENDIENTE_REEMBOLSO' ? 'transparent' : themeColors.border,
+                                backgroundColor: selectedGasto.estado_reembolso === 'PENDIENTE_REEMBOLSO' ? themeColors.warning : themeColors.backgroundElement,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                paddingHorizontal: 4
+                              }}
+                            >
+                              <Text style={{ color: selectedGasto.estado_reembolso === 'PENDIENTE_REEMBOLSO' ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                ⏳ Pend. Reembolso
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => handleUpdateEstadoReembolso('REEMBOLSADO')}
+                              disabled={isUpdatingEstadoReembolso}
+                              style={{
+                                flex: 1.1,
+                                height: 38,
+                                borderRadius: BorderRadius.small,
+                                borderWidth: 1,
+                                borderColor: selectedGasto.estado_reembolso === 'REEMBOLSADO' ? 'transparent' : themeColors.border,
+                                backgroundColor: selectedGasto.estado_reembolso === 'REEMBOLSADO' ? '#8b5cf6' : themeColors.backgroundElement,
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                paddingHorizontal: 4
+                              }}
+                            >
+                              <Text style={{ color: selectedGasto.estado_reembolso === 'REEMBOLSADO' ? '#ffffff' : themeColors.text, fontWeight: '700', fontSize: 11, textAlign: 'center' }}>
+                                ↩️ Reembolsado
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
                       </>
                     );

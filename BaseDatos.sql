@@ -192,6 +192,7 @@ CREATE TABLE IF NOT EXISTS public.gastos (
   proveedor_id uuid,
   cliente_id uuid,
   sucursal_id uuid,
+  estado_reembolso text DEFAULT 'NORMAL'::text CHECK (estado_reembolso = ANY (ARRAY['NORMAL'::text, 'PENDIENTE_REEMBOLSO'::text, 'REEMBOLSADO'::text])),
   CONSTRAINT gastos_pkey PRIMARY KEY (id),
   CONSTRAINT gastos_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id),
   CONSTRAINT gastos_subcategoria_id_fkey FOREIGN KEY (subcategoria_id) REFERENCES public.subcategorias(id) ON DELETE SET NULL,

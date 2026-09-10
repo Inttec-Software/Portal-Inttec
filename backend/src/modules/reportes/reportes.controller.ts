@@ -285,6 +285,13 @@ export const updateGasto = async (req: Request, res: Response) => {
     // Support both new {updatePayload} format and old direct payload format
     const payload = updatePayload || restPayload;
 
+    if (payload.estado_reembolso !== undefined) {
+      const userRole = req.user?.rol || req.user?.role;
+      if (userRole && userRole !== 'ADMIN' && userRole !== 'DEV') {
+        return res.status(403).json({ error: 'Solo administradores pueden modificar el estado de reembolso' });
+      }
+    }
+
     // Get old gasto to see if it's linked to a sale
     const { data: oldGasto } = await client
       .from('gastos')
