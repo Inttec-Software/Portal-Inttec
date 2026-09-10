@@ -48,7 +48,7 @@ interface PartidaEditable {
   costo_unitario_proveedor: string;
 }
 
-const TIPOS_PROYECTO = ['Venta', 'Servicio', 'Paneles', 'Instalación', 'Mantenimiento', 'Otro'];
+const TIPOS_PROYECTO = ['Servicio', 'Proyecto', 'Venta', 'Operativo'];
 
 export default function AdminGastosScreen() {
   const router = useRouter();
@@ -135,6 +135,8 @@ export default function AdminGastosScreen() {
   // Valores temporales para edición rápida
   const [tempMonto, setTempMonto] = useState('');
   const [tempFecha, setTempFecha] = useState('');
+  const [calViewYear, setCalViewYear] = useState(new Date().getFullYear());
+  const [calViewMonth, setCalViewMonth] = useState(new Date().getMonth());
   const [tempCatId, setTempCatId] = useState('');
   const [tempSubcatId, setTempSubcatId] = useState('');
   const [tempCliId, setTempCliId] = useState('');
@@ -142,8 +144,8 @@ export default function AdminGastosScreen() {
   const [quickCliSearch, setQuickCliSearch] = useState('');
   const [tempTipoProyecto, setTempTipoProyecto] = useState('');
   const [tempDetalleProyecto, setTempDetalleProyecto] = useState('');
-  const [tempMetodoPago, setTempMetodoPago] = useState('Efectivo');
-  const [tempTipoTarjeta, setTempTipoTarjeta] = useState<'Empresarial' | 'Personal' | ''>('Empresarial');
+  const [tempMetodoPago, setTempMetodoPago] = useState('efectivo');
+  const [tempTipoTarjeta, setTempTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | null>(null);
   const [tempComentarios, setTempComentarios] = useState('');
 
   // Catálogos adicionales para edición rápida
@@ -750,6 +752,11 @@ export default function AdminGastosScreen() {
     } else if (fieldType === 'fecha') {
       const rawFecha = selectedGasto.fecha_comprobante || selectedGasto.created_at?.split('T')[0] || new Date().toISOString().split('T')[0];
       setTempFecha(rawFecha);
+      const parts = rawFecha.split('-');
+      if (parts.length === 3) {
+        setCalViewYear(parseInt(parts[0], 10) || new Date().getFullYear());
+        setCalViewMonth((parseInt(parts[1], 10) - 1) || new Date().getMonth());
+      }
     } else if (fieldType === 'categoria') {
       const subcatId = selectedGasto.subcategoria_id || '';
       const subcatItem = subcategoriasCatalog.find((s: any) => s.id === subcatId);
@@ -764,9 +771,10 @@ export default function AdminGastosScreen() {
       setTempTipoProyecto(selectedGasto.tipo_servicio_proyecto || 'Servicio');
       setTempDetalleProyecto(selectedGasto.detalle_servicio_proyecto || '');
     } else if (fieldType === 'pago') {
-      setTempMetodoPago(selectedGasto.metodo_pago || 'Efectivo');
-      setTempTipoTarjeta(selectedGasto.tipo_tarjeta || 'Empresarial');
-    } else if (fieldType === 'comentarios') {
+      const rawMetodo = selectedGasto.metodo_pago || 'efectivo';
+      const isCard = rawMetodo !== 'efectivo';
+      setTempMetodoPago(rawMetodo === 'tarjeta' ? 'tarjeta_debito' : rawMetodo);
+      setTempTipoTarjeta((selectedGasto.tipo_tarjeta as any) || (isCard ? 'BBVA' : null));
       const parsed = parseJustificacion(selectedGasto.justificacion);
       setTempComentarios(parsed.justificacion || selectedGasto.justificacion || '');
     }
@@ -849,7 +857,13 @@ export default function AdminGastosScreen() {
         };
         successMsg = 'Servicio / Proyecto actualizado.';
       } else if (quickEditFieldType === 'pago') {
-        const tarjetaVal = tempMetodoPago === 'Tarjeta' ? tempTipoTarjeta : null;
+        const isTarjeta = tempMetodoPago !== 'efectivo';
+        if (isTarjeta && !tempTipoTarjeta) {
+          showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, MERCADO PAGO).');
+          setIsSavingQuickField(false);
+          return;
+        }
+        const tarjetaVal = isTarjeta ? tempTipoTarjeta : null;
         updatePayload = {
           metodo_pago: tempMetodoPago,
           tipo_tarjeta: tarjetaVal,
@@ -2943,13 +2957,15 @@ export default function AdminGastosScreen() {
                         {formatCurrency(selectedGasto.monto)}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditField('monto')}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>Cambiar</Text>
-                    </TouchableOpacity>
+                    {selectedGasto.status === 'APPROVED' && (
+                      <TouchableOpacity
+                        onPress={() => handleOpenQuickEditField('monto')}
+                        style={styles.quickFieldBtn}
+                      >
+                        <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                        <Text style={styles.quickFieldBtnText}>Cambiar</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {/* Empleado */}
@@ -2969,13 +2985,15 @@ export default function AdminGastosScreen() {
                         {selectedGasto.detalle_servicio_proyecto ? `\nDetalle: ${selectedGasto.detalle_servicio_proyecto}` : ''}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditField('servicio')}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>Cambiar</Text>
-                    </TouchableOpacity>
+                    {selectedGasto.status === 'APPROVED' && (
+                      <TouchableOpacity
+                        onPress={() => handleOpenQuickEditField('servicio')}
+                        style={styles.quickFieldBtn}
+                      >
+                        <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                        <Text style={styles.quickFieldBtnText}>Cambiar</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {/* Proveedor */}
@@ -2986,15 +3004,17 @@ export default function AdminGastosScreen() {
                         {GastoHelper.getProveedor(selectedGasto) || '⚠️ En blanco (Sin asignar)'}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>
-                        {GastoHelper.getProveedor(selectedGasto) ? 'Cambiar' : 'Asignar'}
-                      </Text>
-                    </TouchableOpacity>
+                    {selectedGasto.status === 'APPROVED' && (
+                      <TouchableOpacity
+                        onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
+                        style={styles.quickFieldBtn}
+                      >
+                        <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                        <Text style={styles.quickFieldBtnText}>
+                          {GastoHelper.getProveedor(selectedGasto) ? 'Cambiar' : 'Asignar'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {(!GastoHelper.getProveedor(selectedGasto) || !GastoHelper.getProveedor(selectedGasto).trim()) && (
@@ -3079,13 +3099,15 @@ export default function AdminGastosScreen() {
                         {GastoHelper.getCliente(selectedGasto) || 'No especificado'} {GastoHelper.getSucursal(selectedGasto) ? `- Sucursal: ${GastoHelper.getSucursal(selectedGasto)}` : ''}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditField('cliente')}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>Cambiar</Text>
-                    </TouchableOpacity>
+                    {selectedGasto.status === 'APPROVED' && (
+                      <TouchableOpacity
+                        onPress={() => handleOpenQuickEditField('cliente')}
+                        style={styles.quickFieldBtn}
+                      >
+                        <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                        <Text style={styles.quickFieldBtnText}>Cambiar</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {/* Fecha de Gasto */}
@@ -3096,13 +3118,15 @@ export default function AdminGastosScreen() {
                         {formatFriendlyDate(selectedGasto.fecha_comprobante || selectedGasto.created_at?.split('T')[0])}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditField('fecha')}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>Cambiar</Text>
-                    </TouchableOpacity>
+                    {selectedGasto.status === 'APPROVED' && (
+                      <TouchableOpacity
+                        onPress={() => handleOpenQuickEditField('fecha')}
+                        style={styles.quickFieldBtn}
+                      >
+                        <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                        <Text style={styles.quickFieldBtnText}>Cambiar</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {/* Categoría / Subcategoría */}
@@ -3113,13 +3137,15 @@ export default function AdminGastosScreen() {
                         {GastoHelper.getCategoria(selectedGasto) || 'Sin Categoría'} {GastoHelper.getSubcategoria(selectedGasto) ? `> ${GastoHelper.getSubcategoria(selectedGasto)}` : ''}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditField('categoria')}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>Cambiar</Text>
-                    </TouchableOpacity>
+                    {selectedGasto.status === 'APPROVED' && (
+                      <TouchableOpacity
+                        onPress={() => handleOpenQuickEditField('categoria')}
+                        style={styles.quickFieldBtn}
+                      >
+                        <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                        <Text style={styles.quickFieldBtnText}>Cambiar</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {/* Parsear justificación para ver si hay alerta de IA */}
@@ -3144,13 +3170,15 @@ export default function AdminGastosScreen() {
                               {'\n'}Comentarios: {parsed.justificacion || 'No especificados'}
                             </Text>
                           </View>
-                          <TouchableOpacity
-                            onPress={() => handleOpenQuickEditField('pago')}
-                            style={styles.quickFieldBtn}
-                          >
-                            <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                            <Text style={styles.quickFieldBtnText}>Cambiar</Text>
-                          </TouchableOpacity>
+                          {selectedGasto.status === 'APPROVED' && (
+                            <TouchableOpacity
+                              onPress={() => handleOpenQuickEditField('pago')}
+                              style={styles.quickFieldBtn}
+                            >
+                              <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                              <Text style={styles.quickFieldBtnText}>Cambiar</Text>
+                            </TouchableOpacity>
+                          )}
                         </View>
 
                         {(!selectedGasto.facturado || selectedGasto.motivo_sin_factura) && (
@@ -4010,62 +4038,257 @@ export default function AdminGastosScreen() {
                   </View>
                 )}
 
-                {/* CAMPO: FECHA */}
-                {quickEditFieldType === 'fecha' && (
-                  <View style={{ gap: Spacing.two }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.textSecondary, textTransform: 'uppercase' }}>
-                      Fecha del Comprobante (AAAA-MM-DD):
-                    </Text>
-                    <CustomInput
-                      placeholder="YYYY-MM-DD (ej. 2024-05-18)"
-                      value={tempFecha}
-                      onChangeText={setTempFecha}
-                    />
-                    {/* Botones rápidos */}
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                      <TouchableOpacity
-                        onPress={() => setTempFecha(new Date().toISOString().split('T')[0])}
-                        style={{
-                          flex: 1,
-                          paddingVertical: 8,
-                          borderRadius: BorderRadius.small,
-                          backgroundColor: themeColors.backgroundElement,
-                          borderWidth: 1,
-                          borderColor: themeColors.border,
-                          alignItems: 'center'
-                        }}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>📅 Hoy</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => {
-                          const d = new Date();
-                          d.setDate(d.getDate() - 1);
-                          setTempFecha(d.toISOString().split('T')[0]);
-                        }}
-                        style={{
-                          flex: 1,
-                          paddingVertical: 8,
-                          borderRadius: BorderRadius.small,
-                          backgroundColor: themeColors.backgroundElement,
-                          borderWidth: 1,
-                          borderColor: themeColors.border,
-                          alignItems: 'center'
-                        }}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>📅 Ayer</Text>
-                      </TouchableOpacity>
+                {/* CAMPO: FECHA (CALENDARIO) */}
+                {quickEditFieldType === 'fecha' && (() => {
+                  const monthNames = [
+                    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+                  ];
+                  const dayNames = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
+
+                  const firstDayIndex = new Date(calViewYear, calViewMonth, 1).getDay();
+                  const totalDaysInMonth = new Date(calViewYear, calViewMonth + 1, 0).getDate();
+                  const prevMonthDays = new Date(calViewYear, calViewMonth, 0).getDate();
+                  const todayStr = new Date().toISOString().split('T')[0];
+
+                  type CalendarCell = {
+                    day: number;
+                    dateStr: string;
+                    isCurrentMonth: boolean;
+                    year: number;
+                    month: number;
+                  };
+
+                  const cells: CalendarCell[] = [];
+
+                  // Días del mes anterior para completar la primera semana
+                  for (let i = firstDayIndex - 1; i >= 0; i--) {
+                    const dayNum = prevMonthDays - i;
+                    const prevM = calViewMonth === 0 ? 11 : calViewMonth - 1;
+                    const prevY = calViewMonth === 0 ? calViewYear - 1 : calViewYear;
+                    const dateStr = `${prevY}-${String(prevM + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                    cells.push({ day: dayNum, dateStr, isCurrentMonth: false, year: prevY, month: prevM });
+                  }
+
+                  // Días del mes actual
+                  for (let dayNum = 1; dayNum <= totalDaysInMonth; dayNum++) {
+                    const dateStr = `${calViewYear}-${String(calViewMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                    cells.push({ day: dayNum, dateStr, isCurrentMonth: true, year: calViewYear, month: calViewMonth });
+                  }
+
+                  // Días del mes siguiente para completar la cuadrícula (múltiplo de 7)
+                  const remaining = (7 - (cells.length % 7)) % 7;
+                  for (let dayNum = 1; dayNum <= remaining; dayNum++) {
+                    const nextM = calViewMonth === 11 ? 0 : calViewMonth + 1;
+                    const nextY = calViewMonth === 11 ? calViewYear + 1 : calViewYear;
+                    const dateStr = `${nextY}-${String(nextM + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                    cells.push({ day: dayNum, dateStr, isCurrentMonth: false, year: nextY, month: nextM });
+                  }
+
+                  const handlePrevMonth = () => {
+                    if (calViewMonth === 0) {
+                      setCalViewMonth(11);
+                      setCalViewYear(prev => prev - 1);
+                    } else {
+                      setCalViewMonth(prev => prev - 1);
+                    }
+                  };
+
+                  const handleNextMonth = () => {
+                    if (calViewMonth === 11) {
+                      setCalViewMonth(0);
+                      setCalViewYear(prev => prev + 1);
+                    } else {
+                      setCalViewMonth(prev => prev + 1);
+                    }
+                  };
+
+                  const handleSelectToday = () => {
+                    const now = new Date();
+                    const nowStr = now.toISOString().split('T')[0];
+                    setTempFecha(nowStr);
+                    setCalViewYear(now.getFullYear());
+                    setCalViewMonth(now.getMonth());
+                  };
+
+                  const handleSelectYesterday = () => {
+                    const d = new Date();
+                    d.setDate(d.getDate() - 1);
+                    const yestStr = d.toISOString().split('T')[0];
+                    setTempFecha(yestStr);
+                    setCalViewYear(d.getFullYear());
+                    setCalViewMonth(d.getMonth());
+                  };
+
+                  return (
+                    <View style={{ gap: Spacing.two }}>
+                      {/* Contenedor Principal del Calendario */}
+                      <View style={{
+                        backgroundColor: themeColors.backgroundElement,
+                        borderRadius: BorderRadius.medium,
+                        padding: Spacing.two,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        gap: Spacing.one
+                      }}>
+                        {/* Cabecera del Mes y Año */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.one }}>
+                          <TouchableOpacity
+                            onPress={handlePrevMonth}
+                            style={{
+                              padding: 8,
+                              borderRadius: BorderRadius.small,
+                              backgroundColor: themeColors.background,
+                              borderWidth: 1,
+                              borderColor: themeColors.border
+                            }}
+                          >
+                            <Ionicons name="chevron-back" size={18} color={themeColors.text} />
+                          </TouchableOpacity>
+
+                          <View style={{ alignItems: 'center' }}>
+                            <Text style={{ fontSize: 16, fontWeight: '800', color: themeColors.text }}>
+                              {monthNames[calViewMonth]} {calViewYear}
+                            </Text>
+                          </View>
+
+                          <TouchableOpacity
+                            onPress={handleNextMonth}
+                            style={{
+                              padding: 8,
+                              borderRadius: BorderRadius.small,
+                              backgroundColor: themeColors.background,
+                              borderWidth: 1,
+                              borderColor: themeColors.border
+                            }}
+                          >
+                            <Ionicons name="chevron-forward" size={18} color={themeColors.text} />
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Nombres de los Días */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 6 }}>
+                          {dayNames.map((dName, idx) => (
+                            <View key={idx} style={{ flex: 1, alignItems: 'center' }}>
+                              <Text style={{
+                                fontSize: 11,
+                                fontWeight: '700',
+                                color: themeColors.textSecondary,
+                                textTransform: 'uppercase'
+                              }}>
+                                {dName}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+
+                        {/* Cuadrícula de Días */}
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                          {cells.map((cell, index) => {
+                            const isSelected = cell.dateStr === tempFecha;
+                            const isToday = cell.dateStr === todayStr;
+
+                            return (
+                              <View key={index} style={{ width: `${100 / 7}%`, padding: 2, alignItems: 'center', justifyContent: 'center' }}>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setTempFecha(cell.dateStr);
+                                    if (!cell.isCurrentMonth) {
+                                      setCalViewYear(cell.year);
+                                      setCalViewMonth(cell.month);
+                                    }
+                                  }}
+                                  style={{
+                                    width: 36,
+                                    height: 36,
+                                    borderRadius: 18,
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    backgroundColor: isSelected ? themeColors.primary : 'transparent',
+                                    borderWidth: isToday && !isSelected ? 1.5 : 0,
+                                    borderColor: themeColors.accent,
+                                    opacity: cell.isCurrentMonth ? 1 : 0.35,
+                                  }}
+                                >
+                                  <Text style={{
+                                    fontSize: 13,
+                                    fontWeight: isSelected ? '800' : (cell.isCurrentMonth ? '600' : '400'),
+                                    color: isSelected ? '#ffffff' : (isToday ? themeColors.accent : themeColors.text)
+                                  }}>
+                                    {cell.day}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </View>
+
+                      {/* Botones rápidos de acceso directo */}
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity
+                          onPress={handleSelectToday}
+                          style={{
+                            flex: 1,
+                            paddingVertical: 10,
+                            borderRadius: BorderRadius.small,
+                            backgroundColor: themeColors.backgroundElement,
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                            alignItems: 'center',
+                            flexDirection: 'row',
+                            justifyContent: 'center',
+                            gap: 6
+                          }}
+                        >
+                          <Ionicons name="today-outline" size={16} color={themeColors.accent} />
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>Hoy</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={handleSelectYesterday}
+                          style={{
+                            flex: 1,
+                            paddingVertical: 10,
+                            borderRadius: BorderRadius.small,
+                            backgroundColor: themeColors.backgroundElement,
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                            alignItems: 'center',
+                            flexDirection: 'row',
+                            justifyContent: 'center',
+                            gap: 6
+                          }}
+                        >
+                          <Ionicons name="time-outline" size={16} color={themeColors.accent} />
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>Ayer</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Vista Previa de la Fecha Seleccionada */}
+                      <View style={{
+                        backgroundColor: themeColors.primary + '15',
+                        padding: Spacing.two,
+                        borderRadius: BorderRadius.small,
+                        borderWidth: 1,
+                        borderColor: themeColors.primary + '40',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: Spacing.one
+                      }}>
+                        <Ionicons name="calendar" size={20} color={themeColors.primary} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.textSecondary, textTransform: 'uppercase' }}>
+                            Fecha seleccionada:
+                          </Text>
+                          <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.primary, marginTop: 1 }}>
+                            {formatFriendlyDate(tempFecha)} ({tempFecha})
+                          </Text>
+                        </View>
+                      </View>
                     </View>
-                    <View style={{ backgroundColor: themeColors.backgroundElement, padding: Spacing.two, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border }}>
-                      <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                        Vista previa de fecha:
-                      </Text>
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: themeColors.primary, marginTop: 2 }}>
-                        {formatFriendlyDate(tempFecha)}
-                      </Text>
-                    </View>
-                  </View>
-                )}
+                  );
+                })()}
 
                 {/* CAMPO: CATEGORÍA */}
                 {quickEditFieldType === 'categoria' && (
@@ -4283,9 +4506,9 @@ export default function AdminGastosScreen() {
                 {quickEditFieldType === 'servicio' && (
                   <View style={{ gap: Spacing.two }}>
                     <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.textSecondary, textTransform: 'uppercase' }}>
-                      Tipo de Proyecto / Servicio:
+                      Tipo de Gasto *:
                     </Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
                       {TIPOS_PROYECTO.map(t => {
                         const isSelected = tempTipoProyecto === t;
                         return (
@@ -4293,20 +4516,22 @@ export default function AdminGastosScreen() {
                             key={t}
                             onPress={() => setTempTipoProyecto(t)}
                             style={{
-                              paddingVertical: 8,
-                              paddingHorizontal: 14,
+                              flex: 1,
+                              paddingVertical: 10,
                               borderRadius: BorderRadius.medium,
-                              backgroundColor: isSelected ? themeColors.primary : themeColors.backgroundElement,
+                              backgroundColor: isSelected ? themeColors.primary + '20' : themeColors.backgroundElement,
                               borderWidth: 1,
                               borderColor: isSelected ? themeColors.primary : themeColors.border,
+                              alignItems: 'center',
+                              justifyContent: 'center'
                             }}
                           >
                             <Text style={{
                               fontSize: 13,
-                              fontWeight: isSelected ? '800' : '600',
-                              color: isSelected ? '#ffffff' : themeColors.text
+                              fontWeight: isSelected ? '700' : '600',
+                              color: isSelected ? themeColors.primary : themeColors.textSecondary
                             }}>
-                              {isSelected ? '✓ ' : ''}{t}
+                              {t}
                             </Text>
                           </TouchableOpacity>
                         );
@@ -4314,10 +4539,10 @@ export default function AdminGastosScreen() {
                     </View>
 
                     <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.textSecondary, textTransform: 'uppercase', marginTop: Spacing.one }}>
-                      Detalle / Descripción del Proyecto:
+                      Detalle de Servicio o Proyecto *:
                     </Text>
                     <CustomInput
-                      placeholder="Ej. Instalación de paneles solares..."
+                      placeholder="Escribe el nombre o texto libre..."
                       value={tempDetalleProyecto}
                       onChangeText={setTempDetalleProyecto}
                       multiline
@@ -4330,75 +4555,171 @@ export default function AdminGastosScreen() {
                 {/* CAMPO: PAGO */}
                 {quickEditFieldType === 'pago' && (
                   <View style={{ gap: Spacing.two }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.textSecondary, textTransform: 'uppercase' }}>
-                      Método de Pago:
-                    </Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                      {['Efectivo', 'Tarjeta', 'Transferencia', 'Reembolso'].map(m => {
-                        const isSelected = tempMetodoPago === m;
-                        return (
-                          <TouchableOpacity
-                            key={m}
-                            onPress={() => setTempMetodoPago(m)}
-                            style={{
-                              paddingVertical: 8,
-                              paddingHorizontal: 14,
-                              borderRadius: BorderRadius.medium,
-                              backgroundColor: isSelected ? themeColors.primary : themeColors.backgroundElement,
-                              borderWidth: 1,
-                              borderColor: isSelected ? themeColors.primary : themeColors.border,
-                            }}
-                          >
-                            <Text style={{
-                              fontSize: 13,
-                              fontWeight: isSelected ? '800' : '600',
-                              color: isSelected ? '#ffffff' : themeColors.text
-                            }}>
-                              {isSelected ? '✓ ' : ''}{m}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
+                    {/* Método de Pago * */}
+                    <View style={{ gap: 6 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                        Método de Pago *
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setTempMetodoPago('efectivo');
+                            setTempTipoTarjeta(null);
+                          }}
+                          style={{
+                            flex: 1,
+                            paddingVertical: 12,
+                            borderRadius: BorderRadius.medium,
+                            backgroundColor: tempMetodoPago === 'efectivo' ? themeColors.accent : themeColors.backgroundElement,
+                            borderWidth: 1,
+                            borderColor: tempMetodoPago === 'efectivo' ? 'transparent' : themeColors.border,
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <Text style={{
+                            fontSize: 13,
+                            fontWeight: tempMetodoPago === 'efectivo' ? '800' : '600',
+                            color: tempMetodoPago === 'efectivo' ? '#ffffff' : themeColors.text
+                          }}>
+                            Efectivo
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (tempMetodoPago === 'efectivo') {
+                              setTempMetodoPago('tarjeta_debito');
+                            }
+                            if (!tempTipoTarjeta) {
+                              setTempTipoTarjeta('BBVA');
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            paddingVertical: 12,
+                            borderRadius: BorderRadius.medium,
+                            backgroundColor: tempMetodoPago !== 'efectivo' ? themeColors.accent : themeColors.backgroundElement,
+                            borderWidth: 1,
+                            borderColor: tempMetodoPago !== 'efectivo' ? 'transparent' : themeColors.border,
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <Text style={{
+                            fontSize: 13,
+                            fontWeight: tempMetodoPago !== 'efectivo' ? '800' : '600',
+                            color: tempMetodoPago !== 'efectivo' ? '#ffffff' : themeColors.text
+                          }}>
+                            Tarjeta
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
 
-                    {tempMetodoPago === 'Tarjeta' && (
-                      <View style={{ marginTop: Spacing.one, gap: 6 }}>
-                        <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.textSecondary, textTransform: 'uppercase' }}>
-                          Tipo de Tarjeta:
-                        </Text>
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                          {(['Empresarial', 'Personal'] as const).map(tarjeta => {
-                            const isSelected = tempTipoTarjeta === tarjeta;
-                            return (
-                              <TouchableOpacity
-                                key={tarjeta}
-                                onPress={() => setTempTipoTarjeta(tarjeta)}
-                                style={{
-                                  flex: 1,
-                                  paddingVertical: 10,
-                                  alignItems: 'center',
-                                  borderRadius: BorderRadius.medium,
-                                  backgroundColor: isSelected ? themeColors.accent : themeColors.backgroundElement,
-                                  borderWidth: 1,
-                                  borderColor: isSelected ? themeColors.accent : themeColors.border,
-                                }}
-                              >
-                                <Text style={{
-                                  fontSize: 13,
-                                  fontWeight: isSelected ? '800' : '600',
-                                  color: isSelected ? '#ffffff' : themeColors.text
-                                }}>
-                                  {isSelected ? '💳 ✓ ' : '💳 '}{tarjeta}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
+                    {/* Sub-selector si es Tarjeta */}
+                    {tempMetodoPago !== 'efectivo' && (
+                      <View style={{ gap: Spacing.two, marginTop: 4 }}>
+                        {/* Tipo de Tarjeta * (Débito / Crédito) */}
+                        <View style={{ gap: 6 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                            Tipo de Tarjeta *
+                          </Text>
+                          <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TouchableOpacity
+                              onPress={() => setTempMetodoPago('tarjeta_debito')}
+                              style={{
+                                flex: 1,
+                                paddingVertical: 12,
+                                borderRadius: BorderRadius.medium,
+                                backgroundColor: tempMetodoPago === 'tarjeta_debito' ? themeColors.accent : themeColors.backgroundElement,
+                                borderWidth: 1,
+                                borderColor: tempMetodoPago === 'tarjeta_debito' ? 'transparent' : themeColors.border,
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}
+                            >
+                              <Text style={{
+                                fontSize: 13,
+                                fontWeight: tempMetodoPago === 'tarjeta_debito' ? '800' : '600',
+                                color: tempMetodoPago === 'tarjeta_debito' ? '#ffffff' : themeColors.text
+                              }}>
+                                Débito
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => setTempMetodoPago('tarjeta_credito')}
+                              style={{
+                                flex: 1,
+                                paddingVertical: 12,
+                                borderRadius: BorderRadius.medium,
+                                backgroundColor: tempMetodoPago === 'tarjeta_credito' ? themeColors.accent : themeColors.backgroundElement,
+                                borderWidth: 1,
+                                borderColor: tempMetodoPago === 'tarjeta_credito' ? 'transparent' : themeColors.border,
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}
+                            >
+                              <Text style={{
+                                fontSize: 13,
+                                fontWeight: tempMetodoPago === 'tarjeta_credito' ? '800' : '600',
+                                color: tempMetodoPago === 'tarjeta_credito' ? '#ffffff' : themeColors.text
+                              }}>
+                                Crédito
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {/* Selecciona la Tarjeta * (BBVA, AMEX, MARRIOT, BANORTE, INVEX, MERCADO PAGO) */}
+                        <View style={{ gap: 6 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                            Selecciona la Tarjeta *
+                          </Text>
+                          <View style={{ gap: 8 }}>
+                            {[
+                              ['BBVA', 'AMEX'],
+                              ['MARRIOT', 'BANORTE'],
+                              ['INVEX', 'MERCADO PAGO'],
+                            ].map((pair, rowIdx) => (
+                              <View key={rowIdx} style={{ flexDirection: 'row', gap: 8 }}>
+                                {pair.map(card => {
+                                  const isSelected = tempTipoTarjeta === card;
+                                  return (
+                                    <TouchableOpacity
+                                      key={card}
+                                      onPress={() => setTempTipoTarjeta(card as any)}
+                                      style={{
+                                        flex: 1,
+                                        paddingVertical: 12,
+                                        borderRadius: BorderRadius.medium,
+                                        backgroundColor: isSelected ? themeColors.accent : themeColors.backgroundElement,
+                                        borderWidth: 1,
+                                        borderColor: isSelected ? 'transparent' : themeColors.border,
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                      }}
+                                    >
+                                      <Text style={{
+                                        fontSize: 12,
+                                        fontWeight: isSelected ? '800' : '600',
+                                        color: isSelected ? '#ffffff' : themeColors.text
+                                      }}>
+                                        {card}
+                                      </Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
+                            ))}
+                          </View>
                         </View>
                       </View>
                     )}
 
                     <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.textSecondary, textTransform: 'uppercase', marginTop: Spacing.one }}>
-                      Justificación / Comentarios:
+                      Comentarios:
                     </Text>
                     <CustomInput
                       placeholder="Observaciones o justificación del gasto..."
