@@ -19,6 +19,7 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/services/supabase';
 import { TareasService } from '@/services/tareasService';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import EditarTareaModal from '@/components/EditarTareaModal';
 
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -33,6 +34,7 @@ export default function TaskDetailScreen() {
   const [newNote, setNewNote] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [isUpdatingFecha, setIsUpdatingFecha] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const dateInputRef = useRef<any>(null);
 
   useEffect(() => {
@@ -193,22 +195,20 @@ export default function TaskDetailScreen() {
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Detalle de Tarea</Text>
         <TouchableOpacity
-          onPress={openDatePicker}
+          onPress={() => setShowEditModal(true)}
           activeOpacity={0.7}
           style={{
             flexDirection: 'row',
             alignItems: 'center',
             gap: 5,
-            backgroundColor: themeColors.accent + '20',
-            borderColor: themeColors.accent + '50',
-            borderWidth: 1,
-            paddingHorizontal: 10,
+            backgroundColor: themeColors.accent,
+            paddingHorizontal: 12,
             paddingVertical: 6,
             borderRadius: 8
           }}
         >
-          <Ionicons name="calendar-outline" size={16} color={themeColors.accent} />
-          <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 12 }}>Editar Fecha</Text>
+          <Ionicons name="create-outline" size={16} color="#fff" />
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Editar Tarea</Text>
         </TouchableOpacity>
       </View>
 
@@ -446,6 +446,13 @@ export default function TaskDetailScreen() {
         )}
 
       </ScrollView>
+
+      <EditarTareaModal
+        visible={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        onSuccess={fetchTaskDetails}
+        task={task}
+      />
     </SafeAreaView>
   );
 }

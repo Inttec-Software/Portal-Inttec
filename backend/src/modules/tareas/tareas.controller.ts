@@ -191,11 +191,24 @@ export const updateTarea = async (req: Request, res: Response): Promise<void> =>
     const { company, env } = req.tenant!;
     const supabase = getSupabaseClient(company, env);
     
-    // Extracted note info from frontend
-    const { nota_texto, ...updates } = req.body;
+    // Extracted note info and corresponsables from frontend
+    const { nota_texto, corresponsables, ...updates } = req.body;
 
-    const { error } = await supabase.from('tareas').update(updates).eq('id', id);
-    if (error) throw error;
+    if (Object.keys(updates).length > 0) {
+      const { error } = await supabase.from('tareas').update(updates).eq('id', id);
+      if (error) throw error;
+    }
+
+    if (corresponsables !== undefined) {
+      await supabase.from('tarea_corresponsables').delete().eq('tarea_id', id);
+      if (Array.isArray(corresponsables) && corresponsables.length > 0) {
+        const corrInserts = corresponsables.map((uid: string) => ({
+          tarea_id: id,
+          usuario_id: uid
+        }));
+        await supabase.from('tarea_corresponsables').insert(corrInserts);
+      }
+    }
 
     if (nota_texto) {
       await supabase.from('tarea_notas').insert({
