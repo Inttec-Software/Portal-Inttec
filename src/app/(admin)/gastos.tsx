@@ -144,7 +144,7 @@ export default function AdminGastosScreen() {
   const [quickCliSearch, setQuickCliSearch] = useState('');
   const [tempTipoProyecto, setTempTipoProyecto] = useState('');
   const [tempDetalleProyecto, setTempDetalleProyecto] = useState('');
-  const [tempMetodoPago, setTempMetodoPago] = useState('efectivo');
+  const [tempMetodoPago, setTempMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
   const [tempTipoTarjeta, setTempTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | null>(null);
   const [tempComentarios, setTempComentarios] = useState('');
 
