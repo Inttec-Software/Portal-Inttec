@@ -39,6 +39,6 @@ export const getApiHeaders = async () => {
 };
 
 export const getApiUrl = () => {
-  const rawApiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000';
-  return resolveLocalhost(rawApiUrl);
+  const rawApiUrl = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000').trim().replace(/\/+$/, '');
+  return resolveLocalhost(rawApiUrl).replace(/\/+$/, '');
 };

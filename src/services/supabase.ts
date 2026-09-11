@@ -402,8 +402,7 @@ export interface ProveedorItem {
  */
 export const AuthService = {
   async login(email: string, password: string): Promise<Usuario> {
-    const rawApiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000';
-    const apiUrl = resolveLocalhost(rawApiUrl);
+    const apiUrl = getApiUrl();
     const company = CompanyService.getActiveCompany();
     const env = EnvService.getActiveEnv();
 
@@ -418,11 +417,19 @@ export const AuthService = {
         body: JSON.stringify({ email, password })
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data.message || 'Error al iniciar sesión');
+        let errorMsg = `Error ${response.status}: no se pudo conectar con el servidor`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.message) errorMsg = errData.message;
+        } catch (_) {
+          const text = await response.text().catch(() => '');
+          if (text) errorMsg = `Servidor respondió con código ${response.status}`;
+        }
+        throw new Error(errorMsg);
       }
+
+      const data = await response.json();
 
       if (isBrowser) {
         // Guardamos tanto el usuario como el token
