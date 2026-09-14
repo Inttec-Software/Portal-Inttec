@@ -47,6 +47,7 @@ interface Producto {
   categoria_id: string;
   proveedor_id?: string;
   stock_actual: number;
+  unidad?: string;
   precio_unitario?: number;
   activo: boolean;
 }
@@ -128,6 +129,7 @@ export default function InventarioDashboard() {
   const [formCategoriaId, setFormCategoriaId] = useState('');
   const [formProveedorId, setFormProveedorId] = useState('');
   const [formStock, setFormStock] = useState('0');
+  const [formUnidad, setFormUnidad] = useState('pza');
   const [formPrecio, setFormPrecio] = useState('');
   const [isSavingProduct, setIsSavingProduct] = useState(false);
 
@@ -658,6 +660,7 @@ async function loadAllData() {
     setFormCategoriaId(categorias[0]?.id || '');
     setFormProveedorId('');
     setFormStock('0');
+    setFormUnidad('pza');
     setFormPrecio('');
     setCrudModalVisible(true);
   };
@@ -669,6 +672,7 @@ async function loadAllData() {
     setFormCategoriaId(p.categoria_id);
     setFormProveedorId(p.proveedor_id || '');
     setFormStock(p.stock_actual.toString());
+    setFormUnidad(p.unidad || 'pza');
     setFormPrecio(p.precio_unitario?.toString() || '0');
     setCrudModalVisible(true);
   };
@@ -679,9 +683,9 @@ async function loadAllData() {
       return;
     }
 
-    const stockNum = parseInt(formStock, 10);
+    const stockNum = parseFloat(formStock);
     if (isNaN(stockNum) || stockNum < 0) {
-      Alert.alert('Validación', 'El stock debe ser un número entero mayor o igual a 0.');
+      Alert.alert('Validación', 'El stock debe ser un número mayor o igual a 0.');
       return;
     }
 
@@ -694,6 +698,7 @@ async function loadAllData() {
         categoria_id: formCategoriaId,
         proveedor_id: formProveedorId || null,
         stock_actual: stockNum,
+        unidad: formUnidad.trim() || 'pza',
         precio_unitario: parseFloat(formPrecio) || 0,
         activo: true,
       };
@@ -776,10 +781,10 @@ async function loadAllData() {
 
   const handleQuickAddStock = async (product: Producto) => {
     const valueStr = quickStockAdjustments[product.id] || '';
-    const toAdd = parseInt(valueStr, 10);
+    const toAdd = parseFloat(valueStr);
 
     if (isNaN(toAdd) || toAdd <= 0) {
-      Alert.alert('Validación', 'Por favor ingresa un número entero mayor a 0 para añadir al stock.');
+      Alert.alert('Validación', 'Por favor ingresa un número mayor a 0 para añadir al stock.');
       return;
     }
 
@@ -798,11 +803,11 @@ async function loadAllData() {
 
       if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al añadir stock'); }
 
-      const newStock = product.stock_actual + toAdd;
+      const newStock = Math.round((Number(product.stock_actual) + toAdd) * 100) / 100;
       // Limpiar el input de este producto
       setQuickStockAdjustments(prev => ({ ...prev, [product.id]: '' }));
 
-      Alert.alert('Éxito', `Se añadieron ${toAdd} unidades a "${product.nombre_oficial}". Stock actual: ${newStock}`);
+      Alert.alert('Éxito', `Se añadieron ${toAdd} ${product.unidad || 'unidades'} a "${product.nombre_oficial}". Stock actual: ${newStock} ${product.unidad || 'pzas'}`);
       await loadAllData();
     } catch (err: any) {
       Alert.alert('Error', err.message || 'No se pudo actualizar el stock del producto.');
@@ -913,7 +918,7 @@ async function loadAllData() {
         .filter(p => p.activo)
         .map(p => ({
           id: p.id,
-          label: `${p.nombre_oficial} (${p.sku_interno}) - Stock: ${p.stock_actual}`,
+          label: `${p.nombre_oficial} (${p.sku_interno}) - Stock: ${p.stock_actual} ${p.unidad || 'pzas'}`,
         }))
     );
     setOnSelectOption(() => (id: string) => {
@@ -970,7 +975,7 @@ async function loadAllData() {
       if (item.cantidad > prod.stock_actual) {
         Alert.alert(
           'Stock Insuficiente',
-          `No puedes consumir ${item.cantidad} unidades de "${prod.nombre_oficial}" porque solo hay ${prod.stock_actual} disponibles.`
+          `No puedes consumir ${item.cantidad} ${prod.unidad || 'unidades'} de "${prod.nombre_oficial}" porque solo hay ${prod.stock_actual} disponibles.`
         );
         return;
       }
@@ -1651,7 +1656,7 @@ async function loadAllData() {
                             { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success },
                           ]}
                         >
-                          Stock: {item.stock_actual} pzas
+                          Stock: {item.stock_actual} {item.unidad || 'pzas'}
                         </Text>
                         <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>
                           • {precioFmt}
@@ -1668,9 +1673,9 @@ async function loadAllData() {
                           ]}
                           placeholder="+"
                           placeholderTextColor={themeColors.textSecondary}
-                          keyboardType="numeric"
+                          keyboardType="decimal-pad"
                           value={quickStockAdjustments[item.id] || ''}
-                          onChangeText={txt => setQuickStockAdjustments(prev => ({ ...prev, [item.id]: txt }))}
+                          onChangeText={txt => setQuickStockAdjustments(prev => ({ ...prev, [item.id]: txt.replace(/[^0-9.]/g, '') }))}
                         />
                         <TouchableOpacity
                           activeOpacity={0.7}
@@ -1858,7 +1863,7 @@ async function loadAllData() {
                           {prod ? prod.nombre_oficial : 'Producto desconocido'}
                         </Text>
                         <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
-                          SKU: {prod ? prod.sku_interno : '-'} | Disponible: {prod ? prod.stock_actual : 0} pzas
+                          SKU: {prod ? prod.sku_interno : '-'} | Disponible: {prod ? prod.stock_actual : 0} {prod?.unidad || 'pzas'}
                         </Text>
                       </View>
                       <TouchableOpacity onPress={() => handleRemoveConsumoItem(item.id)}>
@@ -1869,10 +1874,10 @@ async function loadAllData() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: Spacing.one, gap: Spacing.two }}>
                       <View style={{ flex: 1 }}>
                         <CustomInput
-                          label="Cantidad a consumir"
-                          keyboardType="numeric"
+                          label={`Cantidad a consumir (${prod?.unidad || 'pzas'})`}
+                          keyboardType="decimal-pad"
                           value={item.cantidad > 0 ? item.cantidad.toString() : ''}
-                          onChangeText={txt => handleUpdateConsumoItemQty(item.id, parseInt(txt, 10) || 0)}
+                          onChangeText={txt => handleUpdateConsumoItemQty(item.id, parseFloat(txt.replace(/[^0-9.]/g, '')) || 0)}
                         />
                       </View>
                     </View>
@@ -1930,7 +1935,7 @@ async function loadAllData() {
                       </View>
                       <View style={{ backgroundColor: themeColors.danger + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: BorderRadius.small }}>
                         <Text style={{ color: themeColors.danger, fontSize: 12, fontWeight: '800' }}>
-                          -{item.cantidad} pzas
+                          -{item.cantidad} {item.producto?.unidad || 'pzas'}
                         </Text>
                       </View>
                     </View>
@@ -2101,7 +2106,7 @@ async function loadAllData() {
                             <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>SKU: {item.productos?.sku_interno || '-'}</Text>
                           </View>
                           <View style={{ backgroundColor: themeColors.primary + '20', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
-                            <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 14 }}>{item.cantidad_disponible} pzas</Text>
+                            <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 14 }}>{item.cantidad_disponible} {item.productos?.unidad || 'pzas'}</Text>
                           </View>
                         </View>
                       ))
@@ -2182,12 +2187,68 @@ async function loadAllData() {
                 </TouchableOpacity>
               </View>
 
-              <CustomInput
-                label="Stock Inicial *"
-                keyboardType="numeric"
-                value={formStock}
-                onChangeText={(val) => setFormStock(val.replace(/[^0-9]/g, ''))}
-              />
+              <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Stock Inicial *"
+                    keyboardType="decimal-pad"
+                    value={formStock}
+                    onChangeText={(val) => setFormStock(val.replace(/[^0-9.]/g, ''))}
+                  />
+                </View>
+                <View style={{ flex: 1, marginBottom: Spacing.three }}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 14, fontWeight: '600', marginBottom: Spacing.half }]}>
+                    Unidad de Medida *
+                  </Text>
+                  <View
+                    style={{
+                      height: 50,
+                      flexDirection: 'row',
+                      backgroundColor: themeColors.backgroundElement,
+                      borderRadius: BorderRadius.medium,
+                      borderColor: themeColors.border,
+                      borderWidth: 1,
+                      padding: 4,
+                      gap: 4,
+                      alignItems: 'center',
+                    }}
+                  >
+                    {[
+                      { key: 'pza', label: 'pza' },
+                      { key: 'mts', label: 'mts' },
+                      { key: 'rollo', label: 'rollo' },
+                      { key: 'kit', label: 'kit' },
+                    ].map(u => {
+                      const isSelected = formUnidad === u.key;
+                      return (
+                        <TouchableOpacity
+                          key={u.key}
+                          onPress={() => setFormUnidad(u.key)}
+                          activeOpacity={0.7}
+                          style={{
+                            flex: 1,
+                            height: '100%',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            borderRadius: BorderRadius.small,
+                            backgroundColor: isSelected ? themeColors.primary : 'transparent',
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: isSelected ? 'bold' : '600',
+                              color: isSelected ? '#ffffff' : themeColors.textSecondary,
+                            }}
+                          >
+                            {u.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              </View>
 
               <View style={{ flexDirection: 'row', gap: Spacing.two }}>
                 <View style={{ flex: 1 }}>

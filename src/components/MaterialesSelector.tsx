@@ -10,6 +10,7 @@ interface Producto {
   sku_interno: string;
   nombre_oficial: string;
   stock_actual: number;
+  unidad?: string;
 }
 
 interface MaterialUsado {
@@ -18,6 +19,7 @@ interface MaterialUsado {
   retirado: number;
   usado: number;
   sobrante: number;
+  unidad?: string;
 }
 
 interface MaterialesSelectorProps {
@@ -46,25 +48,27 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
   const handleAddMaterial = () => {
     if (!selectedProduct) return;
     
-    const numRetirado = selectedProduct.stock_actual;
-    const numUsado = parseInt(usado, 10);
+    const numRetirado = Number(selectedProduct.stock_actual) || 0;
+    const numUsado = parseFloat(usado);
 
-    
-    if (isNaN(numUsado) || numUsado < 0) {
-      Alert.alert('Validación', 'Ingresa una cantidad válida de material usado.');
+    if (isNaN(numUsado) || numUsado <= 0) {
+      Alert.alert('Validación', 'Ingresa una cantidad válida de material usado mayor a 0.');
       return;
     }
     if (numUsado > numRetirado) {
-      Alert.alert('Validación', 'El material usado no puede ser mayor al retirado.');
+      Alert.alert('Validación', `El material usado (${numUsado}) no puede ser mayor al retirado (${numRetirado}).`);
       return;
     }
+
+    const calculatedSobrante = Math.max(0, Math.round((numRetirado - numUsado) * 100) / 100);
 
     const nuevoMaterial: MaterialUsado = {
       productoId: selectedProduct.id,
       nombre: selectedProduct.nombre_oficial,
       retirado: numRetirado,
       usado: numUsado,
-      sobrante: numRetirado - numUsado
+      sobrante: calculatedSobrante,
+      unidad: selectedProduct.unidad || 'pza'
     };
 
     // Validar si ya existe
@@ -85,6 +89,11 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
     onChange(materiales.filter(m => m.productoId !== id));
   };
 
+  const parsedUsado = parseFloat(usado);
+  const calculatedSobrante = selectedProduct 
+    ? (!isNaN(parsedUsado) ? Math.max(0, Math.round((Number(selectedProduct.stock_actual) - parsedUsado) * 100) / 100) : selectedProduct.stock_actual)
+    : 0;
+
   return (
     <View style={styles.container}>
       <Text style={[styles.label, { color: themeColors.text }]}>Materiales Retirados y Usados *</Text>
@@ -99,10 +108,10 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
             <View key={idx} style={[styles.materialItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 14 }}>{m.nombre}</Text>
-                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Retirado: {m.retirado}</Text>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Usado: {m.usado}</Text>
-                  <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.sobrante}</Text>
+                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4, flexWrap: 'wrap' }}>
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Retirado: {m.retirado} {m.unidad || 'pza'}</Text>
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Usado: {m.usado} {m.unidad || 'pza'}</Text>
+                  <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.sobrante} {m.unidad || 'pza'}</Text>
                 </View>
               </View>
               <TouchableOpacity onPress={() => handleRemoveMaterial(m.productoId)} style={{ padding: 4 }}>
@@ -162,7 +171,7 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                         onPress={() => setSelectedProduct(prod)}
                       >
                         <Text style={{ fontSize: 15, fontWeight: '600', color: themeColors.text }}>{prod.nombre_oficial}</Text>
-                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>SKU: {prod.sku_interno} | Stock: {prod.stock_actual}</Text>
+                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>SKU: {prod.sku_interno} | Stock: {prod.stock_actual} {prod.unidad || 'pza'}</Text>
                       </TouchableOpacity>
                     ))
                   )}
@@ -173,21 +182,24 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                 <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text, marginBottom: Spacing.two }}>
                   {selectedProduct.nombre_oficial}
                 </Text>
+                <Text style={{ fontSize: 13, color: themeColors.textSecondary, marginBottom: Spacing.two }}>
+                  Stock Disponible: <Text style={{ fontWeight: 'bold', color: themeColors.primary }}>{selectedProduct.stock_actual} {selectedProduct.unidad || 'pza'}</Text>
+                </Text>
                 
                 <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.three }}>
-                  
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.label, { color: themeColors.text }]}>Cantidad Usada *</Text>
+                    <Text style={[styles.label, { color: themeColors.text }]}>Cantidad Usada ({selectedProduct.unidad || 'pza'}) *</Text>
                     <TextInput
                       style={[styles.input, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
-                      keyboardType="numeric"
+                      keyboardType="decimal-pad"
                       value={usado}
                       onChangeText={(val) => {
-                        const num = parseInt(val, 10);
+                        const cleanVal = val.replace(/[^0-9.]/g, '');
+                        const num = parseFloat(cleanVal);
                         if (!isNaN(num) && num > selectedProduct.stock_actual) {
                           setUsado(selectedProduct.stock_actual.toString());
                         } else {
-                          setUsado(val);
+                          setUsado(cleanVal);
                         }
                       }}
                       placeholder="0"
@@ -198,7 +210,7 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                 <View style={{ backgroundColor: themeColors.primary + '10', padding: Spacing.three, borderRadius: BorderRadius.medium, marginBottom: Spacing.four }}>
                   <Text style={{ color: themeColors.text, fontSize: 14 }}>
                     Sobrante Calculado: <Text style={{ fontWeight: 'bold', color: themeColors.primary }}>
-                      {(!isNaN(parseInt(usado))) ? selectedProduct.stock_actual - parseInt(usado) : selectedProduct.stock_actual}
+                      {calculatedSobrante} {selectedProduct.unidad || 'pza'}
                     </Text>
                   </Text>
                 </View>
@@ -207,7 +219,10 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                   <CustomButton
                     title="Atrás"
                     variant="secondary"
-                    onPress={() => setSelectedProduct(null)}
+                    onPress={() => {
+                      setSelectedProduct(null);
+                      setUsado('');
+                    }}
                     style={{ flex: 1 }}
                   />
                   <CustomButton

@@ -26,12 +26,29 @@ interface Producto {
   sku_interno: string;
   nombre_oficial: string;
   stock_actual: number;
+  unidad?: string;
 }
 
 interface CartItem {
   producto: Producto;
   cantidad: number | '';
 }
+
+const getProductoUnidad = (prod: Producto): string => {
+  if (prod.unidad && prod.unidad.trim() !== '') {
+    const u = prod.unidad.toLowerCase().trim();
+    if (u === 'mts' || u === 'm' || u === 'metro' || u === 'metros' || u === 'mtr' || u === 'lm') return 'mts';
+    if (u === 'pza' || u === 'pzas' || u === 'pz' || u === 'pieza' || u === 'piezas' || u === 'h87') return 'pza';
+    if (u === 'rollo' || u === 'rollos' || u === 'xro') return 'rollo';
+    if (u === 'kit' || u === 'kt') return 'kit';
+    return prod.unidad;
+  }
+  const name = (prod.nombre_oficial || '').toLowerCase();
+  if (name.includes('metro') || name.includes('cable') || name.includes('bobina')) {
+    return 'mts';
+  }
+  return 'pza';
+};
 
 export default function RetiroMaterialScreen() {
   const router = useRouter();
@@ -81,15 +98,17 @@ export default function RetiroMaterialScreen() {
   );
 
   const addToCart = (producto: Producto, qty: number = 1) => {
+    const unit = getProductoUnidad(producto);
     setCart(prev => {
       const existing = prev.find(item => item.producto.id === producto.id);
       if (existing) {
         const currentQty = typeof existing.cantidad === 'number' ? existing.cantidad : 0;
-        if (currentQty + qty > producto.stock_actual) {
-          Alert.alert('Stock Insuficiente', `Solo hay ${producto.stock_actual} unidades disponibles.`);
+        const newQty = Math.round((currentQty + qty) * 100) / 100;
+        if (newQty > producto.stock_actual) {
+          Alert.alert('Stock Insuficiente', `Solo hay ${producto.stock_actual} ${unit} disponibles.`);
           return prev;
         }
-        return prev.map(item => item.producto.id === producto.id ? { ...item, cantidad: currentQty + qty } : item);
+        return prev.map(item => item.producto.id === producto.id ? { ...item, cantidad: newQty } : item);
       }
       return [...prev, { producto, cantidad: qty }];
     });
@@ -105,7 +124,8 @@ export default function RetiroMaterialScreen() {
       return;
     }
 
-    const qty = parseInt(qtyStr, 10);
+    const cleanVal = qtyStr.replace(/[^0-9.]/g, '');
+    const qty = parseFloat(cleanVal);
     if (qty === 0) {
       removeFromCart(productoId);
       return;
@@ -117,8 +137,9 @@ export default function RetiroMaterialScreen() {
 
     setCart(prev => prev.map(item => {
       if (item.producto.id === productoId) {
+        const unit = getProductoUnidad(item.producto);
         if (qty > item.producto.stock_actual) {
-          Alert.alert('Stock Insuficiente', `Solo hay ${item.producto.stock_actual} unidades disponibles.`);
+          Alert.alert('Stock Insuficiente', `Solo hay ${item.producto.stock_actual} ${unit} disponibles.`);
           return { ...item, cantidad: item.producto.stock_actual };
         }
         return { ...item, cantidad: qty };
@@ -215,37 +236,124 @@ export default function RetiroMaterialScreen() {
           ) : (
             filteredProductos.map(prod => {
               const cartItem = cart.find(c => c.producto.id === prod.id);
-              const qtyInCart = cartItem && typeof cartItem.cantidad === 'number' ? cartItem.cantidad : 0;
-              const displayStock = prod.stock_actual - qtyInCart;
-              
+              const qtyInCart = cartItem && typeof cartItem.cantidad === 'number' ? cartItem.cantidad : (cartItem && cartItem.cantidad === '' ? '' : 0);
+              const numericQtyInCart = typeof qtyInCart === 'number' ? qtyInCart : 0;
+              const displayStock = Math.max(0, Math.round((prod.stock_actual - numericQtyInCart) * 100) / 100);
+              const unit = getProductoUnidad(prod);
+              const inCart = numericQtyInCart > 0 || qtyInCart === '';
+
               return (
-                <View key={prod.id} style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 16, fontWeight: '600', color: themeColors.text }}>{prod.nombre_oficial}</Text>
-                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }}>SKU: {prod.sku_interno}</Text>
-                    <Text style={{ fontSize: 14, color: themeColors.primary, fontWeight: 'bold', marginTop: 4 }}>Disponible: {displayStock}</Text>
+                <View
+                  key={prod.id}
+                  style={[
+                    styles.card,
+                    {
+                      backgroundColor: themeColors.backgroundElement,
+                      borderColor: inCart ? themeColors.primary : themeColors.border,
+                      borderWidth: inCart ? 1.5 : 1,
+                    },
+                  ]}
+                >
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: themeColors.text }}>{prod.nombre_oficial}</Text>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 3 }}>SKU: {prod.sku_interno}</Text>
+                    
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 5, flexWrap: 'wrap' }}>
+                      <Text style={{ fontSize: 13, color: themeColors.primary, fontWeight: 'bold' }}>
+                        Disponible: {displayStock} {unit}
+                      </Text>
+                      {numericQtyInCart > 0 && (
+                        <View style={{ backgroundColor: themeColors.primary + '20', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}>
+                          <Ionicons name="cart" size={13} color={themeColors.primary} style={{ marginRight: 4 }} />
+                          <Text style={{ fontSize: 12, color: themeColors.primary, fontWeight: '800' }}>
+                            Llevas: {numericQtyInCart} {unit}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
+
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    {qtyInCart > 0 && (
+                    {inCart ? (
+                      <View style={[styles.stepperContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                        <TouchableOpacity
+                          style={[styles.stepperBtn, { backgroundColor: themeColors.danger + '18' }]}
+                          onPress={() => {
+                            const newQty = Math.max(0, numericQtyInCart - 1);
+                            if (newQty === 0) {
+                              removeFromCart(prod.id);
+                            } else {
+                              updateCartQty(prod.id, String(newQty));
+                            }
+                          }}
+                        >
+                          <Ionicons name="remove" size={16} color={themeColors.danger} />
+                        </TouchableOpacity>
+
+                        <TextInput
+                          style={[styles.stepperInput, { color: themeColors.text }]}
+                          value={qtyInCart.toString()}
+                          keyboardType="decimal-pad"
+                          selectTextOnFocus
+                          onChangeText={(val) => updateCartQty(prod.id, val)}
+                        />
+
+                        <TouchableOpacity
+                          style={[styles.stepperBtn, { backgroundColor: themeColors.primary + '18' }]}
+                          onPress={() => addToCart(prod, 1)}
+                        >
+                          <Ionicons name="add" size={16} color={themeColors.primary} />
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
                       <TouchableOpacity
-                        style={[styles.addBtn, { backgroundColor: themeColors.danger + '20', marginRight: 8 }]}
-                        onPress={() => updateCartQty(prod.id, String(qtyInCart - 1))}
+                        style={[styles.addBtn, { backgroundColor: themeColors.primary }]}
+                        onPress={() => addToCart(prod, 1)}
+                        activeOpacity={0.8}
                       >
-                        <Ionicons name="remove" size={20} color={themeColors.danger} />
+                        <Ionicons name="add" size={22} color="#ffffff" />
                       </TouchableOpacity>
                     )}
-                    <TouchableOpacity
-                      style={[styles.addBtn, { backgroundColor: themeColors.primary + '20' }]}
-                      onPress={() => addToCart(prod)}
-                    >
-                      <Ionicons name="add" size={20} color={themeColors.primary} />
-                    </TouchableOpacity>
                   </View>
                 </View>
               );
             })
           )}
         </ScrollView>
+      )}
+
+      {/* Floating Bottom Cart Bar */}
+      {totalItems > 0 && (
+        <View style={{ position: 'absolute', bottom: 16, left: 16, right: 16 }}>
+          <TouchableOpacity
+            style={{
+              backgroundColor: themeColors.primary,
+              borderRadius: 14,
+              paddingVertical: 14,
+              paddingHorizontal: 20,
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.25,
+              shadowRadius: 8,
+              elevation: 6
+            }}
+            activeOpacity={0.9}
+            onPress={() => setCartModalVisible(true)}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="cart" size={20} color="#ffffff" />
+              <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 15 }}>
+                {cart.length} {cart.length === 1 ? 'material en carrito' : 'materiales en carrito'}
+              </Text>
+            </View>
+            <Text style={{ color: '#ffffff', fontWeight: '800', fontSize: 14 }}>
+              Ver y Confirmar →
+            </Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* MODAL DE CARRITO */}
@@ -264,25 +372,32 @@ export default function RetiroMaterialScreen() {
                 <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginTop: 20 }}>No has seleccionado ningún material.</Text>
               ) : (
                 <>
-                  {cart.map(item => (
-                    <View key={item.producto.id} style={[styles.cartItem, { borderBottomColor: themeColors.border }]}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: themeColors.text }}>{item.producto.nombre_oficial}</Text>
-                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>SKU: {item.producto.sku_interno} (Máx: {item.producto.stock_actual})</Text>
+                  {cart.map(item => {
+                    const unit = getProductoUnidad(item.producto);
+                    return (
+                      <View key={item.producto.id} style={[styles.cartItem, { borderBottomColor: themeColors.border }]}>
+                        <View style={{ flex: 1, paddingRight: 8 }}>
+                          <Text style={{ fontSize: 15, fontWeight: '600', color: themeColors.text }}>{item.producto.nombre_oficial}</Text>
+                          <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
+                            SKU: {item.producto.sku_interno} (Máx: {item.producto.stock_actual} {unit})
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <TextInput
+                            style={[styles.qtyInput, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
+                            value={item.cantidad.toString()}
+                            keyboardType="decimal-pad"
+                            selectTextOnFocus
+                            onChangeText={(val) => updateCartQty(item.producto.id, val)}
+                          />
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 13, fontWeight: '700', marginRight: 8 }}>{unit}</Text>
+                          <TouchableOpacity onPress={() => removeFromCart(item.producto.id)} style={{ padding: 6 }}>
+                            <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
+                          </TouchableOpacity>
+                        </View>
                       </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <TextInput
-                          style={[styles.qtyInput, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
-                          value={item.cantidad.toString()}
-                          keyboardType="numeric"
-                          onChangeText={(val) => updateCartQty(item.producto.id, val)}
-                        />
-                        <TouchableOpacity onPress={() => removeFromCart(item.producto.id)} style={{ padding: 8 }}>
-                          <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))}
+                    );
+                  })}
                   <View style={{ marginTop: Spacing.four }}>
                     <Text style={{ fontSize: 14, fontWeight: '600', color: themeColors.text, marginBottom: Spacing.one }}>Motivo o Referencia del Retiro *</Text>
                     <TextInput
@@ -350,7 +465,28 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: Spacing.two,
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 2,
+  },
+  stepperBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stepperInput: {
+    minWidth: 44,
+    height: 32,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: 'bold',
+    paddingHorizontal: 4,
   },
   modalOverlay: {
     flex: 1,
@@ -385,11 +521,12 @@ const styles = StyleSheet.create({
   qtyInput: {
     borderWidth: 1,
     borderRadius: 8,
-    width: 50,
+    minWidth: 50,
     height: 36,
     textAlign: 'center',
-    marginRight: 8,
+    marginRight: 6,
     fontWeight: 'bold',
+    paddingHorizontal: 4,
   },
   textInput: {
     borderWidth: 1,

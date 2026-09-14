@@ -363,8 +363,29 @@ export default function FacturacionScreen() {
     const desc = prod.nombre_oficial || (prod as any).nombre || '';
     const precio = String(prod.precio_unitario || prod.precio || '0');
     const claveSat = prod.sat_code || prod.clave_sat || prod.clave_facturacion || '01010101';
-    const claveUnidad = prod.clave_unidad || 'H87';
-    const unidad = prod.unidad || 'Pieza';
+    
+    const unidadNorm = (prod.unidad || '').toLowerCase().trim();
+    let claveUnidad = prod.clave_unidad;
+    let unidad = prod.unidad || 'Pieza';
+
+    if (!claveUnidad) {
+      if (unidadNorm === 'mts' || unidadNorm === 'metros' || unidadNorm === 'metro' || unidadNorm === 'm') {
+        claveUnidad = 'LM'; // Metro Lineal SAT standard
+        unidad = 'Metro';
+      } else if (unidadNorm === 'servicio' || unidadNorm === 'servicios') {
+        claveUnidad = 'E48';
+        unidad = 'Unidad de servicio';
+      } else if (unidadNorm === 'rollo' || unidadNorm === 'bobina') {
+        claveUnidad = 'XRO';
+        unidad = 'Rollo';
+      } else if (unidadNorm === 'kit') {
+        claveUnidad = 'KT';
+        unidad = 'Kit';
+      } else {
+        claveUnidad = 'H87';
+        unidad = 'Pieza';
+      }
+    }
 
     setPartidas(prev => {
       const next = [...prev];

@@ -10,13 +10,30 @@ export const getProductosDisponibles = async (req: Request, res: Response) => {
 
     const { data, error } = await client
       .from('productos')
-      .select('id, sku_interno, nombre_oficial, stock_actual')
+      .select('id, sku_interno, nombre_oficial, stock_actual, unidad')
       .eq('activo', true)
       .gt('stock_actual', 0)
       .order('nombre_oficial');
 
     if (error) throw error;
-    return res.json({ productos: data || [] });
+    
+    const mapped = (data || []).map((p: any) => {
+      let unidad = p.unidad;
+      if (!unidad || unidad.trim() === '') {
+        const name = (p.nombre_oficial || '').toLowerCase();
+        if (name.includes('metro') || name.includes('cable') || name.includes('bobina')) {
+          unidad = 'mts';
+        } else {
+          unidad = 'pza';
+        }
+      }
+      return {
+        ...p,
+        unidad
+      };
+    });
+
+    return res.json({ productos: mapped });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

@@ -20,7 +20,7 @@ export const getDashboardData = async (req: Request, res: Response) => {
       client.from('categorias_productos').select('*').order('nombre'),
       client.from('proveedores').select('*').order('nombre'),
       client.from('productos').select('*').order('nombre_oficial'),
-      client.from('movimientos_inventario').select('*, producto:productos(nombre_oficial, sku_interno, precio_unitario)').eq('tipo', 'SALIDA').order('fecha', { ascending: false }).limit(50),
+      client.from('movimientos_inventario').select('*, producto:productos(nombre_oficial, sku_interno, precio_unitario, unidad)').eq('tipo', 'SALIDA').order('fecha', { ascending: false }).limit(50),
       client.from('clientes').select('*').order('nombre'),
       client.from('usuarios').select('id, nombre, rol, email').order('nombre')
     ]);
@@ -98,7 +98,7 @@ export const getEmpleadoRetribuciones = async (req: Request, res: Response) => {
     const [evidenciasRes, devolucionesRes, invRes] = await Promise.all([
       client.from('evidencias').select('id, cliente, created_at, descripcion_trabajo, empleado_nombre, sobrantes_verificados').eq('empleado_id', id).order('created_at', { ascending: false }),
       client.from('devoluciones_empleado').select('*').eq('empleado_id', id).eq('estado', 'PENDIENTE').order('creado_en', { ascending: false }),
-      client.from('inventario_empleados').select('id, cantidad_disponible, productos(id, nombre_oficial, sku_interno)').eq('empleado_id', id).gt('cantidad_disponible', 0)
+      client.from('inventario_empleados').select('id, cantidad_disponible, productos(id, nombre_oficial, sku_interno, unidad)').eq('empleado_id', id).gt('cantidad_disponible', 0)
     ]);
     return res.json({ evidencias: evidenciasRes.data || [], devoluciones: devolucionesRes.data || [], inventario: invRes.data || [] });
   } catch (error: any) {
