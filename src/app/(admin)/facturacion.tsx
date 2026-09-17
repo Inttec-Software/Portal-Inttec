@@ -529,12 +529,48 @@ export default function FacturacionScreen() {
         })),
       };
 
-      const { data, error } = await supabase.functions.invoke('facturar-venta', {
-        body: payload,
-      });
+      // Timbrar a través del backend (con zona horaria correcta sincronizada con SAT/Finkok)
+      let data: any = null;
+      let timbradoSuccess = false;
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      try {
+        const headers = await getApiHeaders();
+        const apiUrl = getApiUrl();
+        const resp = await fetch(`${apiUrl}/api/sat/timbrar-factura`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+        });
+
+        const resJson = await resp.json().catch(() => ({}));
+        if (resp.ok && resJson.success) {
+          data = resJson;
+          timbradoSuccess = true;
+        } else if (resJson.error) {
+          throw new Error(resJson.error);
+        } else {
+          throw new Error(`Error del servidor (${resp.status})`);
+        }
+      } catch (backendErr: any) {
+        console.warn('Backend timbrado fallo o no disponible, intentando Edge Function:', backendErr);
+        // Si el backend arrojó un error fiscal concreto del SAT/Finkok, no ocultarlo
+        if (backendErr.message && (backendErr.message.includes('SAT') || backendErr.message.includes('Finkok') || backendErr.message.includes('['))) {
+          throw backendErr;
+        }
+
+        const { data: edgeData, error: edgeError } = await supabase.functions.invoke('facturar-venta', {
+          body: payload,
+        });
+
+        if (edgeError) throw edgeError;
+        if (edgeData?.error) throw new Error(edgeData.error);
+        data = edgeData;
+        timbradoSuccess = true;
+      }
+
+      if (!timbradoSuccess || !data?.cfdi_uuid) {
+        throw new Error('No se pudo obtener el UUID de timbrado.');
+      }
 
       showAlert('Éxito', `Factura timbrada exitosamente (CFDI 4.0).\n\nFolio Fiscal (UUID):\n${data.cfdi_uuid}`);
       fetchHistorialFacturas();
@@ -696,11 +732,39 @@ export default function FacturacionScreen() {
     const doCancel = async () => {
       try {
         setIsSubmitting(true);
-        const { data, error } = await supabase.functions.invoke('cancelar-factura', {
-          body: { venta_id: factura.id, motivo: '02' },
-        });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
+        let data: any = null;
+
+        try {
+          const headers = await getApiHeaders();
+          const apiUrl = getApiUrl();
+          const resp = await fetch(`${apiUrl}/api/sat/cancelar-factura`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ venta_id: factura.id, motivo: '02' }),
+          });
+
+          const resJson = await resp.json().catch(() => ({}));
+          if (resp.ok && resJson.success) {
+            data = resJson;
+          } else if (resJson.error) {
+            throw new Error(resJson.error);
+          } else {
+            throw new Error(`Error del servidor al cancelar (${resp.status})`);
+          }
+        } catch (backendErr: any) {
+          console.warn('Backend cancelacion fallo, intentando Edge Function:', backendErr);
+          if (backendErr.message && (backendErr.message.includes('SAT') || backendErr.message.includes('Finkok') || backendErr.message.includes('['))) {
+            throw backendErr;
+          }
+
+          const { data: edgeData, error: edgeError } = await supabase.functions.invoke('cancelar-factura', {
+            body: { venta_id: factura.id, motivo: '02' },
+          });
+
+          if (edgeError) throw edgeError;
+          if (edgeData?.error) throw new Error(edgeData.error);
+          data = edgeData;
+        }
 
         showAlert('Éxito', 'La factura ha sido cancelada correctamente ante el SAT.');
         fetchHistorialFacturas();

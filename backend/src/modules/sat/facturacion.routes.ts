@@ -1,25 +1,21 @@
-// @ts-nocheck
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1"
+import { Router, Request, Response } from 'express';
+import { getSupabaseClient } from '../../config/supabase';
+import { buildUnsignedCFDI } from './finkok/xmlBuilder';
+import { signStampFinkok, signCancelFinkok } from './finkok/soapClient';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+const router = Router();
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
-
+/**
+ * POST /api/sat/timbrar-factura
+ * Timbra una factura CFDI 4.0 directamente a través del backend usando Finkok.
+ */
+router.post('/timbrar-factura', async (req: Request, res: Response) => {
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
 
-    // Leer payload
-    const body = await req.json()
+    const body = req.body || {};
     const { 
       venta_id, 
       custom_receptor, 
@@ -27,36 +23,34 @@ serve(async (req) => {
       custom_condiciones, 
       cfdi_config, 
       custom_partidas 
-    } = body
+    } = body;
 
     let resolvedVentaId = venta_id ? parseInt(venta_id, 10) : null;
-    let venta = null;
-    let cliente = null;
-    let partidas = [];
+    let venta: any = null;
+    let cliente: any = null;
+    let partidas: any[] = [];
 
     const effectiveReceptor = cliente_override || custom_receptor || null;
     const effectiveCondiciones = { ...(custom_condiciones || {}), ...(cfdi_config || {}) };
 
     if (resolvedVentaId) {
-      // 1. Obtener venta existente
       const { data: ventaDB, error: ventaError } = await supabaseClient
         .from('ventas')
         .select('*')
         .eq('id', resolvedVentaId)
-        .single()
+        .single();
 
-      if (ventaError || !ventaDB) throw new Error('Venta no encontrada')
-      if (ventaDB.cfdi_estado === 'TIMBRADA') throw new Error('La venta ya se encuentra timbrada')
+      if (ventaError || !ventaDB) throw new Error('Venta no encontrada');
+      if (ventaDB.cfdi_estado === 'TIMBRADA') throw new Error('La venta ya se encuentra timbrada');
 
-      venta = { ...ventaDB, ...effectiveCondiciones }
+      venta = { ...ventaDB, ...effectiveCondiciones };
 
-      // 2. Obtener cliente (o usar receptor personalizado)
       if (venta.cliente) {
         const { data: clienteData } = await supabaseClient
           .from('clientes')
           .select('*')
           .ilike('nombre', venta.cliente.trim())
-          .maybeSingle()
+          .maybeSingle();
 
         if (clienteData) {
           cliente = clienteData;
@@ -70,32 +64,30 @@ serve(async (req) => {
           rfc: 'XAXX010101000',
           regimen_fiscal: '616',
           uso_cfdi: 'S01',
-          codigo_postal: Deno.env.get('EMISOR_CP') || '77500'
-        }
+          codigo_postal: process.env.EMISOR_CP || '31110'
+        };
       }
 
       if (effectiveReceptor) {
         cliente = { ...cliente, ...effectiveReceptor };
       }
 
-      // 3. Obtener partidas
       if (custom_partidas && Array.isArray(custom_partidas) && custom_partidas.length > 0) {
         partidas = custom_partidas;
       } else {
         const { data: partidasDB, error: partidasError } = await supabaseClient
           .from('ventas_partidas')
           .select('*')
-          .eq('venta_id', resolvedVentaId)
+          .eq('venta_id', resolvedVentaId);
 
         if (partidasError || !partidasDB || partidasDB.length === 0) {
-          throw new Error('La venta no tiene partidas o productos para facturar')
+          throw new Error('La venta no tiene partidas o productos para facturar');
         }
         partidas = partidasDB;
       }
     } else {
-      // CASO: Factura directa sin venta previa (Módulo de Facturación)
       if (!effectiveReceptor) {
-        throw new Error('Los datos fiscales del cliente son obligatorios para facturar directamente')
+        throw new Error('Los datos fiscales del cliente son obligatorios para facturar');
       }
 
       cliente = {
@@ -104,16 +96,15 @@ serve(async (req) => {
         rfc: (effectiveReceptor.rfc || 'XAXX010101000').toUpperCase().trim(),
         regimen_fiscal: effectiveReceptor.regimen_fiscal || '616',
         uso_cfdi: effectiveReceptor.uso_cfdi || 'G03',
-        codigo_postal: effectiveReceptor.codigo_postal || Deno.env.get('EMISOR_CP') || '77500',
+        codigo_postal: effectiveReceptor.codigo_postal || process.env.EMISOR_CP || '31110',
         ...effectiveReceptor
       };
 
       if (!custom_partidas || !Array.isArray(custom_partidas) || custom_partidas.length === 0) {
-        throw new Error('Debes incluir al menos una partida para generar la factura')
+        throw new Error('Debes incluir al menos una partida para generar la factura');
       }
       partidas = custom_partidas;
 
-      // Calcular subtotales
       const subtotalCalculado = partidas.reduce((sum, p) => {
         const cant = parseFloat(p.cantidad) || 1;
         const prec = parseFloat(p.precio_unitario_venta || p.precio_unitario || 0);
@@ -126,10 +117,8 @@ serve(async (req) => {
       const folioFinal = effectiveCondiciones.folio || String(Date.now()).slice(-5);
       const formaPagoFinal = effectiveCondiciones.forma_pago || '03';
       const metodoPagoFinal = effectiveCondiciones.metodo_pago_cfdi || 'PUE';
-
       const ordenCompraFinal = effectiveCondiciones.orden_compra || null;
 
-      // Crear venta en base de datos para guardar el registro de la factura
       const { data: createdVenta, error: createVentaError } = await supabaseClient
         .from('ventas')
         .insert({
@@ -145,7 +134,7 @@ serve(async (req) => {
         .single();
 
       if (createVentaError) {
-        console.error("Error al registrar venta para la factura:", createVentaError);
+        console.error("Error al registrar venta:", createVentaError);
       }
 
       resolvedVentaId = createdVenta?.id || null;
@@ -177,41 +166,25 @@ serve(async (req) => {
       };
     }
 
-    // Configurar Finkok
-    const FINKOK_USERNAME = Deno.env.get('FINKOK_USERNAME')
-    const FINKOK_PASSWORD = Deno.env.get('FINKOK_PASSWORD')
-    const FINKOK_ENV = (body.finkok_env || Deno.env.get('FINKOK_ENV') || 'production').toLowerCase()
+    const FINKOK_USERNAME = process.env.FINKOK_USERNAME;
+    const FINKOK_PASSWORD = process.env.FINKOK_PASSWORD;
+    const FINKOK_ENV = (body.finkok_env || process.env.FINKOK_ENV || 'production').toLowerCase();
     const isProduction = FINKOK_ENV === 'production';
 
     if (!FINKOK_USERNAME || !FINKOK_PASSWORD) {
-      throw new Error('Credenciales de Finkok no configuradas en el entorno (FINKOK_USERNAME / FINKOK_PASSWORD)')
+      throw new Error('Credenciales de Finkok no configuradas en el entorno');
     }
 
-    // Importar módulos de Finkok
-    const { buildUnsignedCFDI } = await import('./finkok/xmlBuilder.ts')
-    const { signStampFinkok } = await import('./finkok/soapClient.ts')
-
-    // 4. Construir el XML del CFDI 4.0 sin sellar
+    // Construir CFDI 4.0 XML con hora local correcta
     const xmlSinSellar = await buildUnsignedCFDI(venta, cliente, partidas, isProduction);
 
-    // 5. Solicitar sellado y timbrado a Finkok (SOAP sign_stamp)
-    let stampResult;
-    try {
-      stampResult = await signStampFinkok(
-        xmlSinSellar,
-        FINKOK_USERNAME,
-        FINKOK_PASSWORD,
-        isProduction
-      );
-    } catch (stampErr: any) {
-      if (!isProduction && stampErr.message?.includes('[300]')) {
-        throw new Error(
-          'Finkok Demo rechazó las credenciales (Código 300: Usuario o contraseña inválidos). ' +
-          'La cuenta registrada es de Producción. Configura FINKOK_ENV=production o sube tus CSD en Finkok.'
-        );
-      }
-      throw stampErr;
-    }
+    // Timbrar en Finkok
+    const stampResult = await signStampFinkok(
+      xmlSinSellar,
+      FINKOK_USERNAME,
+      FINKOK_PASSWORD,
+      isProduction
+    );
 
     const { success, uuid: sat_uuid, xml: xmlTimbrado } = stampResult;
 
@@ -219,7 +192,7 @@ serve(async (req) => {
       throw new Error('Finkok no devolvió un UUID fiscal válido');
     }
 
-    // 6. Subir el XML timbrado a Supabase Storage
+    // Subir a Storage
     const xmlFileName = `${sat_uuid}.xml`;
     let xmlUrl = '';
 
@@ -232,48 +205,97 @@ serve(async (req) => {
           upsert: true
         });
 
-      if (storageError) {
-        console.error("Aviso: Error al subir XML a storage:", storageError);
-      } else {
+      if (!storageError) {
         const { data: publicUrlData } = supabaseClient.storage.from('facturas').getPublicUrl(xmlFileName);
         xmlUrl = publicUrlData?.publicUrl || '';
       }
     } catch (sErr) {
-      console.error("Excepción en Storage:", sErr);
+      console.error("Storage aviso:", sErr);
     }
 
-    // 7. Actualizar Venta en base de datos
+    // Actualizar venta
     if (resolvedVentaId) {
-      const { error: updateError } = await supabaseClient
+      await supabaseClient
         .from('ventas')
         .update({
           cfdi_uuid: sat_uuid,
           cfdi_estado: 'TIMBRADA',
           cfdi_xml_url: xmlUrl || xmlFileName
         })
-        .eq('id', resolvedVentaId)
-
-      if (updateError) {
-        console.error("Error al actualizar estado en DB:", updateError);
-      }
+        .eq('id', resolvedVentaId);
     }
 
-    return new Response(JSON.stringify({ 
-      success: true, 
+    return res.json({
+      success: true,
       cfdi_uuid: sat_uuid,
       xml_url: xmlUrl,
       xml: xmlTimbrado,
       venta_id: resolvedVentaId
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    })
+    });
 
   } catch (error: any) {
-    console.error("Edge Function facturar-venta Error:", error)
-    return new Response(JSON.stringify({ error: error.message || 'Error al timbrar factura' }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 400,
-    })
+    console.error("Error al timbrar factura:", error);
+    return res.status(400).json({ error: error.message || 'Error al timbrar factura' });
   }
-})
+});
+
+/**
+ * POST /api/sat/cancelar-factura
+ */
+router.post('/cancelar-factura', async (req: Request, res: Response) => {
+  try {
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
+
+    const { venta_id, motivo = '02', folio_sustitucion = '' } = req.body || {};
+    if (!venta_id) throw new Error('Falta el ID de la venta (venta_id)');
+
+    const FINKOK_USERNAME = process.env.FINKOK_USERNAME || '';
+    const FINKOK_PASSWORD = process.env.FINKOK_PASSWORD || '';
+    const FINKOK_ENV = (req.body.finkok_env || process.env.FINKOK_ENV || 'production').toLowerCase();
+    const isProduction = FINKOK_ENV === 'production';
+
+    const { data: venta, error: ventaError } = await supabaseClient
+      .from('ventas')
+      .select('cfdi_uuid, cfdi_estado')
+      .eq('id', venta_id)
+      .single();
+
+    if (ventaError || !venta) throw new Error('No se encontró la venta');
+    if (venta.cfdi_estado !== 'TIMBRADA' || !venta.cfdi_uuid) {
+      throw new Error('La venta no se encuentra timbrada o no tiene Folio Fiscal');
+    }
+
+    const rfcEmisor = process.env.EMISOR_RFC || (isProduction ? 'FETR83041461A' : 'EKU9003173C9');
+
+    const cancelResult = await signCancelFinkok(
+      venta.cfdi_uuid,
+      rfcEmisor,
+      FINKOK_USERNAME,
+      FINKOK_PASSWORD,
+      motivo,
+      folio_sustitucion,
+      isProduction
+    );
+
+    await supabaseClient
+      .from('ventas')
+      .update({
+        cfdi_estado: 'CANCELADA'
+      })
+      .eq('id', venta_id);
+
+    return res.json({
+      success: true,
+      mensaje: 'Factura cancelada exitosamente ante el SAT',
+      estatus: cancelResult.estatus,
+      uuid: venta.cfdi_uuid
+    });
+  } catch (error: any) {
+    console.error("Error al cancelar factura:", error);
+    return res.status(400).json({ error: error.message || 'Error al cancelar factura' });
+  }
+});
+
+export default router;
