@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { GeminiService } from '@/services/gemini';
+import { normalizeText } from '@/utils/helpers';
 
 // Interfaces locales para concordar con la base de datos
 interface Categoria {
@@ -468,9 +469,10 @@ async function loadAllData() {
     setSelectorVisible(true);
   };
 
-  const filteredSelectorOptions = selectorOptions.filter(opt =>
-    opt.label.toLowerCase().includes(selectorSearch.toLowerCase())
-  );
+  const filteredSelectorOptions = selectorOptions.filter(opt => {
+    const norm = normalizeText(selectorSearch);
+    return !norm || normalizeText(opt.label).includes(norm);
+  });
 
   // --- Acciones en Lote (Bulk Actions) ---
   const toggleSelectProduct = (id: string) => {
@@ -1112,11 +1114,11 @@ async function loadAllData() {
             setFolioFactura(meta.folio_factura);
           }
           if (meta.proveedor_original) {
-            const provName = meta.proveedor_original.toLowerCase();
+            const provName = normalizeText(meta.proveedor_original);
             const rfcClean = meta.rfc_emisor?.replace(/[^A-Z0-9]/ig, '') || '';
             const matchingProv = proveedores.find(p => {
               const pRfcClean = p.rfc?.replace(/[^A-Z0-9]/ig, '') || '';
-              return (rfcClean && pRfcClean === rfcClean) || p.nombre.toLowerCase().includes(provName);
+              return (rfcClean && pRfcClean === rfcClean) || (provName && normalizeText(p.nombre).includes(provName));
             });
             if (matchingProv) {
               setSelectedProveedorId(matchingProv.id);
@@ -1131,23 +1133,26 @@ async function loadAllData() {
           // Buscar coincidencia exacta o lógica por nombre oficial
           let suggestedProd = null;
           if (iaClass.producto_normalizado) {
+            const normIaProd = normalizeText(iaClass.producto_normalizado);
             suggestedProd = productos.find(p => 
-              p.activo && p.nombre_oficial.toLowerCase().trim() === iaClass.producto_normalizado?.toLowerCase().trim()
+              p.activo && normalizeText(p.nombre_oficial) === normIaProd
             );
           }
 
           // Si no hay coincidencia exacta de nombre, intentar coincidir parcialmente
           if (!suggestedProd && iaClass.producto_normalizado) {
+            const normIaProd = normalizeText(iaClass.producto_normalizado);
             suggestedProd = productos.find(p => 
-              p.activo && p.nombre_oficial.toLowerCase().includes(iaClass.producto_normalizado!.toLowerCase())
+              p.activo && normalizeText(p.nombre_oficial).includes(normIaProd)
             );
           }
 
           const esNuevo = !suggestedProd || iaClass.requiere_revision || iaClass.confianza_mapeo < 0.80;
 
           // Buscar coincidencia lógica de categoría
+          const normIaCat = normalizeText(iaClass.categoria_maestra);
           const suggestedCat = categorias.find(c => 
-            c.nombre.toLowerCase().trim() === iaClass.categoria_maestra?.toLowerCase().trim()
+            normalizeText(c.nombre) === normIaCat
           );
 
           return {
@@ -1243,9 +1248,10 @@ async function loadAllData() {
   // Filtrado de catálogo
   const filteredProducts = productos.filter(p => {
     if (!p.activo) return false;
-    const matchesSearch =
-      p.nombre_oficial.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.sku_interno.toLowerCase().includes(searchTerm.toLowerCase());
+    const normSearch = normalizeText(searchTerm);
+    const matchesSearch = !normSearch ||
+      normalizeText(p.nombre_oficial).includes(normSearch) ||
+      normalizeText(p.sku_interno).includes(normSearch);
     const matchesCat = selectedCategoryFilter ? p.categoria_id === selectedCategoryFilter : true;
     return matchesSearch && matchesCat;
   });
@@ -1792,7 +1798,7 @@ async function loadAllData() {
                         style={{ margin: Spacing.one, height: 40 }}
                       />
                       <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                        {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
+                        {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && normalizeText(c.nombre) === normalizeText(clienteSearch)) && (
                           <TouchableOpacity
                             style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
                             onPress={() => handleAddNewCliente(clienteSearch)}
@@ -1804,7 +1810,10 @@ async function loadAllData() {
                           </TouchableOpacity>
                         )}
                         {clientes
-                          .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                          .filter(cli => {
+                            const norm = normalizeText(clienteSearch);
+                            return !norm || (cli.nombre && normalizeText(cli.nombre).includes(norm));
+                          })
                           .map((cli, index, array) => (
                             <TouchableOpacity
                               key={cli.id}

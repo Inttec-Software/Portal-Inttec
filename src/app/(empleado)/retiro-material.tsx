@@ -20,6 +20,7 @@ import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CustomButton from '@/components/CustomButton';
+import { normalizeText } from '@/utils/helpers';
 
 interface Producto {
   id: string;
@@ -92,9 +93,11 @@ export default function RetiroMaterialScreen() {
     }
   };
 
+  const normQuery = normalizeText(searchQuery);
   const filteredProductos = productos.filter(p => 
-    p.nombre_oficial.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.sku_interno.toLowerCase().includes(searchQuery.toLowerCase())
+    !normQuery ||
+    normalizeText(p.nombre_oficial).includes(normQuery) ||
+    normalizeText(p.sku_interno).includes(normQuery)
   );
 
   const addToCart = (producto: Producto, qty: number = 1) => {

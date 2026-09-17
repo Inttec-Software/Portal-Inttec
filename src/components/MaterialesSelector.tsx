@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import CustomButton from './CustomButton';
+import { normalizeText } from '@/utils/helpers';
 
 interface Producto {
   id: string;
@@ -60,9 +61,11 @@ export default function MaterialesSelector({
     }
   };
 
+  const normQuery = normalizeText(searchQuery);
   const filteredProductos = productos.filter(p => 
-    p.nombre_oficial.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.sku_interno.toLowerCase().includes(searchQuery.toLowerCase())
+    !normQuery ||
+    normalizeText(p.nombre_oficial).includes(normQuery) ||
+    normalizeText(p.sku_interno).includes(normQuery)
   );
 
   const handleAddMaterial = () => {
