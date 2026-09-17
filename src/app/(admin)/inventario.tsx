@@ -48,6 +48,9 @@ interface Producto {
   categoria_id: string;
   proveedor_id?: string;
   stock_actual: number;
+  stock_nuevo?: number;
+  stock_usado?: number;
+  stock_por_revisar?: number;
   unidad?: string;
   precio_unitario?: number;
   activo: boolean;
@@ -130,6 +133,10 @@ export default function InventarioDashboard() {
   const [formCategoriaId, setFormCategoriaId] = useState('');
   const [formProveedorId, setFormProveedorId] = useState('');
   const [formStock, setFormStock] = useState('0');
+  const [showEstadoBreakdown, setShowEstadoBreakdown] = useState(false);
+  const [formStockNuevo, setFormStockNuevo] = useState('0');
+  const [formStockUsado, setFormStockUsado] = useState('0');
+  const [formStockPorRevisar, setFormStockPorRevisar] = useState('0');
   const [formUnidad, setFormUnidad] = useState('pza');
   const [formPrecio, setFormPrecio] = useState('');
   const [isSavingProduct, setIsSavingProduct] = useState(false);
@@ -657,11 +664,15 @@ async function loadAllData() {
   // --- CRUD Manual ---
   const handleOpenCreateModal = () => {
     setEditingProduct(null);
-    setFormSku('');
+    setFormSku(`SKU-${Math.random().toString(36).substring(3, 8).toUpperCase()}`);
     setFormNombre('');
     setFormCategoriaId(categorias[0]?.id || '');
     setFormProveedorId('');
     setFormStock('0');
+    setFormStockNuevo('0');
+    setFormStockUsado('0');
+    setFormStockPorRevisar('0');
+    setShowEstadoBreakdown(false);
     setFormUnidad('pza');
     setFormPrecio('');
     setCrudModalVisible(true);
@@ -674,6 +685,15 @@ async function loadAllData() {
     setFormCategoriaId(p.categoria_id);
     setFormProveedorId(p.proveedor_id || '');
     setFormStock(p.stock_actual.toString());
+    
+    const nuevo = p.stock_nuevo !== undefined ? p.stock_nuevo : (p.stock_usado || p.stock_por_revisar ? 0 : p.stock_actual);
+    const usado = p.stock_usado ?? 0;
+    const porRevisar = p.stock_por_revisar ?? 0;
+
+    setFormStockNuevo(nuevo.toString());
+    setFormStockUsado(usado.toString());
+    setFormStockPorRevisar(porRevisar.toString());
+    setShowEstadoBreakdown(usado > 0 || porRevisar > 0);
     setFormUnidad(p.unidad || 'pza');
     setFormPrecio(p.precio_unitario?.toString() || '0');
     setCrudModalVisible(true);
@@ -685,10 +705,38 @@ async function loadAllData() {
       return;
     }
 
-    const stockNum = parseFloat(formStock);
-    if (isNaN(stockNum) || stockNum < 0) {
-      Alert.alert('Validación', 'El stock debe ser un número mayor o igual a 0.');
+    const stockTotalNum = parseFloat(formStock);
+    if (isNaN(stockTotalNum) || stockTotalNum < 0) {
+      Alert.alert('Validación', 'El stock inicial debe ser un número mayor o igual a 0.');
       return;
+    }
+
+    let numNuevo = Math.max(0, parseFloat(formStockNuevo) || 0);
+    let numUsado = Math.max(0, parseFloat(formStockUsado) || 0);
+    let numPorRevisar = Math.max(0, parseFloat(formStockPorRevisar) || 0);
+    const sumaCondiciones = Math.round((numNuevo + numUsado + numPorRevisar) * 100) / 100;
+
+    // Validación: la suma del desglose no puede superar el stock inicial total
+    if (showEstadoBreakdown && sumaCondiciones > stockTotalNum) {
+      Alert.alert(
+        'Validación de Stock',
+        `La suma de las condiciones (${sumaCondiciones}) no puede superar el Stock Inicial total (${stockTotalNum}). Por favor ajusta las cantidades.`
+      );
+      return;
+    }
+
+    let finalNuevo = numNuevo;
+    let finalUsado = numUsado;
+    let finalPorRevisar = numPorRevisar;
+
+    // Si no se activó el desglose opcional o no hay usados/por revisar, todo va automáticamente como stock_nuevo
+    if (!showEstadoBreakdown || (finalUsado === 0 && finalPorRevisar === 0)) {
+      finalNuevo = stockTotalNum;
+      finalUsado = 0;
+      finalPorRevisar = 0;
+    } else if (sumaCondiciones < stockTotalNum) {
+      // Si la suma es menor, el remanente se asigna al stock nuevo
+      finalNuevo = Math.round((stockTotalNum - finalUsado - finalPorRevisar) * 100) / 100;
     }
 
     setIsSavingProduct(true);
@@ -699,7 +747,10 @@ async function loadAllData() {
         nombre_oficial: formNombre.trim(),
         categoria_id: formCategoriaId,
         proveedor_id: formProveedorId || null,
-        stock_actual: stockNum,
+        stock_actual: stockTotalNum,
+        stock_nuevo: finalNuevo,
+        stock_usado: finalUsado,
+        stock_por_revisar: finalPorRevisar,
         unidad: formUnidad.trim() || 'pza',
         precio_unitario: parseFloat(formPrecio) || 0,
         activo: true,
@@ -1655,19 +1706,51 @@ async function loadAllData() {
                       <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>
                         {cat ? cat.nombre : 'Sin Categoría'}
                       </Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
                         <Text
                           style={[
                             styles.stockText,
                             { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success },
                           ]}
                         >
-                          Stock: {item.stock_actual} {item.unidad || 'pzas'}
+                          Stock Total: {item.stock_actual} {item.unidad || 'pzas'}
                         </Text>
                         <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>
                           • {precioFmt}
                         </Text>
                       </View>
+
+                      {/* Desglose de Stock por Condición */}
+                      {(() => {
+                        const nuevo = item.stock_nuevo !== undefined ? item.stock_nuevo : (item.stock_usado || item.stock_por_revisar ? 0 : item.stock_actual);
+                        const usado = item.stock_usado || 0;
+                        const porRevisar = item.stock_por_revisar || 0;
+                        const tieneDesglose = usado > 0 || porRevisar > 0;
+                        
+                        return (
+                          <View style={{ flexDirection: 'row', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                            <View style={[styles.stateBadge, { backgroundColor: '#10B98115', borderColor: '#10B98140' }]}>
+                              <Text style={[styles.stateBadgeText, { color: '#059669' }]}>
+                                🟢 {nuevo} {item.unidad || 'pzas'} nuevas
+                              </Text>
+                            </View>
+                            {tieneDesglose ? (
+                              <>
+                                <View style={[styles.stateBadge, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B40' }]}>
+                                  <Text style={[styles.stateBadgeText, { color: '#D97706' }]}>
+                                    🟡 {usado} usadas
+                                  </Text>
+                                </View>
+                                <View style={[styles.stateBadge, { backgroundColor: '#EF444415', borderColor: '#EF444440' }]}>
+                                  <Text style={[styles.stateBadgeText, { color: '#DC2626' }]}>
+                                    🔴 {porRevisar} por revisar
+                                  </Text>
+                                </View>
+                              </>
+                            ) : null}
+                          </View>
+                        );
+                      })()}
                     </View>
                     <View style={{ flexDirection: 'row', gap: Spacing.two, alignItems: 'center' }}>
                       {/* Ajuste rápido de stock */}
@@ -2196,13 +2279,23 @@ async function loadAllData() {
                 </TouchableOpacity>
               </View>
 
+              {/* Stock Inicial & Unidad de Medida (Siempre Visibles) */}
               <View style={{ flexDirection: 'row', gap: Spacing.two }}>
                 <View style={{ flex: 1 }}>
                   <CustomInput
                     label="Stock Inicial *"
+                    placeholder="0"
                     keyboardType="decimal-pad"
                     value={formStock}
-                    onChangeText={(val) => setFormStock(val.replace(/[^0-9.]/g, ''))}
+                    onChangeText={(val) => {
+                      const cleanVal = val.replace(/[^0-9.]/g, '');
+                      setFormStock(cleanVal);
+                      if (!showEstadoBreakdown) {
+                        setFormStockNuevo(cleanVal);
+                        setFormStockUsado('0');
+                        setFormStockPorRevisar('0');
+                      }
+                    }}
                   />
                 </View>
                 <View style={{ flex: 1, marginBottom: Spacing.three }}>
@@ -2211,7 +2304,7 @@ async function loadAllData() {
                   </Text>
                   <View
                     style={{
-                      height: 50,
+                      height: 48,
                       flexDirection: 'row',
                       backgroundColor: themeColors.backgroundElement,
                       borderRadius: BorderRadius.medium,
@@ -2258,6 +2351,109 @@ async function loadAllData() {
                   </View>
                 </View>
               </View>
+
+              {/* Botón / Toggle para Desglose Opcional por Estado */}
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: BorderRadius.medium,
+                  backgroundColor: showEstadoBreakdown ? themeColors.primary + '12' : themeColors.backgroundElement,
+                  borderWidth: 1,
+                  borderColor: showEstadoBreakdown ? themeColors.primary : themeColors.border,
+                  marginBottom: showEstadoBreakdown ? Spacing.one : Spacing.two,
+                }}
+                onPress={() => {
+                  const next = !showEstadoBreakdown;
+                  setShowEstadoBreakdown(next);
+                  if (next && (!formStockUsado || formStockUsado === '0') && (!formStockPorRevisar || formStockPorRevisar === '0')) {
+                    setFormStockNuevo(formStock || '0');
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <Ionicons
+                    name={showEstadoBreakdown ? 'layers' : 'layers-outline'}
+                    size={18}
+                    color={showEstadoBreakdown ? themeColors.primary : themeColors.textSecondary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                      Desglosar por estado (Opcional)
+                    </Text>
+                    <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                      {showEstadoBreakdown ? 'Ingresa cuántas son nuevas, usadas o por revisar' : 'Toca aquí si tienes artículos usados o por revisar'}
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons
+                  name={showEstadoBreakdown ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={themeColors.textSecondary}
+                />
+              </TouchableOpacity>
+
+              {/* Formulario Desplegable de Desglose Opcional */}
+              {showEstadoBreakdown && (
+                <View style={{ backgroundColor: themeColors.backgroundElement, padding: Spacing.two, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, marginBottom: Spacing.two }}>
+                  {(() => {
+                    const totInit = parseFloat(formStock) || 0;
+                    const n = parseFloat(formStockNuevo) || 0;
+                    const u = parseFloat(formStockUsado) || 0;
+                    const r = parseFloat(formStockPorRevisar) || 0;
+                    const suma = Math.round((n + u + r) * 100) / 100;
+                    const excede = suma > totInit;
+                    const exacto = suma === totInit && totInit > 0;
+
+                    return (
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.one, flexWrap: 'wrap', gap: 4 }}>
+                        <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 12, fontWeight: '700', marginBottom: 0 }]}>
+                          Condición de los artículos:
+                        </Text>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: excede ? themeColors.danger : exacto ? themeColors.success : themeColors.primary }}>
+                          {excede
+                            ? `⚠️ Suma: ${suma} (Supera el total de ${totInit})`
+                            : `Suma: ${suma} / ${totInit} ${formUnidad || 'pzas'}`}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+
+                  <View style={{ flexDirection: 'row', gap: Spacing.one }}>
+                    <View style={{ flex: 1 }}>
+                      <CustomInput
+                        label="🟢 Nuevas"
+                        placeholder="0"
+                        keyboardType="decimal-pad"
+                        value={formStockNuevo}
+                        onChangeText={(val) => setFormStockNuevo(val.replace(/[^0-9.]/g, ''))}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <CustomInput
+                        label="🟡 Usadas"
+                        placeholder="0"
+                        keyboardType="decimal-pad"
+                        value={formStockUsado}
+                        onChangeText={(val) => setFormStockUsado(val.replace(/[^0-9.]/g, ''))}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <CustomInput
+                        label="🔴 Por Revisar"
+                        placeholder="0"
+                        keyboardType="decimal-pad"
+                        value={formStockPorRevisar}
+                        onChangeText={(val) => setFormStockPorRevisar(val.replace(/[^0-9.]/g, ''))}
+                      />
+                    </View>
+                  </View>
+                </View>
+              )}
 
               <View style={{ flexDirection: 'row', gap: Spacing.two }}>
                 <View style={{ flex: 1 }}>
@@ -2817,6 +3013,16 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.small,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  stateBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+  },
+  stateBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   sectionTitle: {
     fontSize: 18,

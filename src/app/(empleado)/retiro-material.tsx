@@ -27,6 +27,9 @@ interface Producto {
   sku_interno: string;
   nombre_oficial: string;
   stock_actual: number;
+  stock_nuevo?: number;
+  stock_usado?: number;
+  stock_por_revisar?: number;
   unidad?: string;
 }
 
@@ -117,51 +120,54 @@ export default function RetiroMaterialScreen() {
     });
   };
 
+  const updateCartQty = (productoId: string, text: string) => {
+    setCart(prev => {
+      const item = prev.find(i => i.producto.id === productoId);
+      if (!item) return prev;
+
+      const unit = getProductoUnidad(item.producto);
+
+      if (text.trim() === '') {
+        return prev.map(i => i.producto.id === productoId ? { ...i, cantidad: '' } : i);
+      }
+
+      const qty = parseFloat(text.replace(/[^0-9.]/g, ''));
+      if (isNaN(qty)) {
+        return prev.map(i => i.producto.id === productoId ? { ...i, cantidad: '' } : i);
+      }
+
+      if (qty > item.producto.stock_actual) {
+        Alert.alert('Stock Insuficiente', `Solo hay ${item.producto.stock_actual} ${unit} disponibles.`);
+        return prev.map(i => i.producto.id === productoId ? { ...i, cantidad: item.producto.stock_actual } : i);
+      }
+
+      return prev.map(i => i.producto.id === productoId ? { ...i, cantidad: qty } : i);
+    });
+  };
+
   const removeFromCart = (productoId: string) => {
     setCart(prev => prev.filter(item => item.producto.id !== productoId));
   };
 
-  const updateCartQty = (productoId: string, qtyStr: string) => {
-    if (qtyStr.trim() === '') {
-      setCart(prev => prev.map(item => item.producto.id === productoId ? { ...item, cantidad: '' } : item));
-      return;
-    }
-
-    const cleanVal = qtyStr.replace(/[^0-9.]/g, '');
-    const qty = parseFloat(cleanVal);
-    if (qty === 0) {
-      removeFromCart(productoId);
-      return;
-    }
-
-    if (isNaN(qty) || qty < 0) {
-      return;
-    }
-
-    setCart(prev => prev.map(item => {
-      if (item.producto.id === productoId) {
-        const unit = getProductoUnidad(item.producto);
-        if (qty > item.producto.stock_actual) {
-          Alert.alert('Stock Insuficiente', `Solo hay ${item.producto.stock_actual} ${unit} disponibles.`);
-          return { ...item, cantidad: item.producto.stock_actual };
-        }
-        return { ...item, cantidad: qty };
-      }
-      return item;
-    }));
-  };
-
   const handleConfirmarRetiro = async () => {
-    const validCart = cart.filter(item => typeof item.cantidad === 'number' && item.cantidad > 0);
+    const validCart = cart
+      .filter(item => typeof item.cantidad === 'number' && item.cantidad > 0)
+      .map(item => ({
+        producto: item.producto,
+        cantidad: item.cantidad as number
+      }));
+
     if (validCart.length === 0) {
-      Alert.alert('Validación', 'El carrito está vacío o tiene cantidades inválidas.');
+      Alert.alert('Carrito Vacío', 'Agrega al menos un material con cantidad mayor a 0 para retirar.');
       return;
     }
-    if (!currentUser) return;
+
     if (!motivoRetiro.trim()) {
       Alert.alert('Validación', 'Por favor ingresa un motivo o referencia para el retiro.');
       return;
     }
+
+    if (!currentUser) return;
 
     setIsSubmitting(true);
     try {
@@ -198,9 +204,30 @@ export default function RetiroMaterialScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <View style={{ padding: Spacing.three, backgroundColor: themeColors.backgroundElement, borderBottomWidth: 1, borderBottomColor: themeColors.border, flexDirection: 'row', alignItems: 'center' }}>
-        <View style={[styles.searchContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border, flex: 1 }]}>
-          <Ionicons name="search" size={20} color={themeColors.textSecondary} />
+      <View style={{ padding: Spacing.three, backgroundColor: themeColors.backgroundElement, borderBottomWidth: 1, borderBottomColor: themeColors.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity onPress={() => router.back()} style={{ marginRight: Spacing.two }}>
+            <Ionicons name="arrow-back" size={24} color={themeColors.text} />
+          </TouchableOpacity>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text }}>Retiro de Material</Text>
+        </View>
+        <TouchableOpacity 
+          style={{ position: 'relative', padding: 4 }}
+          onPress={() => setCartModalVisible(true)}
+        >
+          <Ionicons name="cart-outline" size={26} color={themeColors.primary} />
+          {totalItems > 0 && (
+            <View style={{ position: 'absolute', top: 0, right: 0, backgroundColor: themeColors.danger, borderRadius: 10, width: 18, height: 18, justifyContent: 'center', alignItems: 'center' }}>
+              <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{totalItems}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Buscador */}
+      <View style={{ padding: Spacing.three, borderBottomWidth: 1, borderBottomColor: themeColors.border, backgroundColor: themeColors.background }}>
+        <View style={[styles.searchBox, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <Ionicons name="search" size={20} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
           <TextInput
             style={[styles.searchInput, { color: themeColors.text }]}
             placeholder="Buscar material o SKU..."
@@ -210,32 +237,23 @@ export default function RetiroMaterialScreen() {
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={20} color={themeColors.textSecondary} />
+              <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
             </TouchableOpacity>
           )}
         </View>
-        <TouchableOpacity 
-          style={{ marginLeft: Spacing.three, position: 'relative' }}
-          onPress={() => setCartModalVisible(true)}
-        >
-          <Ionicons name="cart-outline" size={28} color={themeColors.primary} />
-          {totalItems > 0 && (
-            <View style={{ position: 'absolute', top: -5, right: -5, backgroundColor: themeColors.danger, borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' }}>
-              <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{totalItems}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
       </View>
 
       {isLoading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={themeColors.primary} />
+          <Text style={{ marginTop: 10, color: themeColors.textSecondary }}>Cargando catálogo...</Text>
         </View>
       ) : (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: Spacing.three, paddingBottom: 100 }}>
-          <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginBottom: Spacing.two }}>Catálogo Disponible</Text>
           {filteredProductos.length === 0 ? (
-            <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginTop: 40 }}>No se encontraron materiales en stock.</Text>
+            <Text style={{ textAlign: 'center', color: themeColors.textSecondary, marginTop: 40 }}>
+              No se encontraron materiales disponibles.
+            </Text>
           ) : (
             filteredProductos.map(prod => {
               const cartItem = cart.find(c => c.producto.id === prod.id);
@@ -274,6 +292,38 @@ export default function RetiroMaterialScreen() {
                         </View>
                       )}
                     </View>
+
+                    {/* Desglose por estados si existen usados o por revisar */}
+                    {(() => {
+                      const nuevo = prod.stock_nuevo !== undefined ? prod.stock_nuevo : (prod.stock_usado || prod.stock_por_revisar ? 0 : prod.stock_actual);
+                      const usado = prod.stock_usado || 0;
+                      const porRevisar = prod.stock_por_revisar || 0;
+                      if (usado === 0 && porRevisar === 0) return null;
+
+                      return (
+                        <View style={{ flexDirection: 'row', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                          <View style={{ backgroundColor: '#10B98115', borderColor: '#10B98140', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#059669' }}>
+                              🟢 {nuevo} nuevas
+                            </Text>
+                          </View>
+                          {usado > 0 && (
+                            <View style={{ backgroundColor: '#F59E0B15', borderColor: '#F59E0B40', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#D97706' }}>
+                                🟡 {usado} usadas
+                              </Text>
+                            </View>
+                          )}
+                          {porRevisar > 0 && (
+                            <View style={{ backgroundColor: '#EF444415', borderColor: '#EF444440', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#DC2626' }}>
+                                🔴 {porRevisar} por revisar
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })()}
                   </View>
 
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -441,6 +491,19 @@ export default function RetiroMaterialScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: BorderRadius.medium,
+    paddingHorizontal: 12,
+    height: 44,
+  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',

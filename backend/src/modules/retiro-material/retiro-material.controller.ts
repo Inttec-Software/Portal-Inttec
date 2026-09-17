@@ -10,7 +10,7 @@ export const getProductosDisponibles = async (req: Request, res: Response) => {
 
     const { data, error } = await client
       .from('productos')
-      .select('id, sku_interno, nombre_oficial, stock_actual, unidad')
+      .select('id, sku_interno, nombre_oficial, stock_actual, stock_nuevo, stock_usado, stock_por_revisar, unidad')
       .eq('activo', true)
       .gt('stock_actual', 0)
       .order('nombre_oficial');
@@ -57,18 +57,38 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
     for (const item of cart) {
       const { data: prodData, error: prodErr } = await client
         .from('productos')
-        .select('stock_actual')
+        .select('*')
         .eq('id', item.producto.id)
         .single();
         
       if (prodErr || !prodData) continue;
       
-      const newStock = prodData.stock_actual - item.cantidad;
+      let toDiscount = item.cantidad;
+      let nuevo = Number(prodData.stock_nuevo) || 0;
+      let usado = Number(prodData.stock_usado) || 0;
+      let porRevisar = Number(prodData.stock_por_revisar) || 0;
+
+      if (nuevo >= toDiscount) {
+        nuevo -= toDiscount;
+        toDiscount = 0;
+      } else {
+        toDiscount -= nuevo;
+        nuevo = 0;
+        if (usado >= toDiscount) {
+          usado -= toDiscount;
+          toDiscount = 0;
+        } else {
+          toDiscount -= usado;
+          usado = 0;
+          porRevisar = Math.max(0, porRevisar - toDiscount);
+        }
+      }
+      const newStock = Math.round((nuevo + usado + porRevisar) * 100) / 100;
 
       // 1. Descontar del inventario
       const { error: stockErr } = await client
         .from('productos')
-        .update({ stock_actual: newStock })
+        .update({ stock_actual: newStock, stock_nuevo: nuevo, stock_usado: usado, stock_por_revisar: porRevisar })
         .eq('id', item.producto.id);
 
       if (stockErr) throw stockErr;

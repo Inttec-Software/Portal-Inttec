@@ -137,13 +137,41 @@ export const upsertProducto = async (req: Request, res: Response) => {
     
     const id = req.params.id;
     const isUpdate = !!id;
+    const body = { ...req.body };
+
+    // Si se enviaron stocks por condición o stock_actual directo:
+    if (body.stock_nuevo !== undefined || body.stock_usado !== undefined || body.stock_por_revisar !== undefined) {
+      const nuevo = Math.max(0, Number(body.stock_nuevo) || 0);
+      const usado = Math.max(0, Number(body.stock_usado) || 0);
+      const porRevisar = Math.max(0, Number(body.stock_por_revisar) || 0);
+      
+      // Si no hay usados ni por revisar, todo el stock va automáticamente a nuevo
+      if (usado === 0 && porRevisar === 0 && body.stock_actual !== undefined) {
+        const total = Math.max(0, Number(body.stock_actual) || 0);
+        body.stock_actual = total;
+        body.stock_nuevo = total;
+        body.stock_usado = 0;
+        body.stock_por_revisar = 0;
+      } else {
+        body.stock_nuevo = nuevo;
+        body.stock_usado = usado;
+        body.stock_por_revisar = porRevisar;
+        body.stock_actual = Math.round((nuevo + usado + porRevisar) * 100) / 100;
+      }
+    } else if (body.stock_actual !== undefined) {
+      const total = Math.max(0, Number(body.stock_actual) || 0);
+      body.stock_actual = total;
+      body.stock_nuevo = total;
+      body.stock_usado = 0;
+      body.stock_por_revisar = 0;
+    }
     
     if (isUpdate) {
-      const { error } = await client.from('productos').update(req.body).eq('id', id);
+      const { error } = await client.from('productos').update(body).eq('id', id);
       if (error) throw error;
       return res.json({ success: true });
     } else {
-      const { data, error } = await client.from('productos').insert([req.body]).select().single();
+      const { data, error } = await client.from('productos').insert([body]).select().single();
       if (error) throw error;
       return res.json({ success: true, data });
     }
@@ -161,9 +189,37 @@ export const addStock = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const client = getSupabaseClient(company, env);
     const { id } = req.params;
-    const { cantidad, motivo, currentStock } = req.body;
+    const { cantidad, motivo, currentStock, estado } = req.body;
 
-    const { error: updErr } = await client.from('productos').update({ stock_actual: currentStock + cantidad }).eq('id', id);
+    const { data: prodData } = await client.from('productos').select('*').eq('id', id).single();
+    let updates: any = {};
+    if (prodData) {
+      const curStock = Number(prodData.stock_actual) || 0;
+      const curNuevo = Number(prodData.stock_nuevo) || 0;
+      const curUsado = Number(prodData.stock_usado) || 0;
+      const curPorRevisar = Number(prodData.stock_por_revisar) || 0;
+
+      if (estado === 'USADO') {
+        updates = {
+          stock_usado: curUsado + cantidad,
+          stock_actual: curStock + cantidad,
+        };
+      } else if (estado === 'POR_REVISAR') {
+        updates = {
+          stock_por_revisar: curPorRevisar + cantidad,
+          stock_actual: curStock + cantidad,
+        };
+      } else {
+        updates = {
+          stock_nuevo: curNuevo + cantidad,
+          stock_actual: curStock + cantidad,
+        };
+      }
+    } else {
+      updates = { stock_actual: (currentStock || 0) + cantidad };
+    }
+
+    const { error: updErr } = await client.from('productos').update(updates).eq('id', id);
     if (updErr) throw updErr;
 
     const { error: movErr } = await client.from('movimientos_inventario').insert([{
@@ -190,10 +246,39 @@ export const guardarConsumo = async (req: Request, res: Response) => {
     const { items, esAsignacionEmpleado, destinoId, motivoGeneral } = req.body; 
 
     for (const item of items) {
-      const { error: updErr } = await client.from('productos')
-        .update({ stock_actual: Math.max(0, item.currentStock - item.qty) })
-        .eq('id', item.productoId);
-      if (updErr) throw updErr;
+      const { data: prodData } = await client.from('productos').select('*').eq('id', item.productoId).single();
+      if (prodData) {
+        let toDiscount = item.qty;
+        let nuevo = Number(prodData.stock_nuevo) || 0;
+        let usado = Number(prodData.stock_usado) || 0;
+        let porRevisar = Number(prodData.stock_por_revisar) || 0;
+
+        if (nuevo >= toDiscount) {
+          nuevo -= toDiscount;
+          toDiscount = 0;
+        } else {
+          toDiscount -= nuevo;
+          nuevo = 0;
+          if (usado >= toDiscount) {
+            usado -= toDiscount;
+            toDiscount = 0;
+          } else {
+            toDiscount -= usado;
+            usado = 0;
+            porRevisar = Math.max(0, porRevisar - toDiscount);
+          }
+        }
+        const total = Math.round((nuevo + usado + porRevisar) * 100) / 100;
+        const { error: updErr } = await client.from('productos')
+          .update({ stock_actual: total, stock_nuevo: nuevo, stock_usado: usado, stock_por_revisar: porRevisar })
+          .eq('id', item.productoId);
+        if (updErr) throw updErr;
+      } else {
+        const { error: updErr } = await client.from('productos')
+          .update({ stock_actual: Math.max(0, item.currentStock - item.qty) })
+          .eq('id', item.productoId);
+        if (updErr) throw updErr;
+      }
 
       if (esAsignacionEmpleado && destinoId) {
         const { data: invEmp } = await client.from('inventario_empleados')
@@ -238,15 +323,14 @@ export const guardarImportacion = async (req: Request, res: Response) => {
     const { mappedItems, proveedorId, folioFactura } = req.body;
 
     if (folioFactura && folioFactura.trim() !== '') {
-      const { data: existingMov, error: existingErr } = await client
-        .from('movimientos_inventario')
+      const { data: duplicateMov } = await client.from('movimientos_inventario')
         .select('id')
         .eq('folio_factura', folioFactura.trim())
-        .limit(1);
+        .limit(1)
+        .maybeSingle();
 
-      if (existingErr) throw existingErr;
-      if (existingMov && existingMov.length > 0) {
-        return res.status(400).json({ error: `Ya existe un registro previo en el inventario con el folio de factura: ${folioFactura.trim()}` });
+      if (duplicateMov) {
+        return res.status(400).json({ error: 'El folio de factura ingresado ya ha sido registrado previamente en el sistema.' });
       }
     }
 
@@ -260,6 +344,9 @@ export const guardarImportacion = async (req: Request, res: Response) => {
           nombre_oficial: item.descripcionFactura,
           categoria_id: item.categoriaSeleccionadaId,
           stock_actual: item.cantidad,
+          stock_nuevo: item.cantidad,
+          stock_usado: 0,
+          stock_por_revisar: 0,
           precio_unitario: item.precioUnitario || 0,
           activo: true,
           proveedor_id: proveedorId,
@@ -274,9 +361,12 @@ export const guardarImportacion = async (req: Request, res: Response) => {
           nombre_segun_proveedor: item.descripcionFactura,
         }]);
       } else if (finalProductId) {
-        const { data: pData } = await client.from('productos').select('stock_actual, precio_unitario').eq('id', finalProductId).single();
+        const { data: pData } = await client.from('productos').select('stock_actual, stock_nuevo, precio_unitario').eq('id', finalProductId).single();
         if (pData) {
-          const updates: any = { stock_actual: pData.stock_actual + item.cantidad };
+          const updates: any = { 
+            stock_actual: (Number(pData.stock_actual) || 0) + item.cantidad,
+            stock_nuevo: (Number(pData.stock_nuevo) || 0) + item.cantidad,
+          };
           if (item.precioUnitario > 0) updates.precio_unitario = item.precioUnitario;
           await client.from('productos').update(updates).eq('id', finalProductId);
 
