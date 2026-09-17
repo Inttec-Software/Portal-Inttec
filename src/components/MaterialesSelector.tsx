@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, ScrollView, TextInput, StyleSheet, Platform, KeyboardAvoidingView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, ScrollView, TextInput, StyleSheet, Platform, KeyboardAvoidingView, Alert, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
@@ -25,20 +25,40 @@ interface MaterialUsado {
 interface MaterialesSelectorProps {
   productos: Producto[];
   materiales: MaterialUsado[];
+  usaMateriales?: boolean;
+  onToggleUsaMateriales?: (val: boolean) => void;
   onChange: (materiales: MaterialUsado[]) => void;
 }
 
-export default function MaterialesSelector({ productos, materiales, onChange }: MaterialesSelectorProps) {
+export default function MaterialesSelector({
+  productos,
+  materiales,
+  usaMateriales,
+  onToggleUsaMateriales,
+  onChange,
+}: MaterialesSelectorProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+
+  const isEnabled = typeof usaMateriales === 'boolean' 
+    ? usaMateriales 
+    : (materiales.length > 0);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
   // Variables locales para cuando seleccionan un producto
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
-  
   const [usado, setUsado] = useState('');
+
+  const handleToggle = (val: boolean) => {
+    if (onToggleUsaMateriales) {
+      onToggleUsaMateriales(val);
+    }
+    if (!val && materiales.length > 0) {
+      onChange([]);
+    }
+  };
 
   const filteredProductos = productos.filter(p => 
     p.nombre_oficial.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -78,15 +98,19 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
       return;
     }
 
+    if (onToggleUsaMateriales && !isEnabled) {
+      onToggleUsaMateriales(true);
+    }
+
     onChange([...materiales, nuevoMaterial]);
     setSelectedProduct(null);
-    
     setUsado('');
     setModalVisible(false);
   };
 
   const handleRemoveMaterial = (id: string) => {
-    onChange(materiales.filter(m => m.productoId !== id));
+    const updated = materiales.filter(m => m.productoId !== id);
+    onChange(updated);
   };
 
   const parsedUsado = parseFloat(usado);
@@ -96,38 +120,86 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.label, { color: themeColors.text }]}>Materiales Retirados y Usados *</Text>
-      
-      {materiales.length === 0 ? (
-        <View style={[styles.emptyState, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
-          <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center' }}>No has agregado materiales a este trabajo.</Text>
+      {/* Switch de activación de materiales */}
+      <View style={[styles.switchCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10, marginRight: 8 }}>
+          <View style={{
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            backgroundColor: isEnabled ? (themeColors.primary + '20') : (scheme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'),
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}>
+            <Ionicons
+              name={isEnabled ? "cube" : "cube-outline"}
+              size={18}
+              color={isEnabled ? themeColors.primary : themeColors.textSecondary}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+              ¿Se usó material en este trabajo?
+            </Text>
+            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>
+              {isEnabled ? 'Registra los materiales retirados y utilizados.' : 'No se utilizó material (Mano de obra / Revisión).'}
+            </Text>
+          </View>
+        </View>
+
+        <Switch
+          value={isEnabled}
+          onValueChange={handleToggle}
+          trackColor={{ false: scheme === 'dark' ? '#3e3e3e' : '#e0e0e0', true: themeColors.primary + '80' }}
+          thumbColor={isEnabled ? themeColors.primary : '#f4f3f4'}
+        />
+      </View>
+
+      {!isEnabled ? (
+        <View style={[styles.noMaterialBadge, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', borderColor: themeColors.border }]}>
+          <Ionicons name="checkmark-circle-outline" size={16} color={themeColors.success} />
+          <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '500' }}>
+            Sin uso de materiales para este trabajo.
+          </Text>
         </View>
       ) : (
-        <View style={{ marginBottom: Spacing.two }}>
-          {materiales.map((m, idx) => (
-            <View key={idx} style={[styles.materialItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 14 }}>{m.nombre}</Text>
-                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4, flexWrap: 'wrap' }}>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Retirado: {m.retirado} {m.unidad || 'pza'}</Text>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Usado: {m.usado} {m.unidad || 'pza'}</Text>
-                  <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.sobrante} {m.unidad || 'pza'}</Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={() => handleRemoveMaterial(m.productoId)} style={{ padding: 4 }}>
-                <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
-              </TouchableOpacity>
+        <View style={{ marginTop: Spacing.two }}>
+          <Text style={[styles.label, { color: themeColors.text }]}>Materiales Retirados y Usados</Text>
+
+          {materiales.length === 0 ? (
+            <View style={[styles.emptyState, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
+              <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center' }}>
+                No has agregado materiales a este trabajo.
+              </Text>
             </View>
-          ))}
+          ) : (
+            <View style={{ marginBottom: Spacing.two }}>
+              {materiales.map((m, idx) => (
+                <View key={idx} style={[styles.materialItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 14 }}>{m.nombre}</Text>
+                    <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4, flexWrap: 'wrap' }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Retirado: {m.retirado} {m.unidad || 'pza'}</Text>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Usado: {m.usado} {m.unidad || 'pza'}</Text>
+                      <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.sobrante} {m.unidad || 'pza'}</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={() => handleRemoveMaterial(m.productoId)} style={{ padding: 4 }}>
+                    <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <CustomButton
+            title="Agregar Material del Inventario"
+            variant="secondary"
+            onPress={() => setModalVisible(true)}
+            icon={<Ionicons name="add" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
+          />
         </View>
       )}
-
-      <CustomButton
-        title="Agregar Material del Inventario"
-        variant="secondary"
-        onPress={() => setModalVisible(true)}
-        icon={<Ionicons name="add" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
-      />
 
       <Modal statusBarTranslucent={true} visible={modalVisible} animationType="slide" transparent={true} onRequestClose={() => setModalVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
@@ -243,10 +315,28 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: Spacing.four,
+    marginBottom: Spacing.three,
+  },
+  switchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: Spacing.two,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+  },
+  noMaterialBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: Spacing.two,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    marginTop: 6,
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     marginBottom: Spacing.one,
   },
@@ -306,3 +396,4 @@ const styles = StyleSheet.create({
     fontSize: 15,
   }
 });
+

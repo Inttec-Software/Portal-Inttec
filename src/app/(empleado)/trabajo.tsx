@@ -309,7 +309,7 @@ export default function MiTrabajoScreen() {
 
                       <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: Spacing.one }}>
                         <TouchableOpacity
-                          onPress={() => router.push(`/(empleado)/evidencia?draftId=${d.id}` as any)}
+                          onPress={() => router.push(`/(empleado)/agregar-evidencia?draftId=${d.id}` as any)}
                           style={{
                             backgroundColor: themeColors.warning,
                             paddingVertical: 6,
