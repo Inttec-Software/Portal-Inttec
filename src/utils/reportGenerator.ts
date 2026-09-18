@@ -2491,6 +2491,47 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
     return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth()+1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   };
 
+  // Resolucion exhaustiva y precisa de Subtotal, IVA y Total
+  let subtotal = Number(facturaData.subtotal || 0);
+  if (!subtotal && Array.isArray(facturaData.items) && facturaData.items.length > 0) {
+    subtotal = facturaData.items.reduce((sum: number, it: any) => {
+      const q = Number(it.quantity || 1);
+      const p = Number(it.product?.price || 0);
+      return sum + (q * p);
+    }, 0);
+  }
+  if (!subtotal && (venta.subtotal_venta || venta.subtotal)) {
+    subtotal = Number(venta.subtotal_venta || venta.subtotal);
+  }
+
+  let total = Number(facturaData.total || venta.precio_total_facturado || venta.precio_total_venta || 0);
+
+  let iva = 0;
+  if (facturaData.taxes?.[0]?.amount !== undefined && facturaData.taxes?.[0]?.amount !== null && !isNaN(facturaData.taxes[0].amount)) {
+    iva = Number(facturaData.taxes[0].amount);
+  } else if (facturaData.total_impuestos_trasladados !== undefined && !isNaN(facturaData.total_impuestos_trasladados)) {
+    iva = Number(facturaData.total_impuestos_trasladados);
+  } else if (facturaData.iva !== undefined && !isNaN(facturaData.iva)) {
+    iva = Number(facturaData.iva);
+  } else if (Array.isArray(facturaData.items) && facturaData.items.some((it: any) => it.taxes?.[0]?.amount)) {
+    iva = facturaData.items.reduce((sum: number, it: any) => sum + Number(it.taxes?.[0]?.amount || 0), 0);
+  }
+
+  // Fallbacks si IVA sigue en 0
+  if (!iva && total > 0 && subtotal > 0 && total > subtotal) {
+    iva = total - subtotal;
+  } else if (!iva && subtotal > 0) {
+    iva = subtotal * 0.16;
+  }
+
+  // Si total no estaba definido, calcularlo
+  if (!total && subtotal > 0) {
+    total = subtotal + iva;
+  } else if (total > 0 && !subtotal) {
+    subtotal = total / 1.16;
+    if (!iva) iva = total - subtotal;
+  }
+
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -2604,16 +2645,21 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
                   </tr>
               </thead>
               <tbody>
-                  ${(facturaData.items || []).map((item: any) => `
+                  ${(facturaData.items || []).map((item: any) => {
+                      const itemTax = item.taxes?.[0];
+                      const itemRateStr = itemTax?.rate !== undefined ? `${Math.round(itemTax.rate * 100)}%` : '16%';
+                      const itemImporte = (item.quantity || 0) * (item.product?.price || 0);
+                      return `
                       <tr>
                           <td class="text-center">${item.product?.product_key || ''}<br/><span style="font-size: 8px;">(${item.product?.unit_key || ''})</span></td>
                           <td>${item.product?.description || ''}</td>
                           <td class="text-center">${item.quantity}</td>
                           <td class="text-end">${formatMoney(item.product?.price)}</td>
-                          <td class="text-center">16%</td>
-                          <td class="text-end">${formatMoney((item.quantity || 0) * (item.product?.price || 0))}</td>
+                          <td class="text-center">${itemRateStr}</td>
+                          <td class="text-end">${formatMoney(itemImporte)}</td>
                       </tr>
-                  `).join('')}
+                      `;
+                  }).join('')}
               </tbody>
           </table>
 
@@ -2626,9 +2672,9 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
               </div>
               <div class="col-5">
                   <table class="table-totals">
-                      <tr><td>Subtotal</td><td class="text-end">${formatMoney(facturaData.subtotal || venta.subtotal_venta)}</td></tr>
-                      <tr><td>IVA Trasladado</td><td class="text-end">${formatMoney(facturaData.taxes?.[0]?.amount || (venta.subtotal_venta * 0.16))}</td></tr>
-                      <tr><td>TOTAL</td><td class="text-end">${formatMoney(facturaData.total || (venta.subtotal_venta * 1.16))}</td></tr>
+                      <tr><td>Subtotal</td><td class="text-end">${formatMoney(subtotal)}</td></tr>
+                      <tr><td>IVA Trasladado (16%)</td><td class="text-end">${formatMoney(iva)}</td></tr>
+                      <tr><td>TOTAL</td><td class="text-end">${formatMoney(total)}</td></tr>
                   </table>
               </div>
           </div>

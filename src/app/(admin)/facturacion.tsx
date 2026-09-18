@@ -604,6 +604,7 @@ export default function FacturacionScreen() {
         cliente: clienteNombre || 'PUBLICO EN GENERAL',
         fecha: new Date().toISOString(),
         precio_total_facturado: financialTotals.total,
+        subtotal_venta: financialTotals.subtotal,
         orden_compra: ordenCompra.trim(),
       };
 
@@ -615,6 +616,17 @@ export default function FacturacionScreen() {
         payment_form: formaPago,
         payment_method: metodoPago,
         use: clienteUso,
+        subtotal: financialTotals.subtotal,
+        total: financialTotals.total,
+        total_impuestos_trasladados: financialTotals.totalIva,
+        iva: financialTotals.totalIva,
+        taxes: [
+          {
+            amount: financialTotals.totalIva,
+            type: 'IVA',
+            rate: 0.16,
+          }
+        ],
         issuer: {
           tax_id: 'FETR83041461A',
           legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
@@ -627,15 +639,28 @@ export default function FacturacionScreen() {
           tax_system: clienteRegimen,
           address: { zip: clienteCp },
         },
-        items: partidas.map(p => ({
-          quantity: parseFloat(p.cantidad) || 1,
-          product: {
-            product_key: p.clave_sat,
-            unit_key: p.clave_unidad,
-            description: p.descripcion || 'Concepto a facturar',
-            price: parseFloat(p.precio_unitario) || 0,
-          },
-        })),
+        items: partidas.map(p => {
+          const cant = parseFloat(p.cantidad) || 1;
+          const pu = parseFloat(p.precio_unitario) || 0;
+          const imp = cant * pu;
+          const isObj02 = p.objeto_imp === '02';
+          const itemIva = isObj02 ? imp * 0.16 : 0;
+          return {
+            quantity: cant,
+            product: {
+              product_key: p.clave_sat,
+              unit_key: p.clave_unidad,
+              description: p.descripcion || 'Concepto a facturar',
+              price: pu,
+            },
+            taxes: itemIva > 0 ? [{
+              amount: itemIva,
+              base: imp,
+              rate: 0.16,
+              type: 'IVA'
+            }] : []
+          };
+        }),
         stamp: {
           uuid: uuidSimulado,
           date: new Date().toISOString(),

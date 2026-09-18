@@ -400,6 +400,8 @@ export function parseFullCfdiXml(xmlString: string): CfdiDataCompleta {
     }
     if (totalIva > 0) {
       impuestosTrasladados.push({ impuesto: 'IVA', tasa: '16.00%', importe: totalIva });
+    } else if (total > subtotal && subtotal > 0) {
+      impuestosTrasladados.push({ impuesto: 'IVA', tasa: '16.00%', importe: Math.round((total - subtotal) * 100) / 100 });
     }
   }
 

@@ -282,7 +282,11 @@ CREATE TABLE IF NOT EXISTS public.productos (
   sku_interno character varying NOT NULL UNIQUE,
   nombre_oficial text NOT NULL,
   categoria_id uuid NOT NULL,
+  proveedor_id uuid,
   stock_actual numeric NOT NULL DEFAULT 0 CHECK (stock_actual >= 0),
+  stock_nuevo numeric DEFAULT 0,
+  stock_usado numeric DEFAULT 0,
+  stock_por_revisar numeric DEFAULT 0,
   unidad text DEFAULT 'pza',
   activo boolean NOT NULL DEFAULT true,
   created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
@@ -290,7 +294,8 @@ CREATE TABLE IF NOT EXISTS public.productos (
   impuesto_porcentaje numeric DEFAULT 16,
   clave_facturacion text,
   CONSTRAINT productos_pkey PRIMARY KEY (id),
-  CONSTRAINT productos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias_productos(id)
+  CONSTRAINT productos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias_productos(id),
+  CONSTRAINT productos_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS public.alias_proveedor_producto (
@@ -718,13 +723,15 @@ BEGIN
   END IF;
 END $$;
 
--- 4. Creación del Storage Bucket para los XMLs si no existe
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('facturas_recibidas', 'facturas_recibidas', true)
-ON CONFLICT (id) DO NOTHING;
+-- 4. Creación de Storage Buckets y Políticas si no existen
+INSERT INTO storage.buckets (id, name, public) VALUES ('tickets', 'tickets', true) ON CONFLICT (id) DO UPDATE SET public = true;
+INSERT INTO storage.buckets (id, name, public) VALUES ('evidencias', 'evidencias', true) ON CONFLICT (id) DO UPDATE SET public = true;
+INSERT INTO storage.buckets (id, name, public) VALUES ('documentos-firmados', 'documentos-firmados', true) ON CONFLICT (id) DO UPDATE SET public = true;
+INSERT INTO storage.buckets (id, name, public) VALUES ('facturas_recibidas', 'facturas_recibidas', true) ON CONFLICT (id) DO UPDATE SET public = true;
 
 DO $$
 BEGIN
+  -- Políticas para facturas_recibidas
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Lectura publica facturas_recibidas'
   ) THEN
@@ -741,6 +748,69 @@ BEGIN
       ON storage.objects FOR INSERT
       TO anon, authenticated, service_role
       WITH CHECK (bucket_id = 'facturas_recibidas');
+  END IF;
+
+  -- Políticas para tickets
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Lectura publica tickets'
+  ) THEN
+    CREATE POLICY "Lectura publica tickets"
+      ON storage.objects FOR SELECT
+      TO anon, authenticated
+      USING (bucket_id = 'tickets');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Permitir carga tickets'
+  ) THEN
+    CREATE POLICY "Permitir carga tickets"
+      ON storage.objects FOR INSERT
+      TO anon, authenticated, service_role
+      WITH CHECK (bucket_id = 'tickets');
+  END IF;
+
+  -- Políticas para evidencias
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Lectura publica evidencias'
+  ) THEN
+    CREATE POLICY "Lectura publica evidencias"
+      ON storage.objects FOR SELECT
+      TO anon, authenticated
+      USING (bucket_id = 'evidencias');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Permitir carga evidencias'
+  ) THEN
+    CREATE POLICY "Permitir carga evidencias"
+      ON storage.objects FOR INSERT
+      TO anon, authenticated, service_role
+      WITH CHECK (bucket_id = 'evidencias');
+  END IF;
+
+  -- Políticas para documentos-firmados
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Permitir lectura publica documentos-firmados'
+  ) THEN
+    CREATE POLICY "Permitir lectura publica documentos-firmados" 
+      ON storage.objects FOR SELECT 
+      USING (bucket_id = 'documentos-firmados');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Permitir subida publica documentos-firmados'
+  ) THEN
+    CREATE POLICY "Permitir subida publica documentos-firmados" 
+      ON storage.objects FOR INSERT 
+      WITH CHECK (bucket_id = 'documentos-firmados');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Permitir actualizacion documentos-firmados'
+  ) THEN
+    CREATE POLICY "Permitir actualizacion documentos-firmados" 
+      ON storage.objects FOR UPDATE 
+      USING (bucket_id = 'documentos-firmados');
   END IF;
 END $$;
 
