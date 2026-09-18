@@ -46,7 +46,7 @@ interface Producto {
   sku_interno: string;
   nombre_oficial: string;
   categoria_id: string;
-  proveedor_id?: string;
+  proveedor_id?: string | null;
   stock_actual: number;
   stock_nuevo?: number;
   stock_usado?: number;
