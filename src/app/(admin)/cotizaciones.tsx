@@ -71,11 +71,76 @@ const getActionBtnStyle = (action: 'view' | 'download' | 'email' | 'edit' | 'del
       };
     case 'delete':
       return {
-        bg: isDark ? '#450a0a' : '#fee2e2',
-        color: isDark ? '#f87171' : '#ef4444',
+        bg: isDark ? '#3b1219' : '#ffebee',
+        color: isDark ? '#f87171' : '#e53935',
       };
   }
 };
+
+function ActionButtonWithTooltip({
+  icon,
+  iconSize = 14,
+  color,
+  bgColor,
+  tooltip,
+  onPress,
+  isCircular = false,
+}: {
+  icon: string;
+  iconSize?: number;
+  color: string;
+  bgColor?: string;
+  tooltip: string;
+  onPress: () => void;
+  isCircular?: boolean;
+}) {
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <View style={{ position: 'relative', alignItems: 'center' }}>
+      <Pressable
+        onPress={onPress}
+        onHoverIn={() => setIsHovered(true)}
+        onHoverOut={() => setIsHovered(false)}
+        style={({ pressed }) => [
+          isCircular 
+            ? { flex: 1, minWidth: 32, maxWidth: 42, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' } 
+            : { paddingHorizontal: 3, paddingVertical: 4, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+          bgColor ? { backgroundColor: bgColor } : null,
+          pressed && { opacity: 0.7 },
+          isHovered && { transform: [{ scale: 1.15 }] }
+        ]}
+      >
+        <Ionicons name={icon as any} size={iconSize} color={color} />
+      </Pressable>
+
+      {isHovered && Platform.OS === 'web' && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            bottom: '125%',
+            backgroundColor: '#0f172a',
+            paddingVertical: 4,
+            paddingHorizontal: 8,
+            borderRadius: 6,
+            zIndex: 99999,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.25,
+            shadowRadius: 4,
+            elevation: 10,
+            alignSelf: 'center',
+          }}
+        >
+          <Text style={{ color: '#ffffff', fontSize: 11, fontWeight: '700', textAlign: 'center' }} numberOfLines={1}>
+            {tooltip}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
 
 export default function CotizacionesListScreen() {
   const router = useRouter();
@@ -192,6 +257,7 @@ export default function CotizacionesListScreen() {
         total: cot.total,
         lineas: cot.lineas || [],
         terminosCondiciones: cot.terminos_condiciones || 'https://inttec.odoo.com/terms',
+        notasObservaciones: cot.notas_observaciones || '',
       };
       
       await exportarCotizacionOdooPDF(cotData, action);
@@ -238,7 +304,6 @@ export default function CotizacionesListScreen() {
     router.push(`/(admin)/ventas?fromCotizacion=true&cotizacionData=${cotizacionData}`);
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDuplicate = async (cot: any) => {
     try {
       setIsLoading(true);
@@ -247,9 +312,11 @@ export default function CotizacionesListScreen() {
         method: 'POST',
         headers
       });
-      if (!res.ok) throw new Error('Error al duplicar');
       const data = await res.json();
-      showAlert('Éxito', `Cotización duplicada con éxito. Nuevo folio: ${data.newFolio}`);
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al duplicar la cotización');
+      }
+      showAlert('Éxito', `Cotización duplicada con éxito. Se asignó el folio consecutivo: ${data.newFolio}`);
       fetchCotizaciones();
     } catch (err: any) {
       console.error('Error duplicando cotización:', err);
@@ -374,150 +441,125 @@ export default function CotizacionesListScreen() {
 
   // TABLA DE COTIZACIONES DE ALTA FIDELIDAD (WEB/DESKTOP)
   const renderDesktopTable = () => (
-    <View style={styles.tableContainer}>
-      {/* Encabezado de la Tabla */}
-      <View style={styles.tableHeaderRow}>
-        <Text style={[styles.tableHeaderCell, { width: '5%', fontWeight: 'bold' }]}>No. C</Text>
-        <Text style={[styles.tableHeaderCell, { width: '8%', fontWeight: 'bold' }]}>Folio Alt</Text>
-        <Text style={[styles.tableHeaderCell, { width: '10%', fontWeight: 'bold' }]}>Fecha de Emisión</Text>
-        <Text style={[styles.tableHeaderCell, { width: '8%', fontWeight: 'bold' }]}>Usuario</Text>
-        <Text style={[styles.tableHeaderCell, { width: '18%', fontWeight: 'bold' }]}>Empresa</Text>
-        <Text style={[styles.tableHeaderCell, { width: '13%', fontWeight: 'bold' }]}>Referencia</Text>
-        <Text style={[styles.tableHeaderCell, { width: '10%', fontWeight: 'bold' }]}>Estado</Text>
-        <Text style={[styles.tableHeaderCell, { width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>Total</Text>
-        
-        {/* Acciones Header con iconos pequeños */}
-        <View style={[styles.tableHeaderCell, styles.headerActionsContainer, { width: '18%' }]}>
-          <Ionicons name="eye-outline" size={12} color={themeColors.accent} />
-          <Ionicons name="pencil-outline" size={12} color={themeColors.accent} />
-          <Ionicons name="copy-outline" size={12} color={themeColors.accent} />
-          <Ionicons name="document-text-outline" size={12} color={themeColors.accent} />
-          <Ionicons name="mail-outline" size={12} color={themeColors.accent} />
-          <Ionicons name="chatbubble-ellipses-outline" size={12} color={themeColors.accent} />
-          <Ionicons name="chevron-down" size={12} color={themeColors.accent} />
-          <Ionicons name="cash-outline" size={12} color={themeColors.accent} />
-          <Ionicons name="trash-outline" size={12} color={themeColors.danger} />
-        </View>
-      </View>
-
-      {/* Cuerpo de la Tabla */}
-      {filteredCotizaciones.length === 0 ? (
-        <View style={styles.noResultsTable}>
-          <Text style={{ color: '#888', textAlign: 'center', padding: 24 }}>
-            {searchQuery ? 'No se encontraron cotizaciones con esa búsqueda.' : 'No hay cotizaciones registradas aún.'}
-          </Text>
-        </View>
-      ) : (
-        filteredCotizaciones.map((cot, index) => {
-          const sequentialId = 1532 + (filteredCotizaciones.length - 1 - index);
-          const firstLineName = cot.lineas?.[0]?.productoNombre || 'Sin referencia';
+    <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: '100%' }}>
+      <View style={[styles.tableContainer, { minWidth: 1100 }]}>
+        {/* Encabezado de la Tabla */}
+        <View style={styles.tableHeaderRow}>
+          <Text style={[styles.tableHeaderCell, { width: '5%', minWidth: 45, fontWeight: 'bold' }]}>No. C</Text>
+          <Text style={[styles.tableHeaderCell, { width: '8%', minWidth: 75, fontWeight: 'bold' }]}>Folio Alt</Text>
+          <Text style={[styles.tableHeaderCell, { width: '9%', minWidth: 85, fontWeight: 'bold' }]}>Fecha de Emisión</Text>
+          <Text style={[styles.tableHeaderCell, { width: '7%', minWidth: 70, fontWeight: 'bold' }]}>Usuario</Text>
+          <Text style={[styles.tableHeaderCell, { width: '16%', minWidth: 130, fontWeight: 'bold' }]}>Empresa</Text>
+          <Text style={[styles.tableHeaderCell, { width: '11%', minWidth: 95, fontWeight: 'bold' }]}>Referencia</Text>
+          <Text style={[styles.tableHeaderCell, { width: '10%', minWidth: 80, fontWeight: 'bold' }]}>Estado</Text>
+          <Text style={[styles.tableHeaderCell, { width: '10%', minWidth: 105, fontWeight: 'bold', textAlign: 'right', paddingRight: 12, flexShrink: 0 }]}>Total</Text>
           
-          return (
-            <View key={cot.id}>
-              <Pressable 
-                onPress={() => toggleRowExpansion(cot.id)}
-                onHoverIn={() => setHoveredRowId(cot.id)}
-                onHoverOut={() => setHoveredRowId(null)}
-                style={[
-                  styles.tableRow,
-                  hoveredRowId === cot.id && { backgroundColor: themeColors.backgroundSelected },
-                  expandedRowId === cot.id && { borderBottomWidth: 0, backgroundColor: themeColors.backgroundSelected }
-                ]}
-              >
-                <Text style={[styles.tableCell, { width: '5%', color: themeColors.textSecondary }]}>{sequentialId}</Text>
-                <Text style={[styles.tableCell, { width: '8%', color: themeColors.textSecondary }]}>{cot.folio}</Text>
-                <Text style={[styles.tableCell, { width: '10%' }]}>{cot.fecha_creacion}</Text>
-                <Text style={[styles.tableCell, { width: '8%' }]}>{cot.vendedor || 'Admin'}</Text>
-                <Text style={[styles.tableCell, { width: '18%', fontWeight: 'bold', color: themeColors.text }]} numberOfLines={1}>
-                  {cot.cliente_nombre}
-                </Text>
-                <Text style={[styles.tableCell, { width: '13%', color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
-                <View style={[styles.tableCell, { width: '10%' }]}>
-                  {(() => {
-                    const estado = cot.estado || 'Borrador';
-                    const config = getStatusConfig(estado, scheme === 'dark');
-                    return (
-                      <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10, alignSelf: 'flex-start' }]}>
-                        <Text style={{ fontSize: 9, fontWeight: 'bold', color: config.color }}>
-                          {estado}
-                        </Text>
-                      </View>
-                    );
-                  })()}
-                </View>
-                <Text style={[styles.tableCell, { width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>{formatearMoneda(cot.total)}</Text>
-                
-                {/* 8 Iconos de acción */}
-                <View style={[styles.tableCell, styles.rowActionsContainer, { width: '18%' }]}>
-                  {/* 1. Ver PDF */}
-                  <TouchableOpacity onPress={() => handleDownloadPDF(cot, 'view')} style={styles.rowActionBtn}>
-                    <Ionicons name="eye-outline" size={14} color={themeColors.textSecondary} />
-                  </TouchableOpacity>
-                  {/* 2. Editar */}
-                  <TouchableOpacity onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} style={styles.rowActionBtn}>
-                    <Ionicons name="pencil-outline" size={14} color={themeColors.textSecondary} />
-                  </TouchableOpacity>
-                  {/* 3. Duplicar */}
-                  <TouchableOpacity onPress={() => handleDuplicate(cot)} style={styles.rowActionBtn}>
-                    <Ionicons name="copy-outline" size={14} color={themeColors.textSecondary} />
-                  </TouchableOpacity>
-                  {/* 4. Descargar PDF */}
-                  <TouchableOpacity onPress={() => handleDownloadPDF(cot, 'download')} style={styles.rowActionBtn}>
-                    <Ionicons name="document-text-outline" size={14} color={themeColors.textSecondary} />
-                  </TouchableOpacity>
-                  {/* 5. Enviar Correo */}
-                  <TouchableOpacity onPress={() => handleEmail(cot)} style={styles.rowActionBtn}>
-                    <Ionicons name="mail-outline" size={14} color={themeColors.textSecondary} />
-                  </TouchableOpacity>
-                  {/* 6. Comentarios */}
-                  <TouchableOpacity onPress={() => handleComments(cot)} style={styles.rowActionBtn}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={14} color={themeColors.textSecondary} />
-                  </TouchableOpacity>
-                  {/* 7. Detalles */}
-                  <TouchableOpacity onPress={() => toggleRowExpansion(cot.id)} style={styles.rowActionBtn}>
-                    <Ionicons name={expandedRowId === cot.id ? "chevron-up" : "chevron-down"} size={14} color={themeColors.textSecondary} />
-                  </TouchableOpacity>
-                  {/* 8. Convertir a Venta */}
-                  <TouchableOpacity onPress={() => handleConvertirVenta(cot)} style={styles.rowActionBtn}>
-                    <Ionicons name="cash-outline" size={14} color={themeColors.primary} />
-                  </TouchableOpacity>
-                  {/* 9. Eliminar */}
-                  <TouchableOpacity onPress={() => handleDelete(cot.id)} style={styles.rowActionBtn}>
-                    <Ionicons name="trash-outline" size={14} color={themeColors.danger} />
-                  </TouchableOpacity>
-                </View>
-              </Pressable>
+          {/* Acciones Header con iconos pequeños */}
+          <View style={[styles.tableHeaderCell, styles.headerActionsContainer, { width: '24%', minWidth: 250, paddingRight: 2, flexShrink: 0 }]}>
+            <Ionicons name="eye-outline" size={12} color={themeColors.accent} />
+            <Ionicons name="pencil-outline" size={12} color={themeColors.accent} />
+            <Ionicons name="copy-outline" size={12} color={themeColors.accent} />
+            <Ionicons name="download-outline" size={12} color={themeColors.accent} />
+            <Ionicons name="mail-outline" size={12} color={themeColors.accent} />
+            <Ionicons name="chatbubble-ellipses-outline" size={12} color={themeColors.accent} />
+            <Ionicons name="chevron-down" size={12} color={themeColors.accent} />
+            <Ionicons name="cash-outline" size={12} color={themeColors.accent} />
+            <Ionicons name="trash-outline" size={12} color={themeColors.danger} />
+          </View>
+        </View>
 
-              {/* Fila expandida con detalles de partidas */}
-              {expandedRowId === cot.id && (
-                <View style={styles.expandedDetailRow}>
-                  <Text style={styles.detailTitle}>Partidas de la Cotización {cot.folio}:</Text>
-                  {cot.lineas && cot.lineas.length > 0 ? (
-                    cot.lineas.map((linea: any, lIndex: number) => (
-                      <View key={lIndex} style={styles.detailLineItem}>
-                        <Text style={{ width: '40%', fontWeight: '500', color: themeColors.text }}>{linea.productoNombre}</Text>
-                        <Text style={{ width: '30%', color: themeColors.textSecondary, fontSize: 13 }}>{linea.productoDescripcion}</Text>
-                        <Text style={{ width: '10%', textAlign: 'right', color: themeColors.textSecondary }}>Cant: {linea.cantidad}</Text>
-                        <Text style={{ width: '10%', textAlign: 'right', color: themeColors.textSecondary }}>P.U: {formatearMoneda(linea.precioUnitario)}</Text>
-                        <Text style={{ width: '10%', textAlign: 'right', fontWeight: 'bold', color: themeColors.text }}>{formatearMoneda(linea.importe || (linea.cantidad * linea.precioUnitario))}</Text>
-                      </View>
-                    ))
-                  ) : (
-                    <Text style={{ color: themeColors.textSecondary, fontStyle: 'italic' }}>Sin partidas registradas</Text>
-                  )}
-                  
-                  <View style={styles.detailFooter}>
-                    <Text style={styles.detailFooterText}>Subtotal: {formatearMoneda(cot.subtotal)}</Text>
-                    <Text style={styles.detailFooterText}>IVA: {formatearMoneda(cot.iva)}</Text>
-                    <Text style={[styles.detailFooterText, { fontWeight: 'bold', fontSize: 14 }]}>Total: {formatearMoneda(cot.total)}</Text>
+        {/* Cuerpo de la Tabla */}
+        {filteredCotizaciones.length === 0 ? (
+          <View style={styles.noResultsTable}>
+            <Text style={{ color: '#888', textAlign: 'center', padding: 24 }}>
+              {searchQuery ? 'No se encontraron cotizaciones con esa búsqueda.' : 'No hay cotizaciones registradas aún.'}
+            </Text>
+          </View>
+        ) : (
+          filteredCotizaciones.map((cot, index) => {
+            const sequentialId = 1532 + (filteredCotizaciones.length - 1 - index);
+            const firstLineName = cot.lineas?.[0]?.productoNombre || 'Sin referencia';
+            
+            return (
+              <View key={cot.id}>
+                <Pressable 
+                  onPress={() => toggleRowExpansion(cot.id)}
+                  onHoverIn={() => setHoveredRowId(cot.id)}
+                  onHoverOut={() => setHoveredRowId(null)}
+                  style={[
+                    styles.tableRow,
+                    hoveredRowId === cot.id && { backgroundColor: themeColors.backgroundSelected },
+                    expandedRowId === cot.id && { borderBottomWidth: 0, backgroundColor: themeColors.backgroundSelected }
+                  ]}
+                >
+                  <Text style={[styles.tableCell, { width: '5%', minWidth: 45, color: themeColors.textSecondary }]}>{sequentialId}</Text>
+                  <Text style={[styles.tableCell, { width: '8%', minWidth: 75, color: themeColors.textSecondary }]}>{cot.folio}</Text>
+                  <Text style={[styles.tableCell, { width: '9%', minWidth: 85 }]}>{cot.fecha_creacion}</Text>
+                  <Text style={[styles.tableCell, { width: '7%', minWidth: 70 }]}>{cot.vendedor || 'Admin'}</Text>
+                  <Text style={[styles.tableCell, { width: '16%', minWidth: 130, fontWeight: 'bold', color: themeColors.text }]} numberOfLines={1}>
+                    {cot.cliente_nombre}
+                  </Text>
+                  <Text style={[styles.tableCell, { width: '11%', minWidth: 95, color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
+                  <View style={[styles.tableCell, { width: '10%', minWidth: 80 }]}>
+                    {(() => {
+                      const estado = cot.estado || 'Borrador';
+                      const config = getStatusConfig(estado, scheme === 'dark');
+                      return (
+                        <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10, alignSelf: 'flex-start' }]}>
+                          <Text style={{ fontSize: 9, fontWeight: 'bold', color: config.color }}>
+                            {estado}
+                          </Text>
+                        </View>
+                      );
+                    })()}
                   </View>
-                </View>
-              )}
-            </View>
-          );
-        })
-      )}
-    </View>
+                  <Text style={[styles.tableCell, { width: '10%', minWidth: 105, fontWeight: 'bold', textAlign: 'right', paddingRight: 12, flexShrink: 0 }]}>{formatearMoneda(cot.total)}</Text>
+                  
+                  {/* 9 Iconos de acción con Tooltips en Hover */}
+                  <View style={[styles.tableCell, styles.rowActionsContainer, { width: '24%', minWidth: 250, paddingRight: 2, flexShrink: 0 }]}>
+                    <ActionButtonWithTooltip icon="eye-outline" color={themeColors.textSecondary} tooltip="Ver PDF" onPress={() => handleDownloadPDF(cot, 'view')} />
+                    <ActionButtonWithTooltip icon="pencil-outline" color={themeColors.textSecondary} tooltip="Editar Cotización" onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} />
+                    <ActionButtonWithTooltip icon="copy-outline" color={themeColors.textSecondary} tooltip="Duplicar Cotización" onPress={() => handleDuplicate(cot)} />
+                    <ActionButtonWithTooltip icon="download-outline" color={themeColors.textSecondary} tooltip="Descargar PDF" onPress={() => handleDownloadPDF(cot, 'download')} />
+                    <ActionButtonWithTooltip icon="mail-outline" color={themeColors.textSecondary} tooltip="Enviar Correo" onPress={() => handleEmail(cot)} />
+                    <ActionButtonWithTooltip icon="chatbubble-ellipses-outline" color={themeColors.textSecondary} tooltip="Notas y Comentarios" onPress={() => handleComments(cot)} />
+                    <ActionButtonWithTooltip icon={expandedRowId === cot.id ? "chevron-up" : "chevron-down"} color={themeColors.textSecondary} tooltip={expandedRowId === cot.id ? "Ocultar Partidas" : "Ver Partidas"} onPress={() => toggleRowExpansion(cot.id)} />
+                    <ActionButtonWithTooltip icon="cash-outline" color={themeColors.primary} tooltip="Convertir a Venta" onPress={() => handleConvertirVenta(cot)} />
+                    <ActionButtonWithTooltip icon="trash-outline" color={themeColors.danger} tooltip="Eliminar Cotización" onPress={() => handleDelete(cot.id)} />
+                  </View>
+                </Pressable>
+
+                {/* Fila expandida con detalles de partidas */}
+                {expandedRowId === cot.id && (
+                  <View style={styles.expandedDetailRow}>
+                    <Text style={styles.detailTitle}>Partidas de la Cotización {cot.folio}:</Text>
+                    {cot.lineas && cot.lineas.length > 0 ? (
+                      cot.lineas.map((linea: any, lIndex: number) => (
+                        <View key={lIndex} style={styles.detailLineItem}>
+                          <Text style={{ width: '40%', fontWeight: '500', color: themeColors.text }}>{linea.productoNombre}</Text>
+                          <Text style={{ width: '30%', color: themeColors.textSecondary, fontSize: 13 }}>{linea.productoDescripcion}</Text>
+                          <Text style={{ width: '10%', textAlign: 'right', color: themeColors.textSecondary }}>Cant: {linea.cantidad}</Text>
+                          <Text style={{ width: '10%', textAlign: 'right', color: themeColors.textSecondary }}>P.U: {formatearMoneda(linea.precioUnitario)}</Text>
+                          <Text style={{ width: '10%', textAlign: 'right', fontWeight: 'bold', color: themeColors.text }}>{formatearMoneda(linea.importe || (linea.cantidad * linea.precioUnitario))}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={{ color: themeColors.textSecondary, fontStyle: 'italic' }}>Sin partidas registradas</Text>
+                    )}
+                    
+                    <View style={styles.detailFooter}>
+                      <Text style={styles.detailFooterText}>Subtotal: {formatearMoneda(cot.subtotal)}</Text>
+                      <Text style={styles.detailFooterText}>IVA: {formatearMoneda(cot.iva)}</Text>
+                      <Text style={[styles.detailFooterText, { fontWeight: 'bold', fontSize: 14 }]}>Total: {formatearMoneda(cot.total)}</Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+            );
+          })
+        )}
+      </View>
+    </ScrollView>
   );
 
   return (
@@ -666,68 +708,13 @@ export default function CotizacionesListScreen() {
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                        {/* 1. Ver PDF */}
-                        <TouchableOpacity 
-                          onPress={() => handleDownloadPDF(cot, 'view')}
-                          style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('view', scheme === 'dark').bg }]}
-                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="eye-outline" size={16} color={getActionBtnStyle('view', scheme === 'dark').color} />
-                        </TouchableOpacity>
-                        
-                        {/* 2. Descargar PDF */}
-                        <TouchableOpacity 
-                          onPress={() => handleDownloadPDF(cot, 'download')}
-                          style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('download', scheme === 'dark').bg }]}
-                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="download-outline" size={16} color={getActionBtnStyle('download', scheme === 'dark').color} />
-                        </TouchableOpacity>
-
-                        {/* 3. Enviar Correo */}
-                        <TouchableOpacity 
-                          onPress={() => handleEmail(cot)}
-                          style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('email', scheme === 'dark').bg }]}
-                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="mail-outline" size={16} color={getActionBtnStyle('email', scheme === 'dark').color} />
-                        </TouchableOpacity>
-
-                        {/* 4. Duplicar */}
-                        <TouchableOpacity 
-                          onPress={() => handleDuplicate(cot)}
-                          style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('view', scheme === 'dark').bg }]}
-                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="copy-outline" size={16} color={getActionBtnStyle('view', scheme === 'dark').color} />
-                        </TouchableOpacity>
-
-                        {/* 5. Editar */}
-                        <TouchableOpacity 
-                          onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)}
-                          style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('edit', scheme === 'dark').bg }]}
-                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="pencil-outline" size={16} color={getActionBtnStyle('edit', scheme === 'dark').color} />
-                        </TouchableOpacity>
-
-                        {/* 6. Convertir a Venta */}
-                        <TouchableOpacity 
-                          onPress={() => handleConvertirVenta(cot)}
-                          style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('download', scheme === 'dark').bg }]}
-                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="cash-outline" size={16} color={getActionBtnStyle('download', scheme === 'dark').color} />
-                        </TouchableOpacity>
-
-                        {/* 7. Eliminar */}
-                        <TouchableOpacity 
-                          onPress={() => handleDelete(cot.id)}
-                          style={[styles.circularActionBtn, { backgroundColor: getActionBtnStyle('delete', scheme === 'dark').bg }]}
-                          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                        >
-                          <Ionicons name="trash-outline" size={16} color={getActionBtnStyle('delete', scheme === 'dark').color} />
-                        </TouchableOpacity>
+                        <ActionButtonWithTooltip icon="eye-outline" iconSize={16} color={getActionBtnStyle('view', scheme === 'dark').color} bgColor={getActionBtnStyle('view', scheme === 'dark').bg} tooltip="Ver PDF" isCircular onPress={() => handleDownloadPDF(cot, 'view')} />
+                        <ActionButtonWithTooltip icon="download-outline" iconSize={16} color={getActionBtnStyle('download', scheme === 'dark').color} bgColor={getActionBtnStyle('download', scheme === 'dark').bg} tooltip="Descargar PDF" isCircular onPress={() => handleDownloadPDF(cot, 'download')} />
+                        <ActionButtonWithTooltip icon="mail-outline" iconSize={16} color={getActionBtnStyle('email', scheme === 'dark').color} bgColor={getActionBtnStyle('email', scheme === 'dark').bg} tooltip="Enviar Correo" isCircular onPress={() => handleEmail(cot)} />
+                        <ActionButtonWithTooltip icon="copy-outline" iconSize={16} color={getActionBtnStyle('view', scheme === 'dark').color} bgColor={getActionBtnStyle('view', scheme === 'dark').bg} tooltip="Duplicar Cotización" isCircular onPress={() => handleDuplicate(cot)} />
+                        <ActionButtonWithTooltip icon="pencil-outline" iconSize={16} color={getActionBtnStyle('edit', scheme === 'dark').color} bgColor={getActionBtnStyle('edit', scheme === 'dark').bg} tooltip="Editar Cotización" isCircular onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} />
+                        <ActionButtonWithTooltip icon="cash-outline" iconSize={16} color={getActionBtnStyle('download', scheme === 'dark').color} bgColor={getActionBtnStyle('download', scheme === 'dark').bg} tooltip="Convertir a Venta" isCircular onPress={() => handleConvertirVenta(cot)} />
+                        <ActionButtonWithTooltip icon="trash-outline" iconSize={16} color={getActionBtnStyle('delete', scheme === 'dark').color} bgColor={getActionBtnStyle('delete', scheme === 'dark').bg} tooltip="Eliminar Cotización" isCircular onPress={() => handleDelete(cot.id)} />
                       </View>
                     </View>
                   </View>
@@ -1052,13 +1039,17 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 6,
+    gap: 2,
+    paddingRight: 0,
+    flexShrink: 0,
   },
   rowActionsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 6,
+    gap: 2,
+    paddingRight: 0,
+    flexShrink: 0,
   },
   rowActionBtn: {
     padding: 3,

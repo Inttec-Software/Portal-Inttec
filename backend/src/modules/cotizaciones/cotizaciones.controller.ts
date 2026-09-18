@@ -1,6 +1,35 @@
 import { Request, Response } from 'express';
 import { getSupabaseClient } from '../../config/supabase';
 
+// Helper para adaptar el payload si la columna 'notas_observaciones' no existe en la BDD
+const prepareFallbackPayload = (payload: any) => {
+  const fbPayload = { ...payload };
+  if (fbPayload.notas_observaciones && String(fbPayload.notas_observaciones).trim() !== '') {
+    const notesStr = String(fbPayload.notas_observaciones).trim();
+    const existingTerms = fbPayload.terminos_condiciones ? String(fbPayload.terminos_condiciones).trim() : '';
+    fbPayload.terminos_condiciones = existingTerms 
+      ? `${existingTerms}\n\n[Notas u Observaciones]:\n${notesStr}`
+      : `[Notas u Observaciones]:\n${notesStr}`;
+  }
+  delete fbPayload.notas_observaciones;
+  return fbPayload;
+};
+
+// Helper para extraer 'notas_observaciones' si fue concatenado en 'terminos_condiciones'
+const formatCotizacionResponse = (cot: any) => {
+  if (!cot) return cot;
+  const formatted = { ...cot };
+  if ((!formatted.notas_observaciones || String(formatted.notas_observaciones).trim() === '') && formatted.terminos_condiciones) {
+    const marker = '[Notas u Observaciones]:';
+    const index = formatted.terminos_condiciones.indexOf(marker);
+    if (index !== -1) {
+      formatted.notas_observaciones = formatted.terminos_condiciones.substring(index + marker.length).trim();
+      formatted.terminos_condiciones = formatted.terminos_condiciones.substring(0, index).trim();
+    }
+  }
+  return formatted;
+};
+
 // === GET /api/cotizaciones/search-clientes ===
 export const searchClientes = async (req: Request, res: Response) => {
   try {
@@ -35,13 +64,11 @@ export const searchProductos = async (req: Request, res: Response) => {
     let query = client.from('productos').select('*').limit(15);
     
     if (q && typeof q === 'string' && q.trim().length > 0) {
-      // Intentamos con nombre (algunas bdd usan nombre_oficial, otras nombre, asumiendo lo que estaba en frontend)
       query = query.ilike('nombre_oficial', `%${q}%`);
     }
 
     const { data, error } = await query;
     if (error) {
-      // Fallback a "nombre" si "nombre_oficial" falla (por si acaso la BDD es diferente)
       let fbQuery = client.from('productos').select('*').limit(15);
       if (q && typeof q === 'string' && q.trim().length > 0) {
         fbQuery = fbQuery.ilike('nombre', `%${q}%`);
@@ -70,7 +97,8 @@ export const getCotizaciones = async (req: Request, res: Response) => {
       .order('creado_en', { ascending: false });
 
     if (error) throw error;
-    return res.json({ cotizaciones: data || [] });
+    const formatted = (data || []).map(formatCotizacionResponse);
+    return res.json({ cotizaciones: formatted });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -113,7 +141,7 @@ export const getCotizacion = async (req: Request, res: Response) => {
       }
     }
 
-    return res.json({ cotizacion, clientData, sucursales });
+    return res.json({ cotizacion: formatCotizacionResponse(cotizacion), clientData, sucursales });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -146,10 +174,62 @@ export const getPdfData = async (req: Request, res: Response) => {
       clientData = cData || null;
     }
 
-    return res.json({ cotizacion, clientData });
+    return res.json({ cotizacion: formatCotizacionResponse(cotizacion), clientData });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
+};
+
+// Helper para calcular el siguiente folio en formato YYMMDDNN (ciclo 01 a 06 y vuelve a 01)
+const calculateNextFolio = (prefix: string, existingFolios: string[]): string => {
+  const daySeqs: number[] = [];
+
+  existingFolios.forEach(folio => {
+    const clean = String(folio || '').trim();
+    if (clean.startsWith(prefix)) {
+      const suffix = clean.substring(prefix.length);
+      const num = parseInt(suffix, 10);
+      if (!isNaN(num) && num > 0) {
+        daySeqs.push(num);
+      }
+    }
+  });
+
+  const maxNum = daySeqs.length > 0 ? Math.max(...daySeqs) : 0;
+  // Consecutivo: 01, 02... al llegar a 06 vuelve a 01
+  let nextSeq = 1;
+  if (maxNum > 0) {
+    if (maxNum < 6) {
+      nextSeq = maxNum + 1;
+    } else {
+      nextSeq = 1; // Al llegar al 06 vuelve al 01
+    }
+  }
+
+  let candidateFolio = `${prefix}${String(nextSeq).padStart(2, '0')}`;
+  const existingSet = new Set(existingFolios.map(f => String(f || '').trim()));
+
+  // Evitar colisión de llave única en BD si el candidato ya está ocupado
+  if (existingSet.has(candidateFolio)) {
+    let found = false;
+    for (let s = 1; s <= 6; s++) {
+      const test = `${prefix}${String(s).padStart(2, '0')}`;
+      if (!existingSet.has(test)) {
+        candidateFolio = test;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      let s = maxNum + 1;
+      while (existingSet.has(`${prefix}${String(s).padStart(2, '0')}`)) {
+        s++;
+      }
+      candidateFolio = `${prefix}${String(s).padStart(2, '0')}`;
+    }
+  }
+
+  return candidateFolio;
 };
 
 // === GET /api/cotizaciones/last-folio ===
@@ -159,22 +239,42 @@ export const getLastFolio = async (req: Request, res: Response) => {
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const client = getSupabaseClient(tenant.company, tenant.env);
 
-    const { prefix } = req.query;
+    const today = new Date();
+    const yy = String(today.getFullYear()).slice(-2);
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const defaultPrefix = `${yy}${mm}${dd}`;
+
+    const prefix = typeof req.query.prefix === 'string' && req.query.prefix.trim() !== ''
+      ? req.query.prefix.trim()
+      : defaultPrefix;
 
     let query = client
       .from('cotizaciones')
-      .select('folio');
+      .select('folio')
+      .ilike('folio', `${prefix}%`);
 
-    if (prefix && typeof prefix === 'string') {
-      query = query.ilike('folio', `${prefix}%`);
-    }
-
-    const { data, error } = await query
-      .order('folio', { ascending: false })
-      .limit(1);
+    const { data, error } = await query;
 
     if (error) throw error;
-    return res.json({ lastFolio: data && data.length > 0 ? data[0].folio : null });
+
+    const existingFolios = (data || []).map((row: any) => String(row.folio || '').trim());
+    const nextFolio = calculateNextFolio(prefix, existingFolios);
+
+    let highestFolio = null;
+    const daySeqs: number[] = [];
+    existingFolios.forEach(folio => {
+      if (folio.startsWith(prefix)) {
+        const num = parseInt(folio.substring(prefix.length), 10);
+        if (!isNaN(num) && num > 0) daySeqs.push(num);
+      }
+    });
+    if (daySeqs.length > 0) {
+      const maxNum = Math.max(...daySeqs);
+      highestFolio = `${prefix}${String(maxNum).padStart(2, '0')}`;
+    }
+
+    return res.json({ lastFolio: highestFolio, nextFolio });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -218,43 +318,52 @@ export const duplicateCotizacion = async (req: Request, res: Response) => {
 
     if (origError) throw origError;
 
-    // Generate new folio
-    const { data: lastData } = await client
+    const today = new Date();
+    const yy = String(today.getFullYear()).slice(-2);
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const datePrefix = `${yy}${mm}${dd}`;
+
+    const { data: allFolios, error: foliosErr } = await client
       .from('cotizaciones')
       .select('folio')
-      .order('folio', { ascending: false })
-      .limit(1);
+      .ilike('folio', `${datePrefix}%`);
 
-    let newFolio = (new Date().getFullYear() % 100).toString() + "0001";
-    if (lastData && lastData.length > 0) {
-      const lastFolio = parseInt(lastData[0].folio, 10);
-      if (!isNaN(lastFolio)) {
-        newFolio = (lastFolio + 1).toString();
-      }
-    }
+    if (foliosErr) throw foliosErr;
+
+    const existingFolios = (allFolios || []).map((r: any) => String(r.folio || '').trim());
+    const newFolio = calculateNextFolio(datePrefix, existingFolios);
 
     const payload = {
       folio: newFolio,
       cliente_nombre: original.cliente_nombre,
       vendedor: original.vendedor,
-      moneda: original.moneda,
-      fecha_creacion: new Date().toLocaleDateString('es-MX'),
-      subtotal: original.subtotal,
-      iva: original.iva,
-      total: original.total,
-      lineas: original.lineas,
+      moneda: original.moneda || 'MXN',
+      fecha_creacion: today.toLocaleDateString('es-MX'),
+      subtotal: original.subtotal || 0,
+      iva: original.iva || 0,
+      total: original.total || 0,
+      lineas: original.lineas || [],
       terminos_condiciones: original.terminos_condiciones,
+      notas_observaciones: original.notas_observaciones || null,
       estado: 'Borrador'
     };
 
-    const { error: insError } = await client
+    let { error: insError } = await client
       .from('cotizaciones')
       .insert([payload]);
+
+    if (insError && (insError.message?.includes('notas_observaciones') || insError.message?.includes('schema cache'))) {
+      const fbPayload = prepareFallbackPayload(payload);
+      const fbRes = await client.from('cotizaciones').insert([fbPayload]);
+      insError = fbRes.error;
+    }
 
     if (insError) throw insError;
     return res.json({ success: true, newFolio });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message });
+    console.error('Error in duplicateCotizacion:', error);
+    return res.status(500).json({ error: error.message || 'Error al duplicar cotización' });
   }
 };
 
@@ -315,14 +424,25 @@ export const createCotizacion = async (req: Request, res: Response) => {
       }
     }
 
-    const { data: result, error } = await client
+    let { data: result, error } = await client
       .from('cotizaciones')
       .insert([payload])
       .select()
       .single();
 
+    if (error && (error.message?.includes('notas_observaciones') || error.message?.includes('schema cache'))) {
+      const fbPayload = prepareFallbackPayload(payload);
+      const fbRes = await client
+        .from('cotizaciones')
+        .insert([fbPayload])
+        .select()
+        .single();
+      result = fbRes.data;
+      error = fbRes.error;
+    }
+
     if (error) throw error;
-    return res.json({ success: true, cotizacion: result });
+    return res.json({ success: true, cotizacion: formatCotizacionResponse(result) });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -386,10 +506,19 @@ export const updateCotizacion = async (req: Request, res: Response) => {
       }
     }
 
-    const { error } = await client
+    let { error } = await client
       .from('cotizaciones')
       .update(payload)
       .eq('id', id);
+
+    if (error && (error.message?.includes('notas_observaciones') || error.message?.includes('schema cache'))) {
+      const fbPayload = prepareFallbackPayload(payload);
+      const fbRes = await client
+        .from('cotizaciones')
+        .update(fbPayload)
+        .eq('id', id);
+      error = fbRes.error;
+    }
 
     if (error) throw error;
     return res.json({ success: true });
@@ -397,3 +526,4 @@ export const updateCotizacion = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+

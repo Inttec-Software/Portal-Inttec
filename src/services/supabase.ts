@@ -2,7 +2,7 @@ import { logger } from '@/utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 
-import { getApiHeaders, getApiUrl } from './apiHelper';
+import { getApiHeaders, getApiUrl, invalidateHeaderCache } from './apiHelper';
 import { Platform } from 'react-native';
 
 import Constants from 'expo-constants';
@@ -140,6 +140,7 @@ export const CompanyService = {
   async setActiveCompany(company: 'inttec' | 'daravisa'): Promise<void> {
     activeCompany = company;
     updateActiveClient();
+    invalidateHeaderCache();
     if (isBrowser) {
       await AsyncStorage.setItem('active_company', company);
     }
@@ -150,6 +151,7 @@ export const CompanyService = {
       if (saved === 'daravisa' || saved === 'inttec') {
         activeCompany = saved;
         updateActiveClient();
+        invalidateHeaderCache();
       }
     }
     return activeCompany;
@@ -163,6 +165,7 @@ export const EnvService = {
   async setActiveEnv(env: 'cloud' | 'test'): Promise<void> {
     activeEnv = env;
     updateActiveClient();
+    invalidateHeaderCache();
     if (isBrowser) {
       await AsyncStorage.setItem('active_env', env);
     }
@@ -202,7 +205,7 @@ export interface Gasto {
   categoria_id?: string | null; // Deprecado: la categoría se obtiene a través de subcategoria_id
   subcategoria?: string | null;
   subcategoria_id?: string | null;
-  metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito';
+  metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia';
   justificacion?: string | null;
   foto_url?: string | null;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ACTION_REQUIRED';
@@ -402,8 +405,7 @@ export interface ProveedorItem {
  */
 export const AuthService = {
   async login(email: string, password: string): Promise<Usuario> {
-    const rawApiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000';
-    const apiUrl = resolveLocalhost(rawApiUrl);
+    const apiUrl = getApiUrl();
     const company = CompanyService.getActiveCompany();
     const env = EnvService.getActiveEnv();
 
@@ -418,16 +420,25 @@ export const AuthService = {
         body: JSON.stringify({ email, password })
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data.message || 'Error al iniciar sesión');
+        let errorMsg = `Error ${response.status}: no se pudo conectar con el servidor`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.message) errorMsg = errData.message;
+        } catch (_) {
+          const text = await response.text().catch(() => '');
+          if (text) errorMsg = `Servidor respondió con código ${response.status}`;
+        }
+        throw new Error(errorMsg);
       }
+
+      const data = await response.json();
 
       if (isBrowser) {
         // Guardamos tanto el usuario como el token
         await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(data.usuario));
         await AsyncStorage.setItem(`jwt_token_${company}`, data.token);
+        invalidateHeaderCache();
       }
 
       return data.usuario as Usuario;
@@ -442,6 +453,7 @@ export const AuthService = {
       await AsyncStorage.removeItem('logged_user_daravisa');
       await AsyncStorage.removeItem('jwt_token_inttec');
       await AsyncStorage.removeItem('jwt_token_daravisa');
+      invalidateHeaderCache();
     }
   },
 
@@ -624,34 +636,25 @@ export const AsistenciaService = {
     base64Data: string,
     tipo: 'entrada' | 'salida'
   ): Promise<string> {
-    logger.error('[Supabase Storage] Iniciando subirFotoAsistencia...');
     const fechaStr = this.getFechaJornada();
     const fileName = `asistencias/${empleadoId}/${fechaStr}_${tipo}_${Date.now()}.jpg`;
-    logger.error('[Supabase Storage] Nombre de archivo generado:', fileName);
 
     let cleanBase64 = base64Data;
     if (base64Data.includes(';base64,')) {
-      logger.error('[Supabase Storage] Detectado prefijo de Data URL, limpiando base64...');
       const parts = base64Data.split(';base64,');
       if (parts.length > 1) {
         cleanBase64 = parts[1];
-        logger.error('[Supabase Storage] Limpieza completada. Nueva longitud base64:', cleanBase64.length);
       }
-    } else {
-      logger.error('[Supabase Storage] Base64 recibido parece ser binario puro. Longitud:', base64Data.length);
     }
 
     try {
-      // Convertir base64 a ArrayBuffer
-      logger.error('[Supabase Storage] Convirtiendo base64 a ArrayBuffer mediante atob...');
       const binaryStr = atob(cleanBase64);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
+      const len = binaryStr.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
         bytes[i] = binaryStr.charCodeAt(i);
       }
-      logger.error('[Supabase Storage] ArrayBuffer creado, bytes:', bytes.length);
 
-      logger.error('[Supabase Storage] Subiendo archivo al bucket "tickets"...');
       const { error: uploadError } = await supabase.storage
         .from('tickets')
         .upload(fileName, bytes.buffer, {
@@ -660,16 +663,14 @@ export const AsistenciaService = {
         });
 
       if (uploadError) {
-        logger.error('[Supabase Storage] Error en supabase.storage.upload:', uploadError);
+        logger.error('[Supabase Storage] Error en upload:', uploadError);
         throw uploadError;
       }
-      logger.error('[Supabase Storage] Subida completada con éxito.');
 
       const { data: urlData } = supabase.storage
         .from('tickets')
         .getPublicUrl(fileName);
 
-      logger.error('[Supabase Storage] URL pública obtenida:', urlData.publicUrl);
       return urlData.publicUrl;
     } catch (err: any) {
       logger.error('[Supabase Storage] Excepción capturada en subirFotoAsistencia:', err.message || err);

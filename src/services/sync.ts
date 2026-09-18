@@ -14,7 +14,7 @@ export interface OfflineGastoItem {
   categoria_id?: string | null;
   subcategoria?: string | null;
   subcategoria_id?: string | null;
-  metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito';
+  metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia';
   justificacion?: string | null;
   base64Foto?: string | null; // Foto en base64 para guardado offline
   localFotoUri?: string | null; // URL local guardada en disco

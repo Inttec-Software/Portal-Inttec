@@ -97,35 +97,49 @@ export default function MisEvidenciasHistorial() {
   };
 
   const filteredEvidencias = useMemo(() => {
-    if (!searchQuery) return evidencias;
-    const lowerQ = searchQuery.toLowerCase();
-    return evidencias.filter((ev: any) => {
-      const matchClient = ev.cliente?.toLowerCase().includes(lowerQ);
-      const matchDesc = ev.descripcion_trabajo?.toLowerCase().includes(lowerQ);
-      return matchClient || matchDesc;
+    let result = evidencias;
+    if (searchQuery) {
+      const lowerQ = searchQuery.toLowerCase();
+      result = evidencias.filter((ev: any) => {
+        const matchClient = ev.cliente?.toLowerCase().includes(lowerQ);
+        const matchDesc = ev.descripcion_trabajo?.toLowerCase().includes(lowerQ);
+        return matchClient || matchDesc;
+      });
+    }
+
+    return result.map((item: any) => {
+      let materialCount = 0;
+      try {
+        if (item.descripcion_trabajo) {
+          const parsed = typeof item.descripcion_trabajo === 'string' ? JSON.parse(item.descripcion_trabajo) : item.descripcion_trabajo;
+          if (Array.isArray(parsed)) {
+            parsed.forEach((t: any) => {
+              if (t.materiales_usados && Array.isArray(t.materiales_usados)) {
+                materialCount += t.materiales_usados.length;
+              } else if (t.materiales) {
+                materialCount += t.materiales.split(',').filter((m: string) => m.trim().length > 0).length;
+              }
+            });
+          }
+        } else if (item.materiales_usados) {
+          materialCount = item.materiales_usados.split(',').filter((m: string) => m.trim().length > 0).length;
+        }
+      } catch (e) {}
+
+      const materialText = materialCount > 0 ? `${materialCount} mat.` : 'No';
+      const fotosCount = (item.foto_antes_url ? 1 : 0) + (item.foto_despues_url ? 1 : 0) + (item.fotos_adicionales_urls ? item.fotos_adicionales_urls.length : 0);
+      const dateText = dayjs(item.created_at).format('DD/MM/YY, hh:mm A');
+
+      return {
+        ...item,
+        _materialText: materialText,
+        _fotosCount: fotosCount,
+        _dateText: dateText,
+      };
     });
   }, [evidencias, searchQuery]);
 
-  const renderItem = ({ item }: { item: any }) => {
-    let materialCount = 0;
-    try {
-      if (item.descripcion_trabajo) {
-        const parsed = JSON.parse(item.descripcion_trabajo);
-        parsed.forEach((t: any) => {
-          if (t.materiales_usados && Array.isArray(t.materiales_usados)) {
-            materialCount += t.materiales_usados.length;
-          } else if (t.materiales) {
-             materialCount += t.materiales.split(',').filter((m: string) => m.trim().length > 0).length;
-          }
-        });
-      } else if (item.materiales_usados) {
-        materialCount = item.materiales_usados.split(',').filter((m: string) => m.trim().length > 0).length;
-      }
-    } catch (e) {}
-
-    const materialText = materialCount > 0 ? `${materialCount} mat.` : 'No';
-    const fotosCount = (item.foto_antes_url ? 1 : 0) + (item.foto_despues_url ? 1 : 0) + (item.fotos_adicionales_urls ? item.fotos_adicionales_urls.length : 0);
-
+  const renderItem = useCallback(({ item }: { item: any }) => {
     return (
       <TouchableOpacity
         activeOpacity={0.7}
@@ -136,23 +150,23 @@ export default function MisEvidenciasHistorial() {
         style={[styles.tableRow, { borderBottomColor: themeColors.border }]}
       >
         <Text style={[styles.tdText, { flex: 1.5, color: themeColors.textSecondary }]} numberOfLines={2}>
-          {dayjs(item.created_at).format('DD/MM/YY, hh:mm A')}
+          {item._dateText}
         </Text>
         <Text style={[styles.tdText, { flex: 2.5, color: themeColors.text }]} numberOfLines={2}>
           {item.cliente || 'Sin cliente'}
         </Text>
         <Text style={[styles.tdText, { flex: 1, textAlign: 'center', color: themeColors.textSecondary }]}>
-          {fotosCount} fotos
+          {item._fotosCount} fotos
         </Text>
         <Text style={[styles.tdText, { flex: 1, textAlign: 'center', color: themeColors.textSecondary }]}>
-          {materialText}
+          {item._materialText}
         </Text>
         <View style={styles.actionCell}>
            <Ionicons name="eye-outline" size={20} color={themeColors.accent} />
         </View>
       </TouchableOpacity>
     );
-  };
+  }, [themeColors]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: themeColors.background }} edges={['bottom', 'left', 'right']}>

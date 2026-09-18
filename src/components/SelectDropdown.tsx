@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { normalizeText } from '@/utils/helpers';
 
 interface SelectDropdownProps {
   label: string;
@@ -46,9 +47,10 @@ export default function SelectDropdown({
   const selectedItem = data.find(item => item[valueKey] === value);
   const displayValue = selectedItem ? selectedItem[labelKey] : placeholder;
 
-  const filteredData = searchable && searchQuery
+  const normQuery = normalizeText(searchQuery);
+  const filteredData = searchable && normQuery
     ? data.filter(item => 
-        String(item[labelKey]).toLowerCase().includes(searchQuery.toLowerCase())
+        normalizeText(String(item[labelKey] || '')).includes(normQuery)
       )
     : data;
 

@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS public.gastos (
   empleado_id uuid NOT NULL,
   empleado_nombre text,
   monto numeric NOT NULL,
-  metodo_pago text CHECK (metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text])),
+  metodo_pago text CHECK (metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text, 'transferencia'::text])),
   tipo_tarjeta character varying,
   justificacion text,
   foto_url text,
@@ -282,7 +282,8 @@ CREATE TABLE IF NOT EXISTS public.productos (
   sku_interno character varying NOT NULL UNIQUE,
   nombre_oficial text NOT NULL,
   categoria_id uuid NOT NULL,
-  stock_actual integer NOT NULL DEFAULT 0 CHECK (stock_actual >= 0),
+  stock_actual numeric NOT NULL DEFAULT 0 CHECK (stock_actual >= 0),
+  unidad text DEFAULT 'pza',
   activo boolean NOT NULL DEFAULT true,
   created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   precio_unitario numeric DEFAULT 0,
@@ -307,7 +308,7 @@ CREATE TABLE IF NOT EXISTS public.movimientos_inventario (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   producto_id uuid NOT NULL,
   tipo character varying NOT NULL CHECK (tipo::text = ANY (ARRAY['ENTRADA'::character varying::text, 'SALIDA'::character varying::text])),
-  cantidad integer NOT NULL CHECK (cantidad > 0),
+  cantidad numeric NOT NULL CHECK (cantidad > 0),
   fecha timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   folio_factura character varying,
   proveedor_id uuid,
@@ -519,7 +520,7 @@ CREATE TABLE IF NOT EXISTS public.inventario_empleados (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   empleado_id UUID REFERENCES public.usuarios(id) NOT NULL,
   producto_id UUID REFERENCES public.productos(id) NOT NULL,
-  cantidad_disponible INTEGER NOT NULL DEFAULT 0,
+  cantidad_disponible NUMERIC NOT NULL DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT inventario_empleados_unique UNIQUE(empleado_id, producto_id)
@@ -878,4 +879,40 @@ GRANT ALL ON TABLE public.herramientas TO anon, authenticated, service_role;
 GRANT ALL ON TABLE public.inventario_herramientas_empleado TO anon, authenticated, service_role;
 GRANT ALL ON TABLE public.inventario_herramientas_vehiculo TO anon, authenticated, service_role;
 GRANT ALL ON TABLE public.checklists_vehiculo_herramientas TO anon, authenticated, service_role;
+
+-- =========================================================================
+-- MIGRACIÓN: SOPORTE DE UNIDADES DE MEDIDA Y CANTIDADES DECIMALES (METROS, ETC.)
+-- =========================================================================
+ALTER TABLE public.productos 
+ADD COLUMN IF NOT EXISTS unidad TEXT DEFAULT 'pza';
+
+ALTER TABLE public.productos 
+ALTER COLUMN stock_actual TYPE NUMERIC USING stock_actual::NUMERIC;
+
+ALTER TABLE public.movimientos_inventario 
+ALTER COLUMN cantidad TYPE NUMERIC USING cantidad::NUMERIC;
+
+DO $$ 
+BEGIN 
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'inventario_empleados') THEN
+    ALTER TABLE public.inventario_empleados 
+    ALTER COLUMN cantidad_disponible TYPE NUMERIC USING cantidad_disponible::NUMERIC;
+  END IF;
+END $$;
+
+-- =========================================================================
+-- MIGRACIÓN: DESGLOSE DE ESTADOS DE STOCK EN PRODUCTOS (NUEVAS, USADAS, POR REVISAR)
+-- =========================================================================
+ALTER TABLE public.productos 
+ADD COLUMN IF NOT EXISTS stock_nuevo NUMERIC DEFAULT 0,
+ADD COLUMN IF NOT EXISTS stock_usado NUMERIC DEFAULT 0,
+ADD COLUMN IF NOT EXISTS stock_por_revisar NUMERIC DEFAULT 0;
+
+UPDATE public.productos
+SET stock_nuevo = COALESCE(stock_actual, 0)
+WHERE (stock_nuevo IS NULL OR stock_nuevo = 0)
+  AND (stock_usado IS NULL OR stock_usado = 0)
+  AND (stock_por_revisar IS NULL OR stock_por_revisar = 0)
+  AND COALESCE(stock_actual, 0) > 0;
+
 

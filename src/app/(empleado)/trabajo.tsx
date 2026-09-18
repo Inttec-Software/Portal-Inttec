@@ -23,6 +23,7 @@ import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { normalizeText } from '@/utils/helpers';
 import ImageViewerModal from '@/components/ImageViewerModal';
 
 export default function MiTrabajoScreen() {
@@ -139,15 +140,15 @@ export default function MiTrabajoScreen() {
   };
 
   const filteredEvidencias = useMemo(() => {
-    if (!searchQuery.trim()) {
+    const q = normalizeText(searchQuery);
+    if (!q) {
       return evidencias;
     }
-    const q = searchQuery.toLowerCase();
     return evidencias.filter(
       (e) =>
-        e.cliente.toLowerCase().includes(q) ||
-        e.descripcion_trabajo.toLowerCase().includes(q) ||
-        (e.materiales_usados && e.materiales_usados.toLowerCase().includes(q))
+        normalizeText(e.cliente).includes(q) ||
+        normalizeText(e.descripcion_trabajo).includes(q) ||
+        (e.materiales_usados && normalizeText(e.materiales_usados).includes(q))
     );
   }, [searchQuery, evidencias]);
 
@@ -309,7 +310,7 @@ export default function MiTrabajoScreen() {
 
                       <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: Spacing.one }}>
                         <TouchableOpacity
-                          onPress={() => router.push(`/(empleado)/evidencia?draftId=${d.id}` as any)}
+                          onPress={() => router.push(`/(empleado)/agregar-evidencia?draftId=${d.id}` as any)}
                           style={{
                             backgroundColor: themeColors.warning,
                             paddingVertical: 6,

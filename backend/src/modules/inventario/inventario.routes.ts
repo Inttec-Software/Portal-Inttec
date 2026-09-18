@@ -11,7 +11,8 @@ import {
   guardarImportacion, 
   crearCatalogo,
   getEmpleadoRetribuciones,
-  verificarFolioFactura
+  verificarFolioFactura,
+  hardDeleteProducto
 } from './inventario.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -28,6 +29,7 @@ router.post('/productos/bulk-delete', bulkDeleteProductos);
 router.post('/productos/bulk-update', bulkUpdateProductos);
 router.post('/productos', upsertProducto);
 router.put('/productos/:id', upsertProducto);
+router.delete('/productos/:id', hardDeleteProducto);
 router.post('/productos/:id/stock', addStock);
 router.post('/consumos', guardarConsumo);
 router.post('/importar', guardarImportacion);

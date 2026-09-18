@@ -24,6 +24,7 @@ import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { parseCFDIXML } from '@/utils/cfdiParser';
 import { exportarFacturaOdooPDF } from '@/utils/reportGenerator';
+import { normalizeText } from '@/utils/helpers';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 interface ClienteCatalogo {
@@ -350,11 +351,11 @@ export default function FacturacionScreen() {
     if (!searchText || !searchText.trim()) {
       return productos.slice(0, 30);
     }
-    const q = searchText.toLowerCase().trim();
+    const q = normalizeText(searchText);
     return productos.filter(p => {
-      const nombre = (p.nombre_oficial || (p as any).nombre || '').toLowerCase();
-      const sku = (p.sku_interno || '').toLowerCase();
-      const catNombre = (p.categoria_id ? categoriasMap.get(p.categoria_id) || '' : '').toLowerCase();
+      const nombre = normalizeText(p.nombre_oficial || (p as any).nombre || '');
+      const sku = normalizeText(p.sku_interno || '');
+      const catNombre = normalizeText(p.categoria_id ? categoriasMap.get(p.categoria_id) || '' : '');
       return nombre.includes(q) || sku.includes(q) || catNombre.includes(q);
     }).slice(0, 30);
   };
@@ -363,8 +364,29 @@ export default function FacturacionScreen() {
     const desc = prod.nombre_oficial || (prod as any).nombre || '';
     const precio = String(prod.precio_unitario || prod.precio || '0');
     const claveSat = prod.sat_code || prod.clave_sat || prod.clave_facturacion || '01010101';
-    const claveUnidad = prod.clave_unidad || 'H87';
-    const unidad = prod.unidad || 'Pieza';
+    
+    const unidadNorm = (prod.unidad || '').toLowerCase().trim();
+    let claveUnidad = prod.clave_unidad;
+    let unidad = prod.unidad || 'Pieza';
+
+    if (!claveUnidad) {
+      if (unidadNorm === 'mts' || unidadNorm === 'metros' || unidadNorm === 'metro' || unidadNorm === 'm') {
+        claveUnidad = 'LM'; // Metro Lineal SAT standard
+        unidad = 'Metro';
+      } else if (unidadNorm === 'servicio' || unidadNorm === 'servicios') {
+        claveUnidad = 'E48';
+        unidad = 'Unidad de servicio';
+      } else if (unidadNorm === 'rollo' || unidadNorm === 'bobina') {
+        claveUnidad = 'XRO';
+        unidad = 'Rollo';
+      } else if (unidadNorm === 'kit') {
+        claveUnidad = 'KT';
+        unidad = 'Kit';
+      } else {
+        claveUnidad = 'H87';
+        unidad = 'Pieza';
+      }
+    }
 
     setPartidas(prev => {
       const next = [...prev];
@@ -507,12 +529,48 @@ export default function FacturacionScreen() {
         })),
       };
 
-      const { data, error } = await supabase.functions.invoke('facturar-venta', {
-        body: payload,
-      });
+      // Timbrar a través del backend (con zona horaria correcta sincronizada con SAT/Finkok)
+      let data: any = null;
+      let timbradoSuccess = false;
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      try {
+        const headers = await getApiHeaders();
+        const apiUrl = getApiUrl();
+        const resp = await fetch(`${apiUrl}/api/sat/timbrar-factura`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+        });
+
+        const resJson = await resp.json().catch(() => ({}));
+        if (resp.ok && resJson.success) {
+          data = resJson;
+          timbradoSuccess = true;
+        } else if (resJson.error) {
+          throw new Error(resJson.error);
+        } else {
+          throw new Error(`Error del servidor (${resp.status})`);
+        }
+      } catch (backendErr: any) {
+        console.warn('Backend timbrado fallo o no disponible, intentando Edge Function:', backendErr);
+        // Si el backend arrojó un error fiscal concreto del SAT/Finkok, no ocultarlo
+        if (backendErr.message && (backendErr.message.includes('SAT') || backendErr.message.includes('Finkok') || backendErr.message.includes('['))) {
+          throw backendErr;
+        }
+
+        const { data: edgeData, error: edgeError } = await supabase.functions.invoke('facturar-venta', {
+          body: payload,
+        });
+
+        if (edgeError) throw edgeError;
+        if (edgeData?.error) throw new Error(edgeData.error);
+        data = edgeData;
+        timbradoSuccess = true;
+      }
+
+      if (!timbradoSuccess || !data?.cfdi_uuid) {
+        throw new Error('No se pudo obtener el UUID de timbrado.');
+      }
 
       showAlert('Éxito', `Factura timbrada exitosamente (CFDI 4.0).\n\nFolio Fiscal (UUID):\n${data.cfdi_uuid}`);
       fetchHistorialFacturas();
@@ -674,11 +732,39 @@ export default function FacturacionScreen() {
     const doCancel = async () => {
       try {
         setIsSubmitting(true);
-        const { data, error } = await supabase.functions.invoke('cancelar-factura', {
-          body: { venta_id: factura.id, motivo: '02' },
-        });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
+        let data: any = null;
+
+        try {
+          const headers = await getApiHeaders();
+          const apiUrl = getApiUrl();
+          const resp = await fetch(`${apiUrl}/api/sat/cancelar-factura`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ venta_id: factura.id, motivo: '02' }),
+          });
+
+          const resJson = await resp.json().catch(() => ({}));
+          if (resp.ok && resJson.success) {
+            data = resJson;
+          } else if (resJson.error) {
+            throw new Error(resJson.error);
+          } else {
+            throw new Error(`Error del servidor al cancelar (${resp.status})`);
+          }
+        } catch (backendErr: any) {
+          console.warn('Backend cancelacion fallo, intentando Edge Function:', backendErr);
+          if (backendErr.message && (backendErr.message.includes('SAT') || backendErr.message.includes('Finkok') || backendErr.message.includes('['))) {
+            throw backendErr;
+          }
+
+          const { data: edgeData, error: edgeError } = await supabase.functions.invoke('cancelar-factura', {
+            body: { venta_id: factura.id, motivo: '02' },
+          });
+
+          if (edgeError) throw edgeError;
+          if (edgeData?.error) throw new Error(edgeData.error);
+          data = edgeData;
+        }
 
         showAlert('Éxito', 'La factura ha sido cancelada correctamente ante el SAT.');
         fetchHistorialFacturas();
@@ -706,10 +792,10 @@ export default function FacturacionScreen() {
     return historialFacturas.filter(f => {
       if (filtroEstado !== 'TODAS' && f.cfdi_estado !== filtroEstado) return false;
       if (historialSearch.trim()) {
-        const q = historialSearch.toLowerCase();
-        const cl = (f.cliente || '').toLowerCase();
-        const fo = (f.folio || '').toLowerCase();
-        const uu = (f.cfdi_uuid || '').toLowerCase();
+        const q = normalizeText(historialSearch);
+        const cl = normalizeText(f.cliente || '');
+        const fo = normalizeText(f.folio || '');
+        const uu = normalizeText(f.cfdi_uuid || '');
         return cl.includes(q) || fo.includes(q) || uu.includes(q);
       }
       return true;
@@ -718,11 +804,11 @@ export default function FacturacionScreen() {
 
   const clientesFiltrados = useMemo(() => {
     if (!clientSearch.trim()) return clientes;
-    const q = clientSearch.toLowerCase();
+    const q = normalizeText(clientSearch);
     return clientes.filter(c =>
-      (c.nombre || '').toLowerCase().includes(q) ||
-      (c.razon_social || '').toLowerCase().includes(q) ||
-      (c.rfc || '').toLowerCase().includes(q)
+      normalizeText(c.nombre || '').includes(q) ||
+      normalizeText(c.razon_social || '').includes(q) ||
+      normalizeText(c.rfc || '').includes(q)
     );
   }, [clientes, clientSearch]);
 
@@ -1090,6 +1176,9 @@ export default function FacturacionScreen() {
                             setActiveDropdownIndex(index);
                           }}
                           onFocus={() => setActiveDropdownIndex(index)}
+                          onSubmitEditing={() => setActiveDropdownIndex(null)}
+                          returnKeyType="done"
+                          blurOnSubmit={false}
                           placeholder="Escribe o selecciona del catálogo en cascada..."
                           placeholderTextColor={themeColors.textSecondary}
                         />
@@ -1102,6 +1191,14 @@ export default function FacturacionScreen() {
                             style={{ padding: 4 }}
                           >
                             <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                          </TouchableOpacity>
+                        )}
+                        {!!item.descripcion && activeDropdownIndex === index && (
+                          <TouchableOpacity
+                            onPress={() => setActiveDropdownIndex(null)}
+                            style={{ padding: 4 }}
+                          >
+                            <Ionicons name="checkmark-circle" size={18} color="#10b981" />
                           </TouchableOpacity>
                         )}
                         <TouchableOpacity
@@ -1141,15 +1238,66 @@ export default function FacturacionScreen() {
                             </TouchableOpacity>
                           </View>
 
+                          {/* Opción rápida para usar el texto escrito como concepto personalizado */}
+                          {!!item.descripcion && item.descripcion.trim().length > 0 && (
+                            <TouchableOpacity
+                              activeOpacity={0.7}
+                              onPress={() => setActiveDropdownIndex(null)}
+                              style={[
+                                styles.customConceptOption,
+                                {
+                                  borderBottomColor: themeColors.border + '50',
+                                  backgroundColor: '#0284c715',
+                                },
+                              ]}
+                            >
+                              <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: '#0284c725', alignItems: 'center', justifyContent: 'center' }}>
+                                <Ionicons name="create-outline" size={14} color="#0284c7" />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: '#0284c7' }}>
+                                  Usar "{item.descripcion.trim()}"
+                                </Text>
+                                <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>
+                                  Concepto libre / personalizado (sin vincular a catálogo)
+                                </Text>
+                              </View>
+                              <View style={{ backgroundColor: '#0284c7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>Usar este texto</Text>
+                              </View>
+                            </TouchableOpacity>
+                          )}
+
                           {getFilteredProductsForPartida(item.descripcion).length === 0 ? (
-                            <View style={{ padding: 16, alignItems: 'center' }}>
-                              <Ionicons name="search-outline" size={20} color={themeColors.textSecondary} style={{ marginBottom: 4, opacity: 0.6 }} />
+                            <View style={{ padding: 16, alignItems: 'center', gap: 8 }}>
+                              <Ionicons name="search-outline" size={22} color={themeColors.textSecondary} style={{ opacity: 0.6 }} />
                               <Text style={{ color: themeColors.textSecondary, fontSize: 12, fontWeight: '600' }}>
                                 Sin coincidencias en inventario
                               </Text>
-                              <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2, opacity: 0.8 }}>
-                                Puedes seguir escribiendo tu concepto personalizado.
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 11, textAlign: 'center', opacity: 0.8 }}>
+                                Puedes usar lo que escribiste directamente como concepto personalizado o de servicio.
                               </Text>
+                              {!!item.descripcion && item.descripcion.trim().length > 0 && (
+                                <TouchableOpacity
+                                  activeOpacity={0.8}
+                                  onPress={() => setActiveDropdownIndex(null)}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    backgroundColor: '#0284c7',
+                                    paddingHorizontal: 14,
+                                    paddingVertical: 7,
+                                    borderRadius: 8,
+                                    marginTop: 4,
+                                  }}
+                                >
+                                  <Ionicons name="checkmark-circle" size={15} color="#fff" />
+                                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>
+                                    Usar "{item.descripcion.trim()}"
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
                             </View>
                           ) : (
                             <ScrollView
@@ -1836,5 +1984,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderBottomWidth: 1,
+  },
+  customConceptOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    gap: 10,
   },
 });

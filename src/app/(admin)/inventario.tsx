@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { GeminiService } from '@/services/gemini';
+import { normalizeText } from '@/utils/helpers';
 
 // Interfaces locales para concordar con la base de datos
 interface Categoria {
@@ -45,8 +46,12 @@ interface Producto {
   sku_interno: string;
   nombre_oficial: string;
   categoria_id: string;
-  proveedor_id?: string;
+  proveedor_id?: string | null;
   stock_actual: number;
+  stock_nuevo?: number;
+  stock_usado?: number;
+  stock_por_revisar?: number;
+  unidad?: string;
   precio_unitario?: number;
   activo: boolean;
 }
@@ -96,6 +101,8 @@ export default function InventarioDashboard() {
   // Filtros de búsqueda
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   // Selección múltiple para acciones en lote
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
@@ -128,6 +135,11 @@ export default function InventarioDashboard() {
   const [formCategoriaId, setFormCategoriaId] = useState('');
   const [formProveedorId, setFormProveedorId] = useState('');
   const [formStock, setFormStock] = useState('0');
+  const [showEstadoBreakdown, setShowEstadoBreakdown] = useState(false);
+  const [formStockNuevo, setFormStockNuevo] = useState('0');
+  const [formStockUsado, setFormStockUsado] = useState('0');
+  const [formStockPorRevisar, setFormStockPorRevisar] = useState('0');
+  const [formUnidad, setFormUnidad] = useState('pza');
   const [formPrecio, setFormPrecio] = useState('');
   const [isSavingProduct, setIsSavingProduct] = useState(false);
 
@@ -466,9 +478,10 @@ async function loadAllData() {
     setSelectorVisible(true);
   };
 
-  const filteredSelectorOptions = selectorOptions.filter(opt =>
-    opt.label.toLowerCase().includes(selectorSearch.toLowerCase())
-  );
+  const filteredSelectorOptions = selectorOptions.filter(opt => {
+    const norm = normalizeText(selectorSearch);
+    return !norm || normalizeText(opt.label).includes(norm);
+  });
 
   // --- Acciones en Lote (Bulk Actions) ---
   const toggleSelectProduct = (id: string) => {
@@ -653,11 +666,16 @@ async function loadAllData() {
   // --- CRUD Manual ---
   const handleOpenCreateModal = () => {
     setEditingProduct(null);
-    setFormSku('');
+    setFormSku(`SKU-${Math.random().toString(36).substring(3, 8).toUpperCase()}`);
     setFormNombre('');
     setFormCategoriaId(categorias[0]?.id || '');
     setFormProveedorId('');
     setFormStock('0');
+    setFormStockNuevo('0');
+    setFormStockUsado('0');
+    setFormStockPorRevisar('0');
+    setShowEstadoBreakdown(false);
+    setFormUnidad('pza');
     setFormPrecio('');
     setCrudModalVisible(true);
   };
@@ -669,20 +687,58 @@ async function loadAllData() {
     setFormCategoriaId(p.categoria_id);
     setFormProveedorId(p.proveedor_id || '');
     setFormStock(p.stock_actual.toString());
+    
+    const nuevo = p.stock_nuevo !== undefined ? p.stock_nuevo : (p.stock_usado || p.stock_por_revisar ? 0 : p.stock_actual);
+    const usado = p.stock_usado ?? 0;
+    const porRevisar = p.stock_por_revisar ?? 0;
+
+    setFormStockNuevo(nuevo.toString());
+    setFormStockUsado(usado.toString());
+    setFormStockPorRevisar(porRevisar.toString());
+    setShowEstadoBreakdown(usado > 0 || porRevisar > 0);
+    setFormUnidad(p.unidad || 'pza');
     setFormPrecio(p.precio_unitario?.toString() || '0');
     setCrudModalVisible(true);
   };
 
   const handleSaveProduct = async () => {
-    if (!formSku.trim() || !formNombre.trim() || !formCategoriaId || !formProveedorId) {
-      Alert.alert('Validación', 'Por favor llena todos los campos obligatorios.');
+    if (!formSku.trim() || !formNombre.trim() || !formCategoriaId) {
+      Alert.alert('Validación', 'Por favor llena el SKU, Nombre y Categoría del producto.');
       return;
     }
 
-    const stockNum = parseInt(formStock, 10);
-    if (isNaN(stockNum) || stockNum < 0) {
-      Alert.alert('Validación', 'El stock debe ser un número entero mayor o igual a 0.');
+    const stockTotalNum = parseFloat(formStock);
+    if (isNaN(stockTotalNum) || stockTotalNum < 0) {
+      Alert.alert('Validación', 'El stock inicial debe ser un número mayor o igual a 0.');
       return;
+    }
+
+    let numNuevo = Math.max(0, parseFloat(formStockNuevo) || 0);
+    let numUsado = Math.max(0, parseFloat(formStockUsado) || 0);
+    let numPorRevisar = Math.max(0, parseFloat(formStockPorRevisar) || 0);
+    const sumaCondiciones = Math.round((numNuevo + numUsado + numPorRevisar) * 100) / 100;
+
+    // Validación: la suma del desglose no puede superar el stock inicial total
+    if (showEstadoBreakdown && sumaCondiciones > stockTotalNum) {
+      Alert.alert(
+        'Validación de Stock',
+        `La suma de las condiciones (${sumaCondiciones}) no puede superar el Stock Inicial total (${stockTotalNum}). Por favor ajusta las cantidades.`
+      );
+      return;
+    }
+
+    let finalNuevo = numNuevo;
+    let finalUsado = numUsado;
+    let finalPorRevisar = numPorRevisar;
+
+    // Si no se activó el desglose opcional o no hay usados/por revisar, todo va automáticamente como stock_nuevo
+    if (!showEstadoBreakdown || (finalUsado === 0 && finalPorRevisar === 0)) {
+      finalNuevo = stockTotalNum;
+      finalUsado = 0;
+      finalPorRevisar = 0;
+    } else if (sumaCondiciones < stockTotalNum) {
+      // Si la suma es menor, el remanente se asigna al stock nuevo
+      finalNuevo = Math.round((stockTotalNum - finalUsado - finalPorRevisar) * 100) / 100;
     }
 
     setIsSavingProduct(true);
@@ -693,7 +749,11 @@ async function loadAllData() {
         nombre_oficial: formNombre.trim(),
         categoria_id: formCategoriaId,
         proveedor_id: formProveedorId || null,
-        stock_actual: stockNum,
+        stock_actual: stockTotalNum,
+        stock_nuevo: finalNuevo,
+        stock_usado: finalUsado,
+        stock_por_revisar: finalPorRevisar,
+        unidad: formUnidad.trim() || 'pza',
         precio_unitario: parseFloat(formPrecio) || 0,
         activo: true,
       };
@@ -706,19 +766,31 @@ async function loadAllData() {
       const res = await fetch(url, {
         method,
         headers,
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          ...payload,
+          proveedor_id: formProveedorId || null
+        })
       });
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Error al guardar el producto en el servidor');
       }
-      Alert.alert('Éxito', editingProduct ? 'Producto actualizado correctamente.' : 'Producto agregado correctamente.');
+      
+      const resJson = await res.json().catch(() => ({}));
+      showAlert('Éxito', editingProduct ? 'Producto actualizado correctamente.' : 'Producto agregado correctamente.');
 
       setCrudModalVisible(false);
+
+      if (editingProduct) {
+        setProductos(prev => prev.map(prod => prod.id === editingProduct.id ? { ...prod, ...payload } : prod));
+      } else if (resJson.data) {
+        setProductos(prev => [resJson.data, ...prev]);
+      }
+      
       await loadAllData();
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo guardar el producto.');
+      showAlert('Error', err.message || 'No se pudo guardar el producto.');
     } finally {
       setIsSavingProduct(false);
     }
@@ -726,7 +798,8 @@ async function loadAllData() {
 
   const handleSoftDeleteProduct = (p: Producto) => {
     const performDelete = async () => {
-      setIsLoading(true);
+      // Actualización optimista instantánea
+      setProductos(prev => prev.map(prod => prod.id === p.id ? { ...prod, activo: false } : prod));
       try {
         const headers = await getApiHeaders();
         const res = await fetch(`${getApiUrl()}/api/inventario/productos/${p.id}`, {
@@ -735,21 +808,15 @@ async function loadAllData() {
           body: JSON.stringify({ activo: false })
         });
 
-        if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al desactivar el producto'); }
-        if (Platform.OS === 'web') {
-          window.alert('Producto desactivado.');
-        } else {
-          Alert.alert('Éxito', 'Producto desactivado.');
+        if (!res.ok) {
+          // Revertir si hay error
+          setProductos(prev => prev.map(prod => prod.id === p.id ? { ...prod, activo: true } : prod));
+          const errData = await res.json().catch(() => ({})); 
+          throw new Error(errData.error || 'Error al desactivar el producto'); 
         }
-        await loadAllData();
+        showAlert('Éxito', 'Producto desactivado.');
       } catch (err: any) {
-        if (Platform.OS === 'web') {
-          window.alert(err.message || 'No se pudo desactivar el producto.');
-        } else {
-          Alert.alert('Error', err.message || 'No se pudo desactivar el producto.');
-        }
-      } finally {
-        setIsLoading(false);
+        showAlert('Error', err.message || 'No se pudo desactivar el producto.');
       }
     };
 
@@ -774,16 +841,89 @@ async function loadAllData() {
     }
   };
 
+  const handleHardDeleteProduct = (p: Producto) => {
+    const performHardDelete = async () => {
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/inventario/productos/${p.id}`, {
+          method: 'DELETE',
+          headers,
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          if (data.isForeignKeyConstraint) {
+            showAlert(
+              'No se puede eliminar definitivamente',
+              data.error || 'Este producto está vinculado a ventas, cotizaciones o movimientos históricos. Puedes desactivarlo si deseas ocultarlo.'
+            );
+            return;
+          }
+          throw new Error(data.error || 'Error al eliminar el producto de la base de datos');
+        }
+
+        // Remover localmente de inmediato
+        setProductos(prev => prev.filter(prod => prod.id !== p.id));
+        showAlert('Éxito', `El producto "${p.nombre_oficial}" ha sido borrado definitivamente de la base de datos.`);
+      } catch (err: any) {
+        showAlert('Error', err.message || 'No se pudo eliminar el producto.');
+      }
+    };
+
+    const msg = `¿Estás seguro de que deseas ELIMINAR DEFINITIVAMENTE el producto "${p.nombre_oficial}"? Esta acción no se puede deshacer y borrará permanentemente el registro del sistema.`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) {
+        performHardDelete();
+      }
+    } else {
+      Alert.alert(
+        'Eliminación Definitiva (Hard Delete)',
+        msg,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Borrar para siempre', style: 'destructive', onPress: performHardDelete }
+        ]
+      );
+    }
+  };
+
+  const handleReactivateProduct = async (p: Producto) => {
+    // Actualización optimista en tiempo real sin congelar la UI
+    setProductos(prev => prev.map(prod => prod.id === p.id ? { ...prod, activo: true } : prod));
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/productos/${p.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ activo: true })
+      });
+
+      if (!res.ok) { 
+        // Revertir estado si falla la petición
+        setProductos(prev => prev.map(prod => prod.id === p.id ? { ...prod, activo: false } : prod));
+        const errData = await res.json().catch(() => ({})); 
+        throw new Error(errData.error || 'Error al reactivar el producto'); 
+      }
+      showAlert('Éxito', `El producto "${p.nombre_oficial}" ha sido reactivado.`);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo reactivar el producto.');
+    }
+  };
+
   const handleQuickAddStock = async (product: Producto) => {
     const valueStr = quickStockAdjustments[product.id] || '';
-    const toAdd = parseInt(valueStr, 10);
+    const toAdd = parseFloat(valueStr);
 
     if (isNaN(toAdd) || toAdd <= 0) {
-      Alert.alert('Validación', 'Por favor ingresa un número entero mayor a 0 para añadir al stock.');
+      Alert.alert('Validación', 'Por favor ingresa un número mayor a 0 para añadir al stock.');
       return;
     }
 
-    setIsLoading(true);
+    const newStock = product.stock_actual + toAdd;
+    // Actualización optimista instantánea del stock
+    setProductos(prev => prev.map(prod => prod.id === product.id ? { ...prod, stock_actual: newStock } : prod));
+    setQuickStockAdjustments(prev => ({ ...prev, [product.id]: '' }));
+
     try {
       const headers = await getApiHeaders();
       const res = await fetch(`${getApiUrl()}/api/inventario/productos/${product.id}/stock`, {
@@ -796,18 +936,21 @@ async function loadAllData() {
         })
       });
 
-      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al añadir stock'); }
+      if (!res.ok) { 
+        // Revertir si falla la API
+        setProductos(prev => prev.map(prod => prod.id === product.id ? { ...prod, stock_actual: product.stock_actual } : prod));
+        const errData = await res.json().catch(() => ({})); 
+        throw new Error(errData.error || 'Error al añadir stock'); 
+      }
 
-      const newStock = product.stock_actual + toAdd;
+      const newStock = Math.round((Number(product.stock_actual) + toAdd) * 100) / 100;
       // Limpiar el input de este producto
       setQuickStockAdjustments(prev => ({ ...prev, [product.id]: '' }));
 
-      Alert.alert('Éxito', `Se añadieron ${toAdd} unidades a "${product.nombre_oficial}". Stock actual: ${newStock}`);
+      showAlert('Éxito', `Se añadieron ${toAdd} ${product.unidad || 'unidades'} a "${product.nombre_oficial}". Stock actual: ${newStock} ${product.unidad || 'pzas'}`);
       await loadAllData();
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo actualizar el stock del producto.');
-    } finally {
-      setIsLoading(false);
+      showAlert('Error', err.message || 'No se pudo actualizar el stock del producto.');
     }
   };
 
@@ -913,7 +1056,7 @@ async function loadAllData() {
         .filter(p => p.activo)
         .map(p => ({
           id: p.id,
-          label: `${p.nombre_oficial} (${p.sku_interno}) - Stock: ${p.stock_actual}`,
+          label: `${p.nombre_oficial} (${p.sku_interno}) - Stock: ${p.stock_actual} ${p.unidad || 'pzas'}`,
         }))
     );
     setOnSelectOption(() => (id: string) => {
@@ -970,7 +1113,7 @@ async function loadAllData() {
       if (item.cantidad > prod.stock_actual) {
         Alert.alert(
           'Stock Insuficiente',
-          `No puedes consumir ${item.cantidad} unidades de "${prod.nombre_oficial}" porque solo hay ${prod.stock_actual} disponibles.`
+          `No puedes consumir ${item.cantidad} ${prod.unidad || 'unidades'} de "${prod.nombre_oficial}" porque solo hay ${prod.stock_actual} disponibles.`
         );
         return;
       }
@@ -1107,11 +1250,11 @@ async function loadAllData() {
             setFolioFactura(meta.folio_factura);
           }
           if (meta.proveedor_original) {
-            const provName = meta.proveedor_original.toLowerCase();
+            const provName = normalizeText(meta.proveedor_original);
             const rfcClean = meta.rfc_emisor?.replace(/[^A-Z0-9]/ig, '') || '';
             const matchingProv = proveedores.find(p => {
               const pRfcClean = p.rfc?.replace(/[^A-Z0-9]/ig, '') || '';
-              return (rfcClean && pRfcClean === rfcClean) || p.nombre.toLowerCase().includes(provName);
+              return (rfcClean && pRfcClean === rfcClean) || (provName && normalizeText(p.nombre).includes(provName));
             });
             if (matchingProv) {
               setSelectedProveedorId(matchingProv.id);
@@ -1126,23 +1269,26 @@ async function loadAllData() {
           // Buscar coincidencia exacta o lógica por nombre oficial
           let suggestedProd = null;
           if (iaClass.producto_normalizado) {
+            const normIaProd = normalizeText(iaClass.producto_normalizado);
             suggestedProd = productos.find(p => 
-              p.activo && p.nombre_oficial.toLowerCase().trim() === iaClass.producto_normalizado?.toLowerCase().trim()
+              p.activo && normalizeText(p.nombre_oficial) === normIaProd
             );
           }
 
           // Si no hay coincidencia exacta de nombre, intentar coincidir parcialmente
           if (!suggestedProd && iaClass.producto_normalizado) {
+            const normIaProd = normalizeText(iaClass.producto_normalizado);
             suggestedProd = productos.find(p => 
-              p.activo && p.nombre_oficial.toLowerCase().includes(iaClass.producto_normalizado!.toLowerCase())
+              p.activo && normalizeText(p.nombre_oficial).includes(normIaProd)
             );
           }
 
           const esNuevo = !suggestedProd || iaClass.requiere_revision || iaClass.confianza_mapeo < 0.80;
 
           // Buscar coincidencia lógica de categoría
+          const normIaCat = normalizeText(iaClass.categoria_maestra);
           const suggestedCat = categorias.find(c => 
-            c.nombre.toLowerCase().trim() === iaClass.categoria_maestra?.toLowerCase().trim()
+            normalizeText(c.nombre) === normIaCat
           );
 
           return {
@@ -1237,10 +1383,12 @@ async function loadAllData() {
 
   // Filtrado de catálogo
   const filteredProducts = productos.filter(p => {
-    if (!p.activo) return false;
-    const matchesSearch =
-      p.nombre_oficial.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.sku_interno.toLowerCase().includes(searchTerm.toLowerCase());
+    if (!showInactive && !p.activo) return false;
+    if (!showOutOfStock && (p.stock_actual || 0) <= 0) return false;
+    const normSearch = normalizeText(searchTerm);
+    const matchesSearch = !normSearch ||
+      normalizeText(p.nombre_oficial).includes(normSearch) ||
+      normalizeText(p.sku_interno).includes(normSearch);
     const matchesCat = selectedCategoryFilter ? p.categoria_id === selectedCategoryFilter : true;
     return matchesSearch && matchesCat;
   });
@@ -1537,16 +1685,69 @@ async function loadAllData() {
               style={{ marginBottom: Spacing.one }}
             />
 
-            {/* Selector de Categoría */}
-            <View style={styles.customDropdownContainer}>
+            {/* Selector de Categoría y Filtro Sin Stock */}
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <View style={[styles.customDropdownContainer, { flex: 1, minWidth: 180 }]}>
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                  onPress={openCategoryFilter}
+                >
+                  <Text style={{ color: selectedCategoryFilter ? themeColors.text : themeColors.textSecondary }}>
+                    {activeCategoryName || 'Filtrar por Categoría'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={18} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Toggle Switch para Productos Agotados e Inactivos */}
               <TouchableOpacity
-                style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                onPress={openCategoryFilter}
+                onPress={() => setShowOutOfStock(prev => !prev)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: 10,
+                  backgroundColor: showOutOfStock ? themeColors.accent + '20' : themeColors.backgroundElement,
+                  borderWidth: 1,
+                  borderColor: showOutOfStock ? themeColors.accent : themeColors.border,
+                }}
+                {...(Platform.OS === 'web' ? { title: showOutOfStock ? "Ocultar productos con stock 0" : "Mostrar productos sin stock" } as any : {})}
               >
-                <Text style={{ color: selectedCategoryFilter ? themeColors.text : themeColors.textSecondary }}>
-                  {activeCategoryName || 'Filtrar por Categoría'}
+                <Ionicons 
+                  name={showOutOfStock ? "eye-outline" : "eye-off-outline"} 
+                  size={16} 
+                  color={showOutOfStock ? themeColors.accent : themeColors.textSecondary} 
+                />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: showOutOfStock ? themeColors.accent : themeColors.textSecondary }}>
+                  {showOutOfStock ? 'Ver agotados ON' : 'Ver agotados OFF'}
                 </Text>
-                <Ionicons name="chevron-down" size={18} color={themeColors.text} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setShowInactive(prev => !prev)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: 10,
+                  backgroundColor: showInactive ? '#FF980020' : themeColors.backgroundElement,
+                  borderWidth: 1,
+                  borderColor: showInactive ? '#FF9800' : themeColors.border,
+                }}
+                {...(Platform.OS === 'web' ? { title: showInactive ? "Ocultar productos inactivos" : "Mostrar productos deshabilitados / inactivos" } as any : {})}
+              >
+                <Ionicons 
+                  name={showInactive ? "archive-outline" : "archive-outline"} 
+                  size={16} 
+                  color={showInactive ? '#FF9800' : themeColors.textSecondary} 
+                />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: showInactive ? '#FF9800' : themeColors.textSecondary }}>
+                  {showInactive ? 'Ver inactivos ON' : 'Ver inactivos OFF'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1639,24 +1840,63 @@ async function loadAllData() {
                     </TouchableOpacity>
 
                     <View style={{ flex: 1, gap: 2, marginLeft: 8 }}>
-                      <Text style={styles.skuText}>{item.sku_interno}</Text>
-                      <Text style={[styles.itemText, { color: themeColors.text }]}>{item.nombre_oficial}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <Text style={styles.skuText}>{item.sku_interno}</Text>
+                        {!item.activo && (
+                          <View style={{ backgroundColor: '#FF980020', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1, borderWidth: 1, borderColor: '#FF9800' }}>
+                            <Text style={{ color: '#FF9800', fontSize: 10, fontWeight: 'bold' }}>INACTIVO</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.itemText, { color: themeColors.text, opacity: item.activo ? 1 : 0.6 }]}>{item.nombre_oficial}</Text>
                       <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>
                         {cat ? cat.nombre : 'Sin Categoría'}
                       </Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
                         <Text
                           style={[
                             styles.stockText,
                             { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success },
                           ]}
                         >
-                          Stock: {item.stock_actual} pzas
+                          Stock Total: {item.stock_actual} {item.unidad || 'pzas'}
                         </Text>
                         <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>
                           • {precioFmt}
                         </Text>
                       </View>
+
+                      {/* Desglose de Stock por Condición */}
+                      {(() => {
+                        const nuevo = item.stock_nuevo !== undefined ? item.stock_nuevo : (item.stock_usado || item.stock_por_revisar ? 0 : item.stock_actual);
+                        const usado = item.stock_usado || 0;
+                        const porRevisar = item.stock_por_revisar || 0;
+                        const tieneDesglose = usado > 0 || porRevisar > 0;
+                        
+                        return (
+                          <View style={{ flexDirection: 'row', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                            <View style={[styles.stateBadge, { backgroundColor: '#10B98115', borderColor: '#10B98140' }]}>
+                              <Text style={[styles.stateBadgeText, { color: '#059669' }]}>
+                                🟢 {nuevo} {item.unidad || 'pzas'} nuevas
+                              </Text>
+                            </View>
+                            {tieneDesglose ? (
+                              <>
+                                <View style={[styles.stateBadge, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B40' }]}>
+                                  <Text style={[styles.stateBadgeText, { color: '#D97706' }]}>
+                                    🟡 {usado} usadas
+                                  </Text>
+                                </View>
+                                <View style={[styles.stateBadge, { backgroundColor: '#EF444415', borderColor: '#EF444440' }]}>
+                                  <Text style={[styles.stateBadgeText, { color: '#DC2626' }]}>
+                                    🔴 {porRevisar} por revisar
+                                  </Text>
+                                </View>
+                              </>
+                            ) : null}
+                          </View>
+                        );
+                      })()}
                     </View>
                     <View style={{ flexDirection: 'row', gap: Spacing.two, alignItems: 'center' }}>
                       {/* Ajuste rápido de stock */}
@@ -1668,9 +1908,9 @@ async function loadAllData() {
                           ]}
                           placeholder="+"
                           placeholderTextColor={themeColors.textSecondary}
-                          keyboardType="numeric"
+                          keyboardType="decimal-pad"
                           value={quickStockAdjustments[item.id] || ''}
-                          onChangeText={txt => setQuickStockAdjustments(prev => ({ ...prev, [item.id]: txt }))}
+                          onChangeText={txt => setQuickStockAdjustments(prev => ({ ...prev, [item.id]: txt.replace(/[^0-9.]/g, '') }))}
                         />
                         <TouchableOpacity
                           activeOpacity={0.7}
@@ -1681,10 +1921,33 @@ async function loadAllData() {
                         </TouchableOpacity>
                       </View>
 
-                      <TouchableOpacity onPress={() => handleOpenEditModal(item)}>
+                      <TouchableOpacity 
+                        onPress={() => handleOpenEditModal(item)}
+                        {...(Platform.OS === 'web' ? { title: "Editar Producto" } as any : {})}
+                      >
                         <Ionicons name="create-outline" size={20} color={themeColors.accent} />
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleSoftDeleteProduct(item)}>
+                      
+                      {!item.activo ? (
+                        <TouchableOpacity 
+                          onPress={() => handleReactivateProduct(item)}
+                          {...(Platform.OS === 'web' ? { title: "Reactivar Producto" } as any : {})}
+                        >
+                          <Ionicons name="refresh-circle-outline" size={22} color={themeColors.success} />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity 
+                          onPress={() => handleSoftDeleteProduct(item)}
+                          {...(Platform.OS === 'web' ? { title: "Desactivar Producto (Soft Delete)" } as any : {})}
+                        >
+                          <Ionicons name="eye-off-outline" size={20} color={themeColors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                      
+                      <TouchableOpacity 
+                        onPress={() => handleHardDeleteProduct(item)}
+                        {...(Platform.OS === 'web' ? { title: "Borrar Definitivamente (Hard Delete)" } as any : {})}
+                      >
                         <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
                       </TouchableOpacity>
                     </View>
@@ -1787,7 +2050,7 @@ async function loadAllData() {
                         style={{ margin: Spacing.one, height: 40 }}
                       />
                       <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                        {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
+                        {clienteSearch.trim().length > 0 && !clientes.some(c => c.nombre && normalizeText(c.nombre) === normalizeText(clienteSearch)) && (
                           <TouchableOpacity
                             style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
                             onPress={() => handleAddNewCliente(clienteSearch)}
@@ -1799,7 +2062,10 @@ async function loadAllData() {
                           </TouchableOpacity>
                         )}
                         {clientes
-                          .filter(cli => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                          .filter(cli => {
+                            const norm = normalizeText(clienteSearch);
+                            return !norm || (cli.nombre && normalizeText(cli.nombre).includes(norm));
+                          })
                           .map((cli, index, array) => (
                             <TouchableOpacity
                               key={cli.id}
@@ -1858,7 +2124,7 @@ async function loadAllData() {
                           {prod ? prod.nombre_oficial : 'Producto desconocido'}
                         </Text>
                         <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
-                          SKU: {prod ? prod.sku_interno : '-'} | Disponible: {prod ? prod.stock_actual : 0} pzas
+                          SKU: {prod ? prod.sku_interno : '-'} | Disponible: {prod ? prod.stock_actual : 0} {prod?.unidad || 'pzas'}
                         </Text>
                       </View>
                       <TouchableOpacity onPress={() => handleRemoveConsumoItem(item.id)}>
@@ -1869,10 +2135,10 @@ async function loadAllData() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: Spacing.one, gap: Spacing.two }}>
                       <View style={{ flex: 1 }}>
                         <CustomInput
-                          label="Cantidad a consumir"
-                          keyboardType="numeric"
+                          label={`Cantidad a consumir (${prod?.unidad || 'pzas'})`}
+                          keyboardType="decimal-pad"
                           value={item.cantidad > 0 ? item.cantidad.toString() : ''}
-                          onChangeText={txt => handleUpdateConsumoItemQty(item.id, parseInt(txt, 10) || 0)}
+                          onChangeText={txt => handleUpdateConsumoItemQty(item.id, parseFloat(txt.replace(/[^0-9.]/g, '')) || 0)}
                         />
                       </View>
                     </View>
@@ -1930,7 +2196,7 @@ async function loadAllData() {
                       </View>
                       <View style={{ backgroundColor: themeColors.danger + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: BorderRadius.small }}>
                         <Text style={{ color: themeColors.danger, fontSize: 12, fontWeight: '800' }}>
-                          -{item.cantidad} pzas
+                          -{item.cantidad} {item.producto?.unidad || 'pzas'}
                         </Text>
                       </View>
                     </View>
@@ -2101,7 +2367,7 @@ async function loadAllData() {
                             <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>SKU: {item.productos?.sku_interno || '-'}</Text>
                           </View>
                           <View style={{ backgroundColor: themeColors.primary + '20', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
-                            <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 14 }}>{item.cantidad_disponible} pzas</Text>
+                            <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 14 }}>{item.cantidad_disponible} {item.productos?.unidad || 'pzas'}</Text>
                           </View>
                         </View>
                       ))
@@ -2182,12 +2448,181 @@ async function loadAllData() {
                 </TouchableOpacity>
               </View>
 
-              <CustomInput
-                label="Stock Inicial *"
-                keyboardType="numeric"
-                value={formStock}
-                onChangeText={(val) => setFormStock(val.replace(/[^0-9]/g, ''))}
-              />
+              {/* Stock Inicial & Unidad de Medida (Siempre Visibles) */}
+              <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Stock Inicial *"
+                    placeholder="0"
+                    keyboardType="decimal-pad"
+                    value={formStock}
+                    onChangeText={(val) => {
+                      const cleanVal = val.replace(/[^0-9.]/g, '');
+                      setFormStock(cleanVal);
+                      if (!showEstadoBreakdown) {
+                        setFormStockNuevo(cleanVal);
+                        setFormStockUsado('0');
+                        setFormStockPorRevisar('0');
+                      }
+                    }}
+                  />
+                </View>
+                <View style={{ flex: 1, marginBottom: Spacing.three }}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 14, fontWeight: '600', marginBottom: Spacing.half }]}>
+                    Unidad de Medida *
+                  </Text>
+                  <View
+                    style={{
+                      height: 48,
+                      flexDirection: 'row',
+                      backgroundColor: themeColors.backgroundElement,
+                      borderRadius: BorderRadius.medium,
+                      borderColor: themeColors.border,
+                      borderWidth: 1,
+                      padding: 4,
+                      gap: 4,
+                      alignItems: 'center',
+                    }}
+                  >
+                    {[
+                      { key: 'pza', label: 'pza' },
+                      { key: 'mts', label: 'mts' },
+                      { key: 'rollo', label: 'rollo' },
+                      { key: 'kit', label: 'kit' },
+                    ].map(u => {
+                      const isSelected = formUnidad === u.key;
+                      return (
+                        <TouchableOpacity
+                          key={u.key}
+                          onPress={() => setFormUnidad(u.key)}
+                          activeOpacity={0.7}
+                          style={{
+                            flex: 1,
+                            height: '100%',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            borderRadius: BorderRadius.small,
+                            backgroundColor: isSelected ? themeColors.primary : 'transparent',
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: isSelected ? 'bold' : '600',
+                              color: isSelected ? '#ffffff' : themeColors.textSecondary,
+                            }}
+                          >
+                            {u.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              </View>
+
+              {/* Botón / Toggle para Desglose Opcional por Estado */}
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: BorderRadius.medium,
+                  backgroundColor: showEstadoBreakdown ? themeColors.primary + '12' : themeColors.backgroundElement,
+                  borderWidth: 1,
+                  borderColor: showEstadoBreakdown ? themeColors.primary : themeColors.border,
+                  marginBottom: showEstadoBreakdown ? Spacing.one : Spacing.two,
+                }}
+                onPress={() => {
+                  const next = !showEstadoBreakdown;
+                  setShowEstadoBreakdown(next);
+                  if (next && (!formStockUsado || formStockUsado === '0') && (!formStockPorRevisar || formStockPorRevisar === '0')) {
+                    setFormStockNuevo(formStock || '0');
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <Ionicons
+                    name={showEstadoBreakdown ? 'layers' : 'layers-outline'}
+                    size={18}
+                    color={showEstadoBreakdown ? themeColors.primary : themeColors.textSecondary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                      Desglosar por estado (Opcional)
+                    </Text>
+                    <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                      {showEstadoBreakdown ? 'Ingresa cuántas son nuevas, usadas o por revisar' : 'Toca aquí si tienes artículos usados o por revisar'}
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons
+                  name={showEstadoBreakdown ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={themeColors.textSecondary}
+                />
+              </TouchableOpacity>
+
+              {/* Formulario Desplegable de Desglose Opcional */}
+              {showEstadoBreakdown && (
+                <View style={{ backgroundColor: themeColors.backgroundElement, padding: Spacing.two, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, marginBottom: Spacing.two }}>
+                  {(() => {
+                    const totInit = parseFloat(formStock) || 0;
+                    const n = parseFloat(formStockNuevo) || 0;
+                    const u = parseFloat(formStockUsado) || 0;
+                    const r = parseFloat(formStockPorRevisar) || 0;
+                    const suma = Math.round((n + u + r) * 100) / 100;
+                    const excede = suma > totInit;
+                    const exacto = suma === totInit && totInit > 0;
+
+                    return (
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.one, flexWrap: 'wrap', gap: 4 }}>
+                        <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 12, fontWeight: '700', marginBottom: 0 }]}>
+                          Condición de los artículos:
+                        </Text>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: excede ? themeColors.danger : exacto ? themeColors.success : themeColors.primary }}>
+                          {excede
+                            ? `⚠️ Suma: ${suma} (Supera el total de ${totInit})`
+                            : `Suma: ${suma} / ${totInit} ${formUnidad || 'pzas'}`}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+
+                  <View style={{ flexDirection: 'row', gap: Spacing.one }}>
+                    <View style={{ flex: 1 }}>
+                      <CustomInput
+                        label="🟢 Nuevas"
+                        placeholder="0"
+                        keyboardType="decimal-pad"
+                        value={formStockNuevo}
+                        onChangeText={(val) => setFormStockNuevo(val.replace(/[^0-9.]/g, ''))}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <CustomInput
+                        label="🟡 Usadas"
+                        placeholder="0"
+                        keyboardType="decimal-pad"
+                        value={formStockUsado}
+                        onChangeText={(val) => setFormStockUsado(val.replace(/[^0-9.]/g, ''))}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <CustomInput
+                        label="🔴 Por Revisar"
+                        placeholder="0"
+                        keyboardType="decimal-pad"
+                        value={formStockPorRevisar}
+                        onChangeText={(val) => setFormStockPorRevisar(val.replace(/[^0-9.]/g, ''))}
+                      />
+                    </View>
+                  </View>
+                </View>
+              )}
 
               <View style={{ flexDirection: 'row', gap: Spacing.two }}>
                 <View style={{ flex: 1 }}>
@@ -2747,6 +3182,16 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.small,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  stateBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+  },
+  stateBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   sectionTitle: {
     fontSize: 18,

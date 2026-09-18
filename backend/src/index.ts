@@ -24,12 +24,16 @@ import herramientasRoutes from './modules/herramientas/herramientas.routes';
 
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import compression from 'compression';
 
 // Cargar variables de entorno
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+
+// Compresión de respuestas HTTP (Gzip/Brotli) para respuestas 80-90% más ligeras
+app.use(compression());
 
 // Logging exhaustivo para debug
 app.use((req, res, next) => {

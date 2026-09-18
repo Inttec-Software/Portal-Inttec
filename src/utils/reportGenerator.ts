@@ -2360,9 +2360,16 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
               <div class="col-7">
                   <div class="info-text mt-2">
                       <div class="section-header">Informacion Adicional</div>
-                      <div style="padding-top: 4px;">
-                        Términos y condiciones: <a href="${cotizacion.terminosCondiciones}" style="color: #0000ee; text-decoration: none;">${cotizacion.terminosCondiciones}</a>
-                      </div>
+                      ${cotizacion.terminosCondiciones ? `
+                        <div style="padding-top: 4px; white-space: pre-line;">
+                          <strong>Términos y condiciones:</strong> ${cotizacion.terminosCondiciones.startsWith('http') ? `<a href="${cotizacion.terminosCondiciones}" style="color: #0000ee; text-decoration: none;">${cotizacion.terminosCondiciones}</a>` : cotizacion.terminosCondiciones}
+                        </div>
+                      ` : ''}
+                      ${cotizacion.notasObservaciones ? `
+                        <div style="padding-top: 6px; white-space: pre-line;">
+                          <strong>Notas u Observaciones:</strong> ${cotizacion.notasObservaciones}
+                        </div>
+                      ` : ''}
                   </div>
               </div>
               <div class="col-5">

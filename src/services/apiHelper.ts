@@ -15,21 +15,42 @@ export const resolveLocalhost = (url: string) => {
   return url;
 };
 
-export const getApiHeaders = async () => {
+let headerCache: { company: string; env: string; token: string | null } | null = null;
+
+export const invalidateHeaderCache = () => {
+  headerCache = null;
+};
+
+export const getApiHeaders = async (forceRefresh = false) => {
+  if (!forceRefresh && headerCache) {
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${headerCache.token}`,
+      'x-company': headerCache.company,
+      'x-env': headerCache.env
+    };
+  }
+
   let company = 'inttec';
   let env = 'prod';
   let token = null;
 
   try {
     if (isBrowser) {
-      company = (await AsyncStorage.getItem('active_company')) || 'inttec';
-      env = (await AsyncStorage.getItem('active_env')) || 'prod';
+      const [compRes, envRes] = await Promise.all([
+        AsyncStorage.getItem('active_company'),
+        AsyncStorage.getItem('active_env')
+      ]);
+      company = compRes || 'inttec';
+      env = envRes || 'prod';
       token = await AsyncStorage.getItem(`jwt_token_${company}`);
     }
   } catch (e) {
     console.warn('Error reading auth state from AsyncStorage in apiHelper', e);
   }
   
+  headerCache = { company, env, token };
+
   return {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
@@ -39,6 +60,6 @@ export const getApiHeaders = async () => {
 };
 
 export const getApiUrl = () => {
-  const rawApiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000';
-  return resolveLocalhost(rawApiUrl);
+  const rawApiUrl = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000').trim().replace(/\/+$/, '');
+  return resolveLocalhost(rawApiUrl).replace(/\/+$/, '');
 };

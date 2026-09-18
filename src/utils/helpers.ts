@@ -46,3 +46,17 @@ export const isCombustibleExpense = (
 
   return (esCatVehiculo && esSubCombustible) || normSub === 'combustible' || normSub === 'gasolina' || normSub === 'diesel';
 };
+
+/**
+ * Normaliza un texto removiendo acentos / tildes / diacríticos, convirtiendo a minúsculas y eliminando espacios en los extremos.
+ * Permite realizar búsquedas insensibles a mayúsculas, minúsculas y acentos (ej. "batería" coincide con "bateria").
+ */
+export const normalizeText = (text: string | null | undefined): string => {
+  if (!text) return '';
+  return String(text)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+};
+
