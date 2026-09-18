@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS public.gastos (
   empleado_id uuid NOT NULL,
   empleado_nombre text,
   monto numeric NOT NULL,
-  metodo_pago text CHECK (metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text])),
+  metodo_pago text CHECK (metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text, 'transferencia'::text])),
   tipo_tarjeta character varying,
   justificacion text,
   foto_url text,
@@ -280,16 +280,20 @@ CREATE TABLE IF NOT EXISTS public.productos (
   sku_interno character varying NOT NULL UNIQUE,
   nombre_oficial text NOT NULL,
   categoria_id uuid NOT NULL,
-  stock_actual integer NOT NULL DEFAULT 0 CHECK (stock_actual >= 0),
+  proveedor_id uuid,
+  stock_actual numeric NOT NULL DEFAULT 0 CHECK (stock_actual >= 0),
+  stock_nuevo numeric DEFAULT 0,
+  stock_usado numeric DEFAULT 0,
+  stock_por_revisar numeric DEFAULT 0,
+  unidad text DEFAULT 'pza',
   activo boolean NOT NULL DEFAULT true,
   created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   precio_unitario numeric DEFAULT 0,
   impuesto_porcentaje numeric DEFAULT 16,
   clave_facturacion text,
-  proveedor_id uuid,
   CONSTRAINT productos_pkey PRIMARY KEY (id),
   CONSTRAINT productos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias_productos(id),
-  CONSTRAINT productos_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id)
+  CONSTRAINT productos_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS public.alias_proveedor_producto (

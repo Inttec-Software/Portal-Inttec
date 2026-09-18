@@ -43,3 +43,8 @@ example
 /ios
 /android
 /docker
+
+# logs & temp reports
+*.log
+eslint*.json
+lint-results.txt
