@@ -65,32 +65,7 @@ const ZoomableView = forwardRef<ZoomableViewRef, Props>(({
     };
   }, [scale, translateX, translateY, rotateAnim, onScaleChange, onRotationChange]);
 
-  // Imperative ref methods
-  useImperativeHandle(ref, () => ({
-    zoomIn: (step = 0.5) => {
-      const nextScale = Math.min(currentScale.current + step, maxScale);
-      animateTo(nextScale, currentTranslateX.current, currentTranslateY.current);
-    },
-    zoomOut: (step = 0.5) => {
-      const nextScale = Math.max(currentScale.current - step, minScale);
-      if (nextScale <= minScale) {
-        animateTo(minScale, 0, 0);
-      } else {
-        animateTo(nextScale, currentTranslateX.current, currentTranslateY.current);
-      }
-    },
-    reset: () => {
-      animateTo(1, 0, 0);
-      animateRotationTo(0);
-    },
-    rotate: (degrees = 90) => {
-      const nextRotation = (currentRotation.current + degrees) % 360;
-      animateRotationTo(nextRotation);
-    },
-    getScale: () => currentScale.current,
-    getRotation: () => currentRotation.current,
-  }));
-
+  // Spring animation helper
   const animateTo = (targetScale: number, targetTx: number, targetTy: number) => {
     Animated.parallel([
       Animated.spring(scale, {
@@ -123,6 +98,32 @@ const ZoomableView = forwardRef<ZoomableViewRef, Props>(({
     }).start();
   };
 
+  // Imperative ref methods
+  useImperativeHandle(ref, () => ({
+    zoomIn: (step = 0.5) => {
+      const nextScale = Math.min(currentScale.current + step, maxScale);
+      animateTo(nextScale, currentTranslateX.current, currentTranslateY.current);
+    },
+    zoomOut: (step = 0.5) => {
+      const nextScale = Math.max(currentScale.current - step, minScale);
+      if (nextScale <= minScale) {
+        animateTo(minScale, 0, 0);
+      } else {
+        animateTo(nextScale, currentTranslateX.current, currentTranslateY.current);
+      }
+    },
+    reset: () => {
+      animateTo(1, 0, 0);
+      animateRotationTo(0);
+    },
+    rotate: (degrees = 90) => {
+      const nextRotation = (currentRotation.current + degrees) % 360;
+      animateRotationTo(nextRotation);
+    },
+    getScale: () => currentScale.current,
+    getRotation: () => currentRotation.current,
+  }));
+
   // ==========================================
   // WEB MOUSE & TRACKPAD EVENT HANDLERS
   // ==========================================
@@ -133,14 +134,12 @@ const ZoomableView = forwardRef<ZoomableViewRef, Props>(({
     if (Platform.OS !== 'web') return;
     if (e.button !== 0) return; // Only left click
 
-    // Double click detection to toggle zoom
+    // Double click detection on web
     const now = Date.now();
     if (now - lastClickTime.current < 300) {
-      // Double click!
       if (currentScale.current > 1.2) {
         animateTo(1, 0, 0);
       } else {
-        // Zoom in centered on click position
         const rect = e.currentTarget?.getBoundingClientRect?.() || { left: 0, top: 0, width: Dimensions.get('window').width, height: Dimensions.get('window').height };
         const cursorX = e.clientX - (rect.left + rect.width / 2);
         const cursorY = e.clientY - (rect.top + rect.height / 2);
@@ -192,7 +191,7 @@ const ZoomableView = forwardRef<ZoomableViewRef, Props>(({
     const cursorX = e.clientX - (rect.left + rect.width / 2);
     const cursorY = e.clientY - (rect.top + rect.height / 2);
 
-    // Trackpad 2-finger pan (when ctrlKey is false and already zoomed in)
+    // Trackpad 2-finger pan
     if (!e.ctrlKey && currentScale.current > 1.05 && Math.abs(e.deltaX) > 0 && Math.abs(e.deltaY) < 40) {
       translateX.setValue(currentTranslateX.current - e.deltaX);
       translateY.setValue(currentTranslateY.current - e.deltaY);
@@ -210,7 +209,6 @@ const ZoomableView = forwardRef<ZoomableViewRef, Props>(({
       return;
     }
 
-    // Zoom centered at cursor
     const scaleRatio = nextScale / currentScale.current;
     const nextTx = cursorX - (cursorX - currentTranslateX.current) * scaleRatio;
     const nextTy = cursorY - (cursorY - currentTranslateY.current) * scaleRatio;
@@ -221,77 +219,214 @@ const ZoomableView = forwardRef<ZoomableViewRef, Props>(({
   };
 
   // ==========================================
-  // MOBILE TOUCH & PANRESPONDER HANDLERS
+  // MOBILE MULTI-TOUCH DYNAMIC PINCH-TO-ZOOM ENGINE
   // ==========================================
-  const initialDistance = useRef<number | null>(null);
-  const initialScaleOnPinch = useRef<number>(1);
-  const lastTouchTime = useRef(0);
+  const isPinching = useRef(false);
+  const initialPinchDistance = useRef(1);
+  const initialPinchScale = useRef(1);
+  const initialPinchMidpoint = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const initialPinchTranslate = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  const calcDistance = (touches: any[]) => {
-    const dx = touches[0].pageX - touches[1].pageX;
-    const dy = touches[0].pageY - touches[1].pageY;
+  const isPanning = useRef(false);
+  const panStartTouch = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const panStartTranslate = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Tap tracking (strictly for double tap detection on release, never on grant)
+  const touchStartTime = useRef(0);
+  const touchStartPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const hadMultipleTouches = useRef(false);
+  const lastCompletedTapTime = useRef(0);
+  const lastCompletedTapPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const calcDistance = (t0: any, t1: any) => {
+    const dx = t0.pageX - t1.pageX;
+    const dy = t0.pageY - t1.pageY;
     return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const calcMidpoint = (t0: any, t1: any) => {
+    return {
+      x: (t0.pageX + t1.pageX) / 2,
+      y: (t0.pageY + t1.pageY) / 2,
+    };
   };
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        translateX.setOffset(currentTranslateX.current);
-        translateY.setOffset(currentTranslateY.current);
-        translateX.setValue(0);
-        translateY.setValue(0);
-        initialDistance.current = null;
+      onStartShouldSetPanResponderCapture: (evt) => evt.nativeEvent.touches.length >= 2,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        return (
+          evt.nativeEvent.touches.length >= 2 ||
+          currentScale.current > 1.05 ||
+          Math.abs(gestureState.dx) > 3 ||
+          Math.abs(gestureState.dy) > 3
+        );
+      },
+      onMoveShouldSetPanResponderCapture: (evt) => evt.nativeEvent.touches.length >= 2,
+      onPanResponderTerminationRequest: () => false,
 
-        // Double tap on mobile
-        const now = Date.now();
-        if (evt.nativeEvent.touches.length === 1) {
-          if (now - lastTouchTime.current < 300) {
+      onPanResponderGrant: (evt) => {
+        const touches = evt.nativeEvent.touches;
+        touchStartTime.current = Date.now();
+
+        if (touches.length >= 2) {
+          hadMultipleTouches.current = true;
+          isPinching.current = true;
+          isPanning.current = false;
+          initialPinchDistance.current = calcDistance(touches[0], touches[1]) || 1;
+          initialPinchScale.current = currentScale.current;
+          initialPinchMidpoint.current = calcMidpoint(touches[0], touches[1]);
+          initialPinchTranslate.current = {
+            x: currentTranslateX.current,
+            y: currentTranslateY.current,
+          };
+        } else if (touches.length === 1) {
+          hadMultipleTouches.current = false;
+          isPinching.current = false;
+          isPanning.current = true;
+          touchStartPos.current = { x: touches[0].pageX, y: touches[0].pageY };
+          panStartTouch.current = { x: touches[0].pageX, y: touches[0].pageY };
+          panStartTranslate.current = {
+            x: currentTranslateX.current,
+            y: currentTranslateY.current,
+          };
+        }
+      },
+
+      onPanResponderMove: (evt) => {
+        const touches = evt.nativeEvent.touches;
+
+        if (touches.length >= 2) {
+          hadMultipleTouches.current = true;
+          const dist = calcDistance(touches[0], touches[1]);
+          const mid = calcMidpoint(touches[0], touches[1]);
+
+          if (!isPinching.current) {
+            // Smooth start of pinch gesture
+            isPinching.current = true;
+            isPanning.current = false;
+            initialPinchDistance.current = dist || 1;
+            initialPinchScale.current = currentScale.current;
+            initialPinchMidpoint.current = mid;
+            initialPinchTranslate.current = {
+              x: currentTranslateX.current,
+              y: currentTranslateY.current,
+            };
+            return;
+          }
+
+          // Dynamic continuous scale factor (pinch out to zoom in, pinch in to zoom out)
+          const scaleFactor = dist / (initialPinchDistance.current || 1);
+          let newScale = initialPinchScale.current * scaleFactor;
+          // Clamp within limits (with slight resistance rubber-band range)
+          newScale = Math.min(Math.max(minScale * 0.75, newScale), maxScale * 1.25);
+
+          // Pan translation with midpoint movement
+          const dxMid = mid.x - initialPinchMidpoint.current.x;
+          const dyMid = mid.y - initialPinchMidpoint.current.y;
+
+          const newTx = initialPinchTranslate.current.x + dxMid;
+          const newTy = initialPinchTranslate.current.y + dyMid;
+
+          scale.setValue(newScale);
+          translateX.setValue(newTx);
+          translateY.setValue(newTy);
+
+        } else if (touches.length === 1) {
+          if (isPinching.current) {
+            // One finger lifted: seamless transition to single-finger pan
+            isPinching.current = false;
+            isPanning.current = true;
+            panStartTouch.current = { x: touches[0].pageX, y: touches[0].pageY };
+            panStartTranslate.current = {
+              x: currentTranslateX.current,
+              y: currentTranslateY.current,
+            };
+            return;
+          }
+
+          if (isPanning.current && currentScale.current > 1.05) {
+            const dx = touches[0].pageX - panStartTouch.current.x;
+            const dy = touches[0].pageY - panStartTouch.current.y;
+
+            translateX.setValue(panStartTranslate.current.x + dx);
+            translateY.setValue(panStartTranslate.current.y + dy);
+          }
+        }
+      },
+
+      onPanResponderRelease: (evt, gestureState) => {
+        const touchDuration = Date.now() - touchStartTime.current;
+        const totalMoved = Math.hypot(gestureState.dx, gestureState.dy);
+        const isSingleTap = !hadMultipleTouches.current && touchDuration < 280 && totalMoved < 10;
+
+        // Double tap toggle check (only on genuine double taps)
+        if (isSingleTap) {
+          const now = Date.now();
+          const tapX = touchStartPos.current.x;
+          const tapY = touchStartPos.current.y;
+          const distFromLastTap = Math.hypot(
+            tapX - lastCompletedTapPos.current.x,
+            tapY - lastCompletedTapPos.current.y
+          );
+
+          if (now - lastCompletedTapTime.current < 320 && distFromLastTap < 45) {
+            // Genuine double tap!
             if (currentScale.current > 1.2) {
               animateTo(1, 0, 0);
             } else {
-              animateTo(2.5, 0, 0);
+              const screenW = Dimensions.get('window').width;
+              const screenH = Dimensions.get('window').height;
+              const relX = tapX - screenW / 2;
+              const relY = tapY - screenH / 2;
+              const targetScale = 2.5;
+              const targetTx = -relX * 1.5;
+              const targetTy = -relY * 1.5;
+              animateTo(targetScale, targetTx, targetTy);
             }
-            lastTouchTime.current = 0;
+            lastCompletedTapTime.current = 0;
+            isPinching.current = false;
+            isPanning.current = false;
             return;
           }
-          lastTouchTime.current = now;
-        }
-      },
-      onPanResponderMove: (evt, gestureState) => {
-        const touches = evt.nativeEvent.touches;
-        if (touches && touches.length === 2) {
-          // Pinch Zoom
-          const distance = calcDistance(touches);
-          if (initialDistance.current === null) {
-            initialDistance.current = distance;
-            initialScaleOnPinch.current = currentScale.current;
-          } else {
-            const scaleFactor = distance / initialDistance.current;
-            let newScale = initialScaleOnPinch.current * scaleFactor;
-            newScale = Math.min(Math.max(minScale, newScale), maxScale);
-            scale.setValue(newScale);
-          }
-        } else if (touches && touches.length === 1) {
-          // 1 Finger Drag / Pan (allowed when zoomed in or dragging)
-          if (currentScale.current > 1.05) {
-            translateX.setValue(gestureState.dx);
-            translateY.setValue(gestureState.dy);
-          }
-        }
-      },
-      onPanResponderRelease: () => {
-        translateX.flattenOffset();
-        translateY.flattenOffset();
 
+          lastCompletedTapTime.current = now;
+          lastCompletedTapPos.current = { x: tapX, y: tapY };
+        }
+
+        isPinching.current = false;
+        isPanning.current = false;
+
+        // Natural release behavior preserving user's dynamic pinch zoom level
+        if (currentScale.current < minScale || currentScale.current <= 1.05) {
+          // If zoomed all the way out, smoothly center
+          animateTo(1, 0, 0);
+        } else if (currentScale.current > maxScale) {
+          // If over-pinched past max, spring back to maxScale
+          animateTo(maxScale, currentTranslateX.current, currentTranslateY.current);
+        } else {
+          // Keep user's chosen scale! Just keep image within boundaries
+          const screenW = Dimensions.get('window').width;
+          const screenH = Dimensions.get('window').height;
+          const maxTx = Math.max(0, (screenW * (currentScale.current - 1)) / 2);
+          const maxTy = Math.max(0, (screenH * (currentScale.current - 1)) / 2);
+
+          const boundedTx = Math.min(Math.max(-maxTx, currentTranslateX.current), maxTx);
+          const boundedTy = Math.min(Math.max(-maxTy, currentTranslateY.current), maxTy);
+
+          if (boundedTx !== currentTranslateX.current || boundedTy !== currentTranslateY.current) {
+            animateTo(currentScale.current, boundedTx, boundedTy);
+          }
+        }
+      },
+
+      onPanResponderTerminate: () => {
+        isPinching.current = false;
+        isPanning.current = false;
         if (currentScale.current <= 1.05) {
           animateTo(1, 0, 0);
         }
-      },
-      onPanResponderTerminate: () => {
-        translateX.flattenOffset();
-        translateY.flattenOffset();
       },
     })
   ).current;
@@ -329,7 +464,7 @@ const ZoomableView = forwardRef<ZoomableViewRef, Props>(({
         style={[
           styles.content,
           Platform.OS === 'web' && ({
-            pointerEvents: 'none', // Allows drag events to stay on container smoothly
+            pointerEvents: 'none',
           } as any),
           {
             transform: [

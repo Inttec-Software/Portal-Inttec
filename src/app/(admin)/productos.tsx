@@ -7,6 +7,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/services/supabase';
 import CustomInput from '@/components/CustomInput';
+import { normalizeText } from '@/utils/helpers';
 
 export default function ProductosScreen() {
   const router = useRouter();
@@ -64,12 +65,12 @@ export default function ProductosScreen() {
   };
 
   const filteredProductos = productos.filter(p => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
+    const query = normalizeText(searchQuery);
+    if (!query) return true;
     return (
-      (p.nombre_oficial && p.nombre_oficial.toLowerCase().includes(query)) ||
-      (p.sku_interno && p.sku_interno.toLowerCase().includes(query)) ||
-      (p.clave_facturacion && p.clave_facturacion.toLowerCase().includes(query))
+      (p.nombre_oficial && normalizeText(p.nombre_oficial).includes(query)) ||
+      (p.sku_interno && normalizeText(p.sku_interno).includes(query)) ||
+      (p.clave_facturacion && normalizeText(p.clave_facturacion).includes(query))
     );
   });
 

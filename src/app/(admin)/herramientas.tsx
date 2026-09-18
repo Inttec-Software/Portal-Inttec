@@ -28,6 +28,7 @@ import {
 } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import CustomButton from '@/components/CustomButton';
+import { normalizeText } from '@/utils/helpers';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -434,12 +435,12 @@ export default function AdminHerramientasScreen() {
   // Filtros del Catálogo
   const filteredHerramientas = herramientas.filter((h) => {
     const matchesCat = selectedCategoria === 'Todas' || h.categoria === selectedCategoria;
-    const q = searchCatalogo.toLowerCase();
+    const q = normalizeText(searchCatalogo);
     const matchesSearch =
       !q ||
-      h.nombre.toLowerCase().includes(q) ||
-      h.codigo.toLowerCase().includes(q) ||
-      (h.numero_serie && h.numero_serie.toLowerCase().includes(q));
+      normalizeText(h.nombre).includes(q) ||
+      normalizeText(h.codigo).includes(q) ||
+      (h.numero_serie && normalizeText(h.numero_serie).includes(q));
     return matchesCat && matchesSearch;
   });
 
@@ -1334,10 +1335,12 @@ export default function AdminHerramientasScreen() {
                   </Text>
                   <TouchableOpacity
                     onPress={() => {
+                      const q = normalizeText(searchVehAssignTool);
                       const filtered = herramientas.filter((t) =>
-                        t.nombre.toLowerCase().includes(searchVehAssignTool.toLowerCase()) ||
-                        t.codigo.toLowerCase().includes(searchVehAssignTool.toLowerCase()) ||
-                        (t.categoria && t.categoria.toLowerCase().includes(searchVehAssignTool.toLowerCase()))
+                        !q ||
+                        normalizeText(t.nombre).includes(q) ||
+                        normalizeText(t.codigo).includes(q) ||
+                        (t.categoria && normalizeText(t.categoria).includes(q))
                       );
                       handleSelectAllToolsForVeh(filtered);
                     }}
@@ -1370,11 +1373,15 @@ export default function AdminHerramientasScreen() {
                 <View style={{ gap: 6, maxHeight: 220 }}>
                   <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>
                     {herramientas
-                      .filter((t) =>
-                        t.nombre.toLowerCase().includes(searchVehAssignTool.toLowerCase()) ||
-                        t.codigo.toLowerCase().includes(searchVehAssignTool.toLowerCase()) ||
-                        (t.categoria && t.categoria.toLowerCase().includes(searchVehAssignTool.toLowerCase()))
-                      )
+                      .filter((t) => {
+                        const q = normalizeText(searchVehAssignTool);
+                        return (
+                          !q ||
+                          normalizeText(t.nombre).includes(q) ||
+                          normalizeText(t.codigo).includes(q) ||
+                          (t.categoria && normalizeText(t.categoria).includes(q))
+                        );
+                      })
                       .map((tool) => {
                         const isSelected = selectedToolsToAssignVeh.includes(tool.id);
                         return (

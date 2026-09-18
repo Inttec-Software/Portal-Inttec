@@ -1,5 +1,4 @@
-// @ts-nocheck
-import { buildCFDI40XML, CFDIParams, CFDIConcepto } from './xmlGenerator.ts';
+import { buildCFDI40XML, CFDIParams, CFDIConcepto } from './xmlGenerator';
 
 /**
  * Limpia el nombre del receptor para CFDI 4.0 (SAT):
@@ -51,10 +50,10 @@ function mapFormaPagoSAT(forma?: string): string {
 
 export async function buildUnsignedCFDI(ventaData: any, clienteData: any, partidas: any[], isProduction: boolean = false) {
   // Configuración del Emisor (Variables de Entorno o defaults)
-  const emisorRfc = Deno.env.get('EMISOR_RFC') || (isProduction ? 'FETR83041461A' : 'EKU9003173C9');
-  const emisorNombre = Deno.env.get('EMISOR_NOMBRE') || (isProduction ? 'RAFAEL ALONSO FERNANDEZ TINAJERO' : 'ESCUELA KEMPER URATE');
-  const emisorRegimen = Deno.env.get('EMISOR_REGIMEN') || (isProduction ? '612' : '601');
-  const emisorCP = Deno.env.get('EMISOR_CP') || (isProduction ? '31110' : '77500');
+  const emisorRfc = process.env.EMISOR_RFC || (isProduction ? 'FETR83041461A' : 'EKU9003173C9');
+  const emisorNombre = process.env.EMISOR_NOMBRE || (isProduction ? 'RAFAEL ALONSO FERNANDEZ TINAJERO' : 'ESCUELA KEMPER URATE');
+  const emisorRegimen = process.env.EMISOR_REGIMEN || (isProduction ? '612' : '601');
+  const emisorCP = process.env.EMISOR_CP || (isProduction ? '31110' : '77500');
 
   // Mapeo de conceptos/partidas
   const conceptos: CFDIConcepto[] = partidas.map((p: any) => {

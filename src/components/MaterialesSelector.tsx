@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, ScrollView, TextInput, StyleSheet, Platform, KeyboardAvoidingView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, ScrollView, TextInput, StyleSheet, Platform, KeyboardAvoidingView, Alert, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import CustomButton from './CustomButton';
+import { normalizeText } from '@/utils/helpers';
 
 interface Producto {
   id: string;
   sku_interno: string;
   nombre_oficial: string;
   stock_actual: number;
+  unidad?: string;
 }
 
 interface MaterialUsado {
@@ -18,53 +20,78 @@ interface MaterialUsado {
   retirado: number;
   usado: number;
   sobrante: number;
+  unidad?: string;
 }
 
 interface MaterialesSelectorProps {
   productos: Producto[];
   materiales: MaterialUsado[];
+  usaMateriales?: boolean;
+  onToggleUsaMateriales?: (val: boolean) => void;
   onChange: (materiales: MaterialUsado[]) => void;
 }
 
-export default function MaterialesSelector({ productos, materiales, onChange }: MaterialesSelectorProps) {
+export default function MaterialesSelector({
+  productos,
+  materiales,
+  usaMateriales,
+  onToggleUsaMateriales,
+  onChange,
+}: MaterialesSelectorProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+
+  const isEnabled = typeof usaMateriales === 'boolean' 
+    ? usaMateriales 
+    : (materiales.length > 0);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
   // Variables locales para cuando seleccionan un producto
   const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
-  
   const [usado, setUsado] = useState('');
 
+  const handleToggle = (val: boolean) => {
+    if (onToggleUsaMateriales) {
+      onToggleUsaMateriales(val);
+    }
+    if (!val && materiales.length > 0) {
+      onChange([]);
+    }
+  };
+
+  const normQuery = normalizeText(searchQuery);
   const filteredProductos = productos.filter(p => 
-    p.nombre_oficial.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.sku_interno.toLowerCase().includes(searchQuery.toLowerCase())
+    !normQuery ||
+    normalizeText(p.nombre_oficial).includes(normQuery) ||
+    normalizeText(p.sku_interno).includes(normQuery)
   );
 
   const handleAddMaterial = () => {
     if (!selectedProduct) return;
     
-    const numRetirado = selectedProduct.stock_actual;
-    const numUsado = parseInt(usado, 10);
+    const numRetirado = Number(selectedProduct.stock_actual) || 0;
+    const numUsado = parseFloat(usado);
 
-    
-    if (isNaN(numUsado) || numUsado < 0) {
-      Alert.alert('Validación', 'Ingresa una cantidad válida de material usado.');
+    if (isNaN(numUsado) || numUsado <= 0) {
+      Alert.alert('Validación', 'Ingresa una cantidad válida de material usado mayor a 0.');
       return;
     }
     if (numUsado > numRetirado) {
-      Alert.alert('Validación', 'El material usado no puede ser mayor al retirado.');
+      Alert.alert('Validación', `El material usado (${numUsado}) no puede ser mayor al retirado (${numRetirado}).`);
       return;
     }
+
+    const calculatedSobrante = Math.max(0, Math.round((numRetirado - numUsado) * 100) / 100);
 
     const nuevoMaterial: MaterialUsado = {
       productoId: selectedProduct.id,
       nombre: selectedProduct.nombre_oficial,
       retirado: numRetirado,
       usado: numUsado,
-      sobrante: numRetirado - numUsado
+      sobrante: calculatedSobrante,
+      unidad: selectedProduct.unidad || 'pza'
     };
 
     // Validar si ya existe
@@ -74,51 +101,108 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
       return;
     }
 
+    if (onToggleUsaMateriales && !isEnabled) {
+      onToggleUsaMateriales(true);
+    }
+
     onChange([...materiales, nuevoMaterial]);
     setSelectedProduct(null);
-    
     setUsado('');
     setModalVisible(false);
   };
 
   const handleRemoveMaterial = (id: string) => {
-    onChange(materiales.filter(m => m.productoId !== id));
+    const updated = materiales.filter(m => m.productoId !== id);
+    onChange(updated);
   };
+
+  const parsedUsado = parseFloat(usado);
+  const calculatedSobrante = selectedProduct 
+    ? (!isNaN(parsedUsado) ? Math.max(0, Math.round((Number(selectedProduct.stock_actual) - parsedUsado) * 100) / 100) : selectedProduct.stock_actual)
+    : 0;
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.label, { color: themeColors.text }]}>Materiales Retirados y Usados *</Text>
-      
-      {materiales.length === 0 ? (
-        <View style={[styles.emptyState, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
-          <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center' }}>No has agregado materiales a este trabajo.</Text>
+      {/* Switch de activación de materiales */}
+      <View style={[styles.switchCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10, marginRight: 8 }}>
+          <View style={{
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            backgroundColor: isEnabled ? (themeColors.primary + '20') : (scheme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'),
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}>
+            <Ionicons
+              name={isEnabled ? "cube" : "cube-outline"}
+              size={18}
+              color={isEnabled ? themeColors.primary : themeColors.textSecondary}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+              ¿Se usó material en este trabajo?
+            </Text>
+            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>
+              {isEnabled ? 'Registra los materiales retirados y utilizados.' : 'No se utilizó material (Mano de obra / Revisión).'}
+            </Text>
+          </View>
+        </View>
+
+        <Switch
+          value={isEnabled}
+          onValueChange={handleToggle}
+          trackColor={{ false: scheme === 'dark' ? '#3e3e3e' : '#e0e0e0', true: themeColors.primary + '80' }}
+          thumbColor={isEnabled ? themeColors.primary : '#f4f3f4'}
+        />
+      </View>
+
+      {!isEnabled ? (
+        <View style={[styles.noMaterialBadge, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', borderColor: themeColors.border }]}>
+          <Ionicons name="checkmark-circle-outline" size={16} color={themeColors.success} />
+          <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '500' }}>
+            Sin uso de materiales para este trabajo.
+          </Text>
         </View>
       ) : (
-        <View style={{ marginBottom: Spacing.two }}>
-          {materiales.map((m, idx) => (
-            <View key={idx} style={[styles.materialItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 14 }}>{m.nombre}</Text>
-                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Retirado: {m.retirado}</Text>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Usado: {m.usado}</Text>
-                  <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.sobrante}</Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={() => handleRemoveMaterial(m.productoId)} style={{ padding: 4 }}>
-                <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
-              </TouchableOpacity>
+        <View style={{ marginTop: Spacing.two }}>
+          <Text style={[styles.label, { color: themeColors.text }]}>Materiales Retirados y Usados</Text>
+
+          {materiales.length === 0 ? (
+            <View style={[styles.emptyState, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
+              <Text style={{ color: themeColors.textSecondary, fontSize: 13, textAlign: 'center' }}>
+                No has agregado materiales a este trabajo.
+              </Text>
             </View>
-          ))}
+          ) : (
+            <View style={{ marginBottom: Spacing.two }}>
+              {materiales.map((m, idx) => (
+                <View key={idx} style={[styles.materialItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 14 }}>{m.nombre}</Text>
+                    <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4, flexWrap: 'wrap' }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Retirado: {m.retirado} {m.unidad || 'pza'}</Text>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Usado: {m.usado} {m.unidad || 'pza'}</Text>
+                      <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.sobrante} {m.unidad || 'pza'}</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={() => handleRemoveMaterial(m.productoId)} style={{ padding: 4 }}>
+                    <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <CustomButton
+            title="Agregar Material del Inventario"
+            variant="secondary"
+            onPress={() => setModalVisible(true)}
+            icon={<Ionicons name="add" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
+          />
         </View>
       )}
-
-      <CustomButton
-        title="Agregar Material del Inventario"
-        variant="secondary"
-        onPress={() => setModalVisible(true)}
-        icon={<Ionicons name="add" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
-      />
 
       <Modal statusBarTranslucent={true} visible={modalVisible} animationType="slide" transparent={true} onRequestClose={() => setModalVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
@@ -162,7 +246,7 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                         onPress={() => setSelectedProduct(prod)}
                       >
                         <Text style={{ fontSize: 15, fontWeight: '600', color: themeColors.text }}>{prod.nombre_oficial}</Text>
-                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>SKU: {prod.sku_interno} | Stock: {prod.stock_actual}</Text>
+                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>SKU: {prod.sku_interno} | Stock: {prod.stock_actual} {prod.unidad || 'pza'}</Text>
                       </TouchableOpacity>
                     ))
                   )}
@@ -173,21 +257,24 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                 <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text, marginBottom: Spacing.two }}>
                   {selectedProduct.nombre_oficial}
                 </Text>
+                <Text style={{ fontSize: 13, color: themeColors.textSecondary, marginBottom: Spacing.two }}>
+                  Stock Disponible: <Text style={{ fontWeight: 'bold', color: themeColors.primary }}>{selectedProduct.stock_actual} {selectedProduct.unidad || 'pza'}</Text>
+                </Text>
                 
                 <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.three }}>
-                  
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.label, { color: themeColors.text }]}>Cantidad Usada *</Text>
+                    <Text style={[styles.label, { color: themeColors.text }]}>Cantidad Usada ({selectedProduct.unidad || 'pza'}) *</Text>
                     <TextInput
                       style={[styles.input, { backgroundColor: themeColors.background, color: themeColors.text, borderColor: themeColors.border }]}
-                      keyboardType="numeric"
+                      keyboardType="decimal-pad"
                       value={usado}
                       onChangeText={(val) => {
-                        const num = parseInt(val, 10);
+                        const cleanVal = val.replace(/[^0-9.]/g, '');
+                        const num = parseFloat(cleanVal);
                         if (!isNaN(num) && num > selectedProduct.stock_actual) {
                           setUsado(selectedProduct.stock_actual.toString());
                         } else {
-                          setUsado(val);
+                          setUsado(cleanVal);
                         }
                       }}
                       placeholder="0"
@@ -198,7 +285,7 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                 <View style={{ backgroundColor: themeColors.primary + '10', padding: Spacing.three, borderRadius: BorderRadius.medium, marginBottom: Spacing.four }}>
                   <Text style={{ color: themeColors.text, fontSize: 14 }}>
                     Sobrante Calculado: <Text style={{ fontWeight: 'bold', color: themeColors.primary }}>
-                      {(!isNaN(parseInt(usado))) ? selectedProduct.stock_actual - parseInt(usado) : selectedProduct.stock_actual}
+                      {calculatedSobrante} {selectedProduct.unidad || 'pza'}
                     </Text>
                   </Text>
                 </View>
@@ -207,7 +294,10 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
                   <CustomButton
                     title="Atrás"
                     variant="secondary"
-                    onPress={() => setSelectedProduct(null)}
+                    onPress={() => {
+                      setSelectedProduct(null);
+                      setUsado('');
+                    }}
                     style={{ flex: 1 }}
                   />
                   <CustomButton
@@ -228,10 +318,28 @@ export default function MaterialesSelector({ productos, materiales, onChange }: 
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: Spacing.four,
+    marginBottom: Spacing.three,
+  },
+  switchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: Spacing.two,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+  },
+  noMaterialBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: Spacing.two,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    marginTop: 6,
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     marginBottom: Spacing.one,
   },
@@ -291,3 +399,4 @@ const styles = StyleSheet.create({
     fontSize: 15,
   }
 });
+

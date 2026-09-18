@@ -16,6 +16,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Usuario, AuthService, inttecClient, daravisaClient } from '@/services/supabase';
 import { useAuth } from '@/context/AuthContext';
@@ -74,8 +75,9 @@ export default function EvidenciaForm() {
 
   const [trabajos, setTrabajos] = useState<{
     descripcion: string;
+    usa_materiales?: boolean;
     materiales: string;
-    materiales_usados?: { productoId: string; nombre: string; retirado: number; usado: number; sobrante: number }[];
+    materiales_usados?: { productoId: string; nombre: string; retirado: number; usado: number; sobrante: number; unidad?: string }[];
     solucion: string;
     antesImg?: { uri: string; base64: string | null };
     despuesImg?: { uri: string; base64: string | null };
@@ -83,7 +85,7 @@ export default function EvidenciaForm() {
     ia_desc_run?: boolean;
     ia_sol_run?: boolean;
   }[]>([
-    { descripcion: '', materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }
+    { descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }
   ]);
 
   // Modal de imagen a pantalla completa
@@ -248,6 +250,83 @@ export default function EvidenciaForm() {
     init();
   }, [router, company, params.draftId]);
 
+  // Referencia actualizada del estado para el temporizador de autoguardado
+  const formDataRef = React.useRef({
+    currentUser,
+    company,
+    selectedCliente,
+    clientes,
+    selectedSucursal,
+    sucursalesCliente,
+    currentStep,
+    trabajos,
+    activeDraftId,
+    isSubmitting,
+    isSavingDraft,
+  });
+
+  useEffect(() => {
+    formDataRef.current = {
+      currentUser,
+      company,
+      selectedCliente,
+      clientes,
+      selectedSucursal,
+      sucursalesCliente,
+      currentStep,
+      trabajos,
+      activeDraftId,
+      isSubmitting,
+      isSavingDraft,
+    };
+  }, [currentUser, company, selectedCliente, clientes, selectedSucursal, sucursalesCliente, currentStep, trabajos, activeDraftId, isSubmitting, isSavingDraft]);
+
+  // Autoguardado automático en segundo plano cada 60 segundos
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const state = formDataRef.current;
+      if (!state.currentUser || state.isSubmitting || state.isSavingDraft) return;
+
+      const hasContent = Boolean(
+        state.selectedCliente ||
+        state.trabajos.some(t => 
+          t.descripcion?.trim() || 
+          t.solucion?.trim() || 
+          t.materiales?.trim() ||
+          t.antesImg?.uri || 
+          t.despuesImg?.uri || 
+          (t.fotosAdicionales && t.fotosAdicionales.length > 0)
+        )
+      );
+
+      if (!hasContent) return;
+
+      try {
+        const clienteObj = state.clientes.find(c => c.id === state.selectedCliente);
+        const sucObj = state.sucursalesCliente.find(s => s.id === state.selectedSucursal);
+
+        const saved = await EvidenceDraftService.saveDraft(state.currentUser.id, state.company || 'inttec', {
+          id: state.activeDraftId || undefined,
+          selectedCliente: state.selectedCliente,
+          clienteNombre: clienteObj ? clienteObj.nombre : (state.selectedCliente ? 'Cliente' : 'Sin cliente asignado'),
+          selectedSucursal: state.selectedSucursal,
+          sucursalNombre: sucObj ? sucObj.nombre : '',
+          currentStep: state.currentStep,
+          trabajos: state.trabajos,
+        });
+
+        setActiveDraftId(saved.id);
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setLastSavedAt(timeStr);
+        await refreshDraftsList(state.currentUser.id, state.company || 'inttec');
+      } catch (err) {
+        console.warn('[Autosave Admin] Error en autoguardado silencioso:', err);
+      }
+    }, 60000); // 60 segundos
+
+    return () => clearInterval(interval);
+  }, []);
+
   // Funciones del Sistema de Borradores
   const handleSaveDraft = async (silent = false) => {
     if (!currentUser) return;
@@ -280,7 +359,9 @@ export default function EvidenciaForm() {
       }
     } catch (err: any) {
       console.error('Error guardando borrador:', err);
-      Alert.alert('Error', 'No se pudo guardar el borrador en la memoria local.');
+      if (!silent) {
+        Alert.alert('Error', 'No se pudo guardar el borrador en la memoria local.');
+      }
     } finally {
       setIsSavingDraft(false);
     }
@@ -343,7 +424,7 @@ export default function EvidenciaForm() {
       setClienteSearch('');
       setSelectedSucursal('');
       setSucursalSearch('');
-      setTrabajos([{ descripcion: '', materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [] }]);
+      setTrabajos([{ descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }]);
       setCurrentStep(1);
       setActiveDraftId(null);
       setLastSavedAt(null);
@@ -611,6 +692,38 @@ export default function EvidenciaForm() {
     }
   };
 
+  // Helper para obtener Base64 bajo demanda desde cualquier URI local o memoria
+  const getPhotoBase64 = async (photo?: { uri: string; base64?: string | null }): Promise<string | null> => {
+    if (!photo) return null;
+    if (photo.base64 && typeof photo.base64 === 'string' && photo.base64.length > 0) {
+      return photo.base64;
+    }
+    if (!photo.uri) return null;
+
+    // Si ya es un data URI
+    if (photo.uri.startsWith('data:image/')) {
+      const parts = photo.uri.split('base64,');
+      return parts[1] || null;
+    }
+
+    // Si ya es un URL público de Supabase o web, no se necesita Base64 para subir
+    if (photo.uri.startsWith('http://') || photo.uri.startsWith('https://')) {
+      return null;
+    }
+
+    try {
+      const manipulated = await ImageManipulator.manipulateAsync(
+        photo.uri,
+        [{ resize: { width: 1280 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+      return manipulated.base64 || null;
+    } catch (err) {
+      console.warn('Error reading photo base64:', err);
+      return null;
+    }
+  };
+
   const handleSaveToDatabase = async () => {
     console.log("handleSaveToDatabase called");
     if (!currentUser) return;
@@ -627,13 +740,13 @@ export default function EvidenciaForm() {
 
     setIsSubmitting(true);
 
-    // Contabilizar total de fotos a subir en todos los trabajos
+    // Contabilizar total de fotos locales a subir en todos los trabajos
     let totalPhotosToUpload = 0;
     trabajos.forEach(t => {
-      if (t.antesImg?.base64) totalPhotosToUpload++;
-      if (t.despuesImg?.base64) totalPhotosToUpload++;
+      if (t.antesImg?.uri && !t.antesImg.uri.startsWith('http')) totalPhotosToUpload++;
+      if (t.despuesImg?.uri && !t.despuesImg.uri.startsWith('http')) totalPhotosToUpload++;
       (t.fotosAdicionales || []).forEach(extra => {
-        if (extra.base64) totalPhotosToUpload++;
+        if (extra.uri && !extra.uri.startsWith('http')) totalPhotosToUpload++;
       });
     });
 
@@ -664,8 +777,8 @@ export default function EvidenciaForm() {
         return urlData.publicUrl;
       };
 
-      let fotoAntesUrl = null;
-      let fotoDespuesUrl = null;
+      let fotoAntesUrl: string | null = null;
+      let fotoDespuesUrl: string | null = null;
       const allFotosAdicionalesUrls: string[] = [];
 
       // Subir fotos de cada trabajo (antes, despues y fotos adicionales de cada trabajo)
@@ -675,13 +788,26 @@ export default function EvidenciaForm() {
         let antesUrl: string | null = null;
         let despuesUrl: string | null = null;
 
-        if (t.antesImg?.base64) {
-          antesUrl = await uploadPhoto(t.antesImg.base64, `t${i}_antes`);
+        if (t.antesImg?.uri?.startsWith('http')) {
+          antesUrl = t.antesImg.uri;
           if (i === 0) fotoAntesUrl = antesUrl;
+        } else if (t.antesImg) {
+          const b64 = await getPhotoBase64(t.antesImg);
+          if (b64) {
+            antesUrl = await uploadPhoto(b64, `t${i}_antes`);
+            if (i === 0) fotoAntesUrl = antesUrl;
+          }
         }
-        if (t.despuesImg?.base64) {
-          despuesUrl = await uploadPhoto(t.despuesImg.base64, `t${i}_despues`);
+
+        if (t.despuesImg?.uri?.startsWith('http')) {
+          despuesUrl = t.despuesImg.uri;
           if (i === 0) fotoDespuesUrl = despuesUrl;
+        } else if (t.despuesImg) {
+          const b64 = await getPhotoBase64(t.despuesImg);
+          if (b64) {
+            despuesUrl = await uploadPhoto(b64, `t${i}_despues`);
+            if (i === 0) fotoDespuesUrl = despuesUrl;
+          }
         }
 
         // Subir fotos adicionales de este trabajo con concurrencia de 4
@@ -693,8 +819,12 @@ export default function EvidenciaForm() {
             const chunk = extras.slice(j, j + CONCURRENCY);
             const urls = await Promise.all(
               chunk.map(async (extra, chunkIdx) => {
-                if (extra.base64) {
-                  return await uploadPhoto(extra.base64, `t${i}_extra_${j + chunkIdx}`);
+                if (extra.uri?.startsWith('http')) {
+                  return extra.uri;
+                }
+                const b64 = await getPhotoBase64(extra);
+                if (b64) {
+                  return await uploadPhoto(b64, `t${i}_extra_${j + chunkIdx}`);
                 }
                 return extra.uri || null;
               })
@@ -1349,13 +1479,27 @@ export default function EvidenciaForm() {
                     />
                   </View>
 
-                  {/* Selector de Materiales Estructurado */}
+                  {/* Selector de Materiales con Switch */}
                   <MaterialesSelector
                     productos={productos}
                     materiales={trabajo.materiales_usados || []}
+                    usaMateriales={trabajo.usa_materiales ?? (trabajo.materiales_usados && trabajo.materiales_usados.length > 0)}
+                    onToggleUsaMateriales={(val) => {
+                      setTrabajos(prev => prev.map((t, i) => {
+                        if (i === index) {
+                          return {
+                            ...t,
+                            usa_materiales: val,
+                            materiales: val ? t.materiales : '',
+                            materiales_usados: val ? t.materiales_usados : []
+                          };
+                        }
+                        return t;
+                      }));
+                    }}
                     onChange={(nuevosMateriales) => {
-                      const textoMateriales = nuevosMateriales.map(m => `৹ ${m.usado}x ${m.nombre}`).join('\n');
-                      setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, materiales_usados: nuevosMateriales, materiales: textoMateriales } : t));
+                      const textoMateriales = nuevosMateriales.map(m => `৹ ${m.usado}x ${m.nombre} (${m.unidad || 'pza'})`).join('\n');
+                      setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, usa_materiales: true, materiales_usados: nuevosMateriales, materiales: textoMateriales } : t));
                     }}
                   />
 
@@ -1617,7 +1761,7 @@ export default function EvidenciaForm() {
 
               <TouchableOpacity
                 onPress={() => {
-                  setTrabajos(prev => [...prev, { descripcion: '', materiales: '', solucion: '', fotosAdicionales: [] }]);
+                  setTrabajos(prev => [...prev, { descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }]);
                 }}
                 style={{
                   flexDirection: 'row',

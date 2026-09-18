@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { supabase, CompanyService, EnvService } from '@/services/supabase';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ForceUpdateScreen } from '@/components/ForceUpdateScreen';
 
 // Prevent auto-hide of splash screen
@@ -70,20 +71,22 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider value={customTheme}>
-      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-      {needsUpdate ? (
-        <ForceUpdateScreen />
-      ) : (
-        <AuthProvider>
-          <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
-            <Stack.Screen name="index" />
-            <Stack.Screen name="explore" />
-            <Stack.Screen name="(empleado)" />
-            <Stack.Screen name="(admin)" />
-          </Stack>
-        </AuthProvider>
-      )}
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider value={customTheme}>
+        <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+        {needsUpdate ? (
+          <ForceUpdateScreen />
+        ) : (
+          <AuthProvider>
+            <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+              <Stack.Screen name="index" />
+              <Stack.Screen name="explore" />
+              <Stack.Screen name="(empleado)" />
+              <Stack.Screen name="(admin)" />
+            </Stack>
+          </AuthProvider>
+        )}
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
