@@ -55,6 +55,8 @@ export interface ParsedCFDI {
     type: string;
     rate: number;
   }>;
+  total_impuestos_trasladados?: number;
+  iva?: number;
   stamp: {
     uuid: string;
     date: string;
@@ -70,7 +72,7 @@ export interface ParsedCFDI {
  * Extrae el valor de un atributo en un fragmento XML
  */
 function getAttribute(xmlSnippet: string, attrName: string): string {
-  const regex = new RegExp(`${attrName}="([^"]*)"`, 'i');
+  const regex = new RegExp(`\\b${attrName}="([^"]*)"`, 'i');
   const match = xmlSnippet.match(regex);
   return match ? match[1] : '';
 }
@@ -125,11 +127,11 @@ export function parseCFDIXML(xmlText: string, status: 'valid' | 'canceled' = 'va
 
   // 5. Conceptos
   const items: ParsedCFDIItem[] = [];
-  const conceptoRegex = /<cfdi:Concepto\b([^>]*)(?:\/?>|>([\s\S]*?)<\/cfdi:Concepto>)/gi;
+  const conceptoRegex = /<(?:cfdi:)?Concepto\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:cfdi:)?Concepto>)/gi;
   let matchConcepto;
 
   while ((matchConcepto = conceptoRegex.exec(xmlText)) !== null) {
-    const cAttrs = matchConcepto[1];
+    const cAttrs = matchConcepto[1] || '';
     const cBody = matchConcepto[2] || '';
 
     const cantidad = parseFloat(getAttribute(cAttrs, 'Cantidad') || '1');
@@ -140,12 +142,26 @@ export function parseCFDIXML(xmlText: string, status: 'valid' | 'canceled' = 'va
     const unidad = getAttribute(cAttrs, 'Unidad');
     const descripcion = getAttribute(cAttrs, 'Descripcion');
     const noIdentificacion = getAttribute(cAttrs, 'NoIdentificacion');
+    const objetoImp = getAttribute(cAttrs, 'ObjetoImp') || '02';
 
     // Impuesto del concepto
     let itemIva = 0;
-    const trasladoMatch = cBody.match(/<cfdi:Traslado\b([^>]*)\/?>/i);
+    let itemRate = 0.16;
+    const trasladoMatch = cBody.match(/<(?:cfdi:)?Traslado\b([^>]*)\/?>/i);
     if (trasladoMatch) {
-      itemIva = parseFloat(getAttribute(trasladoMatch[1], 'Importe') || '0');
+      const impAttr = getAttribute(trasladoMatch[1], 'Importe');
+      if (impAttr) {
+        itemIva = parseFloat(impAttr) || 0;
+      }
+      const rateAttr = getAttribute(trasladoMatch[1], 'TasaOCuota');
+      if (rateAttr) {
+        itemRate = parseFloat(rateAttr) || 0.16;
+      }
+    }
+
+    // Si no vino importe explícito en el traslado pero es objeto de impuesto 02
+    if (!itemIva && objetoImp === '02' && importe > 0) {
+      itemIva = Math.round(importe * itemRate * 100) / 100;
     }
 
     items.push({
@@ -161,14 +177,34 @@ export function parseCFDIXML(xmlText: string, status: 'valid' | 'canceled' = 'va
       taxes: itemIva > 0 ? [{
         amount: itemIva,
         base: importe,
-        rate: 0.16,
+        rate: itemRate,
         type: 'IVA'
       }] : []
     });
   }
 
   // 6. Impuestos Globales
-  const totalImpuestosTrasladados = items.reduce((sum, item) => sum + (item.taxes?.[0]?.amount || 0), 0);
+  let totalImpuestosTrasladados = 0;
+
+  // A. Buscar en el nodo global de comprobante <cfdi:Impuestos TotalImpuestosTrasladados="...">
+  const globalImpuestosMatch = xmlText.match(/<(?:cfdi:)?Impuestos\b([^>]*)>(?:[\s\S]*?<\/(?:cfdi:)?Impuestos>)?/i);
+  if (globalImpuestosMatch) {
+    const gAttrs = globalImpuestosMatch[1];
+    const totalAttr = getAttribute(gAttrs, 'TotalImpuestosTrasladados');
+    if (totalAttr) {
+      totalImpuestosTrasladados = parseFloat(totalAttr) || 0;
+    }
+  }
+
+  // B. Si es 0 o no se encontró el atributo, sumar impuestos de partidas
+  if (!totalImpuestosTrasladados) {
+    totalImpuestosTrasladados = items.reduce((sum, item) => sum + (item.taxes?.[0]?.amount || 0), 0);
+  }
+
+  // C. Si sigue siendo 0 pero total > subtotal, la diferencia matemática es el impuesto trasladado
+  if (!totalImpuestosTrasladados && total > subtotal && subtotal > 0) {
+    totalImpuestosTrasladados = Math.round((total - subtotal) * 100) / 100;
+  }
 
   // 7. URL de Verificación QR del SAT
   const last8Sello = (selloCFD || '').slice(-8);
@@ -212,6 +248,8 @@ export function parseCFDIXML(xmlText: string, status: 'valid' | 'canceled' = 'va
       }
     },
     items: items,
+    total_impuestos_trasladados: totalImpuestosTrasladados,
+    iva: totalImpuestosTrasladados,
     taxes: totalImpuestosTrasladados > 0 ? [{
       amount: totalImpuestosTrasladados,
       type: 'IVA',
