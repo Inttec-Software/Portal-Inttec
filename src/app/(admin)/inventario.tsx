@@ -96,6 +96,8 @@ export default function InventarioDashboard() {
   // Filtros de búsqueda
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   // Selección múltiple para acciones en lote
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
@@ -674,8 +676,8 @@ async function loadAllData() {
   };
 
   const handleSaveProduct = async () => {
-    if (!formSku.trim() || !formNombre.trim() || !formCategoriaId || !formProveedorId) {
-      Alert.alert('Validación', 'Por favor llena todos los campos obligatorios.');
+    if (!formSku.trim() || !formNombre.trim() || !formCategoriaId) {
+      Alert.alert('Validación', 'Por favor llena el SKU, Nombre y Categoría del producto.');
       return;
     }
 
@@ -692,7 +694,7 @@ async function loadAllData() {
         sku_interno: formSku.trim().toUpperCase(),
         nombre_oficial: formNombre.trim(),
         categoria_id: formCategoriaId,
-        proveedor_id: formProveedorId || null,
+        proveedor_id: formProveedorId || undefined,
         stock_actual: stockNum,
         precio_unitario: parseFloat(formPrecio) || 0,
         activo: true,
@@ -706,19 +708,31 @@ async function loadAllData() {
       const res = await fetch(url, {
         method,
         headers,
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          ...payload,
+          proveedor_id: formProveedorId || null
+        })
       });
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Error al guardar el producto en el servidor');
       }
-      Alert.alert('Éxito', editingProduct ? 'Producto actualizado correctamente.' : 'Producto agregado correctamente.');
+      
+      const resJson = await res.json().catch(() => ({}));
+      showAlert('Éxito', editingProduct ? 'Producto actualizado correctamente.' : 'Producto agregado correctamente.');
 
       setCrudModalVisible(false);
+
+      if (editingProduct) {
+        setProductos(prev => prev.map(prod => prod.id === editingProduct.id ? { ...prod, ...payload } : prod));
+      } else if (resJson.data) {
+        setProductos(prev => [resJson.data, ...prev]);
+      }
+      
       await loadAllData();
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo guardar el producto.');
+      showAlert('Error', err.message || 'No se pudo guardar el producto.');
     } finally {
       setIsSavingProduct(false);
     }
@@ -726,7 +740,8 @@ async function loadAllData() {
 
   const handleSoftDeleteProduct = (p: Producto) => {
     const performDelete = async () => {
-      setIsLoading(true);
+      // Actualización optimista instantánea
+      setProductos(prev => prev.map(prod => prod.id === p.id ? { ...prod, activo: false } : prod));
       try {
         const headers = await getApiHeaders();
         const res = await fetch(`${getApiUrl()}/api/inventario/productos/${p.id}`, {
@@ -735,21 +750,15 @@ async function loadAllData() {
           body: JSON.stringify({ activo: false })
         });
 
-        if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al desactivar el producto'); }
-        if (Platform.OS === 'web') {
-          window.alert('Producto desactivado.');
-        } else {
-          Alert.alert('Éxito', 'Producto desactivado.');
+        if (!res.ok) {
+          // Revertir si hay error
+          setProductos(prev => prev.map(prod => prod.id === p.id ? { ...prod, activo: true } : prod));
+          const errData = await res.json().catch(() => ({})); 
+          throw new Error(errData.error || 'Error al desactivar el producto'); 
         }
-        await loadAllData();
+        showAlert('Éxito', 'Producto desactivado.');
       } catch (err: any) {
-        if (Platform.OS === 'web') {
-          window.alert(err.message || 'No se pudo desactivar el producto.');
-        } else {
-          Alert.alert('Error', err.message || 'No se pudo desactivar el producto.');
-        }
-      } finally {
-        setIsLoading(false);
+        showAlert('Error', err.message || 'No se pudo desactivar el producto.');
       }
     };
 
@@ -774,6 +783,75 @@ async function loadAllData() {
     }
   };
 
+  const handleHardDeleteProduct = (p: Producto) => {
+    const performHardDelete = async () => {
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/inventario/productos/${p.id}`, {
+          method: 'DELETE',
+          headers,
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          if (data.isForeignKeyConstraint) {
+            showAlert(
+              'No se puede eliminar definitivamente',
+              data.error || 'Este producto está vinculado a ventas, cotizaciones o movimientos históricos. Puedes desactivarlo si deseas ocultarlo.'
+            );
+            return;
+          }
+          throw new Error(data.error || 'Error al eliminar el producto de la base de datos');
+        }
+
+        // Remover localmente de inmediato
+        setProductos(prev => prev.filter(prod => prod.id !== p.id));
+        showAlert('Éxito', `El producto "${p.nombre_oficial}" ha sido borrado definitivamente de la base de datos.`);
+      } catch (err: any) {
+        showAlert('Error', err.message || 'No se pudo eliminar el producto.');
+      }
+    };
+
+    const msg = `¿Estás seguro de que deseas ELIMINAR DEFINITIVAMENTE el producto "${p.nombre_oficial}"? Esta acción no se puede deshacer y borrará permanentemente el registro del sistema.`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) {
+        performHardDelete();
+      }
+    } else {
+      Alert.alert(
+        'Eliminación Definitiva (Hard Delete)',
+        msg,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Borrar para siempre', style: 'destructive', onPress: performHardDelete }
+        ]
+      );
+    }
+  };
+
+  const handleReactivateProduct = async (p: Producto) => {
+    // Actualización optimista en tiempo real sin congelar la UI
+    setProductos(prev => prev.map(prod => prod.id === p.id ? { ...prod, activo: true } : prod));
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/productos/${p.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ activo: true })
+      });
+
+      if (!res.ok) { 
+        // Revertir estado si falla la petición
+        setProductos(prev => prev.map(prod => prod.id === p.id ? { ...prod, activo: false } : prod));
+        const errData = await res.json().catch(() => ({})); 
+        throw new Error(errData.error || 'Error al reactivar el producto'); 
+      }
+      showAlert('Éxito', `El producto "${p.nombre_oficial}" ha sido reactivado.`);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo reactivar el producto.');
+    }
+  };
+
   const handleQuickAddStock = async (product: Producto) => {
     const valueStr = quickStockAdjustments[product.id] || '';
     const toAdd = parseInt(valueStr, 10);
@@ -783,7 +861,11 @@ async function loadAllData() {
       return;
     }
 
-    setIsLoading(true);
+    const newStock = product.stock_actual + toAdd;
+    // Actualización optimista instantánea del stock
+    setProductos(prev => prev.map(prod => prod.id === product.id ? { ...prod, stock_actual: newStock } : prod));
+    setQuickStockAdjustments(prev => ({ ...prev, [product.id]: '' }));
+
     try {
       const headers = await getApiHeaders();
       const res = await fetch(`${getApiUrl()}/api/inventario/productos/${product.id}/stock`, {
@@ -796,18 +878,16 @@ async function loadAllData() {
         })
       });
 
-      if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al añadir stock'); }
+      if (!res.ok) { 
+        // Revertir si falla la API
+        setProductos(prev => prev.map(prod => prod.id === product.id ? { ...prod, stock_actual: product.stock_actual } : prod));
+        const errData = await res.json().catch(() => ({})); 
+        throw new Error(errData.error || 'Error al añadir stock'); 
+      }
 
-      const newStock = product.stock_actual + toAdd;
-      // Limpiar el input de este producto
-      setQuickStockAdjustments(prev => ({ ...prev, [product.id]: '' }));
-
-      Alert.alert('Éxito', `Se añadieron ${toAdd} unidades a "${product.nombre_oficial}". Stock actual: ${newStock}`);
-      await loadAllData();
+      showAlert('Éxito', `Se añadieron ${toAdd} unidades a "${product.nombre_oficial}". Stock actual: ${newStock}`);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo actualizar el stock del producto.');
-    } finally {
-      setIsLoading(false);
+      showAlert('Error', err.message || 'No se pudo actualizar el stock del producto.');
     }
   };
 
@@ -1237,7 +1317,8 @@ async function loadAllData() {
 
   // Filtrado de catálogo
   const filteredProducts = productos.filter(p => {
-    if (!p.activo) return false;
+    if (!showInactive && !p.activo) return false;
+    if (!showOutOfStock && (p.stock_actual || 0) <= 0) return false;
     const matchesSearch =
       p.nombre_oficial.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.sku_interno.toLowerCase().includes(searchTerm.toLowerCase());
@@ -1537,16 +1618,69 @@ async function loadAllData() {
               style={{ marginBottom: Spacing.one }}
             />
 
-            {/* Selector de Categoría */}
-            <View style={styles.customDropdownContainer}>
+            {/* Selector de Categoría y Filtro Sin Stock */}
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <View style={[styles.customDropdownContainer, { flex: 1, minWidth: 180 }]}>
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                  onPress={openCategoryFilter}
+                >
+                  <Text style={{ color: selectedCategoryFilter ? themeColors.text : themeColors.textSecondary }}>
+                    {activeCategoryName || 'Filtrar por Categoría'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={18} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Toggle Switch para Productos Agotados e Inactivos */}
               <TouchableOpacity
-                style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-                onPress={openCategoryFilter}
+                onPress={() => setShowOutOfStock(prev => !prev)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: 10,
+                  backgroundColor: showOutOfStock ? themeColors.accent + '20' : themeColors.backgroundElement,
+                  borderWidth: 1,
+                  borderColor: showOutOfStock ? themeColors.accent : themeColors.border,
+                }}
+                {...(Platform.OS === 'web' ? { title: showOutOfStock ? "Ocultar productos con stock 0" : "Mostrar productos sin stock" } as any : {})}
               >
-                <Text style={{ color: selectedCategoryFilter ? themeColors.text : themeColors.textSecondary }}>
-                  {activeCategoryName || 'Filtrar por Categoría'}
+                <Ionicons 
+                  name={showOutOfStock ? "eye-outline" : "eye-off-outline"} 
+                  size={16} 
+                  color={showOutOfStock ? themeColors.accent : themeColors.textSecondary} 
+                />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: showOutOfStock ? themeColors.accent : themeColors.textSecondary }}>
+                  {showOutOfStock ? 'Ver agotados ON' : 'Ver agotados OFF'}
                 </Text>
-                <Ionicons name="chevron-down" size={18} color={themeColors.text} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setShowInactive(prev => !prev)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: 10,
+                  backgroundColor: showInactive ? '#FF980020' : themeColors.backgroundElement,
+                  borderWidth: 1,
+                  borderColor: showInactive ? '#FF9800' : themeColors.border,
+                }}
+                {...(Platform.OS === 'web' ? { title: showInactive ? "Ocultar productos inactivos" : "Mostrar productos deshabilitados / inactivos" } as any : {})}
+              >
+                <Ionicons 
+                  name={showInactive ? "archive-outline" : "archive-outline"} 
+                  size={16} 
+                  color={showInactive ? '#FF9800' : themeColors.textSecondary} 
+                />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: showInactive ? '#FF9800' : themeColors.textSecondary }}>
+                  {showInactive ? 'Ver inactivos ON' : 'Ver inactivos OFF'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1639,8 +1773,15 @@ async function loadAllData() {
                     </TouchableOpacity>
 
                     <View style={{ flex: 1, gap: 2, marginLeft: 8 }}>
-                      <Text style={styles.skuText}>{item.sku_interno}</Text>
-                      <Text style={[styles.itemText, { color: themeColors.text }]}>{item.nombre_oficial}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <Text style={styles.skuText}>{item.sku_interno}</Text>
+                        {!item.activo && (
+                          <View style={{ backgroundColor: '#FF980020', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1, borderWidth: 1, borderColor: '#FF9800' }}>
+                            <Text style={{ color: '#FF9800', fontSize: 10, fontWeight: 'bold' }}>INACTIVO</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.itemText, { color: themeColors.text, opacity: item.activo ? 1 : 0.6 }]}>{item.nombre_oficial}</Text>
                       <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>
                         {cat ? cat.nombre : 'Sin Categoría'}
                       </Text>
@@ -1681,10 +1822,33 @@ async function loadAllData() {
                         </TouchableOpacity>
                       </View>
 
-                      <TouchableOpacity onPress={() => handleOpenEditModal(item)}>
+                      <TouchableOpacity 
+                        onPress={() => handleOpenEditModal(item)}
+                        {...(Platform.OS === 'web' ? { title: "Editar Producto" } as any : {})}
+                      >
                         <Ionicons name="create-outline" size={20} color={themeColors.accent} />
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleSoftDeleteProduct(item)}>
+                      
+                      {!item.activo ? (
+                        <TouchableOpacity 
+                          onPress={() => handleReactivateProduct(item)}
+                          {...(Platform.OS === 'web' ? { title: "Reactivar Producto" } as any : {})}
+                        >
+                          <Ionicons name="refresh-circle-outline" size={22} color={themeColors.success} />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity 
+                          onPress={() => handleSoftDeleteProduct(item)}
+                          {...(Platform.OS === 'web' ? { title: "Desactivar Producto (Soft Delete)" } as any : {})}
+                        >
+                          <Ionicons name="eye-off-outline" size={20} color={themeColors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                      
+                      <TouchableOpacity 
+                        onPress={() => handleHardDeleteProduct(item)}
+                        {...(Platform.OS === 'web' ? { title: "Borrar Definitivamente (Hard Delete)" } as any : {})}
+                      >
                         <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
                       </TouchableOpacity>
                     </View>

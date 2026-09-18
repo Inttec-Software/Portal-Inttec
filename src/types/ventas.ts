@@ -10,6 +10,9 @@ export interface CotizacionLinea {
   precioUnitario: number;
   impuestoPorcentaje: number; // Ej: 16 para el IVA del 16%
   importe: number;
+  cantidadStr?: string;
+  precioUnitarioStr?: string;
+  impuestoPorcentajeStr?: string;
 }
 
 export interface Cotizacion {
@@ -27,6 +30,7 @@ export interface Cotizacion {
   moneda: string; // Ej: 'MXN'
   lineas: CotizacionLinea[];
   terminosCondiciones?: string;
+  notasObservaciones?: string;
   estado?: string;
   subtotal: number;
   iva: number;

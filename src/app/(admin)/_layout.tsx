@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, ActivityIndicator, Text, TouchableOpacity, StyleSheet, Platform, TouchableWithoutFeedback, ScrollView } from 'react-native';
+import { View, ActivityIndicator, Text, TouchableOpacity, StyleSheet, Platform, TouchableWithoutFeedback, ScrollView, Alert } from 'react-native';
 import { Slot, usePathname, useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -7,9 +7,10 @@ import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DevToolsFAB from '@/components/DevToolsFAB';
+import { AuthService } from '@/services/supabase';
 
 export default function AdminLayout() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const pathname = usePathname();
@@ -45,6 +46,27 @@ export default function AdminLayout() {
 
     if (!lastPart || lastPart === 'dashboard') return 'Inicio';
     return lastPart.charAt(0).toUpperCase() + lastPart.slice(1).replace(/-/g, ' ');
+  };
+
+  const handleLogout = async () => {
+    setIsMenuOpen(false);
+    const performLogout = async () => {
+      await AuthService.logout();
+      setUser(null);
+      router.replace('/');
+    };
+
+    if (Platform.OS === 'web') {
+      const confirm = window.confirm('¿Estás seguro de que deseas cerrar sesión?');
+      if (confirm) {
+        await performLogout();
+      }
+    } else {
+      Alert.alert('Cerrar Sesión', '¿Estás seguro de que deseas salir?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Cerrar Sesión', style: 'destructive', onPress: performLogout },
+      ]);
+    }
   };
 
   const quickLinks = [
@@ -138,7 +160,7 @@ export default function AdminLayout() {
               {quickLinks.map((link, index) => (
                 <TouchableOpacity
                   key={index}
-                  style={[styles.dropdownItem, { borderBottomColor: themeColors.border, borderBottomWidth: index === quickLinks.length - 1 ? 0 : 1 }]}
+                  style={[styles.dropdownItem, { borderBottomColor: themeColors.border, borderBottomWidth: 1 }]}
                   onPress={() => {
                     setIsMenuOpen(false);
                     router.replace(link.route as any);
@@ -150,6 +172,31 @@ export default function AdminLayout() {
                   <Text style={[styles.dropdownText, { color: themeColors.text }]}>{link.name}</Text>
                 </TouchableOpacity>
               ))}
+
+              {/* Perfil */}
+              <TouchableOpacity
+                style={[styles.dropdownItem, { borderBottomColor: themeColors.border, borderBottomWidth: 1 }]}
+                onPress={() => {
+                  setIsMenuOpen(false);
+                  router.push('/(admin)/perfil');
+                }}
+              >
+                <View style={[styles.dropdownIconContainer, { backgroundColor: '#5f27cd15' }]}>
+                  <Ionicons name="person-outline" size={20} color="#5f27cd" />
+                </View>
+                <Text style={[styles.dropdownText, { color: themeColors.text }]}>Perfil</Text>
+              </TouchableOpacity>
+
+              {/* Salir Sesión */}
+              <TouchableOpacity
+                style={[styles.dropdownItem, { borderBottomWidth: 0, marginTop: Spacing.one }]}
+                onPress={handleLogout}
+              >
+                <View style={[styles.dropdownIconContainer, { backgroundColor: Colors.light.danger + '15' }]}>
+                  <Ionicons name="log-out-outline" size={20} color={Colors.light.danger} />
+                </View>
+                <Text style={[styles.dropdownText, { color: Colors.light.danger }]}>Salir Sesión</Text>
+              </TouchableOpacity>
             </ScrollView>
           </View>
         </>
@@ -159,6 +206,7 @@ export default function AdminLayout() {
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
   header: {

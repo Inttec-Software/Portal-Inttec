@@ -141,43 +141,55 @@ export default function EmpleadoAsistencia() {
     }
   };
 
-  const handleStartCamera = async () => {
-    setChecadorInstructionVisible(false);
-
-    if (!cameraPermission?.granted) {
-      const { granted } = await requestCameraPermission();
-      if (!granted) {
-        Alert.alert('Permisos', 'Se necesita acceso a la cámara para el checador.');
-        return;
-      }
-    }
-
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permisos', 'Se necesita acceso a la ubicación para registrar la asistencia.');
-      return;
-    }
-
+  const fetchLocationAndAddress = async () => {
     try {
       setCurrentAddress('Obteniendo dirección...');
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
+      let lat = 0;
+      let lng = 0;
+
+      const lastKnown = await Location.getLastKnownPositionAsync().catch(() => null);
+      if (lastKnown) {
+        lat = lastKnown.coords.latitude;
+        lng = lastKnown.coords.longitude;
+        setCurrentLocation({ lat, lng });
+      }
+
+      const locPromise = Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
       });
-      const lat = loc.coords.latitude;
-      const lng = loc.coords.longitude;
-      setCurrentLocation({ lat, lng });
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
+      const loc = await Promise.race([locPromise, timeoutPromise]);
+
+      if (loc) {
+        lat = loc.coords.latitude;
+        lng = loc.coords.longitude;
+        setCurrentLocation({ lat, lng });
+      } else if (!lat && !lng) {
+        const highLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }).catch(() => null);
+        if (highLoc) {
+          lat = highLoc.coords.latitude;
+          lng = highLoc.coords.longitude;
+          setCurrentLocation({ lat, lng });
+        }
+      }
+
+      if (!lat && !lng) {
+        setCurrentAddress('Ubicación no disponible');
+        return;
+      }
 
       try {
         const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
-        const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`);
-        const data = await response.json();
-
-        if (data.status === 'OK' && data.results && data.results.length > 0) {
-          const formatted = data.results[0].formatted_address;
-          setCurrentAddress(formatted || 'Dirección no identificada');
-        } else {
-          throw new Error(data.error_message || `Google Geocoding API status: ${data.status}`);
+        if (apiKey) {
+          const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`);
+          const data = await response.json();
+          if (data.status === 'OK' && data.results && data.results.length > 0) {
+            const formatted = data.results[0].formatted_address;
+            setCurrentAddress(formatted || 'Dirección no identificada');
+            return;
+          }
         }
+        throw new Error('Fallback reverse geocode');
       } catch {
         try {
           const reverse = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
@@ -202,17 +214,37 @@ export default function EmpleadoAsistencia() {
         }
       }
     } catch (err: any) {
-      console.error('[Checador] Error crítico al obtener ubicación:', err.message || err);
-      setCurrentLocation(null);
+      console.error('[Checador] Error al obtener ubicación:', err.message || err);
       setCurrentAddress('Ubicación no disponible');
+    }
+  };
+
+  const handleStartCamera = async () => {
+    setChecadorInstructionVisible(false);
+
+    if (!cameraPermission?.granted) {
+      const { granted } = await requestCameraPermission();
+      if (!granted) {
+        Alert.alert('Permisos', 'Se necesita acceso a la cámara para el checador.');
+        return;
+      }
+    }
+
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permisos', 'Se necesita acceso a la ubicación para registrar la asistencia.');
+      return;
     }
 
     setCurrentDateTime(new Date());
+    if (dateIntervalRef.current) clearInterval(dateIntervalRef.current);
     dateIntervalRef.current = setInterval(() => {
       setCurrentDateTime(new Date());
     }, 1000);
 
     setChecadorCameraVisible(true);
+
+    fetchLocationAndAddress();
   };
 
   const handleCaptureSelfie = async () => {
@@ -221,9 +253,9 @@ export default function EmpleadoAsistencia() {
 
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.7,
+        quality: 0.3,
         base64: true,
-        shutterSound: true,
+        shutterSound: false,
       });
 
       let base64Data = photo?.base64;
@@ -239,7 +271,7 @@ export default function EmpleadoAsistencia() {
       setChecadorCameraVisible(false);
 
       const tipoRegistro = registroHoy?.hora_entrada ? 'salida' : 'entrada';
-      // MODO DOBLE REGISTRO (INTTEC + DARAVISA)
+      // MODO DOBLE REGISTRO (INTTEC + DARAVISA) EN PARALELO
       const fotoUrl = await AsistenciaService.subirFotoAsistencia(user.id, base64Data, tipoRegistro);
       const lat = currentLocation?.lat || 0;
       const lng = currentLocation?.lng || 0;
@@ -258,10 +290,10 @@ export default function EmpleadoAsistencia() {
           longitud_entrada: lng,
           direccion_entrada: addressToSave,
         };
-        // Inttec
-        await inttecClient.from('asistencias').insert([insertData]);
-        // Daravisa
-        await daravisaClient.from('asistencias').insert([insertData]);
+        await Promise.allSettled([
+          inttecClient.from('asistencias').insert([insertData]),
+          daravisaClient.from('asistencias').insert([insertData]),
+        ]);
         setChecadorResultMsg('Entrada registrada en Inttec y Daravisa');
       } else {
         const updateData = {
@@ -271,16 +303,18 @@ export default function EmpleadoAsistencia() {
           longitud_salida: lng,
           direccion_salida: addressToSave,
         };
-        // Inttec
-        const { data: asisInttec } = await inttecClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).single();
-        if (asisInttec) {
-          await inttecClient.from('asistencias').update(updateData).eq('id', asisInttec.id);
+        const [asisInttecRes, asisDaravisaRes] = await Promise.all([
+          inttecClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
+          daravisaClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
+        ]);
+        const updatePromises: Promise<any>[] = [];
+        if (asisInttecRes.data?.id) {
+          updatePromises.push(Promise.resolve(inttecClient.from('asistencias').update(updateData).eq('id', asisInttecRes.data.id)));
         }
-        // Daravisa
-        const { data: asisDaravisa } = await daravisaClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).single();
-        if (asisDaravisa) {
-          await daravisaClient.from('asistencias').update(updateData).eq('id', asisDaravisa.id);
+        if (asisDaravisaRes.data?.id) {
+          updatePromises.push(Promise.resolve(daravisaClient.from('asistencias').update(updateData).eq('id', asisDaravisaRes.data.id)));
         }
+        await Promise.allSettled(updatePromises);
         setChecadorResultMsg('Salida registrada en Inttec y Daravisa');
       }
 

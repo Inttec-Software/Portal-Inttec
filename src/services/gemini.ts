@@ -53,7 +53,7 @@ export interface GeminiOcrResult {
   proveedor: string | null;
   sucursal: string | null;
   fecha: string | null;
-  metodo_pago: 'efectivo' | 'tarjeta_debito' | 'tarjeta_credito' | null;
+  metodo_pago: 'efectivo' | 'tarjeta_debito' | 'tarjeta_credito' | 'transferencia' | null;
   justificacion_sugerida: string | null;
   categoria: string | null;
   subcategoria: string | null;
@@ -348,7 +348,7 @@ export const GeminiService = {
   "proveedor": string (nombre del establecimiento o proveedor, si no hay usa null),
   "sucursal": string (nombre de la sucursal o filial si aparece en el ticket, si no usa null),
   "fecha": string (la fecha de compra o emisión del ticket en formato DD/MM/AAAA, si no es legible o no hay, usa null),
-  "metodo_pago": string (debe ser exactamente uno de estos valores: "efectivo", "tarjeta_debito", "tarjeta_credito". Identifícalo según el ticket por palabras como "EFECTIVO", "PAGO EN EFECTIVO", "DÉBITO", "CRÉDITO", "VISA", "MASTERCARD", "DEBIT", "CREDIT". Si no se puede determinar o no dice, usa null),
+  "metodo_pago": string (debe ser exactamente uno de estos valores: "efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia". Identifícalo según el ticket por palabras como "EFECTIVO", "PAGO EN EFECTIVO", "DÉBITO", "CRÉDITO", "VISA", "MASTERCARD", "TRANSFERENCIA", "SPEI". Si no se puede determinar o no dice, usa null),
   "justificacion_sugerida": string (una breve sugerencia de justificación comercial en español basada en los artículos comprados o el establecimiento, ej: "Consumo de alimentos en comisión de trabajo" o "Compra de herramientas de trabajo" o "Hospedaje por viaje de trabajo", si no se puede determinar usa null),
   "categoria": string (categoría sugerida del gasto. REGLA DE CLASIFICACIÓN ESTRICTA: Si es de ferretería, Home Depot, herramientas, plomería o materiales, usa "Materiales y Herramientas". Si es de hotel, posada, Airbnb u hospedaje, usa "Hospedaje". Si es de gasolinera o combustible, usa "Vehículos". Si es de restaurante, cafetería o fonda, usa "Alimentos"),
   "subcategoria": string (subcategoría específica sugerida de acuerdo a la categoría anterior, ej: Desayuno, Herramientas, Hospedaje, Combustible, Gasolina, Hojas bond, si no hay usa null),

@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthService } from '@/services/supabase';
+import DevToolsFAB from '@/components/DevToolsFAB';
 
 export default function EmpleadoLayout() {
   const { user, setUser } = useAuth();
@@ -170,6 +171,7 @@ export default function EmpleadoLayout() {
         </>
       )}
 
+      <DevToolsFAB />
     </SafeAreaView>
   );
 }

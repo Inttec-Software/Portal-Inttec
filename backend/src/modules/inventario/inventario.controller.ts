@@ -425,4 +425,37 @@ export const bulkUpdateProductos = async (req: Request, res: Response) => {
   }
 };
 
+// 12. Eliminación Definitiva (Hard Delete) de Producto (DELETE /api/inventario/productos/:id)
+export const hardDeleteProducto = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+
+    const { id } = req.params;
+
+    const { error } = await client
+      .from('productos')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      if (error.code === '23503' || error.message?.includes('foreign key constraint') || error.message?.includes('violates foreign key')) {
+        return res.status(409).json({ 
+          error: 'No se puede eliminar este producto definitivamente porque tiene ventas, cotizaciones o movimientos históricos asociados. Puedes marcarlo como inactivo.',
+          isForeignKeyConstraint: true
+        });
+      }
+      throw error;
+    }
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error in hardDeleteProducto:', error);
+    return res.status(500).json({ error: error.message || 'Error al eliminar el producto de la base de datos.' });
+  }
+};
+
+
 

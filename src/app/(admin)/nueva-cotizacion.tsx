@@ -34,7 +34,8 @@ export default function NuevaCotizacionScreen() {
     vendedor: user?.nombre || '',
     moneda: 'MXN',
     lineas: [],
-    terminosCondiciones: 'https://inttec.odoo.com/terms',
+    terminosCondiciones: 'Precios sujetos a cambio sin previo aviso. Tiempo de entrega salvo previa venta.',
+    notasObservaciones: '',
     estado: 'Borrador',
     subtotal: 0,
     iva: 0,
@@ -195,31 +196,29 @@ export default function NuevaCotizacionScreen() {
       }
 
       const fetchLastFolio = async () => {
-        // Obtenemos la fecha actual en formato YYYY/MM/DD
+        // Formato YYMMDD (ej. 260918 para 18 de septiembre de 2026)
         const today = new Date();
-        const year = today.getFullYear();
-        const month = String(today.getMonth() + 1).padStart(2, '0');
-        const day = String(today.getDate()).padStart(2, '0');
-        const datePrefix = `${year}/${month}/${day}/`;
+        const yy = String(today.getFullYear()).slice(-2);
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        const datePrefix = `${yy}${mm}${dd}`;
 
-        const headers = await getApiHeaders();
-        const res = await fetch(`${getApiUrl()}/api/cotizaciones/last-folio?prefix=${encodeURIComponent(datePrefix)}`, { headers });
-        let newSequential = 1;
-
-        if (res.ok) {
-          const data = await res.json();
-          const lastFolio = data.lastFolio;
-          if (lastFolio) {
-            const parts = lastFolio.split('/');
-            const lastNum = parseInt(parts[parts.length - 1], 10);
-            if (!isNaN(lastNum)) {
-              newSequential = lastNum + 1;
+        try {
+          const headers = await getApiHeaders();
+          const res = await fetch(`${getApiUrl()}/api/cotizaciones/last-folio?prefix=${encodeURIComponent(datePrefix)}`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.nextFolio) {
+              setCotizacion(prev => ({ ...prev, numeroCotizacion: data.nextFolio }));
+              return;
             }
           }
+        } catch (err) {
+          console.error('Error fetching last folio:', err);
         }
-        
-        const nextFolio = `${datePrefix}${String(newSequential).padStart(3, '0')}`;
-        setCotizacion(prev => ({ ...prev, numeroCotizacion: nextFolio }));
+
+        const fallbackFolio = `${datePrefix}01`;
+        setCotizacion(prev => ({ ...prev, numeroCotizacion: fallbackFolio }));
       };
       
       fetchLastFolio();
@@ -273,8 +272,33 @@ export default function NuevaCotizacionScreen() {
           const updated = { ...linea, [field]: value };
           // Recalculate importe for this line
           if (field === 'cantidad' || field === 'precioUnitario') {
-            updated.importe = updated.cantidad * updated.precioUnitario;
+            updated.importe = (updated.cantidad || 0) * (updated.precioUnitario || 0);
           }
+          return updated;
+        }
+        return linea;
+      });
+      return { ...prev, lineas: newLineas };
+    });
+  };
+
+  const handleUpdateLineNumericText = (id: string, field: 'precioUnitario' | 'cantidad' | 'impuestoPorcentaje', rawText: string) => {
+    // Permite escribir puntos o comas de forma fluida sin perder el foco ni borrar el carácter decimal
+    const sanitized = rawText.replace(',', '.').replace(/[^0-9.]/g, '').replace(/(\..*?)\..*/g, '$1');
+    const strKey = `${field}Str` as 'precioUnitarioStr' | 'cantidadStr' | 'impuestoPorcentajeStr';
+    
+    const parsedNum = parseFloat(sanitized);
+    const numVal = isNaN(parsedNum) ? 0 : parsedNum;
+
+    setCotizacion(prev => {
+      const newLineas = prev.lineas.map(linea => {
+        if (linea.id === id) {
+          const updated = { 
+            ...linea, 
+            [strKey]: sanitized,
+            [field]: numVal 
+          };
+          updated.importe = (updated.cantidad || 0) * (updated.precioUnitario || 0);
           return updated;
         }
         return linea;
@@ -292,9 +316,9 @@ export default function NuevaCotizacionScreen() {
 
   const handlePrintPDF = async () => {
     try {
-      console.log('Generando PDF...');
-      await exportarCotizacionOdooPDF({ ...cotizacion, subtotal, iva, total });
-      console.log('PDF Generado correctamente.');
+      console.log('Descargando PDF...');
+      await exportarCotizacionOdooPDF({ ...cotizacion, subtotal, iva, total }, 'download');
+      console.log('PDF Descargado correctamente.');
     } catch (error: any) {
       console.error('Error en handlePrintPDF:', error);
       showAlert('Error', error.message || 'Error al generar el PDF');
@@ -321,6 +345,7 @@ export default function NuevaCotizacionScreen() {
         total,
         lineas: cotizacion.lineas,
         terminos_condiciones: cotizacion.terminosCondiciones,
+        notas_observaciones: cotizacion.notasObservaciones,
         estado: cotizacion.estado || 'Borrador'
       };
 
@@ -727,8 +752,8 @@ export default function NuevaCotizacionScreen() {
                     <TextInput
                       style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
                       keyboardType="numeric"
-                      value={linea.cantidad.toString()}
-                      onChangeText={(t) => handleUpdateLine(linea.id, 'cantidad', Number(t.replace(/[^0-9.]/g, '')) || 0)}
+                      value={linea.cantidadStr !== undefined ? linea.cantidadStr : (linea.cantidad ? linea.cantidad.toString() : '')}
+                      onChangeText={(t) => handleUpdateLineNumericText(linea.id, 'cantidad', t)}
                     />
                   </View>
                   <View style={[styles.column, isMobile && styles.columnMobile, { flex: 1.5 }]}>
@@ -736,8 +761,8 @@ export default function NuevaCotizacionScreen() {
                     <TextInput
                       style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
                       keyboardType="numeric"
-                      value={linea.precioUnitario.toString()}
-                      onChangeText={(t) => handleUpdateLine(linea.id, 'precioUnitario', Number(t.replace(/[^0-9.]/g, '')) || 0)}
+                      value={linea.precioUnitarioStr !== undefined ? linea.precioUnitarioStr : (linea.precioUnitario ? linea.precioUnitario.toString() : '')}
+                      onChangeText={(t) => handleUpdateLineNumericText(linea.id, 'precioUnitario', t)}
                     />
                   </View>
                   <View style={[styles.column, isMobile && styles.columnMobile, { flex: 1 }]}>
@@ -745,8 +770,8 @@ export default function NuevaCotizacionScreen() {
                     <TextInput
                       style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
                       keyboardType="numeric"
-                      value={linea.impuestoPorcentaje.toString()}
-                      onChangeText={(t) => handleUpdateLine(linea.id, 'impuestoPorcentaje', Number(t.replace(/[^0-9.]/g, '')) || 0)}
+                      value={linea.impuestoPorcentajeStr !== undefined ? linea.impuestoPorcentajeStr : (linea.impuestoPorcentaje ? linea.impuestoPorcentaje.toString() : '')}
+                      onChangeText={(t) => handleUpdateLineNumericText(linea.id, 'impuestoPorcentaje', t)}
                     />
                   </View>
                 </View>
@@ -763,6 +788,41 @@ export default function NuevaCotizacionScreen() {
               </View>
             ))
           )}
+        </View>
+
+        {/* Términos y Condiciones / Notas y Observaciones */}
+        <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <ThemedText style={[styles.cardTitle, { color: themeColors.primary, fontSize: 16, marginBottom: 12 }]}>
+            Condiciones y Notas Comerciales
+          </ThemedText>
+
+          <View style={{ gap: Spacing.two }}>
+            <View style={styles.inputGroup}>
+              <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Términos y Condiciones</ThemedText>
+              <TextInput
+                style={[styles.inputMultiline, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
+                multiline
+                numberOfLines={3}
+                placeholder="Escribe las condiciones de venta..."
+                placeholderTextColor={themeColors.textSecondary}
+                value={cotizacion.terminosCondiciones || ''}
+                onChangeText={(t) => setCotizacion(prev => ({ ...prev, terminosCondiciones: t }))}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Notas u Observaciones</ThemedText>
+              <TextInput
+                style={[styles.inputMultiline, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
+                multiline
+                numberOfLines={3}
+                placeholder="Escribe notas u observaciones especiales para el cliente..."
+                placeholderTextColor={themeColors.textSecondary}
+                value={cotizacion.notasObservaciones || ''}
+                onChangeText={(t) => setCotizacion(prev => ({ ...prev, notasObservaciones: t }))}
+              />
+            </View>
+          </View>
         </View>
 
         {/* Totales y Botones Finales */}
@@ -787,8 +847,8 @@ export default function NuevaCotizacionScreen() {
               style={[styles.bottomBtnSecondary, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
               onPress={handlePrintPDF}
             >
-              <Ionicons name="print-outline" size={20} color={themeColors.text} />
-              <ThemedText style={{ color: themeColors.text, fontWeight: '600', marginLeft: 8 }}>PDF Corporativo</ThemedText>
+              <Ionicons name="download-outline" size={20} color={themeColors.text} />
+              <ThemedText style={{ color: themeColors.text, fontWeight: '600', marginLeft: 8 }}>Descargar PDF</ThemedText>
             </TouchableOpacity>
 
             <TouchableOpacity 

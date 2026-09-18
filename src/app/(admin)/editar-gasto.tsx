@@ -122,7 +122,7 @@ export default function EditarGastoForm() {
   const [sucursalesCliente, setSucursalesCliente] = useState<SucursalCliente[]>([]);
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
   const [sucursalSearch, setSucursalSearch] = useState('');
-  const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito'>('efectivo');
+  const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia'>('efectivo');
   const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
@@ -798,7 +798,7 @@ export default function EditarGastoForm() {
       proveedor_id: activeProvObj?.id || null,
       cliente_id: activeCliObj?.id || null,
       sucursal_id: activeSucObj?.id || null,
-      tipo_tarjeta: tipoTarjeta,
+      tipo_tarjeta: (metodoPago === 'efectivo' || metodoPago === 'transferencia') ? null : tipoTarjeta,
       ubicacion_registro: 'Móvil',
       facturado: facturado,
       motivo_sin_factura: facturado ? null : (facturaStatus === 'PENDIENTE' ? `PENDIENTE_ENTREGA: ${comentarioPendiente}` : motivoSinFactura.trim() || null),
@@ -933,7 +933,7 @@ export default function EditarGastoForm() {
         return;
       }
 
-      if (metodoPago !== 'efectivo' && !tipoTarjeta) {
+      if (metodoPago !== 'efectivo' && metodoPago !== 'transferencia' && !tipoTarjeta) {
         showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, Mercado Pago).');
         return;
       }
@@ -1015,6 +1015,7 @@ export default function EditarGastoForm() {
                 {imageUri ? (
                   <View style={styles.previewContainer}>
                     <TouchableOpacity 
+                      style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
                       onPress={() => {
                         if (imageExt !== 'pdf') {
                           setActivePreviewUrl(imageUri);
@@ -1029,7 +1030,13 @@ export default function EditarGastoForm() {
                           <Text style={{ color: themeColors.text, marginTop: Spacing.one, fontWeight: '500' }}>Documento PDF</Text>
                         </View>
                       ) : (
-                        <Image source={{ uri: imageUri }} style={styles.previewImage} resizeMode="contain" />
+                        <Image source={{ uri: imageUri }} style={[styles.previewImage, { width: '100%', height: '100%' }]} resizeMode="contain" />
+                      )}
+                      {imageExt !== 'pdf' && (
+                        <View style={styles.zoomBadgeOverlay}>
+                          <Ionicons name="scan-outline" size={13} color="#ffffff" />
+                          <Text style={styles.zoomBadgeOverlayText}>Toca para ampliar</Text>
+                        </View>
                       )}
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -1274,6 +1281,32 @@ export default function EditarGastoForm() {
               <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
                 2. Detalles de la Compra
               </Text>
+
+              {imageUri && (
+                <TouchableOpacity
+                  onPress={() => {
+                    if (imageExt !== 'pdf') {
+                      setActivePreviewUrl(imageUri);
+                      setViewerVisible(true);
+                    }
+                  }}
+                  activeOpacity={0.8}
+                  style={[styles.floatingPreviewBanner, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                >
+                  {imageExt === 'pdf' ? (
+                    <View style={styles.floatingPreviewThumb}>
+                      <Ionicons name="document-text" size={24} color={themeColors.danger} />
+                    </View>
+                  ) : (
+                    <Image source={{ uri: imageUri }} style={styles.floatingPreviewThumb} resizeMode="cover" />
+                  )}
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={[styles.floatingPreviewTitle, { color: themeColors.text }]}>Ticket Adjunto (Vista Previa)</Text>
+                    <Text style={[styles.floatingPreviewSub, { color: themeColors.textSecondary }]}>Toca aquí para ampliar y revisar el ticket</Text>
+                  </View>
+                  <Ionicons name="eye-outline" size={20} color={themeColors.primary} />
+                </TouchableOpacity>
+              )}
 
               {!!(alertaPolitica || alertaLocal) && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}>
@@ -1861,21 +1894,44 @@ export default function EditarGastoForm() {
 
                   <TouchableOpacity
                     onPress={() => {
-                      if (metodoPago !== 'tarjeta_credito' && metodoPago !== 'tarjeta_debito') {
-                        setMetodoPago('tarjeta_debito');
-                      }
+                      setMetodoPago('transferencia');
+                      setTipoTarjeta(null);
                     }}
                     style={[
                       styles.paymentOption,
                       {
-                        backgroundColor: metodoPago !== 'efectivo' ? themeColors.accent : themeColors.backgroundElement,
-                        borderColor: metodoPago !== 'efectivo' ? 'transparent' : themeColors.border,
+                        backgroundColor: metodoPago === 'transferencia' ? themeColors.accent : themeColors.backgroundElement,
+                        borderColor: metodoPago === 'transferencia' ? 'transparent' : themeColors.border,
                         flex: 1,
                         alignItems: 'center',
                       },
                     ]}
                   >
-                    <Text style={[styles.paymentOptionText, { color: metodoPago !== 'efectivo' ? '#ffffff' : themeColors.text }]}>
+                    <Text style={[styles.paymentOptionText, { color: metodoPago === 'transferencia' ? '#ffffff' : themeColors.text }]}>
+                      Transferencia
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (metodoPago !== 'tarjeta_credito' && metodoPago !== 'tarjeta_debito') {
+                        setMetodoPago('tarjeta_debito');
+                      }
+                      if (!tipoTarjeta) {
+                        setTipoTarjeta('BBVA');
+                      }
+                    }}
+                    style={[
+                      styles.paymentOption,
+                      {
+                        backgroundColor: (metodoPago === 'tarjeta_debito' || metodoPago === 'tarjeta_credito' || metodoPago === 'tarjeta') ? themeColors.accent : themeColors.backgroundElement,
+                        borderColor: (metodoPago === 'tarjeta_debito' || metodoPago === 'tarjeta_credito' || metodoPago === 'tarjeta') ? 'transparent' : themeColors.border,
+                        flex: 1,
+                        alignItems: 'center',
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.paymentOptionText, { color: (metodoPago === 'tarjeta_debito' || metodoPago === 'tarjeta_credito' || metodoPago === 'tarjeta') ? '#ffffff' : themeColors.text }]}>
                       Tarjeta
                     </Text>
                   </TouchableOpacity>
@@ -1883,7 +1939,7 @@ export default function EditarGastoForm() {
               </View>
 
               {/* Sub-selector si se elige Tarjeta */}
-              {metodoPago !== 'efectivo' && (
+              {(metodoPago === 'tarjeta_debito' || metodoPago === 'tarjeta_credito' || metodoPago === 'tarjeta') && (
                 <View style={[styles.selectorGroup, { marginTop: -Spacing.one, paddingLeft: Spacing.two, borderLeftWidth: 2, borderLeftColor: themeColors.accent, gap: Spacing.two }]}>
                   <View>
                     <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13, marginBottom: Spacing.one }]}>Tipo de Tarjeta *</Text>
@@ -2168,6 +2224,32 @@ export default function EditarGastoForm() {
               <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
                 3. Categorización e Información de Negocio
               </Text>
+
+              {imageUri && (
+                <TouchableOpacity
+                  onPress={() => {
+                    if (imageExt !== 'pdf') {
+                      setActivePreviewUrl(imageUri);
+                      setViewerVisible(true);
+                    }
+                  }}
+                  activeOpacity={0.8}
+                  style={[styles.floatingPreviewBanner, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                >
+                  {imageExt === 'pdf' ? (
+                    <View style={styles.floatingPreviewThumb}>
+                      <Ionicons name="document-text" size={24} color={themeColors.danger} />
+                    </View>
+                  ) : (
+                    <Image source={{ uri: imageUri }} style={styles.floatingPreviewThumb} resizeMode="cover" />
+                  )}
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={[styles.floatingPreviewTitle, { color: themeColors.text }]}>Ticket Adjunto (Vista Previa)</Text>
+                    <Text style={[styles.floatingPreviewSub, { color: themeColors.textSecondary }]}>Toca aquí para ampliar y revisar el ticket</Text>
+                  </View>
+                  <Ionicons name="eye-outline" size={20} color={themeColors.primary} />
+                </TouchableOpacity>
+              )}
 
               {!!(alertaPolitica || alertaLocal) && (
                 <View style={[styles.alertBanner, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}>
@@ -2637,5 +2719,47 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.one,
     borderRadius: BorderRadius.small,
     gap: Spacing.half,
+  },
+  zoomBadgeOverlay: {
+    position: 'absolute',
+    bottom: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  zoomBadgeOverlayText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  floatingPreviewBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    marginBottom: Spacing.two,
+    marginTop: 4,
+  },
+  floatingPreviewThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: '#00000010',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  floatingPreviewTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  floatingPreviewSub: {
+    fontSize: 11,
+    marginTop: 2,
   },
 });

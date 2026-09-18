@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS public.gastos (
   empleado_id uuid NOT NULL,
   empleado_nombre text,
   monto numeric NOT NULL,
-  metodo_pago text CHECK (metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text])),
+  metodo_pago text CHECK (metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text, 'transferencia'::text])),
   tipo_tarjeta character varying,
   justificacion text,
   foto_url text,
