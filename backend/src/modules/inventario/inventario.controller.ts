@@ -63,16 +63,58 @@ export const aprobarDevolucion = async (req: Request, res: Response) => {
 
     const materiales = typeof dev.materiales === 'string' ? JSON.parse(dev.materiales || '[]') : dev.materiales;
     for (const m of materiales) {
-      if (m.devolver > 0) {
-        const { data: pData } = await client.from('productos').select('stock_actual').eq('id', m.productoId).single();
+      const totalDevolver = Number(m.devolver) || 0;
+      if (totalDevolver > 0) {
+        const { data: pData } = await client
+          .from('productos')
+          .select('id, stock_actual, stock_nuevo, stock_usado, stock_por_revisar')
+          .eq('id', m.productoId)
+          .single();
+
         if (pData) {
-          await client.from('productos').update({ stock_actual: pData.stock_actual + m.devolver }).eq('id', m.productoId);
+          let currNuevo = Number(pData.stock_nuevo) || 0;
+          let currUsado = Number(pData.stock_usado) || 0;
+          let currPorRevisar = Number(pData.stock_por_revisar) || 0;
+
+          // Si el material tiene desglose específico de estados
+          let addNuevo = Number(m.devolver_nuevo) || 0;
+          let addUsado = Number(m.devolver_usado) || 0;
+          let addPorRevisar = Number(m.devolver_por_revisar) || 0;
+
+          if (addNuevo === 0 && addUsado === 0 && addPorRevisar === 0) {
+            // Si vino con un estado único o formato anterior
+            if (m.estado === 'usado') addUsado = totalDevolver;
+            else if (m.estado === 'por_revisar') addPorRevisar = totalDevolver;
+            else addNuevo = totalDevolver;
+          }
+
+          const nuevoTotalNuevo = currNuevo + addNuevo;
+          const nuevoTotalUsado = currUsado + addUsado;
+          const nuevoTotalPorRevisar = currPorRevisar + addPorRevisar;
+          const nuevoStockActual = Math.round((nuevoTotalNuevo + nuevoTotalUsado + nuevoTotalPorRevisar) * 100) / 100;
+
+          await client
+            .from('productos')
+            .update({
+              stock_actual: nuevoStockActual,
+              stock_nuevo: nuevoTotalNuevo,
+              stock_usado: nuevoTotalUsado,
+              stock_por_revisar: nuevoTotalPorRevisar
+            })
+            .eq('id', m.productoId);
+
+          const estadosDesglose = [];
+          if (addNuevo > 0) estadosDesglose.push(`Nuevas: ${addNuevo}`);
+          if (addUsado > 0) estadosDesglose.push(`Usadas: ${addUsado}`);
+          if (addPorRevisar > 0) estadosDesglose.push(`Dañadas/Incompletas: ${addPorRevisar}`);
+          const labelEstados = estadosDesglose.length > 0 ? ` (${estadosDesglose.join(', ')})` : '';
+
           await client.from('movimientos_inventario').insert([{
             producto_id: m.productoId,
             tipo: 'ENTRADA',
-            cantidad: m.devolver,
-            folio_factura: `DEVOLUCIÓN MANUAL ${dev.id.substring(0,8)}`,
-            creado_por: user?.id
+            cantidad: totalDevolver,
+            folio_factura: `DEVOLUCIÓN ${dev.id.substring(0,8)}${labelEstados}`,
+            creado_por: user?.id || dev.empleado_id
           }]);
         }
       }
@@ -87,7 +129,7 @@ export const aprobarDevolucion = async (req: Request, res: Response) => {
   }
 };
 
-// 9. Fetch Employee Retribuciones
+// 3. Fetch Employee Retribuciones
 export const getEmpleadoRetribuciones = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -106,7 +148,7 @@ export const getEmpleadoRetribuciones = async (req: Request, res: Response) => {
   }
 };
 
-// 3. Confirmar Verificación de Evidencia (POST /api/inventario/evidencias/verificar)
+// 4. Confirmar Verificación de Evidencia (POST /api/inventario/evidencias/verificar)
 export const verificarEvidencia = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -127,7 +169,7 @@ export const verificarEvidencia = async (req: Request, res: Response) => {
   }
 };
 
-// 4. CRUD Producto (POST /api/inventario/productos, PUT /api/inventario/productos/:id)
+// 5. CRUD Producto (POST /api/inventario/productos, PUT /api/inventario/productos/:id)
 export const upsertProducto = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -167,12 +209,61 @@ export const upsertProducto = async (req: Request, res: Response) => {
     }
     
     if (isUpdate) {
+      const { data: oldProd } = await client.from('productos').select('*').eq('id', id).maybeSingle();
       const { error } = await client.from('productos').update(body).eq('id', id);
       if (error) throw error;
+
+      // Registrar movimiento si hubo cambio manual de stock
+      if (oldProd && body.stock_actual !== undefined) {
+        const oldStock = Number(oldProd.stock_actual) || 0;
+        const newStock = Number(body.stock_actual) || 0;
+        const diff = Math.round((newStock - oldStock) * 100) / 100;
+
+        if (diff > 0) {
+          await client.from('movimientos_inventario').insert([{
+            producto_id: id,
+            tipo: 'ENTRADA',
+            cantidad: diff,
+            folio_factura: 'AJUSTE MANUAL / INCREMENTO DE STOCK',
+            proveedor_id: body.proveedor_id || oldProd.proveedor_id || null,
+            creado_por: (req as any).user?.id || tenant.user?.id || null
+          }]);
+        } else if (diff < 0) {
+          await client.from('movimientos_inventario').insert([{
+            producto_id: id,
+            tipo: 'SALIDA',
+            cantidad: Math.abs(diff),
+            folio_factura: 'AJUSTE MANUAL / DISMINUCIÓN DE STOCK',
+            proveedor_id: body.proveedor_id || oldProd.proveedor_id || null,
+            creado_por: (req as any).user?.id || tenant.user?.id || null
+          }]);
+        }
+      }
+
       return res.json({ success: true });
     } else {
       const { data, error } = await client.from('productos').insert([body]).select().single();
       if (error) throw error;
+
+      // Registrar movimiento de ENTRADA por alta inicial si tiene stock
+      const initialStock = Number(data.stock_actual) || 0;
+      if (initialStock > 0) {
+        const estadosDesglose: string[] = [];
+        if (data.stock_nuevo > 0) estadosDesglose.push(`Nuevas: ${data.stock_nuevo}`);
+        if (data.stock_usado > 0) estadosDesglose.push(`Usadas: ${data.stock_usado}`);
+        if (data.stock_por_revisar > 0) estadosDesglose.push(`Dañadas/Incompletas: ${data.stock_por_revisar}`);
+        const desgloseStr = estadosDesglose.length > 0 ? ` (${estadosDesglose.join(', ')})` : '';
+
+        await client.from('movimientos_inventario').insert([{
+          producto_id: data.id,
+          tipo: 'ENTRADA',
+          cantidad: initialStock,
+          folio_factura: `ALTA DE PRODUCTO / INVENTARIO INICIAL${desgloseStr}`,
+          proveedor_id: data.proveedor_id || null,
+          creado_por: (req as any).user?.id || tenant.user?.id || null
+        }]);
+      }
+
       return res.json({ success: true, data });
     }
   } catch (error: any) {
@@ -181,7 +272,7 @@ export const upsertProducto = async (req: Request, res: Response) => {
   }
 };
 
-// 5. Agregar Stock Rápido (POST /api/inventario/productos/:id/stock)
+// 6. Agregar Stock Rápido (POST /api/inventario/productos/:id/stock)
 export const addStock = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -236,7 +327,7 @@ export const addStock = async (req: Request, res: Response) => {
   }
 };
 
-// 6. Consumo/Asignación de Material (POST /api/inventario/consumos)
+// 7. Consumo/Asignación de Material (POST /api/inventario/consumos)
 export const guardarConsumo = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -313,7 +404,7 @@ export const guardarConsumo = async (req: Request, res: Response) => {
   }
 };
 
-// 7. Guardar Importación IA (POST /api/inventario/importar)
+// 8. Guardar Importación IA (POST /api/inventario/importar)
 export const guardarImportacion = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -403,7 +494,7 @@ export const guardarImportacion = async (req: Request, res: Response) => {
   }
 };
 
-// 8. Crear Catálogos (POST /api/inventario/catalogos/:tipo)
+// 9. Crear Catálogos (POST /api/inventario/catalogos/:tipo)
 export const crearCatalogo = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -426,7 +517,7 @@ export const crearCatalogo = async (req: Request, res: Response) => {
   }
 };
 
-// 9. Verificar si el folio de factura ya existe (GET /api/inventario/verificar-folio)
+// 10. Verificar si el folio de factura ya existe (GET /api/inventario/verificar-folio)
 export const verificarFolioFactura = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -453,7 +544,7 @@ export const verificarFolioFactura = async (req: Request, res: Response) => {
   }
 };
 
-// 10. Eliminación Masiva de Productos (POST /api/inventario/productos/bulk-delete)
+// 11. Eliminación Masiva de Productos (POST /api/inventario/productos/bulk-delete)
 export const bulkDeleteProductos = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -476,7 +567,7 @@ export const bulkDeleteProductos = async (req: Request, res: Response) => {
   }
 };
 
-// 11. Actualización Masiva de Productos (POST /api/inventario/productos/bulk-update)
+// 12. Actualización Masiva de Productos (POST /api/inventario/productos/bulk-update)
 export const bulkUpdateProductos = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -515,7 +606,7 @@ export const bulkUpdateProductos = async (req: Request, res: Response) => {
   }
 };
 
-// 12. Eliminación Definitiva (Hard Delete) de Producto (DELETE /api/inventario/productos/:id)
+// 13. Eliminación Definitiva (Hard Delete) de Producto (DELETE /api/inventario/productos/:id)
 export const hardDeleteProducto = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -543,9 +634,183 @@ export const hardDeleteProducto = async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (error: any) {
     console.error('Error in hardDeleteProducto:', error);
-    return res.status(500).json({ error: error.message || 'Error al eliminar el producto de la base de datos.' });
+    return res.status(500).json({ error: error.message || 'Error al eliminar el producto de la base de datos' });
   }
 };
 
+// 14. Obtener todos los movimientos de inventario (GET /api/inventario/movimientos)
+export const getMovimientosInventario = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
 
+    const [movsRes, retirosRes, usersRes, provsRes] = await Promise.all([
+      client
+        .from('movimientos_inventario')
+        .select('id, producto_id, tipo, cantidad, fecha, folio_factura, proveedor_id, creado_por, producto:productos(id, nombre_oficial, sku_interno, unidad, precio_unitario)')
+        .order('fecha', { ascending: false })
+        .limit(500),
+      client
+        .from('retiros_material')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200),
+      client
+        .from('usuarios')
+        .select('id, nombre, email, rol'),
+      client
+        .from('proveedores')
+        .select('id, nombre')
+    ]);
 
+    if (movsRes.error) throw movsRes.error;
+
+    const userMap = new Map((usersRes.data || []).map((u: any) => [u.id, u.nombre || u.email || 'Usuario']));
+    const provMap = new Map((provsRes.data || []).map((p: any) => [p.id, p.nombre]));
+
+    // 1. Mapear retiros estructurados desde retiros_material (englobando todas sus partidas)
+    const structuredRetiros = (retirosRes.data || []).map((r: any) => {
+      const mats = Array.isArray(r.materiales) ? r.materiales : [];
+      const totalQty = mats.reduce((s: number, m: any) => s + (Number(m.cantidad) || 0), 0);
+      const clientLabel = r.is_split ? 'Varios clientes' : (r.cliente_nombre ? (r.cliente_nombre + (r.sucursal_nombre ? ' - ' + r.sucursal_nombre : '')) : '');
+      const fullFolio = `RETIRO: ${(r.motivo || '').trim()}${r.tipo_gasto ? ` [${r.tipo_gasto}]` : ''}${clientLabel ? ` (${clientLabel})` : ''}`;
+      
+      return {
+        id: r.id,
+        tipo: 'SALIDA',
+        subtipo: 'RETIRO',
+        cantidad: totalQty,
+        fecha: r.created_at,
+        folio_factura: fullFolio,
+        detalle_motivo: r.detalle_servicio_proyecto || r.motivo || fullFolio,
+        motivo: r.motivo || '',
+        cliente_nombre: r.cliente_nombre || '',
+        sucursal_nombre: r.sucursal_nombre || '',
+        is_split: Boolean(r.is_split),
+        tipo_gasto: r.tipo_gasto || 'Operativo',
+        proveedor_id: r.proveedor_id || null,
+        proveedor_nombre: r.proveedor || provMap.get(r.proveedor_id) || '',
+        usuario_id: r.empleado_id,
+        usuario_nombre: r.empleado_nombre || userMap.get(r.empleado_id) || 'Empleado',
+        producto_id: mats[0]?.producto_id || '',
+        producto_nombre: mats.length === 1 ? (mats[0].nombre || 'Material') : `${mats.length} materiales: ${mats.map((m: any) => m.nombre).join(', ')}`,
+        producto_sku: mats.length === 1 ? (mats[0].sku || '-') : `${mats.length} partidas`,
+        producto_unidad: mats.length === 1 ? (mats[0].unidad || 'pza') : 'pzas',
+        precio_unitario: 0,
+        materiales: mats
+      };
+    });
+
+    // 2. Mapear movimientos de inventario individuales y agrupar retiros legados que no estén en retiros_material
+    const nonRetiroMovs: any[] = [];
+    const legacyRetirosMap = new Map<string, any>();
+
+    (movsRes.data || []).forEach((m: any) => {
+      const prod = Array.isArray(m.producto) ? m.producto[0] : (m.producto || {});
+      const folio = m.folio_factura || '';
+
+      if (folio.startsWith('RETIRO:')) {
+        const mTime = new Date(m.fecha).getTime();
+        const alreadyInStructured = structuredRetiros.some((st: any) => {
+          const stTime = new Date(st.fecha).getTime();
+          return (st.usuario_id === m.creado_por || st.usuario_nombre === userMap.get(m.creado_por)) && Math.abs(stTime - mTime) < 60000;
+        });
+
+        if (!alreadyInStructured) {
+          const groupKey = `${m.creado_por}_${folio}_${Math.floor(mTime / 60000)}`;
+          if (!legacyRetirosMap.has(groupKey)) {
+            let tipoGasto = '';
+            const tipoMatch = folio.match(/\[(Servicio|Proyecto|Venta|Operativo)\]/i);
+            if (tipoMatch) tipoGasto = tipoMatch[1];
+            let clienteNombre = '';
+            const clientMatch = folio.match(/\((.*?)\)/);
+            if (clientMatch) clienteNombre = clientMatch[1];
+            const detalle = folio.replace(/^RETIRO:\s*/i, '').replace(/\[(Servicio|Proyecto|Venta|Operativo)\]/gi, '').replace(/\(.*?\)/g, '').trim();
+
+            legacyRetirosMap.set(groupKey, {
+              id: m.id,
+              tipo: 'SALIDA',
+              subtipo: 'RETIRO',
+              cantidad: 0,
+              fecha: m.fecha,
+              folio_factura: folio,
+              detalle_motivo: detalle || folio,
+              motivo: detalle,
+              cliente_nombre: clienteNombre,
+              sucursal_nombre: '',
+              tipo_gasto: tipoGasto || 'Operativo',
+              proveedor_id: m.proveedor_id,
+              proveedor_nombre: provMap.get(m.proveedor_id) || '',
+              usuario_id: m.creado_por,
+              usuario_nombre: userMap.get(m.creado_por) || 'Empleado',
+              producto_id: m.producto_id,
+              producto_nombre: prod.nombre_oficial || 'Producto',
+              producto_sku: prod.sku_interno || '-',
+              producto_unidad: prod.unidad || 'pza',
+              precio_unitario: prod.precio_unitario || 0,
+              materiales: []
+            });
+          }
+
+          const leg = legacyRetirosMap.get(groupKey);
+          leg.cantidad = Math.round((leg.cantidad + (Number(m.cantidad) || 0)) * 100) / 100;
+          leg.materiales.push({
+            producto_id: m.producto_id,
+            sku: prod.sku_interno || '-',
+            nombre: prod.nombre_oficial || 'Producto',
+            cantidad: Number(m.cantidad) || 0,
+            unidad: prod.unidad || 'pza'
+          });
+          if (leg.materiales.length > 1) {
+            leg.producto_nombre = `${leg.materiales.length} materiales: ${leg.materiales.map((x: any) => x.nombre).join(', ')}`;
+            leg.producto_sku = `${leg.materiales.length} partidas`;
+          }
+        }
+      } else {
+        let subtipo = m.tipo;
+        if (folio.startsWith('DEVOLUCIÓN')) subtipo = 'DEVOLUCIÓN';
+        else if (folio.startsWith('IMPORTACIÓN') || folio.startsWith('FACTURA') || m.proveedor_id) subtipo = 'COMPRA/FACTURA';
+        else if (folio.startsWith('CONSUMO')) subtipo = 'CONSUMO';
+        else if (folio.startsWith('ALTA DE PRODUCTO')) subtipo = 'ENTRADA';
+
+        nonRetiroMovs.push({
+          id: m.id,
+          tipo: m.tipo,
+          subtipo,
+          cantidad: Number(m.cantidad) || 0,
+          fecha: m.fecha,
+          folio_factura: folio,
+          detalle_motivo: folio,
+          cliente_nombre: '',
+          tipo_gasto: '',
+          proveedor_id: m.proveedor_id,
+          proveedor_nombre: provMap.get(m.proveedor_id) || '',
+          usuario_id: m.creado_por,
+          usuario_nombre: userMap.get(m.creado_por) || 'Sistema / Almacén',
+          producto_id: m.producto_id,
+          producto_nombre: prod.nombre_oficial || 'Producto',
+          producto_sku: prod.sku_interno || '-',
+          producto_unidad: prod.unidad || 'pza',
+          precio_unitario: prod.precio_unitario || 0,
+          materiales: [{
+            producto_id: m.producto_id,
+            sku: prod.sku_interno || '-',
+            nombre: prod.nombre_oficial || 'Producto',
+            cantidad: Number(m.cantidad) || 0,
+            unidad: prod.unidad || 'pza'
+          }]
+        });
+      }
+    });
+
+    const allMovs = [...structuredRetiros, ...Array.from(legacyRetirosMap.values()), ...nonRetiroMovs];
+    allMovs.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+
+    return res.json({ movimientos: allMovs, retiros: allMovs });
+  } catch (error: any) {
+    console.error('Error en getMovimientosInventario:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};

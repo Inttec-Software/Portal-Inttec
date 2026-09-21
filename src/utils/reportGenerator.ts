@@ -85,6 +85,336 @@ const hasPolicyAlert = (g: Gasto): { alert: boolean; reason: string } => {
 
 export const ReportGenerator = {
   /**
+   * Genera un reporte PDF completo de movimientos de inventario (Entradas, Salidas, Retiros, Compras)
+   */
+  async exportMovimientosToPDF(movimientos: any[], title: string = 'Reporte de Movimientos de Inventario'): Promise<void> {
+    if (movimientos.length === 0) {
+      throw new Error('No hay movimientos para exportar.');
+    }
+    const branding = await getCompanyBranding();
+
+    const totalMovs = movimientos.length;
+    let totalEntradas = 0;
+    let totalSalidas = 0;
+    movimientos.forEach(m => {
+      const q = Number(m.cantidad || 0);
+      if (m.tipo === 'ENTRADA') totalEntradas += q;
+      else totalSalidas += q;
+    });
+
+    let tableRows = '';
+    movimientos.forEach((m, idx) => {
+      const fecha = m.fecha ? new Date(m.fecha).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }) : '-';
+      const isEntrada = m.tipo === 'ENTRADA';
+      const typeBadgeColor = isEntrada ? '#10B981' : '#EF4444';
+      const subtipoLabel = m.subtipo || m.tipo;
+
+      const prodName = m.producto_nombre || 'Producto';
+      const prodSku = m.producto_sku || '-';
+      const cantFormatted = `${isEntrada ? '+' : '-'}${m.cantidad} ${m.producto_unidad || 'pza'}`;
+      const responsable = m.usuario_nombre || m.empleado_nombre || 'Almacén';
+      const folioDetalle = m.detalle_motivo || m.folio_factura || '-';
+      const clientInfo = m.cliente_nombre ? `${m.cliente_nombre}${m.tipo_gasto ? ` [${m.tipo_gasto}]` : ''}` : '';
+
+      tableRows += `
+        <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
+          <td style="font-size: 10px; color: #4b5563; white-space: nowrap;">${fecha}</td>
+          <td>
+            <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: ${typeBadgeColor};">
+              ${m.tipo}
+            </span>
+            ${subtipoLabel !== m.tipo ? `<br/><small style="font-size: 8px; color: #6b7280; font-weight: 600;">${subtipoLabel}</small>` : ''}
+          </td>
+          <td>
+            <strong style="font-size: 11px; color: #111827;">${prodName}</strong><br/>
+            <small style="font-size: 9px; color: #6b7280;">SKU: ${prodSku}</small>
+          </td>
+          <td style="text-align: right; font-weight: bold; font-size: 11px; color: ${typeBadgeColor}; white-space: nowrap;">
+            ${cantFormatted}
+          </td>
+          <td style="font-size: 10px; color: #374151;">${responsable}</td>
+          <td style="font-size: 9px; color: #4b5563;">
+            ${folioDetalle}
+            ${clientInfo ? `<br/><span style="color: #2563EB; font-weight: 600;">${clientInfo}</span>` : ''}
+          </td>
+        </tr>
+      `;
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 20px; color: #1f2937; font-size: 11px; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #E11D48; padding-bottom: 12px; margin-bottom: 16px; }
+          .logo { max-height: 48px; }
+          .title { font-size: 18px; font-weight: bold; color: #111827; margin: 0; }
+          .subtitle { font-size: 11px; color: #6b7280; margin-top: 4px; }
+          .summary-cards { display: flex; gap: 12px; margin-bottom: 16px; }
+          .card { flex: 1; padding: 10px; background: #f3f4f6; border-radius: 6px; border: 1px solid #e5e7eb; }
+          .card-title { font-size: 9px; color: #6b7280; text-transform: uppercase; font-weight: bold; }
+          .card-val { font-size: 16px; font-weight: bold; color: #111827; margin-top: 2px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+          th { background-color: #1f2937; color: #ffffff; text-align: left; padding: 8px 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+          td { padding: 6px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+          .footer { margin-top: 24px; text-align: center; font-size: 9px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 class="title">${title}</h1>
+            <div class="subtitle">Generado el: ${new Date().toLocaleString('es-MX')} • Empresa: ${branding.name}</div>
+          </div>
+          ${branding.logo ? `<img class="logo" src="${branding.logo}" />` : `<h2 style="color: #E11D48; margin: 0;">${branding.name}</h2>`}
+        </div>
+
+        <div class="summary-cards">
+          <div class="card">
+            <div class="card-title">Total Registros</div>
+            <div class="card-val">${totalMovs}</div>
+          </div>
+          <div class="card" style="border-left: 4px solid #10B981;">
+            <div class="card-title" style="color: #059669;">Total Entradas</div>
+            <div class="card-val" style="color: #059669;">+${totalEntradas} un.</div>
+          </div>
+          <div class="card" style="border-left: 4px solid #EF4444;">
+            <div class="card-title" style="color: #DC2626;">Total Salidas / Retiros</div>
+            <div class="card-val" style="color: #DC2626;">-${totalSalidas} un.</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th width="12%">Fecha</th>
+              <th width="10%">Tipo</th>
+              <th width="32%">Producto</th>
+              <th width="12%" style="text-align: right;">Cantidad</th>
+              <th width="16%">Responsable</th>
+              <th width="18%">Concepto / Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Documento oficial generado desde Portal ${branding.name} • Control y Auditoría de Almacén
+        </div>
+      </body>
+      </html>
+    `;
+
+    await ReportGenerator._printOrDownload(htmlContent, `reporte_movimientos_${Date.now()}.pdf`);
+  },
+
+  /**
+   * Exporta el listado de movimientos de inventario a formato CSV compatible con Excel
+   */
+  async exportMovimientosToCSV(movimientos: any[], filename: string = 'reporte_movimientos_inventario.csv'): Promise<void> {
+    if (movimientos.length === 0) {
+      throw new Error('No hay movimientos para exportar.');
+    }
+
+    const headers = [
+      'ID',
+      'Fecha',
+      'Tipo',
+      'Subtipo',
+      'SKU',
+      'Producto',
+      'Cantidad',
+      'Unidad',
+      'Responsable / Usuario',
+      'Proveedor',
+      'Cliente',
+      'Tipo de Gasto',
+      'Folio / Concepto / Detalle'
+    ];
+
+    const rows = movimientos.map(m => [
+      escapeCSVCell(m.id),
+      escapeCSVCell(m.fecha ? new Date(m.fecha).toISOString().replace('T', ' ').substring(0, 19) : ''),
+      escapeCSVCell(m.tipo || 'MOVIMIENTO'),
+      escapeCSVCell(m.subtipo || m.tipo || ''),
+      escapeCSVCell(m.producto_sku || '-'),
+      escapeCSVCell(m.producto_nombre || 'Producto'),
+      escapeCSVCell(m.cantidad || 0),
+      escapeCSVCell(m.producto_unidad || 'pza'),
+      escapeCSVCell(m.usuario_nombre || m.empleado_nombre || 'Almacén'),
+      escapeCSVCell(m.proveedor_nombre || ''),
+      escapeCSVCell(m.cliente_nombre || ''),
+      escapeCSVCell(m.tipo_gasto || ''),
+      escapeCSVCell(m.detalle_motivo || m.folio_factura || '')
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+
+    if (Platform.OS === 'web') {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const fileUri = `${cacheDirectory}${filename}`;
+      await writeAsStringAsync(fileUri, csvContent, { encoding: EncodingType.UTF8 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Exportar Movimientos CSV' });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    }
+  },
+
+  /**
+   * Genera el vale individual de un movimiento o retiro de material en PDF
+   */
+  async exportSingleMovimientoValePDF(mov: any): Promise<void> {
+    const branding = await getCompanyBranding();
+    const fecha = mov.fecha ? new Date(mov.fecha).toLocaleString('es-MX', { dateStyle: 'long', timeStyle: 'short' }) : new Date().toLocaleDateString('es-MX');
+    const isEntrada = mov.tipo === 'ENTRADA';
+    const tipoColor = isEntrada ? '#10B981' : '#E11D48';
+    const tipoTitle = isEntrada ? 'VALE DE ENTRADA / INGRESO DE MATERIAL' : 'VALE DE SALIDA / RETIRO DE MATERIAL';
+
+    const items = Array.isArray(mov.materiales) && mov.materiales.length > 0 
+      ? mov.materiales 
+      : [{
+          sku: mov.producto_sku || '-',
+          nombre: mov.producto_nombre || 'Producto',
+          cantidad: mov.cantidad || 0,
+          unidad: mov.producto_unidad || 'pza'
+        }];
+
+    let itemsRows = '';
+    items.forEach((item: any, idx: number) => {
+      itemsRows += `
+        <tr>
+          <td style="text-align: center;">${idx + 1}</td>
+          <td><code>${item.sku || '-'}</code></td>
+          <td><strong>${item.nombre}</strong></td>
+          <td style="text-align: right; font-weight: bold; font-size: 13px; color: ${tipoColor};">${item.cantidad} ${item.unidad || 'pza'}</td>
+        </tr>
+      `;
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 30px; color: #1f2937; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid ${tipoColor}; padding-bottom: 15px; }
+          .logo { max-height: 50px; }
+          .title { font-size: 20px; font-weight: bold; color: ${tipoColor}; margin: 0; }
+          .folio { font-size: 12px; color: #6b7280; margin-top: 4px; }
+          .info-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-top: 20px; display: flex; flex-wrap: wrap; gap: 15px; }
+          .info-col { flex: 1; min-width: 200px; }
+          .info-label { font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; }
+          .info-val { font-size: 13px; font-weight: bold; color: #111827; margin-top: 2px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 25px; }
+          th { background-color: #1f2937; color: #fff; padding: 10px; font-size: 11px; text-transform: uppercase; }
+          td { padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 12px; }
+          .signatures { display: flex; justify-content: space-between; margin-top: 70px; }
+          .sig-box { width: 42%; text-align: center; border-top: 1px solid #111827; padding-top: 8px; font-size: 11px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 class="title">${tipoTitle}</h1>
+            <div class="folio">Folio / Identificador: <strong>${mov.id ? mov.id.substring(0, 13) : 'VALE-INTTEC'}</strong></div>
+          </div>
+          ${branding.logo ? `<img class="logo" src="${branding.logo}" />` : `<h2 style="color: ${tipoColor}; margin: 0;">${branding.name}</h2>`}
+        </div>
+
+        <div class="info-box">
+          <div class="info-col">
+            <div class="info-label">Fecha y Hora</div>
+            <div class="info-val">${fecha}</div>
+          </div>
+          <div class="info-col">
+            <div class="info-label">Responsable / Empleado</div>
+            <div class="info-val">${mov.usuario_nombre || mov.empleado_nombre || 'Personal Autorizado'}</div>
+          </div>
+          ${mov.cliente_nombre ? `
+          <div class="info-col">
+            <div class="info-label">Cliente / Destino</div>
+            <div class="info-val">${mov.cliente_nombre} ${mov.sucursal_nombre ? `(${mov.sucursal_nombre})` : ''}</div>
+          </div>
+          ` : ''}
+          ${mov.tipo_gasto ? `
+          <div class="info-col">
+            <div class="info-label">Tipo de Gasto / Proyecto</div>
+            <div class="info-val">${mov.tipo_gasto}</div>
+          </div>
+          ` : ''}
+          <div class="info-col" style="width: 100%;">
+            <div class="info-label">Concepto / Motivo</div>
+            <div class="info-val">${mov.detalle_motivo || mov.motivo || mov.folio_factura || 'Movimiento de material en almacén'}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th width="8%">#</th>
+              <th width="22%">SKU</th>
+              <th width="50%">Descripción del Material</th>
+              <th width="20%" style="text-align: right;">Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRows}
+          </tbody>
+        </table>
+
+        <div class="signatures">
+          <div class="sig-box">
+            <strong>Entregó / Autorizó</strong><br/>
+            <span>Encargado de Almacén</span>
+          </div>
+          <div class="sig-box">
+            <strong>Recibió / Conforme</strong><br/>
+            <span>${mov.usuario_nombre || mov.empleado_nombre || 'Empleado Receptor'}</span>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    await ReportGenerator._printOrDownload(htmlContent, `vale_movimiento_${mov.id || Date.now()}.pdf`);
+  },
+
+  /**
+   * Helper unificado para imprimir en Web o compartir en Móvil
+   */
+  async _printOrDownload(htmlContent: string, defaultFilename: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      const newWindow = window.open('', '_blank');
+      if (newWindow) {
+        newWindow.document.write(htmlContent);
+        newWindow.document.close();
+      }
+    } else {
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: defaultFilename });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    }
+  },
+
+  /**
    * Genera un reporte PDF de los gastos y lo comparte mediante la hoja nativa
    */
   async exportToPDF(gastos: Gasto[], title: string = 'Reporte de Control de Gastos'): Promise<void> {
@@ -1780,6 +2110,607 @@ export const ReportGenerator = {
       throw new Error(error.message || 'Error al generar reporte CSV.');
     }
   },
+
+  /**
+   * Genera un reporte PDF consolidado del historial de retiros de material y lo comparte
+   */
+  async exportRetirosToPDF(
+    retiros: any[],
+    title: string = 'Reporte de Retiros de Material'
+  ): Promise<void> {
+    if (retiros.length === 0) {
+      throw new Error('No hay retiros registrados para exportar.');
+    }
+    const branding = await getCompanyBranding();
+
+    const totalRetiros = retiros.length;
+    let totalPiezas = 0;
+    const tiposCount: Record<string, number> = { Servicio: 0, Proyecto: 0, Venta: 0, Operativo: 0 };
+
+    retiros.forEach((r) => {
+      const tipo = r.tipo_gasto || 'Operativo';
+      tiposCount[tipo] = (tiposCount[tipo] || 0) + 1;
+      const mats = Array.isArray(r.materiales) ? r.materiales : [];
+      mats.forEach((m: any) => {
+        totalPiezas += Number(m.cantidad || 0);
+      });
+    });
+
+    let tableRows = '';
+    retiros.forEach((r) => {
+      const fecha = r.created_at ? new Date(r.created_at).toLocaleString('es-MX', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      }) : 'N/A';
+
+      const mats = Array.isArray(r.materiales) ? r.materiales : [];
+      const matsHtml = mats.map((m: any) => 
+        `<div style="margin-bottom: 3px;"><strong>${m.cantidad} ${m.unidad || 'pza'}</strong> - ${m.nombre || 'Producto'} <span style="color: #666; font-size: 9px;">(${m.sku || '-'})</span></div>`
+      ).join('');
+
+      let tipoBadgeColor = '#4B5563';
+      if (r.tipo_gasto === 'Servicio') tipoBadgeColor = '#2563EB';
+      else if (r.tipo_gasto === 'Proyecto') tipoBadgeColor = '#7C3AED';
+      else if (r.tipo_gasto === 'Venta') tipoBadgeColor = '#059669';
+      else if (r.tipo_gasto === 'Operativo') tipoBadgeColor = '#D97706';
+
+      let clienteDisplay = r.cliente_nombre || '-';
+      if (r.is_split) {
+        clienteDisplay = `<span style="color: #7C3AED; font-weight: bold;">[Dividido en varios clientes]</span>`;
+      } else if (r.sucursal_nombre) {
+        clienteDisplay += `<br/><small style="color: #666;">Suc: ${r.sucursal_nombre}</small>`;
+      }
+
+      tableRows += `
+        <tr>
+          <td style="white-space: nowrap; font-size: 10px;">${fecha}</td>
+          <td><strong>${r.empleado_nombre || 'Desconocido'}</strong></td>
+          <td><span style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; color: #fff; background-color: ${tipoBadgeColor};">${r.tipo_gasto || 'Operativo'}</span></td>
+          <td>${clienteDisplay}</td>
+          <td style="font-size: 10px;">
+            ${r.detalle_servicio_proyecto ? `<strong>Detalle:</strong> ${r.detalle_servicio_proyecto}<br/>` : ''}
+            ${r.motivo ? `<strong>Motivo:</strong> ${r.motivo}<br/>` : ''}
+            ${r.proveedor ? `<small style="color: #666;">Prov: ${r.proveedor}</small>` : ''}
+          </td>
+          <td style="font-size: 10px;">${matsHtml || '<span style="color: #999;">Sin partidas</span>'}</td>
+        </tr>
+      `;
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${title}</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 24px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @media print {
+            body {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            @page {
+              size: letter landscape;
+              margin: 10mm;
+            }
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 22px;
+            font-weight: bold;
+            margin: 0;
+          }
+          .subtitle {
+            color: #666;
+            font-size: 11px;
+            margin: 4px 0 0 0;
+          }
+          .summary-card {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 10px 14px;
+            text-align: center;
+          }
+          .summary-card .label {
+            font-size: 10px;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 600;
+          }
+          .summary-card .value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #0d1b2a;
+            margin-top: 2px;
+          }
+          table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 10.5px;
+          }
+          table.data-table th {
+            background-color: #0d1b2a;
+            color: white;
+            text-align: left;
+            padding: 8px 6px;
+            font-weight: 600;
+          }
+          table.data-table td {
+            padding: 8px 6px;
+            border-bottom: 1px solid #e9ecef;
+            vertical-align: top;
+          }
+          table.data-table tr:nth-child(even) {
+            background-color: #fcfcfd;
+          }
+          .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 9px;
+            color: #aaa;
+            border-top: 1px solid #eee;
+            padding-top: 10px;
+          }
+          .logo-img {
+            width: 240px;
+            height: 70px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 15px; border: none;">
+          <tr>
+            <td style="vertical-align: middle; border: none; padding: 0;">
+              <h1 class="title">${title}</h1>
+              <p class="subtitle">Generado el: ${new Date().toLocaleString('es-MX')}</p>
+            </td>
+            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
+              <img class="logo-img" src="${branding.logo}" />
+            </td>
+          </tr>
+        </table>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: none;">
+          <tr>
+            <td style="width: 25%; padding-right: 6px; border: none;">
+              <div class="summary-card">
+                <div class="label">Total Retiros</div>
+                <div class="value">${totalRetiros}</div>
+              </div>
+            </td>
+            <td style="width: 25%; padding-left: 3px; padding-right: 3px; border: none;">
+              <div class="summary-card">
+                <div class="label">Unidades Retiradas</div>
+                <div class="value" style="color: #2563EB;">${Math.round(totalPiezas * 100) / 100}</div>
+              </div>
+            </td>
+            <td style="width: 25%; padding-left: 3px; padding-right: 3px; border: none;">
+              <div class="summary-card">
+                <div class="label">Servicios / Proyectos</div>
+                <div class="value" style="color: #7C3AED;">${(tiposCount.Servicio || 0) + (tiposCount.Proyecto || 0)}</div>
+              </div>
+            </td>
+            <td style="width: 25%; padding-left: 6px; border: none;">
+              <div class="summary-card">
+                <div class="label">Ventas / Operativos</div>
+                <div class="value" style="color: #059669;">${(tiposCount.Venta || 0) + (tiposCount.Operativo || 0)}</div>
+              </div>
+            </td>
+          </tr>
+        </table>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 13%">Fecha / Hora</th>
+              <th style="width: 14%">Empleado</th>
+              <th style="width: 10%">Tipo</th>
+              <th style="width: 18%">Cliente / Sucursal</th>
+              <th style="width: 20%">Detalle / Motivo</th>
+              <th style="width: 25%">Materiales Retirados</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Documento Oficial - Control de Inventario y Retiros de Material - Sistema Automatizado ${branding.name}
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      if (Platform.OS === 'web') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+
+          setTimeout(() => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+            }, 1000);
+          }, 500);
+        }
+        return;
+      }
+
+      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      const pdfFileName = `reporte_retiros_${Date.now()}.pdf`;
+      const safeUri = `${cacheDirectory}${pdfFileName}`;
+      
+      await writeAsStringAsync(safeUri, base64 || '', {
+        encoding: EncodingType.Base64,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(safeUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Exportar Reporte Retiros PDF',
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    } catch (error: any) {
+      logger.error('Error generating retiros PDF:', error);
+      throw new Error(error.message || 'Error al generar el reporte de retiros.');
+    }
+  },
+
+  /**
+   * Genera un Vale de Salida de Almacén individual en PDF para un retiro específico
+   */
+  async exportSingleRetiroValePDF(retiro: any): Promise<void> {
+    if (!retiro) throw new Error('No se especificó la información del retiro.');
+    const branding = await getCompanyBranding();
+
+    const fechaStr = retiro.created_at ? new Date(retiro.created_at).toLocaleString('es-MX', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    }) : 'N/A';
+
+    const mats = Array.isArray(retiro.materiales) ? retiro.materiales : [];
+    let matsRows = '';
+    mats.forEach((m: any, idx: number) => {
+      matsRows += `
+        <tr>
+          <td style="text-align: center;">${idx + 1}</td>
+          <td><strong>${m.sku || '-'}</strong></td>
+          <td>${m.nombre || 'Producto'}</td>
+          <td style="text-align: right; font-weight: bold;">${m.cantidad}</td>
+          <td style="text-align: center;">${m.unidad || 'pza'}</td>
+        </tr>
+      `;
+    });
+
+    let clientDetail = retiro.cliente_nombre || 'N/A';
+    if (retiro.is_split) {
+      clientDetail = 'Múltiples clientes (Dividido)';
+    } else if (retiro.sucursal_nombre) {
+      clientDetail += ` (Sucursal: ${retiro.sucursal_nombre})`;
+    }
+
+    const folioStr = retiro.id ? retiro.id.substring(0, 8).toUpperCase() : `RET-${Date.now().toString().slice(-6)}`;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Vale de Salida de Material - ${folioStr}</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 30px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @page {
+            size: letter portrait;
+            margin: 15mm;
+          }
+          .vale-box {
+            border: 2px solid #0d1b2a;
+            border-radius: 8px;
+            padding: 20px;
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 20px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin: 0;
+          }
+          .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+          }
+          .info-table td {
+            padding: 6px 4px;
+            font-size: 11px;
+            vertical-align: top;
+          }
+          .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 11px;
+          }
+          .items-table th {
+            background-color: #0d1b2a;
+            color: white;
+            padding: 8px;
+            text-align: left;
+          }
+          .items-table td {
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+          }
+          .items-table tr:nth-child(even) {
+            background-color: #f9fafb;
+          }
+          .signatures-table {
+            width: 100%;
+            margin-top: 60px;
+            border-collapse: collapse;
+          }
+          .signature-box {
+            width: 45%;
+            text-align: center;
+            border-top: 1px solid #333;
+            padding-top: 8px;
+            font-size: 11px;
+          }
+          .logo-img {
+            width: 220px;
+            height: 60px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="vale-box">
+          <table style="width: 100%; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 10px; border-collapse: collapse;">
+            <tr>
+              <td>
+                <div class="title">Vale de Salida de Almacén</div>
+                <div style="font-size: 12px; font-weight: bold; color: #2563EB; margin-top: 3px;">Folio: #${folioStr}</div>
+              </td>
+              <td style="text-align: right;">
+                <img class="logo-img" src="${branding.logo}" />
+              </td>
+            </tr>
+          </table>
+
+          <table class="info-table">
+            <tr>
+              <td style="width: 50%;"><strong>Empleado Solicitante:</strong> ${retiro.empleado_nombre || 'Desconocido'}</td>
+              <td style="width: 50%;"><strong>Fecha y Hora:</strong> ${fechaStr}</td>
+            </tr>
+            <tr>
+              <td><strong>Tipo de Destino:</strong> ${retiro.tipo_gasto || 'Operativo'}</td>
+              <td><strong>Cliente / Destino:</strong> ${clientDetail}</td>
+            </tr>
+            ${retiro.detalle_servicio_proyecto ? `<tr><td colspan="2"><strong>Detalle de Servicio o Proyecto:</strong> ${retiro.detalle_servicio_proyecto}</td></tr>` : ''}
+            ${retiro.motivo ? `<tr><td colspan="2"><strong>Motivo / Referencia:</strong> ${retiro.motivo}</td></tr>` : ''}
+            ${retiro.proveedor ? `<tr><td colspan="2"><strong>Proveedor / Comercio:</strong> ${retiro.proveedor}</td></tr>` : ''}
+          </table>
+
+          <div style="font-weight: bold; font-size: 12px; margin-top: 10px; color: #0d1b2a;">MATERIALES RETIRADOS:</div>
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th style="width: 8%; text-align: center;">#</th>
+                <th style="width: 22%;">SKU</th>
+                <th style="width: 46%;">Descripción del Material</th>
+                <th style="width: 12%; text-align: right;">Cantidad</th>
+                <th style="width: 12%; text-align: center;">Unidad</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${matsRows || '<tr><td colspan="5" style="text-align:center; color:#888;">Sin partidas</td></tr>'}
+            </tbody>
+          </table>
+
+          <table class="signatures-table">
+            <tr>
+              <td class="signature-box">
+                <strong>ENTREGÓ</strong><br/>
+                Encargado de Almacén / Administración
+              </td>
+              <td style="width: 10%;"></td>
+              <td class="signature-box">
+                <strong>RECIBIÓ</strong><br/>
+                ${retiro.empleado_nombre || 'Empleado Responsable'}
+              </td>
+            </tr>
+          </table>
+
+          <div style="text-align: center; font-size: 9px; color: #888; margin-top: 40px;">
+            Este documento ampara la entrega y responsabilidad del material especificado perteneciente a ${branding.name}.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      if (Platform.OS === 'web') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+
+          setTimeout(() => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+            }, 1000);
+          }, 500);
+        }
+        return;
+      }
+
+      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      const pdfFileName = `vale_retiro_${folioStr}.pdf`;
+      const safeUri = `${cacheDirectory}${pdfFileName}`;
+      
+      await writeAsStringAsync(safeUri, base64 || '', {
+        encoding: EncodingType.Base64,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(safeUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: `Compartir Vale de Retiro ${folioStr}`,
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    } catch (error: any) {
+      logger.error('Error generating vale retiro PDF:', error);
+      throw new Error(error.message || 'Error al generar el vale de retiro.');
+    }
+  },
+
+  /**
+   * Genera un archivo CSV de retiros de material y lo comparte
+   */
+  async exportRetirosToCSV(
+    retiros: any[],
+    fileName: string = 'reporte_retiros_material.csv'
+  ): Promise<void> {
+    if (retiros.length === 0) {
+      throw new Error('No hay registros de retiro para exportar.');
+    }
+
+    let csvContent = '\uFEFF'; // BOM
+    csvContent += 'ID Retiro,Fecha,Empleado,Tipo Destino,Cliente,Sucursal,Proveedor,Detalle,Motivo,SKU,Material,Cantidad,Unidad\n';
+
+    retiros.forEach((r) => {
+      const fecha = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : '';
+      const mats = Array.isArray(r.materiales) ? r.materiales : [];
+
+      if (mats.length === 0) {
+        const row = [
+          escapeCSVCell(r.id),
+          escapeCSVCell(fecha),
+          escapeCSVCell(r.empleado_nombre),
+          escapeCSVCell(r.tipo_gasto || 'Operativo'),
+          escapeCSVCell(r.cliente_nombre || (r.is_split ? 'Dividido' : '')),
+          escapeCSVCell(r.sucursal_nombre || ''),
+          escapeCSVCell(r.proveedor || ''),
+          escapeCSVCell(r.detalle_servicio_proyecto || ''),
+          escapeCSVCell(r.motivo || ''),
+          '""',
+          '""',
+          '0',
+          '""'
+        ].join(',');
+        csvContent += row + '\n';
+      } else {
+        mats.forEach((m: any) => {
+          const row = [
+            escapeCSVCell(r.id),
+            escapeCSVCell(fecha),
+            escapeCSVCell(r.empleado_nombre),
+            escapeCSVCell(r.tipo_gasto || 'Operativo'),
+            escapeCSVCell(r.cliente_nombre || (r.is_split ? 'Dividido' : '')),
+            escapeCSVCell(r.sucursal_nombre || ''),
+            escapeCSVCell(r.proveedor || ''),
+            escapeCSVCell(r.detalle_servicio_proyecto || ''),
+            escapeCSVCell(r.motivo || ''),
+            escapeCSVCell(m.sku || ''),
+            escapeCSVCell(m.nombre || ''),
+            m.cantidad || 0,
+            escapeCSVCell(m.unidad || 'pza')
+          ].join(',');
+          csvContent += row + '\n';
+        });
+      }
+    });
+
+    try {
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', fileName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      const fileUri = `${cacheDirectory}${fileName}`;
+      await writeAsStringAsync(fileUri, csvContent, {
+        encoding: EncodingType.UTF8,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Exportar Reporte Retiros CSV',
+          UTI: 'public.comma-separated-values-text',
+        });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    } catch (error: any) {
+      logger.error('Error generating retiros CSV:', error);
+      throw new Error(error.message || 'Error al generar reporte CSV de retiros.');
+    }
+  },
+
 
   /**
    * Genera un reporte PDF de las ventas registradas y lo comparte

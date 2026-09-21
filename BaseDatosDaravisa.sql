@@ -516,6 +516,26 @@ CREATE TABLE IF NOT EXISTS public.tarea_reprogramaciones (
 
 ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS proveedor_id UUID REFERENCES public.proveedores(id);
 
+-- 5. Tabla de Retiros de Material (Historial enriquecido para reportes de administración)
+CREATE TABLE IF NOT EXISTS public.retiros_material (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  empleado_id UUID REFERENCES public.usuarios(id) NOT NULL,
+  empleado_nombre TEXT NOT NULL,
+  tipo_gasto TEXT, -- 'Servicio', 'Proyecto', 'Venta', 'Operativo'
+  detalle_servicio_proyecto TEXT,
+  proveedor TEXT,
+  proveedor_id UUID REFERENCES public.proveedores(id) ON DELETE SET NULL,
+  cliente_id UUID REFERENCES public.clientes(id) ON DELETE SET NULL,
+  cliente_nombre TEXT,
+  sucursal_id UUID REFERENCES public.sucursales_cliente(id) ON DELETE SET NULL,
+  sucursal_nombre TEXT,
+  is_split BOOLEAN DEFAULT false,
+  splits_json JSONB,
+  materiales JSONB NOT NULL, -- [{ producto_id, sku, nombre, cantidad, unidad }]
+  motivo TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 
 
 -- =========================================================================
