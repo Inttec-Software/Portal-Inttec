@@ -12,7 +12,8 @@ import {
   crearCatalogo,
   getEmpleadoRetribuciones,
   verificarFolioFactura,
-  hardDeleteProducto
+  hardDeleteProducto,
+  getMovimientosInventario
 } from './inventario.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -30,6 +31,8 @@ const invMutate = (req: any, res: any, next: any) => {
 };
 
 router.get('/dashboard', cacheMiddleware(30), getDashboardData);
+router.get('/movimientos', getMovimientosInventario);
+router.get('/retiros', getMovimientosInventario);
 router.post('/devoluciones/aprobar', invMutate, aprobarDevolucion);
 router.post('/evidencias/verificar', invMutate, verificarEvidencia);
 router.post('/productos/bulk-delete', invMutate, bulkDeleteProductos);
