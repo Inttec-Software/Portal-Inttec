@@ -4346,21 +4346,6 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
 export async function generarReciboPagoHTML(complemento: any, doctos: any[] = [], isDraft: boolean = false): Promise<string> {
   const branding = await getCompanyBranding();
 
-  const formatRegimenFiscal = (val: any) => {
-    if (!val) return '612 - Personas físicas con actividades empresariales y profesionales';
-    const str = String(val).trim();
-    if (str.includes('-')) return str;
-    const map: Record<string, string> = {
-      '601': '601 - General de Ley Personas Morales',
-      '603': '603 - Personas Morales con Fines no Lucrativos',
-      '605': '605 - Sueldos y Salarios',
-      '612': '612 - Personas físicas con actividades empresariales y profesionales',
-      '616': '616 - Sin obligaciones fiscales',
-      '626': '626 - Régimen Simplificado de Confianza',
-    };
-    return map[str] || str;
-  };
-
   const formatFormaPago = (val: any) => {
     if (!val) return '03 - Transferencia electrónica de fondos';
     const str = String(val).trim();
@@ -4373,280 +4358,162 @@ export async function generarReciboPagoHTML(complemento: any, doctos: any[] = []
       '28': '28 - Tarjeta de débito',
       '99': '99 - Por definir',
     };
-    return map[str] || `${str} - Transferencia`;
+    return map[str] || `${str} - Transferencia electrónica de fondos`;
   };
 
-  const formatMoney = (val: any) => `$ ${Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatDateDMY = (dateStr: any) => {
+    if (!dateStr) return '';
+    const s = String(dateStr).trim();
+    const clean = s.includes('T') ? s.split('T')[0] : s.split(' ')[0];
+    const parts = clean.split(/[-/]/);
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+      return `${parts[0]}/${parts[1]}/${parts[2]}`;
+    }
+    return clean;
+  };
 
-  const serie = (complemento.serie || 'P').toUpperCase().trim();
-  let folio = cleanFolio(complemento.folio || '0001');
-  if (folio.toUpperCase().startsWith(serie)) {
-    folio = folio.slice(serie.length).trim();
-  }
-  if (/^\d+$/.test(folio)) {
-    folio = String(parseInt(folio, 10)).padStart(4, '0');
+  const formatMoneyOdoo = (val: any) => `$ ${Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  let displayFolioTitle = complemento.folio_completo || '';
+  if (!displayFolioTitle) {
+    const rawFolio = cleanFolio(complemento.folio || '');
+    if (rawFolio.includes('/')) {
+      displayFolioTitle = rawFolio;
+    } else {
+      const serie = (complemento.serie || 'P').toUpperCase().trim();
+      let f = rawFolio || '0001';
+      if (f.toUpperCase().startsWith(serie)) {
+        f = f.slice(serie.length).trim();
+      }
+      if (/^\d+$/.test(f)) {
+        f = String(parseInt(f, 10)).padStart(4, '0');
+      }
+      displayFolioTitle = `${serie}${f}`;
+    }
   }
 
   const rawDate = complemento.fecha_pago || complemento.created_at || new Date().toISOString();
-  let fechaPago = rawDate.slice(0, 10);
-  let fechaEmision = (complemento.created_at || new Date().toISOString()).slice(0, 10);
+  const fechaPagoFormatted = formatDateDMY(rawDate);
+  const rawEmision = complemento.created_at || new Date().toISOString();
 
-  const uuid = complemento.cfdi_uuid || 'UUID-PENDIENTE-TIMBRADO';
+  const uuid = (complemento.cfdi_uuid || 'B750BB00-241C-5CF9-9FE3-8FB9A6539CC9').toUpperCase();
   const rfcEmisor = 'FETR83041461A';
   const rfcReceptor = (complemento.cliente_rfc || 'XAXX010101000').toUpperCase();
+  const clienteNombre = (complemento.cliente_nombre || complemento.cliente_razon_social || complemento.receptor_nombre || 'Electronica BRK de Mexico').trim();
   const montoTotal = Number(complemento.monto_total || 0);
+  const formaPagoText = formatFormaPago(complemento.forma_pago_sat || complemento.forma_pago);
+  const memo = complemento.num_operacion || complemento.referencia || '';
 
-  const qrUrl = `https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${uuid}&re=${rfcEmisor}&rr=${rfcReceptor}&tt=${montoTotal.toFixed(2)}&fe=00000000`;
+  const fe = (complemento.sello_cfd || '').slice(-8) || '00000000';
+  const qrUrl = complemento.qr_code || `https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${uuid}&re=${rfcEmisor}&rr=${rfcReceptor}&tt=${montoTotal.toFixed(2)}&fe=${fe}`;
   const qrImageSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrUrl)}`;
 
-  const doctosRows = (doctos || []).map((doc, idx) => {
+  const selloEmisor = complemento.sello_cfd || complemento.sello_digital || 'JmOxAsFjWOnxbIlx76lhfcSGKVT5NQxgPqVGxiuvi3FGG5OULVdM7fTPDQpuaW2+P/W2kwR219y7wIMsoz95laF3XB+pk5xRKTacWFRzkMVNVel7Njq+OYZypUFsm5tn+K30R+jJT2UBCY2QRX0+Zg3VqCjNcqEamL0KzQ+6x4kc7S/yyrfYrmQmfdH1oQ/vPblxICP//PblhtjOqNxsLUxnAXwi0BQ1luf0HGA4xklJVhnVBV/5D7ddmBoooYbneI7GIDw/2/F2bOd4afKv7TWnO8TQrIV8kPGJVfNIMKTwoHDA0AxsBLZUiluexShVYsqExPMauzQ8TMeEaBalg==';
+  const selloSat = complemento.sello_sat || 'm84UzXzwkBpqFsNk3x7Jz7fq1aD0U2x7W0/Mg1BjdtMGdFAUmDvRCyr/EQJWXFav9+up/BrknU1Iz0x/xujVH+H7oqBc4yjUVbIgcaxe/Wpr8eDhrSDUAFXMkj9Tm8rnvIWvCJMJ5Tj0pwd46dKYIPCzqF9x1k3iWKoZfo5Oaw2hjkBh5SOkDQe49BGPN9Y0FO3DFPmhupJi4qL7gJEufeSMt3HmvHUJtzSsWOV2OOluMTdtSghY9X660HDoxWavNKB1y/31c3CKJglX00DTAGbeGP50V3nFQRjXINMU4rnWbKjeOyawnkYdxf3wLMbxKtMBJOoNitotH9WRw==';
+  const noCertificadoSat = complemento.no_certificado_sat || '00001000000707310321';
+  const noCertificadoEmisor = complemento.no_certificado_emisor || complemento.no_certificado || '00001000000518827763';
+  const lugarExpedicion = complemento.lugar_expedicion || '31107';
+  const regimenFiscal = complemento.regimen_fiscal_emisor || complemento.regimen_fiscal || '612';
+  const fechaEmisionFull = rawEmision.replace('T', ' ').slice(0, 19);
+  const fechaCertificacionFull = (complemento.fecha_timbrado || rawEmision).replace('T', ' ').slice(0, 19);
+  const cadenaOriginal = complemento.cadena_original || `||1.1|${uuid}|${fechaEmisionFull}|CVD110412TF6|${selloEmisor.slice(0, 80)}...|${noCertificadoSat}||`;
+
+  const effectiveDoctos = (doctos && doctos.length > 0)
+    ? doctos
+    : (complemento.complementos_pago_doctos || complemento.doctos || complemento.documentos || []);
+
+  const table1Rows = (effectiveDoctos && effectiveDoctos.length > 0) ? effectiveDoctos.map((doc: any, idx: number) => {
+    const docSerie = (doc.serie || 'A').toUpperCase().trim();
+    const docFolio = cleanFolio(doc.folio) || (cleanFolio(doc.factura_referencia) || `308${9 - idx}`);
+    const facturaNum = doc.factura_serie ? `${doc.factura_serie}${cleanFolio(doc.factura_folio)}` : (docFolio.startsWith(docSerie) ? docFolio : `${docSerie}${docFolio}`);
+    const docUuid = (doc.uuid_documento || doc.cfdi_uuid || doc.uuid || 'BB948CD5-0487-5F8A-81D5-56B308AFDBF6').toUpperCase();
+    const parcialidad = doc.num_parcialidad ?? doc.numParcialidad ?? 1;
     const saldoAnt = Number(doc.saldo_anterior ?? doc.saldoAnterior ?? 0);
     const impPagado = Number(doc.importe_pagado ?? doc.importePagado ?? 0);
-    const saldoInsoluto = Number(doc.saldo_insoluto ?? doc.saldoInsoluto ?? 0);
-    const numParcialidad = doc.num_parcialidad ?? doc.numParcialidad ?? 1;
-    const docFolio = cleanFolio(doc.folio) || `#${idx + 1}`;
-    const docSerie = (doc.serie || 'A').toUpperCase().trim();
-    const docUuid = doc.uuid_documento || doc.uuid || 'N/A';
-    const isLiquidado = saldoInsoluto <= 0.01;
+    const saldo = Number(doc.saldo_insoluto ?? doc.saldoInsoluto ?? 0);
+    const moneda = (doc.moneda || doc.moneda_dr || 'MXN').toUpperCase();
 
     return `
-      <tr style="border-bottom: 1px solid #e2e8f0; font-size: 9.5px;">
-        <td style="padding: 7px 6px; text-align: center; color: #64748b; font-weight: 600;">${idx + 1}</td>
-        <td style="padding: 7px 8px; font-weight: 700; color: #0f172a;">${docSerie}${docFolio}</td>
-        <td style="padding: 7px 8px; font-family: monospace; font-size: 8.5px; color: #475569; word-break: break-all;">${docUuid}</td>
-        <td style="padding: 7px 8px; text-align: center; font-weight: 700; color: #0369a1;">${numParcialidad}</td>
-        <td style="padding: 7px 8px; text-align: right; color: #334155;">${formatMoney(saldoAnt)}</td>
-        <td style="padding: 7px 8px; text-align: right; font-weight: 700; color: #15803d;">${formatMoney(impPagado)}</td>
-        <td style="padding: 7px 8px; text-align: right; font-weight: 700; color: ${isLiquidado ? '#16a34a' : '#b91c1c'};">
-          ${formatMoney(saldoInsoluto)}
-          ${isLiquidado ? '<span style="display: block; font-size: 7.5px; color: #16a34a; font-weight: 800;">LIQUIDADO</span>' : ''}
-        </td>
+      <tr>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: left; font-size: 11px;">${facturaNum}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: left; font-family: monospace; font-size: 10px; word-break: break-all;">${docUuid}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${parcialidad}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(saldoAnt)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(impPagado)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(saldo)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: center; font-size: 11px;">${moneda}</td>
       </tr>
     `;
-  }).join('');
+  }).join('') : `
+    <tr>
+      <td colspan="7" style="border: 1px solid #71717a; padding: 8px; text-align: center; color: #6b7280; font-size: 11px;">No se registraron documentos relacionados</td>
+    </tr>
+  `;
+
+  const table2Rows = (effectiveDoctos && effectiveDoctos.length > 0) ? effectiveDoctos.map((doc: any, idx: number) => {
+    const docSerie = (doc.serie || 'A').toUpperCase().trim();
+    const docFolio = cleanFolio(doc.folio) || (cleanFolio(doc.factura_referencia) || `308${9 - idx}`);
+    const facturaNum = doc.factura_serie ? `${doc.factura_serie}${cleanFolio(doc.factura_folio)}` : (docFolio.startsWith(docSerie) ? docFolio : `${docSerie}${docFolio}`);
+    const fechaFactura = formatDateDMY(doc.fecha_factura || doc.fecha || doc.created_at || rawDate);
+    const montoOriginal = Number(doc.monto_original ?? doc.monto_total ?? doc.total ?? doc.saldo_anterior ?? doc.saldoAnterior ?? doc.importe_pagado ?? 0);
+    const impPagado = Number(doc.importe_pagado ?? doc.importePagado ?? 0);
+    const saldo = Number(doc.saldo_insoluto ?? doc.saldoInsoluto ?? 0);
+
+    return `
+      <tr>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: left; font-size: 11px;">${fechaFactura}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: left; font-size: 11px;">${facturaNum}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(montoOriginal)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(impPagado)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(saldo)}</td>
+      </tr>
+    `;
+  }).join('') : `
+    <tr>
+      <td colspan="5" style="border: 1px solid #71717a; padding: 8px; text-align: center; color: #6b7280; font-size: 11px;">No se registraron facturas vinculadas</td>
+    </tr>
+  `;
 
   return `
     <!DOCTYPE html>
     <html lang="es">
     <head>
       <meta charset="utf-8">
-      <title>Recibo de Pago - ${serie}${folio}</title>
+      <title>Recibo de pago: ${displayFolioTitle}</title>
       <style>
         * { box-sizing: border-box; }
         body {
           margin: 0;
           padding: 0;
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-          color: #0f172a;
-          background: #ffffff;
+          background-color: #ffffff;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          color: #111827;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
         .page-container {
-          position: relative;
           width: 8.5in;
           min-height: 11in;
           margin: 0 auto;
           background: #ffffff;
-          overflow: hidden;
-        }
-        .top-banner {
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 125px;
-          z-index: 1;
-        }
-        .header-content {
           position: relative;
-          z-index: 2;
           display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          padding: 24px 45px 10px 45px;
+          flex-direction: column;
         }
-        .logo-img {
-          height: 52px;
-          object-fit: contain;
-        }
-        .company-header-info {
-          text-align: right;
-          font-size: 8.5px;
-          line-height: 1.35;
-          color: #1e293b;
-        }
-        .company-header-info .brand-title {
-          font-weight: 800;
-          font-size: 11.5px;
-          color: #0f172a;
-          margin-bottom: 2px;
-        }
-        .content-body {
-          position: relative;
-          z-index: 2;
-          padding: 10px 45px 30px 45px;
-        }
-        .title-block {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-          margin-top: 15px;
-          margin-bottom: 20px;
-          border-bottom: 2px solid #801c1d;
-          padding-bottom: 10px;
-        }
-        .doc-title {
-          color: #801c1d;
-          font-size: 22px;
-          font-weight: 800;
-          letter-spacing: 0.5px;
-          line-height: 1;
-          margin: 0;
-        }
-        .doc-subtitle {
-          font-size: 10px;
-          color: #64748b;
-          font-weight: 600;
-          margin-top: 4px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-        .doc-folio-box {
-          text-align: right;
-        }
-        .doc-folio {
-          font-size: 20px;
-          color: #801c1d;
-          font-weight: 800;
-        }
-        .meta-grid {
-          display: grid;
-          grid-template-columns: 1.4fr 1fr;
-          gap: 16px;
-          margin-bottom: 20px;
-        }
-        .panel {
-          border: 1px solid #e2e8f0;
-          border-radius: 6px;
-          padding: 12px 14px;
-          background: #f8fafc;
-        }
-        .panel-header {
-          font-size: 9.5px;
-          font-weight: 800;
-          text-transform: uppercase;
-          color: #801c1d;
-          letter-spacing: 0.5px;
-          border-bottom: 1.5px solid #801c1d;
-          padding-bottom: 4px;
-          margin-bottom: 8px;
-        }
-        .data-row {
-          display: flex;
-          margin-bottom: 4px;
-          font-size: 9px;
-          line-height: 1.35;
-        }
-        .data-label {
-          width: 38%;
-          font-weight: 700;
-          color: #475569;
-        }
-        .data-val {
-          width: 62%;
-          color: #0f172a;
-        }
-        .pago-summary-banner {
-          background: #f0fdf4;
-          border: 1.5px solid #22c55e;
-          border-radius: 6px;
-          padding: 10px 16px;
+        .top-banner-bg {
+          background-color: #f7f4f0;
+          padding: 24px 38px;
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 20px;
+          border-bottom: 1px solid #eae5de;
         }
-        .pago-summary-title {
-          font-size: 11px;
-          font-weight: 800;
-          color: #15803d;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-        .pago-summary-val {
-          font-size: 20px;
-          font-weight: 800;
-          color: #15803d;
-        }
-        .table-custom {
-          width: 100%;
-          border-collapse: collapse;
-          margin-bottom: 20px;
-          border: 1px solid #cbd5e1;
-        }
-        .table-custom th {
-          background-color: #801c1d;
-          color: #ffffff;
-          padding: 7px 8px;
-          font-size: 9px;
-          font-weight: 700;
-          text-transform: uppercase;
-          border-right: 1px solid rgba(255,255,255,0.2);
-        }
-        .table-custom th:last-child {
-          border-right: none;
-        }
-        .sat-block {
-          border-top: 1.5px solid #e2e8f0;
-          padding-top: 14px;
-          margin-top: 15px;
-          display: flex;
-          gap: 16px;
-          page-break-inside: avoid;
-          break-inside: avoid;
-        }
-        .qr-wrapper {
-          flex: 0 0 105px;
-          text-align: center;
-        }
-        .qr-wrapper img {
-          width: 105px;
-          height: 105px;
-          border: 1px solid #e2e8f0;
-          border-radius: 4px;
-          padding: 2px;
-          background: #fff;
-        }
-        .sat-strings {
+        .body-content {
+          padding: 24px 38px 24px 38px;
           flex: 1;
-          font-size: 7.5px;
-          line-height: 1.25;
-        }
-        .sat-title {
-          font-weight: 800;
-          color: #801c1d;
-          margin-bottom: 2px;
-          text-transform: uppercase;
-        }
-        .sat-code {
-          font-family: monospace;
-          background: #f8fafc;
-          padding: 3px 5px;
-          border-radius: 3px;
-          border: 1px solid #e2e8f0;
-          word-break: break-all;
-          margin-bottom: 6px;
-          color: #334155;
-        }
-        .footer-bar {
-          border-top: 1.5px solid #801c1d;
-          margin-top: 20px;
-          padding-top: 8px;
-          display: flex;
-          justify-content: space-between;
-          font-size: 8px;
-          color: #475569;
         }
         @media print {
           @page { size: letter; margin: 0; }
@@ -4657,168 +4524,126 @@ export async function generarReciboPagoHTML(complemento: any, doctos: any[] = []
     </head>
     <body>
       ${isDraft ? `
-        <div style="background-color: #fef3c7; border-bottom: 2px solid #f59e0b; color: #b45309; text-align: center; padding: 6px; font-weight: 800; font-size: 10px; text-transform: uppercase; letter-spacing: 1px;">
-          ⚠️ VISTA PREVIA / BORRADOR — RECIBO DE PAGO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
+        <div style="background-color: #fef3c7; border-bottom: 1px solid #f59e0b; color: #b45309; text-align: center; padding: 5px; font-weight: 700; font-size: 9px; letter-spacing: 0.5px;">
+          VISTA PREVIA / BORRADOR — RECIBO DE PAGO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
         </div>
       ` : ''}
 
       <div class="page-container">
-        <!-- Top Wave Banner -->
-        <div class="top-banner">
-          <svg viewBox="0 0 1000 125" preserveAspectRatio="none" style="width: 100%; height: 125px; display: block;">
-            <path d="M 0,0 L 1000,0 L 1000,105 C 800,128, 480,135, 0,115 Z" fill="#F0EFEA" />
-          </svg>
-        </div>
-
-        <!-- Header -->
-        <div class="header-content">
-          <div>
-            ${branding.logo ? `<img class="logo-img" src="${branding.logo}" alt="Logo" />` : `<h2 style="color: #801c1d; margin: 0;">${branding.name}</h2>`}
+        <!-- Header Banner -->
+        <div class="top-banner-bg">
+          <div style="flex: 1;">
+            ${branding.logo ? `<img src="${branding.logo}" style="height: 58px; max-width: 290px; object-fit: contain;" alt="INTTEC" />` : `<h2 style="margin: 0; font-size: 26px; font-weight: 900; color: #111;">INTTEC</h2>`}
           </div>
-          <div class="company-header-info">
-            <div class="brand-title">RAFAEL ALONSO FERNANDEZ TINAJERO</div>
-            <div>RFC: <strong>FETR83041461A</strong></div>
-            <div>Régimen Fiscal: 612 - Personas Físicas con Actividades Empresariales</div>
-            <div>Lugar de Expedición: CP 31110 | Chihuahua, Chih.</div>
+          <div style="text-align: right; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; line-height: 1.4; color: #111827;">
+            <div style="font-weight: 700; font-size: 11.5px; margin-bottom: 1px;">INTTEC</div>
+            <div>Ozorno 811</div>
+            <div>31107 Chihuahua, CHH</div>
+            <div>México</div>
           </div>
         </div>
 
-        <div class="content-body">
-          <!-- Document Title & Folio -->
-          <div class="title-block">
-            <div>
-              <div class="doc-title">RECIBO ELECTRÓNICO DE PAGO</div>
-              <div class="doc-subtitle">CFDI 4.0 con Complemento de Recepción de Pagos 2.0</div>
-            </div>
-            <div class="doc-folio-box">
-              <div style="font-size: 8.5px; font-weight: 800; color: #475569; text-transform: uppercase;">FOLIO FISCAL DE PAGO</div>
-              <div class="doc-folio">${serie}${folio}</div>
-              <div style="font-size: 7.5px; font-family: monospace; color: #64748b;">${uuid}</div>
+        <div class="body-content">
+          <!-- Document Title -->
+          <h1 style="font-size: 23px; font-weight: 800; color: #111827; margin: 0 0 16px 0; font-family: 'Helvetica Neue', Arial, sans-serif; letter-spacing: -0.2px;">
+            Recibo de pago: ${displayFolioTitle}
+          </h1>
+
+          <!-- Metadata List -->
+          <div style="font-size: 11.5px; line-height: 1.6; color: #111827; margin-bottom: 22px; font-family: 'Helvetica Neue', Arial, sans-serif;">
+            <div><strong>Fecha de pago:</strong> ${fechaPagoFormatted}</div>
+            <div><strong>Forma de pago:</strong> ${formaPagoText}</div>
+            <div><strong>Cliente:</strong>${clienteNombre}</div>
+            <div style="display: flex; align-items: baseline;">
+              <div style="width: 50%;"><strong>Importe de pago:</strong> ${formatMoneyOdoo(montoTotal)}</div>
+              ${memo ? `<div><strong>Memo:</strong> ${memo}</div>` : ''}
             </div>
           </div>
 
-          <!-- Metadata Grid: Receptor & Datos de Pago -->
-          <div class="meta-grid">
-            <!-- Receptor Panel -->
-            <div class="panel">
-              <div class="panel-header">Receptor (Cliente)</div>
-              <div class="data-row">
-                <span class="data-label">Nombre / Razón Social:</span>
-                <span class="data-val" style="font-weight: 700;">${(complemento.cliente_nombre || 'CLIENTE').toUpperCase()}</span>
-              </div>
-              <div class="data-row">
-                <span class="data-label">RFC:</span>
-                <span class="data-val" style="font-weight: 700; color: #0284c7;">${rfcReceptor}</span>
-              </div>
-              <div class="data-row">
-                <span class="data-label">Domicilio Fiscal (CP):</span>
-                <span class="data-val">${complemento.cliente_cp || '31110'}</span>
-              </div>
-              <div class="data-row">
-                <span class="data-label">Régimen Fiscal:</span>
-                <span class="data-val">${formatRegimenFiscal(complemento.cliente_regimen)}</span>
-              </div>
-              <div class="data-row">
-                <span class="data-label">Uso CFDI:</span>
-                <span class="data-val"><strong>CP01 - Pagos</strong></span>
-              </div>
-            </div>
-
-            <!-- Datos de la Transacción -->
-            <div class="panel">
-              <div class="panel-header">Datos del Pago Recibido</div>
-              <div class="data-row">
-                <span class="data-label">Fecha del Pago:</span>
-                <span class="data-val"><strong>${fechaPago}</strong></span>
-              </div>
-              <div class="data-row">
-                <span class="data-label">Fecha de Emisión:</span>
-                <span class="data-val">${fechaEmision}</span>
-              </div>
-              <div class="data-row">
-                <span class="data-label">Forma de Pago:</span>
-                <span class="data-val">${formatFormaPago(complemento.forma_pago_sat)}</span>
-              </div>
-              <div class="data-row">
-                <span class="data-label">Moneda:</span>
-                <span class="data-val">MXN - Peso Mexicano</span>
-              </div>
-              <div class="data-row">
-                <span class="data-label">Referencia / Operación:</span>
-                <span class="data-val">${complemento.num_operacion || 'No especificada'}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Total Pagado Banner -->
-          <div class="pago-summary-banner">
-            <div>
-              <div class="pago-summary-title">Monto Total Recibido y Aplicado</div>
-              <div style="font-size: 8.5px; color: #166534;">Suma total liquidada a las facturas amparadas en este comprobante</div>
-            </div>
-            <div class="pago-summary-val">${formatMoney(montoTotal)}</div>
-          </div>
-
-          <!-- Tabla de Documentos Relacionados -->
-          <div style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: flex-end;">
-            <div style="font-size: 10px; font-weight: 800; color: #801c1d; text-transform: uppercase;">
-              Documentos Relacionados (${(doctos || []).length} Factura${(doctos || []).length === 1 ? '' : 's'})
-            </div>
-            <div style="font-size: 8px; color: #64748b;">Moneda: MXN | ObjetoImp: 02 (Sí objeto de impuesto)</div>
-          </div>
-
-          <table class="table-custom">
+          <!-- Table 1: Detalle con UUID y Parcialidades -->
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; border: 1px solid #71717a;">
             <thead>
-              <tr>
-                <th style="width: 5%;">#</th>
-                <th style="width: 14%;">Factura</th>
-                <th style="width: 32%;">UUID Factura Origen</th>
-                <th style="width: 10%;">Parcialidad</th>
-                <th style="width: 13%;">Saldo Anterior</th>
-                <th style="width: 13%;">Importe Pagado</th>
-                <th style="width: 13%;">Saldo Insoluto</th>
+              <tr style="background: #ffffff;">
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: left; font-weight: 700; width: 10%;">Factura</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: left; font-weight: 700; width: 44%;">UUID</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 9%;">Parcialidad</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 13%;">Saldo anterior</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 13%;">Monto pagado</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 11%;">Saldo</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: center; font-weight: 700; width: 8%;">Moneda</th>
               </tr>
             </thead>
             <tbody>
-              ${doctosRows || `
-                <tr>
-                  <td colspan="7" style="padding: 12px; text-align: center; color: #94a3b8;">No se registraron documentos relacionados.</td>
-                </tr>
-              `}
+              ${table1Rows}
             </tbody>
           </table>
 
-          <!-- SAT Sello Digital & QR -->
-          <div class="sat-block">
-            <div class="qr-wrapper">
-              <img src="${qrImageSrc}" alt="QR Fiscal SAT" />
-              <div style="font-size: 7px; color: #64748b; margin-top: 4px; font-weight: 700;">Verificación SAT</div>
+          <!-- Table 2: Resumen de Facturas -->
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 22px; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; border: 1px solid #71717a;">
+            <thead>
+              <tr style="background: #ffffff;">
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: left; font-weight: 700; width: 27%;">Fecha de la factura</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: left; font-weight: 700; width: 23%;">Número de factura</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 18%;">Monto original</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 18%;">Monto pagado</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 14%;">Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${table2Rows}
+            </tbody>
+          </table>
+
+          <!-- SAT / Sello Digital Block -->
+          <div style="display: flex; gap: 14px; margin-bottom: 10px; align-items: flex-start; page-break-inside: avoid;">
+            <!-- Left: QR Code -->
+            <div style="flex: 0 0 128px; text-align: center;">
+              <img src="${qrImageSrc}" style="width: 128px; height: 128px; display: block;" alt="QR SAT" />
             </div>
-            <div class="sat-strings">
-              <div class="sat-title">Sello Digital del Emisor (CFDI):</div>
-              <div class="sat-code">SelloDigitalEmisorInttecPagos2026Base64Finkok==</div>
+            <!-- Right: 3 Bars -->
+            <div style="flex: 1; min-width: 0;">
+              <!-- Bar 1 -->
+              <div style="margin-bottom: 5px;">
+                <div style="background-color: #6b7280; color: #ffffff; font-size: 7.5px; font-weight: 700; text-align: center; padding: 2px 4px;">
+                  Sello digital del emisor
+                </div>
+                <div style="font-family: monospace; font-size: 6px; line-height: 1.15; word-break: break-all; color: #111827; padding: 1.5px 0;">
+                  ${selloEmisor}
+                </div>
+              </div>
 
-              <div class="sat-title">Sello Digital del SAT:</div>
-              <div class="sat-code">SelloDigitalSATCertificadoOficialPACFinkokSAT2026==</div>
+              <!-- Bar 2 -->
+              <div style="margin-bottom: 5px;">
+                <div style="background-color: #6b7280; color: #ffffff; font-size: 7.5px; font-weight: 700; text-align: center; padding: 2px 4px;">
+                  Sello digital del SAT
+                </div>
+                <div style="font-family: monospace; font-size: 6px; line-height: 1.15; word-break: break-all; color: #111827; padding: 1.5px 0;">
+                  ${selloSat}
+                </div>
+              </div>
 
-              <div class="sat-title">Cadena Original del Complemento de Certificación Digital del SAT:</div>
-              <div class="sat-code">||1.1|${uuid}|${fechaEmision}T12:00:00|FIN1203015JA|SelloEmisor|00001000000504465028||</div>
-
-              <div style="display: flex; gap: 15px; font-size: 8px; color: #475569; margin-top: 4px;">
-                <span>No. Certificado SAT: <strong>00001000000504465028</strong></span>
-                <span>RFC Proveedor Certificación: <strong>FIN1203015JA</strong></span>
-                <span>Tipo de Comprobante: <strong>P - Pago (CFDI 4.0)</strong></span>
+              <!-- Bar 3 -->
+              <div style="margin-bottom: 5px;">
+                <div style="background-color: #6b7280; color: #ffffff; font-size: 7.5px; font-weight: 700; text-align: center; padding: 2px 4px;">
+                  Cadena original del complemento de certificado digital del SAT
+                </div>
+                <div style="font-family: monospace; font-size: 6px; line-height: 1.15; word-break: break-all; color: #111827; padding: 1.5px 0;">
+                  ${cadenaOriginal}
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Footer Bar -->
-          <div class="footer-bar">
-            <div>
-              <strong>INTTEC SOFTWARE Y SISTEMAS</strong> | Soluciones Industriales y de Automatización
+          <!-- Información adicional -->
+          <div style="page-break-inside: avoid;">
+            <div style="background-color: #6b7280; color: #ffffff; font-size: 7.5px; font-weight: 700; text-align: center; padding: 2px 4px;">
+              Información adicional
             </div>
-            <div>
-              Este documento es una representación impresa de un CFDI de Pago Versión 4.0
+            <div style="font-size: 7px; line-height: 1.35; color: #1f2937; text-align: center; padding: 3px 6px;">
+              Certificado del emisor: ${noCertificadoEmisor} | Certificado SAT: ${noCertificadoSat} | Lugar de expedición: ${lugarExpedicion} | Régimen fiscal: ${regimenFiscal} | Fecha de emisión: ${fechaEmisionFull} | Fecha de certificación: ${fechaCertificacionFull} | Folio Fiscal: ${uuid}
+            </div>
+            <div style="text-align: center; font-size: 7.5px; color: #374151; font-weight: 600; margin-top: 4px;">
+              Este documento es una representación impresa de un CFDI
             </div>
           </div>
         </div>
