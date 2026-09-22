@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS complementos_pago_doctos (
   uuid_documento VARCHAR(50) NOT NULL,
   serie VARCHAR(10),
   folio VARCHAR(20),
+  fecha TIMESTAMPTZ,
   moneda_dr VARCHAR(5) DEFAULT 'MXN',
   num_parcialidad INT NOT NULL DEFAULT 1,
   saldo_anterior NUMERIC(12, 2) NOT NULL,
