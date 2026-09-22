@@ -21,6 +21,7 @@ import { supabase } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { parseCfdiXml } from '../../../supabase/functions/sync-facturas-recibidas/xmlParser';
 import { exportFacturaCfdiToPdf } from '@/utils/cfdiPdfGenerator';
+import { ModuleCache } from '@/services/moduleCache';
 
 interface FacturaRecibida {
   id: string;
@@ -70,9 +71,10 @@ export default function FacturasRecibidasScreen() {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
-  const [loading, setLoading] = useState(true);
+  const cachedFacturas = ModuleCache.get<FacturaRecibida[]>('facturas_recibidas');
+  const [loading, setLoading] = useState(() => !cachedFacturas);
   const [refreshing, setRefreshing] = useState(false);
-  const [facturas, setFacturas] = useState<FacturaRecibida[]>([]);
+  const [facturas, setFacturas] = useState<FacturaRecibida[]>(() => cachedFacturas || []);
   const [satSolicitudes, setSatSolicitudes] = useState<SatSolicitud[]>([]);
   const [syncStatus, setSyncStatus] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -116,9 +118,11 @@ export default function FacturasRecibidasScreen() {
     }
   };
 
-  const fetchFacturas = async () => {
+  const fetchFacturas = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent && !ModuleCache.has('facturas_recibidas')) {
+        setLoading(true);
+      }
       setTableMissing(false);
       const headers = await getApiHeaders();
       const res = await fetch(`${getApiUrl()}/api/facturas-recibidas`, { headers });
@@ -130,6 +134,7 @@ export default function FacturasRecibidasScreen() {
       if (json.tableMissing) {
         setTableMissing(true);
       } else if (json.facturas) {
+        ModuleCache.set('facturas_recibidas', json.facturas);
         setFacturas(json.facturas);
       }
     } catch (err) {
@@ -627,7 +632,7 @@ export default function FacturasRecibidasScreen() {
             </Text>
             <TouchableOpacity
               style={[styles.actionBtn, { backgroundColor: themeColors.accent, marginTop: 16 }]}
-              onPress={fetchFacturas}
+              onPress={() => fetchFacturas()}
             >
               <Ionicons name="refresh-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
               <Text style={styles.actionBtnText}>Reintentar Conexión</Text>

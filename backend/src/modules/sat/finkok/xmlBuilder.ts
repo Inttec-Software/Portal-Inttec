@@ -48,6 +48,19 @@ function mapFormaPagoSAT(forma?: string): string {
   return '03'; // Transferencia electrónica por defecto para ventas empresariales
 }
 
+function cleanFolio(rawFolio?: any): string {
+  if (!rawFolio && rawFolio !== 0) return '';
+  let str = String(rawFolio).trim();
+  if (str.includes(' - ')) {
+    str = str.split(' - ')[0].trim();
+  } else if (/\s*-\s*[a-zA-Z]/.test(str)) {
+    str = str.split(/\s*-\s*/)[0].trim();
+  } else if (/\s+[a-zA-Z(]/.test(str)) {
+    str = str.split(/\s+/)[0].trim();
+  }
+  return str;
+}
+
 export async function buildUnsignedCFDI(ventaData: any, clienteData: any, partidas: any[], isProduction: boolean = false) {
   // Configuración del Emisor (Variables de Entorno o defaults)
   const emisorRfc = process.env.EMISOR_RFC || (isProduction ? 'FETR83041461A' : 'EKU9003173C9');
@@ -98,9 +111,20 @@ export async function buildUnsignedCFDI(ventaData: any, clienteData: any, partid
   const tzOffset = (6 * 60 * 60 * 1000) + (10 * 60 * 1000); // 6 horas + 10 minutos
   const fecha = new Date(Date.now() - tzOffset).toISOString().substring(0, 19);
 
+  const serie = (ventaData.cfdi_serie || ventaData.serie || 'A').toUpperCase().trim();
+  let folio = cleanFolio(ventaData.cfdi_folio || ventaData.folio || '0001');
+  if (folio.toUpperCase().startsWith(serie)) {
+    folio = folio.slice(serie.length).trim();
+  }
+  if (/^\d+$/.test(folio)) {
+    folio = String(parseInt(folio, 10)).padStart(4, '0');
+  } else if (!folio) {
+    folio = '0001';
+  }
+
   const params: CFDIParams = {
-    Serie: ventaData.cfdi_serie || ventaData.serie || 'A',
-    Folio: String(ventaData.cfdi_folio || ventaData.folio || ventaData.id || Date.now()),
+    Serie: serie,
+    Folio: folio,
     Fecha: fecha,
     FormaPago: formaPago,
     MetodoPago: metodoPago,

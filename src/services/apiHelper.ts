@@ -5,6 +5,12 @@ import { Platform } from 'react-native';
 const isBrowser = Platform.OS !== 'web' || typeof window !== 'undefined';
 
 export const resolveLocalhost = (url: string) => {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && window.location && window.location.hostname) {
+      return url.replace(/localhost|127\.0\.0\.1/, window.location.hostname);
+    }
+    return url;
+  }
   if (__DEV__ && url && (url.includes('localhost') || url.includes('127.0.0.1'))) {
     const debuggerHost = Constants.expoConfig?.hostUri || (Constants.manifest as any)?.debuggerHost;
     if (debuggerHost) {
@@ -60,6 +66,16 @@ export const getApiHeaders = async (forceRefresh = false) => {
 };
 
 export const getApiUrl = () => {
-  const rawApiUrl = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000').trim().replace(/\/+$/, '');
+  let rawApiUrl = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:10000').trim().replace(/\/+$/, '');
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (__DEV__ && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      // Si estamos en desarrollo local en el navegador y el bundle tenía la URL de Render, usar el backend local
+      if (rawApiUrl.includes('onrender.com')) {
+        rawApiUrl = `http://${window.location.hostname}:10000`;
+      }
+    }
+  }
+
   return resolveLocalhost(rawApiUrl).replace(/\/+$/, '');
 };

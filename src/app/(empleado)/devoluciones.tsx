@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { AuthService, supabase } from '@/services/supabase';
+import { AuthService } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 
@@ -25,8 +25,14 @@ type InventarioItem = {
   producto_id: string;
   cantidad_disponible: number;
   producto: {
+    id?: string;
     nombre_oficial: string;
     sku_interno: string;
+    unidad?: string;
+    stock_actual?: number;
+    stock_nuevo?: number;
+    stock_usado?: number;
+    stock_por_revisar?: number;
   };
 };
 
@@ -34,7 +40,18 @@ type MaterialDevolucion = {
   productoId: string;
   nombre: string;
   sku: string;
+  unidad: string;
   maximo: number;
+  pos_nuevo: number;
+  pos_usado: number;
+  pos_por_revisar: number;
+  stock_nuevo: number;
+  stock_usado: number;
+  stock_por_revisar: number;
+  hasUsedOrDamaged: boolean;
+  devolver_nuevo: number | '';
+  devolver_usado: number | '';
+  devolver_por_revisar: number | '';
   devolver: number;
 };
 
@@ -52,6 +69,9 @@ export default function DevolucionesEmpleadoScreen() {
   // Lista de materiales a devolver
   const [materialesDevolver, setMaterialesDevolver] = useState<MaterialDevolucion[]>([]);
   
+  // Estado para controlar menús de cascada colapsables (inicialmente cerrados)
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [observaciones, setObservaciones] = useState('');
 
@@ -83,15 +103,45 @@ export default function DevolucionesEmpleadoScreen() {
 
       setInventario((data as any) || []);
       
-      // Inicializar el arreglo de devolución
+      // Inicializar el arreglo de devolución con detección de existencias en usado/dañado
       if (data) {
-        const initial = data.map((item: any) => ({
-          productoId: item.producto_id,
-          nombre: Array.isArray(item.producto) ? item.producto[0]?.nombre_oficial : (item.producto?.nombre_oficial || 'Desconocido'),
-          sku: Array.isArray(item.producto) ? item.producto[0]?.sku_interno : (item.producto?.sku_interno || ''),
-          maximo: item.cantidad_disponible,
-          devolver: 0
-        }));
+        const initial: MaterialDevolucion[] = data.map((item: any) => {
+          const prodObj = Array.isArray(item.producto) ? item.producto[0] : item.producto;
+          const sNuevo = Number(prodObj?.stock_nuevo) || 0;
+          const sUsado = Number(prodObj?.stock_usado) || 0;
+          const sPorRev = Number(prodObj?.stock_por_revisar) || 0;
+
+          const maximo = Number(item.cantidad_disponible) || 0;
+          const cNuevo = Number(item.cantidad_nuevo) || 0;
+          const cUsado = Number(item.cantidad_usado) || 0;
+          const cPorRev = Number(item.cantidad_por_revisar) || 0;
+
+          // Si el registro de posesión no tiene desglose guardado en BD, se asume nuevo
+          const posNuevo = (cNuevo === 0 && cUsado === 0 && cPorRev === 0) ? maximo : cNuevo;
+          const posUsado = cUsado;
+          const posPorRev = cPorRev;
+
+          const hasUsedOrDamaged = posUsado > 0 || posPorRev > 0 || sUsado > 0 || sPorRev > 0;
+
+          return {
+            productoId: item.producto_id,
+            nombre: prodObj?.nombre_oficial || 'Desconocido',
+            sku: prodObj?.sku_interno || '',
+            unidad: prodObj?.unidad || 'pza',
+            maximo,
+            pos_nuevo: posNuevo,
+            pos_usado: posUsado,
+            pos_por_revisar: posPorRev,
+            stock_nuevo: sNuevo,
+            stock_usado: sUsado,
+            stock_por_revisar: sPorRev,
+            hasUsedOrDamaged,
+            devolver_nuevo: '',
+            devolver_usado: '',
+            devolver_por_revisar: '',
+            devolver: 0
+          };
+        });
         setMaterialesDevolver(initial);
       }
     } catch (err: any) {
@@ -102,19 +152,171 @@ export default function DevolucionesEmpleadoScreen() {
     }
   };
 
-  const handleUpdateDevolver = (idx: number, val: string) => {
-    const num = parseInt(val, 10);
-    const safeNum = isNaN(num) || num < 0 ? 0 : num;
-    
+  const handleDirectQtyChange = (idx: number, textOrNum: number | string) => {
     setMaterialesDevolver(prev => {
-      const nuevo = [...prev];
-      nuevo[idx].devolver = Math.min(safeNum, nuevo[idx].maximo);
-      return nuevo;
+      const copy = [...prev];
+      const item = { ...copy[idx] };
+      
+      let val: number = 0;
+      if (typeof textOrNum === 'number') {
+        val = textOrNum;
+      } else {
+        if (textOrNum.trim() === '') val = 0;
+        else {
+          const parsed = parseFloat(textOrNum.replace(/[^0-9.]/g, ''));
+          val = isNaN(parsed) ? 0 : parsed;
+        }
+      }
+
+      val = Math.max(0, val);
+      if (val > item.maximo) {
+        Alert.alert('Límite Superado', `No puedes devolver más de los ${item.maximo} ${item.unidad} disponibles.`);
+        val = item.maximo;
+      }
+
+      // Distribuir la cantidad a devolver respetando lo que posee en cada estado
+      let remaining = val;
+      const assignNuevo = Math.min(item.pos_nuevo, remaining);
+      remaining -= assignNuevo;
+
+      const assignUsado = Math.min(item.pos_usado, remaining);
+      remaining -= assignUsado;
+
+      const assignPorRev = Math.min(item.pos_por_revisar, remaining);
+      remaining -= assignPorRev;
+
+      item.devolver_nuevo = assignNuevo > 0 ? assignNuevo : '';
+      item.devolver_usado = assignUsado > 0 ? assignUsado : '';
+      item.devolver_por_revisar = assignPorRev > 0 ? assignPorRev : '';
+      item.devolver = val;
+
+      copy[idx] = item;
+      return copy;
+    });
+  };
+
+  const handleUpdateCondition = (
+    idx: number, 
+    field: 'devolver_nuevo' | 'devolver_usado' | 'devolver_por_revisar', 
+    val: number | ''
+  ) => {
+    setMaterialesDevolver(prev => {
+      const copy = [...prev];
+      const item = { ...copy[idx] };
+
+      const maxForField = field === 'devolver_nuevo' 
+        ? item.pos_nuevo 
+        : field === 'devolver_usado' 
+          ? item.pos_usado 
+          : item.pos_por_revisar;
+
+      const labelField = field === 'devolver_nuevo'
+        ? 'Nuevas'
+        : field === 'devolver_usado'
+          ? 'Usadas'
+          : 'Dañadas/Incompletas';
+
+      let numVal: number | '' = val;
+      if (typeof val === 'number') {
+        if (val < 0) numVal = 0;
+        else if (val > maxForField) {
+          Alert.alert(
+            'Límite de Estado Superado',
+            `Solo tienes en posesión ${maxForField} ${item.unidad} de calidad "${labelField}".`
+          );
+          numVal = maxForField;
+        }
+      }
+
+      item[field] = numVal;
+
+      const nNuevo = typeof item.devolver_nuevo === 'number' ? item.devolver_nuevo : 0;
+      const nUsado = typeof item.devolver_usado === 'number' ? item.devolver_usado : 0;
+      const nPorRev = typeof item.devolver_por_revisar === 'number' ? item.devolver_por_revisar : 0;
+      const sum = Math.round((nNuevo + nUsado + nPorRev) * 100) / 100;
+
+      if (sum > item.maximo) {
+        Alert.alert(
+          'Límite Superado', 
+          `No puedes devolver más de los ${item.maximo} ${item.unidad} que tienes disponibles en tu inventario.`
+        );
+        return prev;
+      }
+
+      item.devolver = sum;
+      copy[idx] = item;
+      return copy;
+    });
+  };
+
+  const handleSetAllCondition = (
+    idx: number, 
+    field: 'devolver_nuevo' | 'devolver_usado' | 'devolver_por_revisar' | 'all'
+  ) => {
+    setMaterialesDevolver(prev => {
+      const copy = [...prev];
+      const item = { ...copy[idx] };
+
+      if (field === 'all') {
+        item.devolver_nuevo = item.pos_nuevo > 0 ? item.pos_nuevo : '';
+        item.devolver_usado = item.pos_usado > 0 ? item.pos_usado : '';
+        item.devolver_por_revisar = item.pos_por_revisar > 0 ? item.pos_por_revisar : '';
+        item.devolver = item.maximo;
+      } else {
+        const qty = field === 'devolver_nuevo' 
+          ? item.pos_nuevo 
+          : field === 'devolver_usado' 
+            ? item.pos_usado 
+            : item.pos_por_revisar;
+
+        item.devolver_nuevo = field === 'devolver_nuevo' && qty > 0 ? qty : '';
+        item.devolver_usado = field === 'devolver_usado' && qty > 0 ? qty : '';
+        item.devolver_por_revisar = field === 'devolver_por_revisar' && qty > 0 ? qty : '';
+        item.devolver = qty;
+      }
+
+      copy[idx] = item;
+      return copy;
+    });
+  };
+
+  const handleClearItem = (idx: number) => {
+    setMaterialesDevolver(prev => {
+      const copy = [...prev];
+      const item = { ...copy[idx] };
+      item.devolver_nuevo = '';
+      item.devolver_usado = '';
+      item.devolver_por_revisar = '';
+      item.devolver = 0;
+      copy[idx] = item;
+      return copy;
     });
   };
 
   const handleEnviarDevolucion = async () => {
-    const aDevolver = materialesDevolver.filter(m => m.devolver > 0);
+    const aDevolver = materialesDevolver
+      .filter(m => m.devolver > 0)
+      .map(m => {
+        const nNuevo = typeof m.devolver_nuevo === 'number' ? m.devolver_nuevo : 0;
+        const nUsado = typeof m.devolver_usado === 'number' ? m.devolver_usado : 0;
+        const nPorRev = typeof m.devolver_por_revisar === 'number' ? m.devolver_por_revisar : 0;
+
+        // Si no se desglosó por condición, todo el valor devuelto se asigna por defecto a nuevo
+        const finalNuevo = (nNuevo === 0 && nUsado === 0 && nPorRev === 0) ? m.devolver : nNuevo;
+
+        return {
+          productoId: m.productoId,
+          nombre: m.nombre,
+          sku: m.sku,
+          unidad: m.unidad,
+          maximo: m.maximo,
+          devolver: m.devolver,
+          devolver_nuevo: finalNuevo,
+          devolver_usado: nUsado,
+          devolver_por_revisar: nPorRev,
+        };
+      });
+
     if (aDevolver.length === 0) {
       Alert.alert('Validación', 'Debes indicar al menos un material con cantidad mayor a 0 para devolver.');
       return;
@@ -163,13 +365,15 @@ export default function DevolucionesEmpleadoScreen() {
     );
   }
 
+  const totalDevolverGeneral = materialesDevolver.reduce((acc, curr) => acc + (curr.devolver || 0), 0);
+
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Text style={[styles.title, { color: themeColors.text }]}>Devolución de Material</Text>
           <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
-            Indica qué materiales sobrantes vas a regresar al almacén. El administrador deberá aprobar la devolución para descontarlos de tu inventario.
+            Indica los materiales que regresas al almacén. Si un producto cuenta con existencias usadas o dañadas, puedes desplegar el menú en cascada para desglosarlo.
           </Text>
         </View>
 
@@ -182,48 +386,356 @@ export default function DevolucionesEmpleadoScreen() {
           </View>
         ) : (
           <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-            <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text, marginBottom: Spacing.three }}>
-              Material Disponible
-            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.three }}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text }}>
+                Material en Camioneta ({inventario.length})
+              </Text>
+              {totalDevolverGeneral > 0 && (
+                <View style={{ backgroundColor: themeColors.primary + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>
+                    Total a regresar: {totalDevolverGeneral}
+                  </Text>
+                </View>
+              )}
+            </View>
 
-            {materialesDevolver.map((m, idx) => (
-              <View key={m.productoId} style={[styles.itemRow, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
-                <View style={{ flex: 1, paddingRight: Spacing.two }}>
-                  <Text style={{ color: themeColors.text, fontWeight: '600', marginBottom: 4 }}>{m.nombre}</Text>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>SKU: {m.sku} • Tienes: <Text style={{fontWeight: 'bold', color: themeColors.primary}}>{m.maximo}</Text></Text>
+            {materialesDevolver.map((m, idx) => {
+              const qNuevo = typeof m.devolver_nuevo === 'number' ? m.devolver_nuevo : 0;
+              const qUsado = typeof m.devolver_usado === 'number' ? m.devolver_usado : 0;
+              const qPorRev = typeof m.devolver_por_revisar === 'number' ? m.devolver_por_revisar : 0;
+              const currentTotal = m.devolver || 0;
+              const remainingToDevolve = Math.max(0, m.maximo - currentTotal);
+              const isExpanded = !!expandedItems[m.productoId];
+
+              return (
+                <View 
+                  key={m.productoId} 
+                  style={[
+                    styles.itemCard, 
+                    { 
+                      borderColor: currentTotal > 0 ? themeColors.primary : themeColors.border, 
+                      backgroundColor: themeColors.background,
+                      borderWidth: currentTotal > 0 ? 1.5 : 1
+                    }
+                  ]}
+                >
+                  {/* Encabezado del Producto */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 15 }}>{m.nombre}</Text>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                        SKU: {m.sku || '-'} • En posesión: <Text style={{ fontWeight: 'bold', color: themeColors.primary }}>{m.maximo} {m.unidad}</Text>
+                      </Text>
+                    </View>
+
+                    {currentTotal > 0 && (
+                      <TouchableOpacity 
+                        onPress={() => handleClearItem(idx)}
+                        style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: themeColors.danger + '15' }}
+                      >
+                        <Text style={{ fontSize: 11, color: themeColors.danger, fontWeight: '700' }}>Limpiar</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Fila de Control Directo (Stepper Rápido y Limpio) */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: m.hasUsedOrDamaged ? 8 : 4 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text }}>
+                      Cantidad a devolver:
+                    </Text>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      {currentTotal === 0 && (
+                        <TouchableOpacity
+                          style={[styles.quickAllChip, { borderColor: themeColors.primary, backgroundColor: themeColors.primary + '15' }]}
+                          onPress={() => handleDirectQtyChange(idx, m.maximo)}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.primary }}>Todo ({m.maximo})</Text>
+                        </TouchableOpacity>
+                      )}
+
+                      <View style={[styles.stepperContainer, { backgroundColor: themeColors.backgroundElement, borderColor: currentTotal > 0 ? themeColors.primary : themeColors.border }]}>
+                        <TouchableOpacity
+                          style={[styles.stepperBtn, { backgroundColor: themeColors.danger + '18' }]}
+                          onPress={() => handleDirectQtyChange(idx, Math.max(0, currentTotal - 1))}
+                          disabled={currentTotal <= 0}
+                        >
+                          <Ionicons name="remove" size={14} color={currentTotal > 0 ? themeColors.danger : themeColors.textSecondary} />
+                        </TouchableOpacity>
+                        
+                        <TextInput
+                          style={[styles.stepperInput, { color: themeColors.text }]}
+                          keyboardType="decimal-pad"
+                          selectTextOnFocus
+                          value={currentTotal === 0 ? '' : String(currentTotal)}
+                          placeholder="0"
+                          placeholderTextColor={themeColors.textSecondary}
+                          onChangeText={(val) => handleDirectQtyChange(idx, val)}
+                        />
+
+                        <TouchableOpacity
+                          style={[styles.stepperBtn, { backgroundColor: themeColors.primary + '18' }]}
+                          onPress={() => handleDirectQtyChange(idx, Math.min(m.maximo, currentTotal + 1))}
+                          disabled={currentTotal >= m.maximo}
+                        >
+                          <Ionicons name="add" size={14} color={currentTotal < m.maximo ? themeColors.primary : themeColors.textSecondary} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Menú de Cascada Desplegable para Desglose de Estado (Inicialmente Cerrado) */}
+                  <View style={{ marginTop: 6 }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.cascadeHeaderBtn,
+                        {
+                          backgroundColor: isExpanded ? themeColors.primary + '12' : themeColors.backgroundElement,
+                          borderColor: isExpanded ? themeColors.primary : themeColors.border,
+                        }
+                      ]}
+                      onPress={() => setExpandedItems(prev => ({ ...prev, [m.productoId]: !prev[m.productoId] }))}
+                      activeOpacity={0.7}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                        <Ionicons
+                          name={isExpanded ? "layers" : "layers-outline"}
+                          size={14}
+                          color={isExpanded ? themeColors.primary : themeColors.textSecondary}
+                        />
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: isExpanded ? themeColors.primary : themeColors.text }}>
+                          Desglose por condición (Nuevas, Usadas, Dañadas)
+                        </Text>
+                      </View>
+
+                      {(qUsado > 0 || qPorRev > 0) && (
+                        <View style={{ backgroundColor: '#D9770620', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginRight: 6 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#D97706' }}>
+                            {qUsado > 0 ? `Usadas: ${qUsado}` : ''} {qPorRev > 0 ? `Dañadas: ${qPorRev}` : ''}
+                          </Text>
+                        </View>
+                      )}
+
+                      <Ionicons
+                        name={isExpanded ? "chevron-up" : "chevron-down"}
+                        size={14}
+                        color={isExpanded ? themeColors.primary : themeColors.textSecondary}
+                      />
+                    </TouchableOpacity>
+
+                    {/* Contenido en Cascada cuando está Desplegado */}
+                    {isExpanded && (
+                      <View style={[styles.cascadeBody, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                        {/* Botones de selección rápida basados en la posesión real de cada estado */}
+                        <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+                          {m.pos_nuevo > 0 && (
+                            <TouchableOpacity
+                              onPress={() => handleSetAllCondition(idx, 'devolver_nuevo')}
+                              style={[styles.quickPresetBtn, { borderColor: '#10B981', backgroundColor: '#10B98115' }]}
+                            >
+                              <Ionicons name="sparkles-outline" size={12} color="#10B981" />
+                              <Text style={{ fontSize: 11, fontWeight: '600', color: '#10B981' }}>Todo Nuevo ({m.pos_nuevo})</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {m.pos_usado > 0 && (
+                            <TouchableOpacity
+                              onPress={() => handleSetAllCondition(idx, 'devolver_usado')}
+                              style={[styles.quickPresetBtn, { borderColor: '#D97706', backgroundColor: '#D9770615' }]}
+                            >
+                              <Ionicons name="refresh-outline" size={12} color="#D97706" />
+                              <Text style={{ fontSize: 11, fontWeight: '600', color: '#D97706' }}>Todo Usado ({m.pos_usado})</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {m.pos_por_revisar > 0 && (
+                            <TouchableOpacity
+                              onPress={() => handleSetAllCondition(idx, 'devolver_por_revisar')}
+                              style={[styles.quickPresetBtn, { borderColor: '#DC2626', backgroundColor: '#DC262615' }]}
+                            >
+                              <Ionicons name="alert-circle-outline" size={12} color="#DC2626" />
+                              <Text style={{ fontSize: 11, fontWeight: '600', color: '#DC2626' }}>Todo Dañado ({m.pos_por_revisar})</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {m.maximo > 0 && (
+                            <TouchableOpacity
+                              onPress={() => handleSetAllCondition(idx, 'all')}
+                              style={[styles.quickPresetBtn, { borderColor: themeColors.primary, backgroundColor: themeColors.primary + '15' }]}
+                            >
+                              <Ionicons name="checkmark-done-outline" size={12} color={themeColors.primary} />
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.primary }}>Devolver Todo ({m.maximo})</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+
+                        {/* 1. Nuevas */}
+                        <View style={styles.conditionRow}>
+                          <View style={{ flex: 1, paddingRight: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' }} />
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>Nuevas (Intactas)</Text>
+                            </View>
+                            <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginLeft: 14 }}>
+                              En posesión: <Text style={{ fontWeight: '700', color: themeColors.text }}>{m.pos_nuevo} {m.unidad}</Text>
+                            </Text>
+                          </View>
+                          <View style={[styles.stepperContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                            <TouchableOpacity
+                              style={[styles.stepperBtn, { backgroundColor: themeColors.danger + '18' }]}
+                              onPress={() => handleUpdateCondition(idx, 'devolver_nuevo', Math.max(0, qNuevo - 1))}
+                              disabled={qNuevo <= 0}
+                            >
+                              <Ionicons name="remove" size={14} color={qNuevo > 0 ? themeColors.danger : themeColors.textSecondary} />
+                            </TouchableOpacity>
+                            <TextInput
+                              style={[styles.stepperInput, { color: themeColors.text }]}
+                              keyboardType="decimal-pad"
+                              selectTextOnFocus
+                              value={m.devolver_nuevo === '' ? '' : String(m.devolver_nuevo)}
+                              placeholder="0"
+                              placeholderTextColor={themeColors.textSecondary}
+                              onChangeText={(val) => {
+                                if (val.trim() === '') handleUpdateCondition(idx, 'devolver_nuevo', '');
+                                else {
+                                  const num = parseFloat(val.replace(/[^0-9.]/g, ''));
+                                  handleUpdateCondition(idx, 'devolver_nuevo', isNaN(num) ? '' : num);
+                                }
+                              }}
+                            />
+                            <TouchableOpacity
+                              style={[styles.stepperBtn, { backgroundColor: themeColors.primary + '18' }]}
+                              onPress={() => handleUpdateCondition(idx, 'devolver_nuevo', qNuevo + 1)}
+                              disabled={qNuevo >= m.pos_nuevo || remainingToDevolve <= 0}
+                            >
+                              <Ionicons name="add" size={14} color={(qNuevo < m.pos_nuevo && remainingToDevolve > 0) ? themeColors.primary : themeColors.textSecondary} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {/* 2. Usadas */}
+                        <View style={[styles.conditionRow, { marginTop: 8 }]}>
+                          <View style={{ flex: 1, paddingRight: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#D97706' }} />
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>Usadas (Buen estado)</Text>
+                            </View>
+                            <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginLeft: 14 }}>
+                              En posesión: <Text style={{ fontWeight: '700', color: themeColors.text }}>{m.pos_usado} {m.unidad}</Text>
+                            </Text>
+                          </View>
+                          <View style={[styles.stepperContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                            <TouchableOpacity
+                              style={[styles.stepperBtn, { backgroundColor: themeColors.danger + '18' }]}
+                              onPress={() => handleUpdateCondition(idx, 'devolver_usado', Math.max(0, qUsado - 1))}
+                              disabled={qUsado <= 0}
+                            >
+                              <Ionicons name="remove" size={14} color={qUsado > 0 ? themeColors.danger : themeColors.textSecondary} />
+                            </TouchableOpacity>
+                            <TextInput
+                              style={[styles.stepperInput, { color: themeColors.text }]}
+                              keyboardType="decimal-pad"
+                              selectTextOnFocus
+                              value={m.devolver_usado === '' ? '' : String(m.devolver_usado)}
+                              placeholder="0"
+                              placeholderTextColor={themeColors.textSecondary}
+                              onChangeText={(val) => {
+                                if (val.trim() === '') handleUpdateCondition(idx, 'devolver_usado', '');
+                                else {
+                                  const num = parseFloat(val.replace(/[^0-9.]/g, ''));
+                                  handleUpdateCondition(idx, 'devolver_usado', isNaN(num) ? '' : num);
+                                }
+                              }}
+                            />
+                            <TouchableOpacity
+                              style={[styles.stepperBtn, { backgroundColor: themeColors.primary + '18' }]}
+                              onPress={() => handleUpdateCondition(idx, 'devolver_usado', qUsado + 1)}
+                              disabled={qUsado >= m.pos_usado || remainingToDevolve <= 0}
+                            >
+                              <Ionicons name="add" size={14} color={(qUsado < m.pos_usado && remainingToDevolve > 0) ? themeColors.primary : themeColors.textSecondary} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {/* 3. Dañado / Incompleto */}
+                        <View style={[styles.conditionRow, { marginTop: 8 }]}>
+                          <View style={{ flex: 1, paddingRight: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626' }} />
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>Dañado / Incompleto</Text>
+                            </View>
+                            <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginLeft: 14 }}>
+                              En posesión: <Text style={{ fontWeight: '700', color: themeColors.text }}>{m.pos_por_revisar} {m.unidad}</Text>
+                            </Text>
+                          </View>
+                          <View style={[styles.stepperContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                            <TouchableOpacity
+                              style={[styles.stepperBtn, { backgroundColor: themeColors.danger + '18' }]}
+                              onPress={() => handleUpdateCondition(idx, 'devolver_por_revisar', Math.max(0, qPorRev - 1))}
+                              disabled={qPorRev <= 0}
+                            >
+                              <Ionicons name="remove" size={14} color={qPorRev > 0 ? themeColors.danger : themeColors.textSecondary} />
+                            </TouchableOpacity>
+                            <TextInput
+                              style={[styles.stepperInput, { color: themeColors.text }]}
+                              keyboardType="decimal-pad"
+                              selectTextOnFocus
+                              value={m.devolver_por_revisar === '' ? '' : String(m.devolver_por_revisar)}
+                              placeholder="0"
+                              placeholderTextColor={themeColors.textSecondary}
+                              onChangeText={(val) => {
+                                if (val.trim() === '') handleUpdateCondition(idx, 'devolver_por_revisar', '');
+                                else {
+                                  const num = parseFloat(val.replace(/[^0-9.]/g, ''));
+                                  handleUpdateCondition(idx, 'devolver_por_revisar', isNaN(num) ? '' : num);
+                                }
+                              }}
+                            />
+                            <TouchableOpacity
+                              style={[styles.stepperBtn, { backgroundColor: themeColors.primary + '18' }]}
+                              onPress={() => handleUpdateCondition(idx, 'devolver_por_revisar', qPorRev + 1)}
+                              disabled={qPorRev >= m.pos_por_revisar || remainingToDevolve <= 0}
+                            >
+                              <Ionicons name="add" size={14} color={(qPorRev < m.pos_por_revisar && remainingToDevolve > 0) ? themeColors.primary : themeColors.textSecondary} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Resumen del Item */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                      Te quedarás con: <Text style={{ fontWeight: 'bold', color: themeColors.text }}>{Math.max(0, m.maximo - currentTotal)} {m.unidad}</Text>
+                    </Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: currentTotal > 0 ? themeColors.primary : themeColors.textSecondary }}>
+                      Devolviendo: {currentTotal} {m.unidad}
+                    </Text>
+                  </View>
                 </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={{ color: themeColors.textSecondary, marginRight: 8, fontSize: 13 }}>Devolver:</Text>
-                  <TextInput
-                    style={[styles.input, { borderColor: themeColors.border, color: themeColors.text }]}
-                    keyboardType="numeric"
-                    value={m.devolver === 0 ? '' : m.devolver.toString()}
-                    placeholder="0"
-                    placeholderTextColor={themeColors.textSecondary}
-                    onChangeText={(val) => handleUpdateDevolver(idx, val)}
-                  />
-                </View>
-              </View>
-            ))}
+              );
+            })}
 
             <Text style={{ color: themeColors.text, fontWeight: '600', marginTop: Spacing.four, marginBottom: Spacing.two }}>
-              Observaciones (Opcional)
+              Observaciones o Motivo (Opcional)
             </Text>
             <TextInput
               style={[styles.textArea, { borderColor: themeColors.border, color: themeColors.text, backgroundColor: themeColors.background }]}
               multiline
               numberOfLines={3}
-              placeholder="Ej: Regreso 2 cables extra porque..."
+              placeholder="Ej: Material sobrante del servicio en sucursal X..."
               placeholderTextColor={themeColors.textSecondary}
               value={observaciones}
               onChangeText={setObservaciones}
             />
 
             <CustomButton
-              title="Solicitar Devolución"
+              title={totalDevolverGeneral > 0 ? `Solicitar Devolución (${totalDevolverGeneral} unidades)` : "Solicitar Devolución"}
               variant="primary"
               onPress={handleEnviarDevolucion}
               loading={isSubmitting}
+              disabled={totalDevolverGeneral === 0}
               style={{ marginTop: Spacing.four }}
             />
           </View>
@@ -239,6 +751,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: Spacing.three,
+    paddingBottom: 60,
   },
   header: {
     marginBottom: Spacing.four,
@@ -264,23 +777,68 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.medium,
     borderWidth: 1,
   },
-  itemRow: {
+  itemCard: {
+    padding: Spacing.three,
+    borderRadius: BorderRadius.medium,
+    marginBottom: Spacing.three,
+  },
+  quickAllChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  cascadeHeaderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: Spacing.three,
-    borderWidth: 1,
-    borderRadius: BorderRadius.small,
-    marginBottom: Spacing.two,
-  },
-  input: {
-    borderWidth: 1,
-    borderRadius: BorderRadius.small,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
-    width: 60,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  cascadeBody: {
+    marginTop: 6,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  quickPresetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  conditionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+    height: 32,
+  },
+  stepperBtn: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stepperInput: {
+    width: 44,
+    height: 32,
     textAlign: 'center',
-    fontWeight: 'bold',
+    fontWeight: '700',
+    fontSize: 13,
+    padding: 0,
   },
   textArea: {
     borderWidth: 1,

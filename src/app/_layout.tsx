@@ -23,30 +23,43 @@ export default function RootLayout() {
   useEffect(() => {
     const initApp = async () => {
       try {
-        // Cargar empresa y entorno activos ANTES de renderizar y consultar versión
-        await CompanyService.loadSavedCompany();
-        await EnvService.loadSavedEnv();
-        
-        // Si es la versión web, no forzamos la actualización de la tienda
-        if (Platform.OS !== 'web') {
-          const { data, error } = await supabase
+        // Cargar empresa y entorno activos en paralelo
+        await Promise.all([
+          CompanyService.loadSavedCompany(),
+          EnvService.loadSavedEnv(),
+        ]);
+      } catch (err) {
+        console.error('Error cargando configuración local:', err);
+      } finally {
+        // Desbloquear interfaz y ocultar Splash Screen inmediatamente
+        setIsReady(true);
+        SplashScreen.hideAsync().catch(() => {});
+      }
+
+      // Verificación de versión en segundo plano (sin bloquear el arranque ni el Splash)
+      if (Platform.OS !== 'web') {
+        try {
+          const versionPromise = supabase
             .from('app_settings')
             .select('min_version_code')
             .eq('id', 1)
             .single();
 
-          if (data && data.min_version_code) {
+          const timeoutPromise = new Promise<{ data: any; error: any }>((resolve) =>
+            setTimeout(() => resolve({ data: null, error: new Error('Version check timeout') }), 2500)
+          );
+
+          const { data } = await Promise.race([versionPromise, timeoutPromise]);
+
+          if (data?.min_version_code) {
             const currentVersionCode = Constants.expoConfig?.android?.versionCode || 1;
             if (currentVersionCode < data.min_version_code) {
               setNeedsUpdate(true);
             }
           }
+        } catch (verErr) {
+          console.warn('Verificación de versión secundaria falló o expiró:', verErr);
         }
-      } catch (err) {
-        console.error('Error durante inicialización:', err);
-      } finally {
-        setIsReady(true);
-        SplashScreen.hideAsync().catch(() => {});
       }
     };
     

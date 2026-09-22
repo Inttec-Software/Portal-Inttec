@@ -16,11 +16,27 @@ const handleResponse = async (res: Response, fallbackMsg: string) => {
   return res.json();
 };
 
+let cachedTareas: any[] | null = null;
+let lastFetchTime = 0;
+const CACHE_TTL_MS = 30000; // 30 segundos de caché en memoria
+
 export const TareasService = {
-  getTareas: async () => {
+  invalidateCache: () => {
+    cachedTareas = null;
+    lastFetchTime = 0;
+  },
+
+  getTareas: async (forceRefresh = false) => {
+    const now = Date.now();
+    if (!forceRefresh && cachedTareas && (now - lastFetchTime < CACHE_TTL_MS)) {
+      return cachedTareas;
+    }
     const headers = await getHeaders();
     const res = await fetch(`${getApiUrl()}/api/tareas`, { headers });
-    return handleResponse(res, 'Error al obtener tareas');
+    const data = await handleResponse(res, 'Error al obtener tareas');
+    cachedTareas = data;
+    lastFetchTime = Date.now();
+    return data;
   },
   
   getTareaById: async (id: string) => {
@@ -42,7 +58,9 @@ export const TareasService = {
       headers,
       body: JSON.stringify(tareaData)
     });
-    return handleResponse(res, 'Error al crear tarea');
+    const result = await handleResponse(res, 'Error al crear tarea');
+    TareasService.invalidateCache();
+    return result;
   },
   
   updateTarea: async (id: string, updates: any) => {
@@ -52,7 +70,9 @@ export const TareasService = {
       headers,
       body: JSON.stringify(updates)
     });
-    return handleResponse(res, 'Error al actualizar tarea');
+    const result = await handleResponse(res, 'Error al actualizar tarea');
+    TareasService.invalidateCache();
+    return result;
   },
   
   addNota: async (id: string, comentario: string) => {
@@ -62,6 +82,8 @@ export const TareasService = {
       headers,
       body: JSON.stringify({ comentario })
     });
-    return handleResponse(res, 'Error al agregar nota');
+    const result = await handleResponse(res, 'Error al agregar nota');
+    TareasService.invalidateCache();
+    return result;
   }
 };

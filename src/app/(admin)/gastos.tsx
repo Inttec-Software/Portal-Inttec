@@ -329,18 +329,20 @@ export default function AdminGastosScreen() {
   };
 
   const refreshData = useCallback(async (silent = false) => {
-    if (!silent) {
+    // Solo mostrar spinner central si no hay datos previos cargados
+    if (!silent && gastos.length === 0) {
       setIsLoading(true);
-      setGastos([]);
-      setPersonal([]);
-      setVehiculos([]);
-      setRegistrosGasolina([]);
     }
     try {
       const headers = await getApiHeaders();
       const apiUrl = getApiUrl();
       const fetchUrl = `${apiUrl}/api/reportes/admin/all`;
-      const res = await fetch(fetchUrl, { headers });
+
+      // Ejecutar la petición principal y catálogos en paralelo
+      const [res, catRes] = await Promise.all([
+        fetch(fetchUrl, { headers }),
+        fetch(`${apiUrl}/api/reportes/form-catalogs`, { headers }).catch(() => null),
+      ]);
       
       if (res.status === 401) {
          // Token expirado o nulo, forzar logout
@@ -361,28 +363,26 @@ export default function AdminGastosScreen() {
       setVehiculos(data.vehiculos || []);
       setRegistrosGasolina(data.gasLogs || []);
 
-      // Cargar catálogos completos para edición de campos
-      try {
-        const catRes = await fetch(`${apiUrl}/api/reportes/form-catalogs`, { headers });
-        if (catRes.ok) {
+      // Procesar catálogos que se ejecutaron en paralelo
+      if (catRes && catRes.ok) {
+        try {
           const catData = await catRes.json();
           if (catData.categorias) setCategoriasCatalog(catData.categorias);
           if (catData.subcategorias) setSubcategoriasCatalog(catData.subcategorias);
           if (catData.clientes) setClientesCatalog(catData.clientes);
           if (catData.sucursales) setSucursalesCatalog(catData.sucursales);
           if (catData.proveedores && catData.proveedores.length > 0) setProveedoresCatalog(catData.proveedores);
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
     } catch (err: any) {
       logger.error('Error loading admin data:', err);
-      // No se usa supabase directo en frontend
       if (!silent) {
         Alert.alert('Error', err.message || 'No se pudieron recuperar los datos.');
       }
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }, []);
+  }, [gastos.length]);
 
   useEffect(() => {
     const checkAdmin = async () => {

@@ -17,24 +17,32 @@ import {
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
 
+import { cacheMiddleware, invalidateCache } from '../../middlewares/cache.middleware';
+
 const router = Router();
 
 router.use(verifyToken);
 router.use(tenantMiddleware);
 
-router.get('/historial', getVentasHistorial);
-router.get('/catalogs', getVentasCatalogs);
+const ventasMutate = (req: any, res: any, next: any) => {
+  invalidateCache('ventas');
+  invalidateCache('sat');
+  next();
+};
+
+router.get('/historial', cacheMiddleware(30), getVentasHistorial);
+router.get('/catalogs', cacheMiddleware(60), getVentasCatalogs);
 router.get('/check-duplicate', checkDuplicateReference);
 router.get('/:id/detalle', getVentaDetalle);
 router.get('/:id/pagos', getVentaPagos);
-router.post('/:id/pagos', registrarPago);
-router.delete('/:id/pagos/:pagoId', deletePago);
+router.post('/:id/pagos', ventasMutate, registrarPago);
+router.delete('/:id/pagos/:pagoId', ventasMutate, deletePago);
 router.get('/:id/partidas', getVentaPartidas);
 router.get('/:id/pdf-data', getVentaPdfData);
-router.post('/:id/sync-payment', syncPaymentStatus);
+router.post('/:id/sync-payment', ventasMutate, syncPaymentStatus);
 
-router.post('/', createVenta);
-router.put('/:id', updateVenta);
-router.delete('/:id', deleteVenta);
+router.post('/', ventasMutate, createVenta);
+router.put('/:id', ventasMutate, updateVenta);
+router.delete('/:id', ventasMutate, deleteVenta);
 
 export default router;
