@@ -179,6 +179,7 @@ export default function FacturacionScreen() {
   // Modal Nuevo Complemento de Pago
   const [isPagoModalOpen, setIsPagoModalOpen] = useState(false);
   const [pagoCliente, setPagoCliente] = useState<ClienteCatalogo | null>(null);
+  const [pagoClienteRegimen, setPagoClienteRegimen] = useState('601');
   const [isSelectClientePagoOpen, setIsSelectClientePagoOpen] = useState(false);
   const [searchClientePago, setSearchClientePago] = useState('');
   const [facturasPendientesCliente, setFacturasPendientesCliente] = useState<any[]>([]);
@@ -1052,6 +1053,7 @@ export default function FacturacionScreen() {
 
   const handleSelectClienteParaPago = async (cli: ClienteCatalogo) => {
     setPagoCliente(cli);
+    setPagoClienteRegimen(cli.regimen_fiscal || '601');
     setIsSelectClientePagoOpen(false);
     setSelectedFacturasMap({});
     setAbonosMap({});
@@ -1101,12 +1103,21 @@ export default function FacturacionScreen() {
     }
     setAbonosMap(newAbonos);
   };
-
   const handleCambiarAbono = (facturaId: number, montoStr: string, maxSaldo: number) => {
-    let num = parseFloat(montoStr);
-    if (isNaN(num) || num < 0) num = 0;
-    if (num > maxSaldo) num = maxSaldo;
-    setAbonosMap(prev => ({ ...prev, [facturaId]: String(num) }));
+    if (montoStr === '') {
+      setAbonosMap(prev => ({ ...prev, [facturaId]: '' }));
+      return;
+    }
+    
+    // Permitir solo dígitos y a lo mucho un punto decimal
+    if (/^\d*\.?\d*$/.test(montoStr)) {
+      let num = parseFloat(montoStr);
+      if (!isNaN(num) && num > maxSaldo) {
+        setAbonosMap(prev => ({ ...prev, [facturaId]: String(maxSaldo) }));
+      } else {
+        setAbonosMap(prev => ({ ...prev, [facturaId]: montoStr }));
+      }
+    }
   };
 
   const handlePagarSaldoCompleto = (facturaId: number, saldoPendiente: number) => {
@@ -1116,8 +1127,8 @@ export default function FacturacionScreen() {
 
   const totalAbonosCalculado = useMemo(() => {
     return Object.keys(selectedFacturasMap)
-      .filter(id => selectedFacturasMap[Number(id)])
-      .reduce((sum, id) => sum + (parseFloat(abonosMap[Number(id)] || '0') || 0), 0);
+      .filter(id => selectedFacturasMap[id as any])
+      .reduce((sum, id) => sum + (parseFloat(abonosMap[id as any] || '0') || 0), 0);
   }, [selectedFacturasMap, abonosMap]);
 
   const handleTimbrarPagoModal = async () => {
@@ -1126,15 +1137,15 @@ export default function FacturacionScreen() {
       return;
     }
 
-    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[Number(id)]);
+    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[id as any]);
     if (selectedIds.length === 0) {
       showAlert('Validación', 'Debes seleccionar al menos una factura con saldo pendiente.');
       return;
     }
 
     const doctosPayload = selectedIds.map(idStr => {
-      const vId = Number(idStr);
-      const monto = parseFloat(abonosMap[vId] || '0');
+      const vId = idStr;
+      const monto = parseFloat(abonosMap[vId as any] || '0');
       return {
         venta_id: vId,
         importe_a_pagar: monto
@@ -1158,7 +1169,7 @@ export default function FacturacionScreen() {
             nombre: pagoCliente.razon_social || pagoCliente.nombre,
             rfc: pagoCliente.rfc || 'XAXX010101000',
             codigo_postal: pagoCliente.codigo_postal || '31110',
-            regimen_fiscal: pagoCliente.regimen_fiscal || '601',
+            regimen_fiscal: pagoClienteRegimen,
           },
           fecha_pago: fechaPagoVal,
           forma_pago: formaPagoPago,
@@ -1216,16 +1227,16 @@ export default function FacturacionScreen() {
       showAlert('Validación', 'Por favor selecciona un cliente para la vista previa.');
       return;
     }
-    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[Number(id)]);
+    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[id as any]);
     if (selectedIds.length === 0) {
       showAlert('Validación', 'Selecciona al menos una factura.');
       return;
     }
 
     const doctosMock = selectedIds.map((idStr, idx) => {
-      const vId = Number(idStr);
-      const f = facturasPendientesCliente.find(fact => fact.id === vId) || {};
-      const monto = parseFloat(abonosMap[vId] || '0');
+      const vId = idStr;
+      const f = facturasPendientesCliente.find(fact => String(fact.id) === vId) || {};
+      const monto = parseFloat(abonosMap[vId as any] || '0');
       const saldoAnt = Number(f.saldo_pendiente || 0);
       return {
         id: idx + 1,
@@ -1360,6 +1371,7 @@ export default function FacturacionScreen() {
     };
 
     setPagoCliente(matchedCli);
+    setPagoClienteRegimen(matchedCli.regimen_fiscal || '601');
     setReferenciaPago(`Pago factura ${cleanFolio(factura.folio || factura.factura_referencia) || '#' + factura.id}`);
     setFormaPagoPago('03');
     setSeriePago('P');
@@ -2712,13 +2724,46 @@ export default function FacturacionScreen() {
                 </View>
 
                 {pagoCliente ? (
-                  <View style={{ backgroundColor: themeColors.backgroundElement, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
-                    <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.text }}>
-                      {pagoCliente.razon_social || pagoCliente.nombre}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 3 }}>
-                      RFC: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{pagoCliente.rfc || 'XAXX010101000'}</Text> | CP: {pagoCliente.codigo_postal || '31110'} | Régimen: {pagoCliente.regimen_fiscal || '601'}
-                    </Text>
+                  <View style={{ gap: 12 }}>
+                    <View style={{ backgroundColor: themeColors.backgroundElement, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
+                      <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.text }}>
+                        {pagoCliente.razon_social || pagoCliente.nombre}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 3 }}>
+                        RFC: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{pagoCliente.rfc || 'XAXX010101000'}</Text> | CP: {pagoCliente.codigo_postal || '31110'}
+                      </Text>
+                    </View>
+
+                    <View>
+                      <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Régimen Fiscal del Receptor *</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                          {REGIMENES_FISCALES.map(reg => (
+                            <TouchableOpacity
+                              key={reg.code}
+                              onPress={() => setPagoClienteRegimen(reg.code)}
+                              style={[
+                                styles.chipBtn,
+                                {
+                                  borderColor: pagoClienteRegimen === reg.code ? '#801c1d' : themeColors.border,
+                                  backgroundColor: pagoClienteRegimen === reg.code ? '#801c1d20' : themeColors.background,
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: pagoClienteRegimen === reg.code ? '800' : '500',
+                                  color: pagoClienteRegimen === reg.code ? '#801c1d' : themeColors.textSecondary,
+                                }}
+                              >
+                                {reg.code} - {reg.label}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </ScrollView>
+                    </View>
                   </View>
                 ) : (
                   <View style={{ gap: 8 }}>

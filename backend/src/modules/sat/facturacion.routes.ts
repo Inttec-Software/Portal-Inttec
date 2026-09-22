@@ -915,6 +915,7 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
         uuid_documento: vData.cfdi_uuid,
         serie: serieFactura,
         folio: cleanFolioVal,
+        fecha: vData.fecha,
         moneda_dr: 'MXN',
         num_parcialidad: numParcialidad,
         saldo_anterior: saldoAnterior,
@@ -1099,9 +1100,17 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
       complemento: complementoCreado || {
         serie: serieFinal,
         folio: `${serieFinal}${folioFinal}`,
+        cliente_nombre: receptorNombre,
+        cliente_rfc: receptorRfc,
+        cliente_cp: receptorCP,
+        cliente_regimen: receptorRegimen,
+        fecha_pago: `${fechaPagoStr}T12:00:00Z`,
+        forma_pago_sat: formaPagoStr,
+        num_operacion: referencia || null,
         monto_total: montoTotalPagos,
         cfdi_uuid: sat_uuid,
-        cfdi_xml_url: xmlUrl
+        cfdi_xml_url: xmlUrl,
+        cfdi_estado: 'TIMBRADA'
       },
       doctos: doctosDetallesParaGuardar
     });
