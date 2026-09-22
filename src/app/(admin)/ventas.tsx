@@ -28,7 +28,7 @@ import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { base64ToArrayBuffer } from '@/services/sync';
-import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF, cleanFolio } from '@/utils/reportGenerator';
+import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF, exportarReciboPagoPDF, generarReciboPagoHTML, cleanFolio } from '@/utils/reportGenerator';
 import { parseCFDIXML } from '@/utils/cfdiParser';
 import FacturaPreviewModal from '@/components/FacturaPreviewModal';
 import StepIndicator from '@/components/StepIndicator';
@@ -296,6 +296,7 @@ export default function VentasScreen() {
   const [isSubmittingPago, setIsSubmittingPago] = useState(false);
   const [showPagoDatePicker, setShowPagoDatePicker] = useState(false);
   const [pagoDateValue, setPagoDateValue] = useState(new Date());
+  const [pagoTimbrarREP, setPagoTimbrarREP] = useState(true);
 
   // === Clientes de Supabase ===
   const [clientes, setClientes] = useState<any[]>([]);
@@ -333,8 +334,11 @@ export default function VentasScreen() {
   const [previewVenta, setPreviewVenta] = useState<any>(null);
   const [previewFacturaData, setPreviewFacturaData] = useState<any>(null);
   const [previewXmlText, setPreviewXmlText] = useState<string>('');
+  const [previewCustomHtml, setPreviewCustomHtml] = useState<string>('');
   const [previewIsDraft, setPreviewIsDraft] = useState<boolean>(false);
   const [previewTitle, setPreviewTitle] = useState<string>('');
+  const [returnToDetailModal, setReturnToDetailModal] = useState<boolean>(false);
+  const [returnToTimbradoModal, setReturnToTimbradoModal] = useState<boolean>(false);
 
   // === Auth Check ===
   useEffect(() => {
@@ -543,7 +547,9 @@ export default function VentasScreen() {
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
     setPagoFecha(`${yyyy}-${mm}-${dd}`);
+    setPagoMetodo('Transferencia');
     setPagoReferencia('');
+    setPagoTimbrarREP(!!venta.cfdi_uuid);
 
     await loadPagosForSelectedVenta(venta.id, venta);
   };
@@ -597,29 +603,92 @@ export default function VentasScreen() {
 
     setIsSubmittingPago(true);
     try {
-      const payload = {
-        monto: montoNum,
-        fecha_pago: pagoFecha,
-        metodo_pago: pagoMetodo || 'Transferencia',
-        referencia: pagoReferencia.trim() || null,
-        registrado_por: currentUser?.id || null,
-      };
+      let complementoData: any = null;
 
-      const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pagos`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) throw new Error('Error al registrar pago');
+      if (selectedVenta.cfdi_uuid && pagoTimbrarREP) {
+        // Timbrar Complemento de Recepción de Pagos (REP) ante el SAT
+        const mapForma = (met: string) => {
+          const m = (met || '').toLowerCase();
+          if (m.includes('transferencia')) return '03';
+          if (m.includes('efectivo')) return '01';
+          if (m.includes('tarjeta') || m.includes('credito') || m.includes('debito')) return '04';
+          if (m.includes('cheque')) return '02';
+          return '03';
+        };
 
-      showAlert('Éxito', `Se registró la parcialidad de ${formatCurrency(montoNum)} correctamente.`);
-      
+        const repPayload = {
+          cliente: {
+            id: (selectedVenta as any).cliente_id || null,
+            nombre: selectedVenta.cliente || 'Cliente General',
+            rfc: (selectedVenta as any).cliente_rfc || 'XAXX010101000',
+            codigo_postal: (selectedVenta as any).cliente_cp || '31110',
+            regimen_fiscal: (selectedVenta as any).cliente_regimen || '601',
+          },
+          fecha_pago: pagoFecha,
+          forma_pago: mapForma(pagoMetodo || 'Transferencia'),
+          referencia: pagoReferencia.trim() || undefined,
+          doctos: [{
+            venta_id: selectedVenta.id,
+            importe_a_pagar: montoNum
+          }]
+        };
+
+        const headers = await getApiHeaders();
+        const repRes = await fetch(`${getApiUrl()}/api/sat/timbrar-pago`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(repPayload)
+        });
+
+        const repJson = await repRes.json().catch(() => ({}));
+        if (!repRes.ok || !repJson.success) {
+          throw new Error(repJson.error || `Error al timbrar complemento de pago (${repRes.status})`);
+        }
+
+        complementoData = repJson;
+        showAlert('Pago y REP Timbrado', `Se registró el abono de ${formatCurrency(montoNum)} y se timbró el Complemento de Pago con folio ${repJson.folio} (UUID: ${repJson.uuid?.slice(0, 8)}...).`);
+      } else {
+        // Registro normal interno
+        const payload = {
+          monto: montoNum,
+          fecha_pago: pagoFecha,
+          metodo_pago: pagoMetodo || 'Transferencia',
+          referencia: pagoReferencia.trim() || null,
+          registrado_por: currentUser?.id || null,
+        };
+
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pagos`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Error al registrar pago');
+
+        showAlert('Éxito', `Se registró la parcialidad de ${formatCurrency(montoNum)} correctamente.`);
+      }
+
       const updatedPagos = await loadPagosForSelectedVenta(selectedVenta.id);
       const nuevoTotalPagado = updatedPagos.reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0);
       const nuevoSaldo = Math.max(0, (Number(selectedVenta.precio_total_facturado) || 0) - nuevoTotalPagado);
       setPagoMonto(nuevoSaldo > 0 ? String(nuevoSaldo) : '');
       setPagoReferencia('');
+
+      if (complementoData?.complemento) {
+        try {
+          const html = await generarReciboPagoHTML(complementoData.complemento, complementoData.doctos || [], false);
+          setPreviewCustomHtml(html);
+          setPreviewTitle(`Recibo de Pago: ${cleanFolio(complementoData.complemento.folio) || complementoData.complemento.cfdi_uuid?.slice(0, 8)}`);
+          setPreviewIsDraft(false);
+          setPreviewVenta(selectedVenta);
+          setPreviewFacturaData(null);
+          setPreviewXmlText('');
+          setIsPagoModalVisible(false);
+          setPreviewModalVisible(true);
+        } catch (_) {
+          exportarReciboPagoPDF(complementoData.complemento, complementoData.doctos || [], 'view');
+        }
+      }
     } catch (err: any) {
       console.error('Error al registrar pago:', err);
       const isMissingTable = err?.code === '42P01' || err?.message?.includes('ventas_pagos');
@@ -1372,6 +1441,14 @@ export default function VentasScreen() {
     setIsTimbradoModalVisible(true);
   };
 
+  const handleCloseTimbradoModal = () => {
+    setIsTimbradoModalVisible(false);
+    if (returnToDetailModal) {
+      setReturnToDetailModal(false);
+      setIsDetailModalVisible(true);
+    }
+  };
+
   const handleAddCfdiPartida = () => {
     setCfdiPartidas(prev => [
       ...prev,
@@ -1484,8 +1561,14 @@ export default function VentasScreen() {
           throw new Error(`Error del servidor (${resp.status})`);
         }
       } catch (backendErr: any) {
-        console.warn('Backend timbrado fallo, intentando Edge Function:', backendErr);
-        if (backendErr.message && (backendErr.message.includes('SAT') || backendErr.message.includes('Finkok') || backendErr.message.includes('['))) {
+        console.warn('Backend timbrado fallo:', backendErr);
+        // Si el backend respondió un error de validación o del SAT/Finkok, no ocultarlo ni reintentar con Edge Function
+        const isNetworkOrOffline = !backendErr.message || 
+          backendErr.message.includes('Network') || 
+          backendErr.message.includes('Failed to fetch') || 
+          backendErr.message.includes('Error del servidor (5');
+
+        if (!isNetworkOrOffline) {
           throw backendErr;
         }
 
@@ -1505,6 +1588,8 @@ export default function VentasScreen() {
 
       showAlert('Éxito', `Factura timbrada exitosamente ante el SAT con Finkok.\n\nFolio Fiscal (UUID):\n${data.cfdi_uuid}`);
       setIsTimbradoModalVisible(false);
+      setReturnToDetailModal(false);
+      setReturnToTimbradoModal(false);
       if (selectedVenta?.id === timbrandoVenta.id) {
         setSelectedVenta(prev => prev ? {
           ...prev,
@@ -1515,9 +1600,8 @@ export default function VentasScreen() {
       }
       loadHistorial();
     } catch (err: any) {
-      console.error('Error al timbrar con Finkok:', err);
       let errorMsg = err.message || 'Error desconocido al timbrar.';
-      if (err.context) {
+      if (err?.context) {
         try {
           if (typeof err.context.json === 'function') {
             const body = await err.context.json();
@@ -1525,17 +1609,19 @@ export default function VentasScreen() {
             else if (body?.message) errorMsg = body.message;
           } else if (typeof err.context.text === 'function') {
             const txt = await err.context.text();
-            if (txt) errorMsg = txt;
-          }
-        } catch (e) {
-          try {
-            if (typeof err.context.text === 'function') {
-              const txt = await err.context.text();
-              if (txt) errorMsg = txt;
+            if (txt) {
+              try {
+                const parsed = JSON.parse(txt);
+                if (parsed?.error) errorMsg = parsed.error;
+                else if (parsed?.message) errorMsg = parsed.message;
+              } catch (_) {
+                errorMsg = txt;
+              }
             }
-          } catch (e2) {}
-        }
+          }
+        } catch (_) {}
       }
+      console.error('Error al timbrar con Finkok:', errorMsg);
       showAlert('Error al timbrar con Finkok', errorMsg);
     } finally {
       setIsSubmittingTimbrado(false);
@@ -1624,8 +1710,11 @@ export default function VentasScreen() {
       setPreviewVenta(fakeVenta);
       setPreviewFacturaData(fakeFacturaData);
       setPreviewXmlText('');
+      setPreviewCustomHtml('');
       setPreviewIsDraft(true);
       setPreviewTitle(`Borrador: Venta #${timbrandoVenta.id} (${cfdiSerie}${cfdiFolio})`);
+      setIsTimbradoModalVisible(false);
+      setReturnToTimbradoModal(true);
       setPreviewModalVisible(true);
     } catch (err: any) {
       showAlert('Error en Vista Previa', err.message || 'No se pudo generar la vista previa.');
@@ -1635,18 +1724,26 @@ export default function VentasScreen() {
   const handleTimbrarFactura = async (ventaToStamp?: Venta) => {
     const targetVenta = ventaToStamp || selectedVenta;
     if (!targetVenta) return;
+    if (isDetailModalVisible) {
+      setReturnToDetailModal(true);
+      setIsDetailModalVisible(false);
+    }
     await handleOpenTimbradoModal(targetVenta);
   };
 
   const handleViewFacturaPDF = async (targetVenta?: Venta) => {
     const ventaToView = targetVenta || selectedVenta;
     if (!ventaToView) return;
+    if (isDetailModalVisible) {
+      setReturnToDetailModal(true);
+      setIsDetailModalVisible(false);
+    }
     setIsSubmitting(true);
     try {
       const uuid = ventaToView.cfdi_uuid;
       let xmlText = '';
 
-      // 1. Intentar endpoint backend dedicado
+      // 1. Intentar backend endpoint dedicado
       try {
         const headers = await getApiHeaders();
         const resp = await fetch(`${getApiUrl()}/api/sat/factura-xml/${uuid || ventaToView.id}`, { headers });
@@ -1746,6 +1843,7 @@ export default function VentasScreen() {
       setPreviewVenta(ventaToView);
       setPreviewFacturaData(facturaData);
       setPreviewXmlText(xmlText);
+      setPreviewCustomHtml('');
       setPreviewIsDraft(false);
       setPreviewTitle(`Factura: ${cleanFolio(ventaToView.folio) || facturaData.folio_number || uuid?.slice(0, 8) || 'Venta'}`);
       setPreviewModalVisible(true);
@@ -3210,12 +3308,16 @@ export default function VentasScreen() {
         transparent={true}
         onRequestClose={() => setIsDetailModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+        <Pressable style={styles.modalOverlay} onPress={() => setIsDetailModalVisible(false)}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={[styles.modalContent, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
             {/* Header del Modal */}
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
               <Text style={[styles.modalTitle, { color: themeColors.text }]}>Detalle de Venta</Text>
-              <TouchableOpacity onPress={() => setIsDetailModalVisible(false)} style={styles.modalCloseBtn}>
+              <TouchableOpacity
+                onPress={() => setIsDetailModalVisible(false)}
+                hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                style={styles.modalCloseBtn}
+              >
                 <Ionicons name="close" size={24} color={themeColors.text} />
               </TouchableOpacity>
             </View>
@@ -3823,8 +3925,8 @@ export default function VentasScreen() {
                 )}
               </View>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* Modal Dedicado Exclusivamente para Registrar Pago */}
@@ -3834,15 +3936,19 @@ export default function VentasScreen() {
         transparent={true}
         onRequestClose={() => setIsPagoModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, borderColor: themeColors.border, maxWidth: 550, maxHeight: '85%' }]}>
+        <Pressable style={styles.modalOverlay} onPress={() => setIsPagoModalVisible(false)}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={[styles.modalContent, { backgroundColor: themeColors.background, borderColor: themeColors.border, maxWidth: 550, maxHeight: '85%' }]}>
             {/* Header del Modal */}
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="cash" size={22} color={themeColors.success} />
                 <Text style={[styles.modalTitle, { color: themeColors.text }]}>Registrar Pago / Abono</Text>
               </View>
-              <TouchableOpacity onPress={() => setIsPagoModalVisible(false)} style={styles.modalCloseBtn}>
+              <TouchableOpacity
+                onPress={() => setIsPagoModalVisible(false)}
+                hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                style={styles.modalCloseBtn}
+              >
                 <Ionicons name="close" size={24} color={themeColors.text} />
               </TouchableOpacity>
             </View>
@@ -3958,6 +4064,37 @@ export default function VentasScreen() {
                     placeholderTextColor={themeColors.textSecondary}
                   />
 
+                  {selectedVenta?.cfdi_uuid ? (
+                    <TouchableOpacity
+                      onPress={() => setPagoTimbrarREP(!pagoTimbrarREP)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 10,
+                        backgroundColor: pagoTimbrarREP ? '#801c1d10' : themeColors.background,
+                        borderColor: pagoTimbrarREP ? '#801c1d' : themeColors.border,
+                        borderWidth: 1.5,
+                        borderRadius: 8,
+                        padding: 10,
+                        marginBottom: 16
+                      }}
+                    >
+                      <Ionicons
+                        name={pagoTimbrarREP ? "checkbox" : "square-outline"}
+                        size={22}
+                        color={pagoTimbrarREP ? "#801c1d" : themeColors.textSecondary}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: pagoTimbrarREP ? '#801c1d' : themeColors.text }}>
+                          Timbrar Complemento de Pago SAT (CFDI 4.0)
+                        </Text>
+                        <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                          Genera automáticamente el Recibo Fiscal Electrónico (REP) con sello digital ante Finkok / SAT.
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : null}
+
                   <TouchableOpacity
                     onPress={handleRegistrarPago}
                     disabled={isSubmittingPago}
@@ -4033,8 +4170,8 @@ export default function VentasScreen() {
                 <Text style={[styles.modalActionText, { color: themeColors.text }]}>Cerrar</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* Modal de Pre-Timbrado / Edición de Factura CFDI 4.0 */}
@@ -4042,10 +4179,10 @@ export default function VentasScreen() {
         visible={isTimbradoModalVisible}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setIsTimbradoModalVisible(false)}
+        onRequestClose={handleCloseTimbradoModal}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, borderColor: themeColors.border, maxWidth: 700, maxHeight: '90%' }]}>
+        <Pressable style={styles.modalOverlay} onPress={handleCloseTimbradoModal}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={[styles.modalContent, { backgroundColor: themeColors.background, borderColor: themeColors.border, maxWidth: 700, maxHeight: '90%' }]}>
             {/* Header del Modal */}
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -4055,7 +4192,11 @@ export default function VentasScreen() {
                   <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>Revisa o edita los datos antes de emitir ante el SAT con Finkok</Text>
                 </View>
               </View>
-              <TouchableOpacity onPress={() => setIsTimbradoModalVisible(false)} style={styles.modalCloseBtn}>
+              <TouchableOpacity
+                onPress={handleCloseTimbradoModal}
+                hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                style={styles.modalCloseBtn}
+              >
                 <Ionicons name="close" size={24} color={themeColors.text} />
               </TouchableOpacity>
             </View>
@@ -4350,7 +4491,7 @@ export default function VentasScreen() {
             {/* Footer de Acciones */}
             <View style={[styles.modalFooter, { borderTopColor: themeColors.border, gap: 10 }]}>
               <TouchableOpacity
-                onPress={() => setIsTimbradoModalVisible(false)}
+                onPress={handleCloseTimbradoModal}
                 disabled={isSubmittingTimbrado}
                 style={[styles.modalActionBtn, { flex: 0.8, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
               >
@@ -4381,20 +4522,30 @@ export default function VentasScreen() {
                 )}
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* Visualizador Integrado de Facturas (Odoo Preview, Borrador y Timbradas) */}
       <FacturaPreviewModal
         visible={previewModalVisible}
-        onClose={() => setPreviewModalVisible(false)}
+        onClose={() => {
+          setPreviewModalVisible(false);
+          if (returnToTimbradoModal) {
+            setReturnToTimbradoModal(false);
+            setIsTimbradoModalVisible(true);
+          } else if (returnToDetailModal) {
+            setReturnToDetailModal(false);
+            setIsDetailModalVisible(true);
+          }
+        }}
         venta={previewVenta}
         facturaData={previewFacturaData}
         xmlText={previewXmlText}
+        customHtml={previewCustomHtml}
         isDraft={previewIsDraft}
         title={previewTitle}
-        onConfirmTimbrar={previewIsDraft ? () => {
+        onConfirmTimbrar={previewIsDraft && !previewCustomHtml ? () => {
           setPreviewModalVisible(false);
           handleExecuteTimbrado();
         } : undefined}
@@ -4912,7 +5063,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   modalCloseBtn: {
-    padding: Spacing.half,
+    padding: 6,
+    borderRadius: 8,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
   modalScrollContent: {
     padding: Spacing.three,
