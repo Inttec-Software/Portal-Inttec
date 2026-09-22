@@ -65,10 +65,23 @@ const hasMultipleStockStates = (prod: Producto): boolean => {
   return (prod.stock_usado || 0) > 0 || (prod.stock_por_revisar || 0) > 0;
 };
 
+const getTotalStock = (prod: Producto): number => {
+  const sNuevo = Number(prod.stock_nuevo) || 0;
+  const sUsado = Number(prod.stock_usado) || 0;
+  const sPorRev = Number(prod.stock_por_revisar) || 0;
+  const sum = Math.round((sNuevo + sUsado + sPorRev) * 100) / 100;
+  if (sum > 0) return sum;
+  return Number(prod.stock_actual) || 0;
+};
+
 const getStockNuevo = (prod: Producto): number => {
-  if (prod.stock_nuevo !== undefined && prod.stock_nuevo !== null) return prod.stock_nuevo;
-  if ((prod.stock_usado || 0) > 0 || (prod.stock_por_revisar || 0) > 0) return 0;
-  return prod.stock_actual || 0;
+  if (prod.stock_nuevo !== undefined && prod.stock_nuevo !== null) return Number(prod.stock_nuevo) || 0;
+  const sUsado = Number(prod.stock_usado) || 0;
+  const sPorRev = Number(prod.stock_por_revisar) || 0;
+  if (sUsado > 0 || sPorRev > 0) {
+    return Math.max(0, (Number(prod.stock_actual) || 0) - (sUsado + sPorRev));
+  }
+  return Number(prod.stock_actual) || 0;
 };
 
 export default function RetiroMaterialScreen() {
@@ -125,7 +138,21 @@ export default function RetiroMaterialScreen() {
       if (!res.ok) throw new Error('Error de red al cargar productos');
       
       const { productos: data } = await res.json();
-      setProductos(data || []);
+      const normalized = (data || []).map((p: any) => {
+        const sNuevo = Number(p.stock_nuevo) || 0;
+        const sUsado = Number(p.stock_usado) || 0;
+        const sPorRev = Number(p.stock_por_revisar) || 0;
+        const sum = Math.round((sNuevo + sUsado + sPorRev) * 100) / 100;
+        const total = sum > 0 ? sum : (Number(p.stock_actual) || 0);
+        return {
+          ...p,
+          stock_actual: total,
+          stock_nuevo: sNuevo > 0 ? sNuevo : (sUsado === 0 && sPorRev === 0 ? total : 0),
+          stock_usado: sUsado,
+          stock_por_revisar: sPorRev
+        };
+      });
+      setProductos(normalized);
 
       // Cargar catálogos
       const catRes = await fetch(`${getApiUrl()}/api/reportes/form-catalogs`, { headers });
@@ -150,13 +177,14 @@ export default function RetiroMaterialScreen() {
 
   const addToCart = (producto: Producto, qty: number = 1) => {
     const unit = getProductoUnidad(producto);
+    const totalMax = getTotalStock(producto);
     setCart(prev => {
       const existing = prev.find(item => item.producto.id === producto.id);
       if (existing) {
         const currentQty = typeof existing.cantidad === 'number' ? existing.cantidad : 0;
         const newQty = Math.round((currentQty + qty) * 100) / 100;
-        if (newQty > producto.stock_actual) {
-          Alert.alert('Stock Insuficiente', `Solo hay ${producto.stock_actual} ${unit} disponibles.`);
+        if (newQty > totalMax) {
+          Alert.alert('Stock Insuficiente', `Solo hay ${totalMax} ${unit} disponibles.`);
           return prev;
         }
         return prev.map(item => item.producto.id === producto.id ? { 
@@ -181,6 +209,7 @@ export default function RetiroMaterialScreen() {
       if (!item) return prev;
 
       const unit = getProductoUnidad(item.producto);
+      const totalMax = getTotalStock(item.producto);
 
       if (text.trim() === '') {
         return prev.map(i => i.producto.id === productoId ? { ...i, cantidad: '', cantidad_nuevo: '' } : i);
@@ -191,9 +220,9 @@ export default function RetiroMaterialScreen() {
         return prev.map(i => i.producto.id === productoId ? { ...i, cantidad: '', cantidad_nuevo: '' } : i);
       }
 
-      if (qty > item.producto.stock_actual) {
-        Alert.alert('Stock Insuficiente', `Solo hay ${item.producto.stock_actual} ${unit} disponibles.`);
-        return prev.map(i => i.producto.id === productoId ? { ...i, cantidad: item.producto.stock_actual, cantidad_nuevo: item.producto.stock_actual } : i);
+      if (qty > totalMax) {
+        Alert.alert('Stock Insuficiente', `Solo hay ${totalMax} ${unit} disponibles.`);
+        return prev.map(i => i.producto.id === productoId ? { ...i, cantidad: totalMax, cantidad_nuevo: totalMax } : i);
       }
 
       return prev.map(i => i.producto.id === productoId ? { ...i, cantidad: qty, cantidad_nuevo: qty } : i);
@@ -986,7 +1015,7 @@ export default function RetiroMaterialScreen() {
                 <View style={{ padding: Spacing.three }}>
                   <View style={{ marginBottom: 12, backgroundColor: themeColors.background, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
                     <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>SKU: <Text style={{ color: themeColors.text, fontWeight: '600' }}>{prod.sku_interno}</Text></Text>
-                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>Stock Total Disponible: <Text style={{ color: themeColors.primary, fontWeight: 'bold' }}>{prod.stock_actual} {unit}</Text></Text>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>Stock Total Disponible: <Text style={{ color: themeColors.primary, fontWeight: 'bold' }}>{getTotalStock(prod)} {unit}</Text></Text>
                   </View>
 
                   <View style={{ gap: 10 }}>

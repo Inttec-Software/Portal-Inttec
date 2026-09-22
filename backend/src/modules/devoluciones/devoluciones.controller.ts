@@ -16,7 +16,7 @@ export const getInventarioEmpleado = async (req: Request, res: Response) => {
 
     const { data, error } = await client
       .from('inventario_empleados')
-      .select('id, producto_id, cantidad_disponible, producto:productos(nombre_oficial, sku_interno, unidad)')
+      .select('id, producto_id, cantidad_disponible, producto:productos(id, nombre_oficial, sku_interno, unidad, stock_actual, stock_nuevo, stock_usado, stock_por_revisar)')
       .eq('empleado_id', userId)
       .gt('cantidad_disponible', 0)
       .order('updated_at', { ascending: false });
@@ -41,7 +41,7 @@ export const getInventarioEmpleado = async (req: Request, res: Response) => {
       if (prodIds.length > 0) {
         const { data: prods } = await client
           .from('productos')
-          .select('id, nombre_oficial, sku_interno, unidad')
+          .select('id, nombre_oficial, sku_interno, unidad, stock_actual, stock_nuevo, stock_usado, stock_por_revisar')
           .in('id', prodIds);
         (prods || []).forEach((p: any) => { prodMap[p.id] = p; });
       }

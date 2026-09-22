@@ -38,10 +38,26 @@ export const getDashboardData = async (req: Request, res: Response) => {
       usuario: userMap.get(m.creado_por || m.empleado_id) || null
     }));
 
+    const normalizedProductos = (productosRes.data || []).map((p: any) => {
+      const sNuevo = Number(p.stock_nuevo) || 0;
+      const sUsado = Number(p.stock_usado) || 0;
+      const sPorRev = Number(p.stock_por_revisar) || 0;
+      const sumConditions = Math.round((sNuevo + sUsado + sPorRev) * 100) / 100;
+      const totalStock = sumConditions > 0 ? sumConditions : (Number(p.stock_actual) || 0);
+
+      return {
+        ...p,
+        stock_actual: totalStock,
+        stock_nuevo: sNuevo > 0 ? sNuevo : (sUsado === 0 && sPorRev === 0 ? totalStock : 0),
+        stock_usado: sUsado,
+        stock_por_revisar: sPorRev
+      };
+    });
+
     return res.json({
       categorias: categoriasRes.data || [],
       proveedores: proveedoresRes.data || [],
-      productos: productosRes.data || [],
+      productos: normalizedProductos,
       historial_consumo: historialWithUser,
       clientes: clientesRes.data || [],
       usuarios: (usuariosRes.data || []).filter((u: any) => ['EMPLEADO', 'DEV'].includes(u.rol))

@@ -12,7 +12,6 @@ export const getProductosDisponibles = async (req: Request, res: Response) => {
       .from('productos')
       .select('id, sku_interno, nombre_oficial, stock_actual, stock_nuevo, stock_usado, stock_por_revisar, unidad')
       .eq('activo', true)
-      .gt('stock_actual', 0)
       .order('nombre_oficial');
 
     if (error) throw error;
@@ -27,11 +26,22 @@ export const getProductosDisponibles = async (req: Request, res: Response) => {
           unidad = 'pza';
         }
       }
+
+      const sNuevo = Number(p.stock_nuevo) || 0;
+      const sUsado = Number(p.stock_usado) || 0;
+      const sPorRev = Number(p.stock_por_revisar) || 0;
+      const sumConditions = Math.round((sNuevo + sUsado + sPorRev) * 100) / 100;
+      const totalStock = sumConditions > 0 ? sumConditions : (Number(p.stock_actual) || 0);
+
       return {
         ...p,
+        stock_actual: totalStock,
+        stock_nuevo: sNuevo > 0 ? sNuevo : (sUsado === 0 && sPorRev === 0 ? totalStock : 0),
+        stock_usado: sUsado,
+        stock_por_revisar: sPorRev,
         unidad
       };
-    });
+    }).filter((p: any) => p.stock_actual > 0);
 
     return res.json({ productos: mapped });
   } catch (error: any) {
