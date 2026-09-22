@@ -1005,4 +1005,20 @@ WHERE (stock_nuevo IS NULL OR stock_nuevo = 0)
   AND (stock_por_revisar IS NULL OR stock_por_revisar = 0)
   AND COALESCE(stock_actual, 0) > 0;
 
+-- =========================================================================
+-- MIGRACIÓN: DESGLOSE DE ESTADOS EN INVENTARIO DE EMPLEADOS
+-- =========================================================================
+ALTER TABLE public.inventario_empleados 
+ADD COLUMN IF NOT EXISTS cantidad_nuevo NUMERIC DEFAULT 0,
+ADD COLUMN IF NOT EXISTS cantidad_usado NUMERIC DEFAULT 0,
+ADD COLUMN IF NOT EXISTS cantidad_por_revisar NUMERIC DEFAULT 0;
+
+UPDATE public.inventario_empleados
+SET cantidad_nuevo = COALESCE(cantidad_disponible, 0)
+WHERE (cantidad_nuevo IS NULL OR cantidad_nuevo = 0)
+  AND (cantidad_usado IS NULL OR cantidad_usado = 0)
+  AND (cantidad_por_revisar IS NULL OR cantidad_por_revisar = 0)
+  AND COALESCE(cantidad_disponible, 0) > 0;
+
+
 

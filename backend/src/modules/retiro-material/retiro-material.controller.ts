@@ -141,26 +141,39 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
       const reqUsado = Number(item.cantidad_usado) || 0;
       const reqPorRevisar = Number(item.cantidad_por_revisar) || 0;
 
+      let withdrawNuevo = 0;
+      let withdrawUsado = 0;
+      let withdrawPorRevisar = 0;
+
       if (reqNuevo > 0 || reqUsado > 0 || reqPorRevisar > 0) {
         // Descuento exacto por estado solicitado
-        nuevo = Math.max(0, nuevo - reqNuevo);
-        usado = Math.max(0, usado - reqUsado);
-        porRevisar = Math.max(0, porRevisar - reqPorRevisar);
+        withdrawNuevo = Math.min(nuevo, reqNuevo);
+        withdrawUsado = Math.min(usado, reqUsado);
+        withdrawPorRevisar = Math.min(porRevisar, reqPorRevisar);
+
+        nuevo = Math.max(0, nuevo - withdrawNuevo);
+        usado = Math.max(0, usado - withdrawUsado);
+        porRevisar = Math.max(0, porRevisar - withdrawPorRevisar);
       } else {
         // Descuento por orden de prioridad (FIFO) si no se especificó desglose
         let toDiscount = item.cantidad;
         if (nuevo >= toDiscount) {
+          withdrawNuevo = toDiscount;
           nuevo -= toDiscount;
           toDiscount = 0;
         } else {
+          withdrawNuevo = nuevo;
           toDiscount -= nuevo;
           nuevo = 0;
           if (usado >= toDiscount) {
+            withdrawUsado = toDiscount;
             usado -= toDiscount;
             toDiscount = 0;
           } else {
+            withdrawUsado = usado;
             toDiscount -= usado;
             usado = 0;
+            withdrawPorRevisar = Math.min(porRevisar, toDiscount);
             porRevisar = Math.max(0, porRevisar - toDiscount);
           }
         }
@@ -168,7 +181,7 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
 
       const newStock = Math.round((nuevo + usado + porRevisar) * 100) / 100;
 
-      // Descontar del inventario
+      // Descontar del inventario general
       const { error: stockErr } = await client
         .from('productos')
         .update({ stock_actual: newStock, stock_nuevo: nuevo, stock_usado: usado, stock_por_revisar: porRevisar })
@@ -196,27 +209,76 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
         console.warn('No se pudo registrar histórico:', moveErr.message);
       }
 
-      // Agregar al inventario del empleado
-      const { data: invEmp } = await client
-        .from('inventario_empleados')
-        .select('id, cantidad_disponible')
-        .eq('empleado_id', currentUser.id)
-        .eq('producto_id', item.producto.id)
-        .maybeSingle();
+      // Agregar al inventario del empleado con desglose de estados
+      try {
+        const { data: invEmp } = await client
+          .from('inventario_empleados')
+          .select('id, cantidad_disponible, cantidad_nuevo, cantidad_usado, cantidad_por_revisar')
+          .eq('empleado_id', currentUser.id)
+          .eq('producto_id', item.producto.id)
+          .maybeSingle();
 
-      if (invEmp) {
-        await client
+        if (invEmp) {
+          const curNuevo = Number(invEmp.cantidad_nuevo) || 0;
+          const curUsado = Number(invEmp.cantidad_usado) || 0;
+          const curPorRev = Number(invEmp.cantidad_por_revisar) || 0;
+
+          // Si el empleado ya tenía stock pero no desglosado
+          const baseNuevo = (curNuevo === 0 && curUsado === 0 && curPorRev === 0 && Number(invEmp.cantidad_disponible) > 0)
+            ? Number(invEmp.cantidad_disponible)
+            : curNuevo;
+
+          const nextNuevo = baseNuevo + withdrawNuevo;
+          const nextUsado = curUsado + withdrawUsado;
+          const nextPorRev = curPorRev + withdrawPorRevisar;
+          const nextTotal = Math.round((nextNuevo + nextUsado + nextPorRev) * 100) / 100;
+
+          await client
+            .from('inventario_empleados')
+            .update({ 
+              cantidad_disponible: nextTotal, 
+              cantidad_nuevo: nextNuevo,
+              cantidad_usado: nextUsado,
+              cantidad_por_revisar: nextPorRev,
+              updated_at: new Date().toISOString() 
+            })
+            .eq('id', invEmp.id);
+        } else {
+          await client
+            .from('inventario_empleados')
+            .insert([{
+              empleado_id: currentUser.id,
+              producto_id: item.producto.id,
+              cantidad_disponible: item.cantidad,
+              cantidad_nuevo: withdrawNuevo,
+              cantidad_usado: withdrawUsado,
+              cantidad_por_revisar: withdrawPorRevisar
+            }]);
+        }
+      } catch (invSaveErr: any) {
+        console.warn('Fallback al actualizar inventario_empleados:', invSaveErr?.message);
+        // Fallback simple si la tabla no tuviera las columnas todavía
+        const { data: fallbackInv } = await client
           .from('inventario_empleados')
-          .update({ cantidad_disponible: invEmp.cantidad_disponible + item.cantidad, updated_at: new Date().toISOString() })
-          .eq('id', invEmp.id);
-      } else {
-        await client
-          .from('inventario_empleados')
-          .insert([{
-            empleado_id: currentUser.id,
-            producto_id: item.producto.id,
-            cantidad_disponible: item.cantidad
-          }]);
+          .select('id, cantidad_disponible')
+          .eq('empleado_id', currentUser.id)
+          .eq('producto_id', item.producto.id)
+          .maybeSingle();
+
+        if (fallbackInv) {
+          await client
+            .from('inventario_empleados')
+            .update({ cantidad_disponible: fallbackInv.cantidad_disponible + item.cantidad, updated_at: new Date().toISOString() })
+            .eq('id', fallbackInv.id);
+        } else {
+          await client
+            .from('inventario_empleados')
+            .insert([{
+              empleado_id: currentUser.id,
+              producto_id: item.producto.id,
+              cantidad_disponible: item.cantidad
+            }]);
+        }
       }
     }
 

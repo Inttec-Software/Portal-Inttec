@@ -662,7 +662,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const client = getSupabaseClient(company, env);
 
-    const [movsRes, retirosRes, usersRes, provsRes] = await Promise.all([
+    const [movsRes, retirosRes, devsRes, usersRes, provsRes] = await Promise.all([
       client
         .from('movimientos_inventario')
         .select('id, producto_id, tipo, cantidad, fecha, folio_factura, proveedor_id, creado_por, producto:productos(id, nombre_oficial, sku_interno, unidad, precio_unitario)')
@@ -671,6 +671,12 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
       client
         .from('retiros_material')
         .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200),
+      client
+        .from('devoluciones_empleado')
+        .select('*')
+        .eq('estado', 'APROBADO')
         .order('created_at', { ascending: false })
         .limit(200),
       client
@@ -719,9 +725,57 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
       };
     });
 
-    // 2. Mapear movimientos de inventario individuales y agrupar retiros legados que no estén en retiros_material
-    const nonRetiroMovs: any[] = [];
+    // 2. Mapear devoluciones estructuradas desde devoluciones_empleado (englobando todas sus partidas devueltas)
+    const structuredDevs = (devsRes.data || []).map((d: any) => {
+      let rawMats: any[] = [];
+      try {
+        rawMats = typeof d.materiales === 'string' ? JSON.parse(d.materiales) : (d.materiales || []);
+      } catch (_) {
+        rawMats = [];
+      }
+      const mats = rawMats.filter((m: any) => (Number(m.devolver) || 0) > 0);
+      const totalQty = mats.reduce((s: number, m: any) => s + (Number(m.devolver) || 0), 0);
+      const shortId = d.id ? d.id.substring(0, 8) : 'DEV';
+      const fullFolio = `DEVOLUCIÓN #${shortId}`;
+
+      return {
+        id: d.id,
+        tipo: 'ENTRADA',
+        subtipo: 'DEVOLUCIÓN',
+        cantidad: totalQty,
+        fecha: d.updated_at || d.created_at,
+        folio_factura: fullFolio,
+        detalle_motivo: d.observaciones || fullFolio,
+        motivo: d.observaciones || 'Devolución de material',
+        cliente_nombre: '',
+        sucursal_nombre: '',
+        tipo_gasto: '',
+        proveedor_id: null,
+        proveedor_nombre: '',
+        usuario_id: d.empleado_id,
+        usuario_nombre: d.empleado_nombre || userMap.get(d.empleado_id) || 'Empleado',
+        producto_id: mats[0]?.productoId || mats[0]?.producto_id || '',
+        producto_nombre: mats.length === 1 ? (mats[0].nombre || 'Material') : `${mats.length} materiales: ${mats.map((m: any) => m.nombre).join(', ')}`,
+        producto_sku: mats.length === 1 ? (mats[0].sku || '-') : `${mats.length} partidas`,
+        producto_unidad: mats.length === 1 ? (mats[0].unidad || 'pza') : 'pzas',
+        precio_unitario: 0,
+        materiales: mats.map((m: any) => ({
+          producto_id: m.productoId || m.producto_id,
+          sku: m.sku || '-',
+          nombre: m.nombre || 'Material',
+          cantidad: Number(m.devolver) || 0,
+          unidad: m.unidad || 'pza',
+          devolver_nuevo: Number(m.devolver_nuevo) || 0,
+          devolver_usado: Number(m.devolver_usado) || 0,
+          devolver_por_revisar: Number(m.devolver_por_revisar) || 0
+        }))
+      };
+    });
+
+    // 3. Mapear movimientos de inventario individuales y agrupar registros legados
+    const otherMovs: any[] = [];
     const legacyRetirosMap = new Map<string, any>();
+    const legacyDevsMap = new Map<string, any>();
 
     (movsRes.data || []).forEach((m: any) => {
       const prod = Array.isArray(m.producto) ? m.producto[0] : (m.producto || {});
@@ -784,14 +838,65 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
             leg.producto_sku = `${leg.materiales.length} partidas`;
           }
         }
+      } else if (folio.startsWith('DEVOLUCIÓN')) {
+        const mTime = new Date(m.fecha).getTime();
+        // Verificar si este movimiento ya está representado en structuredDevs
+        const alreadyInStructuredDev = structuredDevs.some((sd: any) => {
+          const sdIdShort = sd.id ? sd.id.substring(0, 8).toLowerCase() : '';
+          const matchFolioId = sdIdShort && folio.toLowerCase().includes(sdIdShort);
+          const sdTime = new Date(sd.fecha).getTime();
+          return matchFolioId || ((sd.usuario_id === m.creado_por || sd.usuario_nombre === userMap.get(m.creado_por)) && Math.abs(sdTime - mTime) < 60000);
+        });
+
+        if (!alreadyInStructuredDev) {
+          const groupKey = `${m.creado_por}_${folio.substring(0, 20)}_${Math.floor(mTime / 60000)}`;
+          if (!legacyDevsMap.has(groupKey)) {
+            legacyDevsMap.set(groupKey, {
+              id: m.id,
+              tipo: 'ENTRADA',
+              subtipo: 'DEVOLUCIÓN',
+              cantidad: 0,
+              fecha: m.fecha,
+              folio_factura: folio,
+              detalle_motivo: folio,
+              motivo: 'Devolución de material',
+              cliente_nombre: '',
+              sucursal_nombre: '',
+              tipo_gasto: '',
+              proveedor_id: null,
+              proveedor_nombre: '',
+              usuario_id: m.creado_por,
+              usuario_nombre: userMap.get(m.creado_por) || 'Empleado',
+              producto_id: m.producto_id,
+              producto_nombre: prod.nombre_oficial || 'Producto',
+              producto_sku: prod.sku_interno || '-',
+              producto_unidad: prod.unidad || 'pza',
+              precio_unitario: prod.precio_unitario || 0,
+              materiales: []
+            });
+          }
+
+          const legDev = legacyDevsMap.get(groupKey);
+          legDev.cantidad = Math.round((legDev.cantidad + (Number(m.cantidad) || 0)) * 100) / 100;
+          legDev.materiales.push({
+            producto_id: m.producto_id,
+            sku: prod.sku_interno || '-',
+            nombre: prod.nombre_oficial || 'Producto',
+            cantidad: Number(m.cantidad) || 0,
+            unidad: prod.unidad || 'pza'
+          });
+          if (legDev.materiales.length > 1) {
+            legDev.producto_nombre = `${legDev.materiales.length} materiales: ${legDev.materiales.map((x: any) => x.nombre).join(', ')}`;
+            legDev.producto_sku = `${legDev.materiales.length} partidas`;
+          }
+        }
       } else {
         let subtipo = m.tipo;
-        if (folio.startsWith('DEVOLUCIÓN')) subtipo = 'DEVOLUCIÓN';
-        else if (folio.startsWith('IMPORTACIÓN') || folio.startsWith('FACTURA') || m.proveedor_id) subtipo = 'COMPRA/FACTURA';
+        if (folio.startsWith('IMPORTACIÓN') || folio.startsWith('FACTURA') || m.proveedor_id) subtipo = 'COMPRA/FACTURA';
         else if (folio.startsWith('CONSUMO')) subtipo = 'CONSUMO';
         else if (folio.startsWith('ALTA DE PRODUCTO')) subtipo = 'ENTRADA';
 
-        nonRetiroMovs.push({
+        otherMovs.push({
           id: m.id,
           tipo: m.tipo,
           subtipo,
@@ -821,7 +926,13 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
       }
     });
 
-    const allMovs = [...structuredRetiros, ...Array.from(legacyRetirosMap.values()), ...nonRetiroMovs];
+    const allMovs = [
+      ...structuredRetiros, 
+      ...Array.from(legacyRetirosMap.values()), 
+      ...structuredDevs, 
+      ...Array.from(legacyDevsMap.values()), 
+      ...otherMovs
+    ];
     allMovs.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
 
     return res.json({ movimientos: allMovs, retiros: allMovs });
