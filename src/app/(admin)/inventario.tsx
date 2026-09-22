@@ -28,6 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { GeminiService } from '@/services/gemini';
 import { normalizeText } from '@/utils/helpers';
+import { ModuleCache } from '@/services/moduleCache';
 
 // Interfaces locales para concordar con la base de datos
 interface Categoria {
@@ -91,12 +92,15 @@ export default function InventarioDashboard() {
   // Tab activa: 'catalogo' | 'ia-import' | 'consumo' | 'categorias'
   const [activeTab, setActiveTab] = useState<'importacion' | 'categorias' | 'retribuciones'>('importacion');
   
-  // Datos maestros de la DB
-  const [productos, setProductos] = useState<Producto[]>([]);
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
-  const [proveedores, setProveedores] = useState<Proveedor[]>([]);
-  const [empleados, setEmpleados] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Datos maestros con soporte de caché en memoria (0ms render)
+  const cachedInv = ModuleCache.get<any>('inventario_dashboard');
+  const [productos, setProductos] = useState<Producto[]>(() => cachedInv?.productos || []);
+  const [categorias, setCategorias] = useState<Categoria[]>(() => cachedInv?.categorias || []);
+  const [proveedores, setProveedores] = useState<Proveedor[]>(() => cachedInv?.proveedores || []);
+  const [empleados, setEmpleados] = useState<any[]>(() => cachedInv?.usuarios || []);
+  const [historialConsumo, setHistorialConsumo] = useState<any[]>(() => cachedInv?.historial_consumo || []);
+  const [clientes, setClientes] = useState<CatalogoItem[]>(() => cachedInv?.clientes || []);
+  const [isLoading, setIsLoading] = useState(() => !cachedInv);
 
   // Filtros de búsqueda
   const [searchTerm, setSearchTerm] = useState('');
@@ -165,12 +169,10 @@ export default function InventarioDashboard() {
 
   // Flujo Consumo / Salidas de Materiales
   const [consumoCliente, setConsumoCliente] = useState('');
-  const [clientes, setClientes] = useState<CatalogoItem[]>([]);
   const [showCliDropdown, setShowCliDropdown] = useState(false);
   const [clienteSearch, setClienteSearch] = useState('');
   const [consumoItems, setConsumoItems] = useState<ConsumoItem[]>([]);
   const [isSavingConsumo, setIsSavingConsumo] = useState(false);
-  const [historialConsumo, setHistorialConsumo] = useState<any[]>([]);
 
 
 
@@ -386,8 +388,10 @@ export default function InventarioDashboard() {
     }
   };
 
-async function loadAllData() {
-    setIsLoading(true);
+  async function loadAllData(silent = false) {
+    if (!silent && !ModuleCache.has('inventario_dashboard')) {
+      setIsLoading(true);
+    }
     try {
       const headers = await getApiHeaders();
       const res = await fetch(`${getApiUrl()}/api/inventario/dashboard`, { headers });
@@ -396,6 +400,7 @@ async function loadAllData() {
         throw new Error(errData.error || 'Error al cargar datos del dashboard');
       }
       const data = await res.json();
+      ModuleCache.set('inventario_dashboard', data);
 
       setCategorias(data.categorias || []);
       setProveedores(data.proveedores || []);
@@ -405,7 +410,9 @@ async function loadAllData() {
       setEmpleados(data.usuarios || []);
     } catch (err: any) {
       console.error('Error al cargar datos de inventario:', err);
-      Alert.alert('Error', err.message || 'No se pudieron recuperar los datos de inventario.');
+      if (!silent) {
+        Alert.alert('Error', err.message || 'No se pudieron recuperar los datos de inventario.');
+      }
     } finally {
       setIsLoading(false);
     }

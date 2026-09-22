@@ -38,6 +38,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { PushNotificationService } from '@/services/pushNotifications';
+import { ModuleCache } from '@/services/moduleCache';
 
 interface PartidaEditable {
   id: string;
@@ -67,10 +68,11 @@ export default function AdminEmpleadosScreen() {
     }
   };
 
+  const cachedData = ModuleCache.get<any>('admin_empleados');
   const [adminUser, setAdminUser] = useState<Usuario | null>(null);
-  const [gastos, setGastos] = useState<Gasto[]>([]);
-  const [personal, setPersonal] = useState<Usuario[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [gastos, setGastos] = useState<Gasto[]>(() => cachedData?.gastos || []);
+  const [personal, setPersonal] = useState<Usuario[]>(() => cachedData?.personal || []);
+  const [isLoading, setIsLoading] = useState(() => !cachedData);
   const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
   const [facturaFilter, setFacturaFilter] = useState<'TODOS' | 'FACTURADOS' | 'PENDIENTE_ENTREGA' | 'NO_FACTURADOS'>('TODOS');
 
@@ -84,8 +86,8 @@ export default function AdminEmpleadosScreen() {
   const [tempEndDate, setTempEndDate] = useState('');
 
   // Vehículos y Gasolina
-  const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
-  const [registrosGasolina, setRegistrosGasolina] = useState<RegistroGasolina[]>([]);
+  const [vehiculos, setVehiculos] = useState<Vehiculo[]>(() => cachedData?.vehiculos || []);
+  const [registrosGasolina, setRegistrosGasolina] = useState<RegistroGasolina[]>(() => cachedData?.registrosGasolina || []);
   const [newVehiculoMarca, setNewVehiculoMarca] = useState('');
   const [newVehiculoModelo, setNewVehiculoModelo] = useState('');
   const [newVehiculoAnio, setNewVehiculoAnio] = useState('');
@@ -118,7 +120,7 @@ export default function AdminEmpleadosScreen() {
   }
 
   // Selector Rápido de Proveedor en Menú de Gasto
-  const [proveedoresCatalog, setProveedoresCatalog] = useState<ProveedorItem[]>([]);
+  const [proveedoresCatalog, setProveedoresCatalog] = useState<ProveedorItem[]>(() => cachedData?.proveedoresCatalog || []);
   const [quickEditProvModalVisible, setQuickEditProvModalVisible] = useState(false);
   const [quickEditProvSearch, setQuickEditProvSearch] = useState('');
   const [isSavingQuickProv, setIsSavingQuickProv] = useState(false);
@@ -291,67 +293,41 @@ export default function AdminEmpleadosScreen() {
   };
 
   const refreshData = useCallback(async (silent = false) => {
-    if (!silent) {
+    if (!silent && !ModuleCache.has('admin_empleados')) {
       setIsLoading(true);
-      setGastos([]);
-      setPersonal([]);
-      setVehiculos([]);
-      setRegistrosGasolina([]);
     }
     try {
-      const [gastosRes, usersRes, vehList, gasLogs, catRes, subRes, provRes, cliRes, sucRes] = await Promise.all([
-        supabase.from('gastos').select(`
-          *,
-          subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-          proveedor_rel:proveedores(id, nombre),
-          cliente_rel:clientes(id, nombre),
-          sucursal_rel:sucursales_cliente(id, nombre)
-        `).order('created_at', { ascending: false }),
-        CatalogService.getUsuarios(),
-        VehiculoService.getVehiculos(false),
-        VehiculoService.getRegistrosGasolina(),
-        supabase.from('categorias').select('*'),
-        supabase.from('subcategorias').select('*'),
-        supabase.from('proveedores').select('*'),
-        supabase.from('clientes').select('*'),
-        supabase.from('sucursales_cliente').select('*'),
-      ]);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/all`, { headers });
+      if (!res.ok) throw new Error('Error al cargar datos');
+      const data = await res.json();
 
-      let rawGastos = gastosRes.data || [];
-      if (gastosRes.error) {
-        console.warn('Relational gastos query failed, attempting basic select:', gastosRes.error.message);
-        const fallbackRes = await supabase.from('gastos').select('*').order('created_at', { ascending: false });
-        rawGastos = fallbackRes.data || [];
-      }
-
-      const enrichedGastos = GastoService.enrichGastosWithCatalogs(
-        rawGastos,
-        catRes.data || [],
-        subRes.data || [],
-        provRes.data || [],
-        cliRes.data || [],
-        sucRes.data || []
-      );
+      const enrichedGastos = data.gastos || [];
+      const sortedPersonal = sortUsuariosByRoleAndName(data.usuarios || []);
+      const vehList = data.vehiculos || [];
+      const gasLogs = data.gasLogs || [];
+      const provList = data.proveedores || [];
 
       setGastos(enrichedGastos);
-setProveedoresCatalog(provRes.data || []);
-      setPersonal(sortUsuariosByRoleAndName(usersRes || []));
+      setPersonal(sortedPersonal);
       setVehiculos(vehList);
       setRegistrosGasolina(gasLogs);
+      setProveedoresCatalog(provList);
+
+      ModuleCache.set('admin_empleados', {
+        gastos: enrichedGastos,
+        personal: sortedPersonal,
+        vehiculos: vehList,
+        registrosGasolina: gasLogs,
+        proveedoresCatalog: provList,
+      });
     } catch (err: any) {
-      logger.error('Error loading admin data:', err);
-      // Emergency fallback
-      try {
-        const emergency = await supabase.from('gastos').select('*').order('created_at', { ascending: false });
-        if (emergency.data && emergency.data.length > 0) {
-          setGastos(emergency.data);
-        }
-      } catch {}
+      logger.error('Error loading admin data in empleados:', err);
       if (!silent) {
         Alert.alert('Error', err.message || 'No se pudieron recuperar los datos.');
       }
     } finally {
-      if (!silent) setIsLoading(false);
+      setIsLoading(false);
     }
   }, []);
 
