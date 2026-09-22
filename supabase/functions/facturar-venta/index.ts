@@ -29,7 +29,7 @@ serve(async (req) => {
       custom_partidas 
     } = body
 
-    let resolvedVentaId = venta_id ? parseInt(venta_id, 10) : null;
+    let resolvedVentaId = venta_id ? (typeof venta_id === 'number' ? venta_id : String(venta_id).trim()) : null;
     let venta = null;
     let cliente = null;
     let partidas = [];

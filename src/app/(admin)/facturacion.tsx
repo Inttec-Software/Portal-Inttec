@@ -23,7 +23,7 @@ import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { parseCFDIXML } from '@/utils/cfdiParser';
-import { exportarFacturaOdooPDF, cleanFolio } from '@/utils/reportGenerator';
+import { exportarFacturaOdooPDF, exportarReciboPagoPDF, generarReciboPagoHTML, cleanFolio } from '@/utils/reportGenerator';
 import FacturaPreviewModal from '@/components/FacturaPreviewModal';
 import { normalizeText } from '@/utils/helpers';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -121,7 +121,7 @@ export default function FacturacionScreen() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
 
-  const [activeTab, setActiveTab] = useState<'emitir' | 'historial'>('emitir');
+  const [activeTab, setActiveTab] = useState<'emitir' | 'historial' | 'pagos'>('emitir');
 
   // Catálogo de Clientes
   const [clientes, setClientes] = useState<ClienteCatalogo[]>([]);
@@ -170,6 +170,28 @@ export default function FacturacionScreen() {
   const [historialSearch, setHistorialSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState<'TODAS' | 'TIMBRADA' | 'CANCELADA'>('TODAS');
 
+  // Complementos de Pago (REP)
+  const [complementosList, setComplementosList] = useState<any[]>([]);
+  const [isLoadingComplementos, setIsLoadingComplementos] = useState(false);
+  const [complementosSearch, setComplementosSearch] = useState('');
+  const [filtroEstadoPago, setFiltroEstadoPago] = useState<'TODAS' | 'TIMBRADA' | 'CANCELADA'>('TODAS');
+
+  // Modal Nuevo Complemento de Pago
+  const [isPagoModalOpen, setIsPagoModalOpen] = useState(false);
+  const [pagoCliente, setPagoCliente] = useState<ClienteCatalogo | null>(null);
+  const [isSelectClientePagoOpen, setIsSelectClientePagoOpen] = useState(false);
+  const [searchClientePago, setSearchClientePago] = useState('');
+  const [facturasPendientesCliente, setFacturasPendientesCliente] = useState<any[]>([]);
+  const [isLoadingFacturasPendientes, setIsLoadingFacturasPendientes] = useState(false);
+  const [selectedFacturasMap, setSelectedFacturasMap] = useState<Record<number, boolean>>({});
+  const [abonosMap, setAbonosMap] = useState<Record<number, string>>({});
+  const [formaPagoPago, setFormaPagoPago] = useState('03');
+  const [fechaPagoVal, setFechaPagoVal] = useState(new Date().toISOString().slice(0, 10));
+  const [referenciaPago, setReferenciaPago] = useState('');
+  const [seriePago, setSeriePago] = useState('P');
+  const [folioPago, setFolioPago] = useState('0001');
+  const [isSubmittingPago, setIsSubmittingPago] = useState(false);
+
   // Estados de proceso
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -178,14 +200,18 @@ export default function FacturacionScreen() {
   const [previewVenta, setPreviewVenta] = useState<any>(null);
   const [previewFacturaData, setPreviewFacturaData] = useState<any>(null);
   const [previewXmlText, setPreviewXmlText] = useState<string>('');
+  const [previewCustomHtml, setPreviewCustomHtml] = useState<string>('');
   const [previewIsDraft, setPreviewIsDraft] = useState<boolean>(false);
   const [previewTitle, setPreviewTitle] = useState<string>('');
+  const [returnToPagoModal, setReturnToPagoModal] = useState<boolean>(false);
 
   useEffect(() => {
     fetchClientes();
     fetchProductos();
     fetchHistorialFacturas();
     fetchSiguienteFolio('A');
+    fetchComplementosList();
+    fetchSiguienteFolioPago('P');
   }, []);
 
   const fetchSiguienteFolio = async (serieTarget = 'A') => {
@@ -201,6 +227,37 @@ export default function FacturacionScreen() {
       }
     } catch (_) {}
     setFolio('0001');
+  };
+
+  const fetchSiguienteFolioPago = async (serieTarget = 'P') => {
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/sat/siguiente-folio-pago?serie=${encodeURIComponent(serieTarget)}`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.folio) {
+          setFolioPago(json.folio);
+          return;
+        }
+      }
+    } catch (_) {}
+    setFolioPago('0001');
+  };
+
+  const fetchComplementosList = async () => {
+    try {
+      setIsLoadingComplementos(true);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/sat/complementos-pago`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        setComplementosList(json.complementos || []);
+      }
+    } catch (err) {
+      console.warn('Error al cargar complementos de pago:', err);
+    } finally {
+      setIsLoadingComplementos(false);
+    }
   };
 
   const showAlert = (title: string, message: string) => {
@@ -617,9 +674,13 @@ export default function FacturacionScreen() {
           throw new Error(`Error del servidor (${resp.status})`);
         }
       } catch (backendErr: any) {
-        console.warn('Backend timbrado fallo o no disponible, intentando Edge Function:', backendErr);
-        // Si el backend arrojó un error fiscal concreto del SAT/Finkok, no ocultarlo
-        if (backendErr.message && (backendErr.message.includes('SAT') || backendErr.message.includes('Finkok') || backendErr.message.includes('['))) {
+        console.warn('Backend timbrado fallo o no disponible:', backendErr);
+        const isNetworkOrOffline = !backendErr.message || 
+          backendErr.message.includes('Network') || 
+          backendErr.message.includes('Failed to fetch') || 
+          backendErr.message.includes('Error del servidor (5');
+
+        if (!isNetworkOrOffline) {
           throw backendErr;
         }
 
@@ -642,16 +703,28 @@ export default function FacturacionScreen() {
       setActiveTab('historial');
       handleResetForm();
     } catch (err: any) {
-      console.error('Error al timbrar factura:', err);
       let errorMsg = err.message || 'Error desconocido al timbrar la factura.';
-      if (err.context) {
+      if (err?.context) {
         try {
           if (typeof err.context.json === 'function') {
             const body = await err.context.json();
             if (body?.error) errorMsg = body.error;
+            else if (body?.message) errorMsg = body.message;
+          } else if (typeof err.context.text === 'function') {
+            const txt = await err.context.text();
+            if (txt) {
+              try {
+                const parsed = JSON.parse(txt);
+                if (parsed?.error) errorMsg = parsed.error;
+                else if (parsed?.message) errorMsg = parsed.message;
+              } catch (_) {
+                errorMsg = txt;
+              }
+            }
           }
         } catch (_) {}
       }
+      console.error('Error al timbrar factura:', errorMsg);
       showAlert('Error al Timbrar', errorMsg);
     } finally {
       setIsSubmitting(false);
@@ -973,6 +1046,377 @@ export default function FacturacionScreen() {
     }
   };
 
+  // ============================================================================
+  // HANDLERS COMPLEMENTOS DE PAGO (REP)
+  // ============================================================================
+
+  const handleSelectClienteParaPago = async (cli: ClienteCatalogo) => {
+    setPagoCliente(cli);
+    setIsSelectClientePagoOpen(false);
+    setSelectedFacturasMap({});
+    setAbonosMap({});
+    fetchSiguienteFolioPago(seriePago);
+
+    try {
+      setIsLoadingFacturasPendientes(true);
+      const headers = await getApiHeaders();
+      const params = new URLSearchParams();
+      if (cli.id) params.append('cliente_id', cli.id);
+      if (cli.rfc) params.append('cliente_rfc', cli.rfc);
+      if (cli.nombre) params.append('cliente_nombre', cli.nombre);
+
+      const res = await fetch(`${getApiUrl()}/api/sat/facturas-pendientes-cliente?${params.toString()}`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        const docs = json.facturas || [];
+        setFacturasPendientesCliente(docs);
+
+        // Si solo hay 1 factura pendiente, la seleccionamos automáticamente
+        if (docs.length === 1) {
+          const f = docs[0];
+          setSelectedFacturasMap({ [f.id]: true });
+          setAbonosMap({ [f.id]: String(f.saldo_pendiente) });
+        }
+      } else {
+        setFacturasPendientesCliente([]);
+      }
+    } catch (err) {
+      console.error('Error buscando facturas pendientes del cliente:', err);
+      setFacturasPendientesCliente([]);
+    } finally {
+      setIsLoadingFacturasPendientes(false);
+    }
+  };
+
+  const handleToggleFacturaSeleccionada = (factura: any) => {
+    const isCurrentlySelected = !!selectedFacturasMap[factura.id];
+    const newMap = { ...selectedFacturasMap, [factura.id]: !isCurrentlySelected };
+    setSelectedFacturasMap(newMap);
+
+    const newAbonos = { ...abonosMap };
+    if (!isCurrentlySelected) {
+      newAbonos[factura.id] = String(factura.saldo_pendiente);
+    } else {
+      delete newAbonos[factura.id];
+    }
+    setAbonosMap(newAbonos);
+  };
+
+  const handleCambiarAbono = (facturaId: number, montoStr: string, maxSaldo: number) => {
+    let num = parseFloat(montoStr);
+    if (isNaN(num) || num < 0) num = 0;
+    if (num > maxSaldo) num = maxSaldo;
+    setAbonosMap(prev => ({ ...prev, [facturaId]: String(num) }));
+  };
+
+  const handlePagarSaldoCompleto = (facturaId: number, saldoPendiente: number) => {
+    setSelectedFacturasMap(prev => ({ ...prev, [facturaId]: true }));
+    setAbonosMap(prev => ({ ...prev, [facturaId]: String(saldoPendiente) }));
+  };
+
+  const totalAbonosCalculado = useMemo(() => {
+    return Object.keys(selectedFacturasMap)
+      .filter(id => selectedFacturasMap[Number(id)])
+      .reduce((sum, id) => sum + (parseFloat(abonosMap[Number(id)] || '0') || 0), 0);
+  }, [selectedFacturasMap, abonosMap]);
+
+  const handleTimbrarPagoModal = async () => {
+    if (!pagoCliente) {
+      showAlert('Validación', 'Por favor selecciona un cliente receptor.');
+      return;
+    }
+
+    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[Number(id)]);
+    if (selectedIds.length === 0) {
+      showAlert('Validación', 'Debes seleccionar al menos una factura con saldo pendiente.');
+      return;
+    }
+
+    const doctosPayload = selectedIds.map(idStr => {
+      const vId = Number(idStr);
+      const monto = parseFloat(abonosMap[vId] || '0');
+      return {
+        venta_id: vId,
+        importe_a_pagar: monto
+      };
+    }).filter(d => d.importe_a_pagar > 0);
+
+    if (doctosPayload.length === 0) {
+      showAlert('Validación', 'Ingresa un monto a pagar mayor a cero para las facturas marcadas.');
+      return;
+    }
+
+    const totalCalculado = doctosPayload.reduce((sum, d) => sum + d.importe_a_pagar, 0);
+
+    const doTimbrar = async () => {
+      try {
+        setIsSubmittingPago(true);
+        const headers = await getApiHeaders();
+        const payload = {
+          cliente: {
+            id: pagoCliente.id,
+            nombre: pagoCliente.razon_social || pagoCliente.nombre,
+            rfc: pagoCliente.rfc || 'XAXX010101000',
+            codigo_postal: pagoCliente.codigo_postal || '31110',
+            regimen_fiscal: pagoCliente.regimen_fiscal || '601',
+          },
+          fecha_pago: fechaPagoVal,
+          forma_pago: formaPagoPago,
+          referencia: referenciaPago.trim() || undefined,
+          serie: seriePago,
+          folio: folioPago,
+          doctos: doctosPayload,
+        };
+
+        const res = await fetch(`${getApiUrl()}/api/sat/timbrar-pago`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload)
+        });
+
+        const resJson = await res.json().catch(() => ({}));
+        if (!res.ok || !resJson.success) {
+          throw new Error(resJson.error || `Error al timbrar pago (${res.status})`);
+        }
+
+        showAlert('Complemento Timbrado', `Se emitió el CFDI de Pago con folio ${resJson.folio} (UUID: ${resJson.uuid?.slice(0, 8)}...).`);
+        setIsPagoModalOpen(false);
+        fetchComplementosList();
+        fetchHistorialFacturas();
+
+        if (resJson.complemento) {
+          exportarReciboPagoPDF(resJson.complemento, resJson.doctos || [], 'view');
+        }
+      } catch (err: any) {
+        console.error('Error al timbrar complemento de pago:', err);
+        showAlert('Error al Timbrar Pago', err.message || 'No se pudo timbrar el complemento de pago.');
+      } finally {
+        setIsSubmittingPago(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`¿Confirmas timbrar el Complemento de Pago por un total de $${totalCalculado.toLocaleString('es-MX', { minimumFractionDigits: 2 })} amparando ${doctosPayload.length} factura(s)?`)) {
+        await doTimbrar();
+      }
+    } else {
+      Alert.alert(
+        'Confirmar Timbrado REP',
+        `¿Deseas emitir el comprobante de pago por $${totalCalculado.toLocaleString('es-MX', { minimumFractionDigits: 2 })}?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Timbrar', onPress: doTimbrar }
+        ]
+      );
+    }
+  };
+
+  const handlePrevisualizarReciboPago = async () => {
+    if (!pagoCliente) {
+      showAlert('Validación', 'Por favor selecciona un cliente para la vista previa.');
+      return;
+    }
+    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[Number(id)]);
+    if (selectedIds.length === 0) {
+      showAlert('Validación', 'Selecciona al menos una factura.');
+      return;
+    }
+
+    const doctosMock = selectedIds.map((idStr, idx) => {
+      const vId = Number(idStr);
+      const f = facturasPendientesCliente.find(fact => fact.id === vId) || {};
+      const monto = parseFloat(abonosMap[vId] || '0');
+      const saldoAnt = Number(f.saldo_pendiente || 0);
+      return {
+        id: idx + 1,
+        folio: f.folio || String(vId),
+        serie: f.serie || 'A',
+        uuid_documento: f.cfdi_uuid || 'UUID-FACTURA-PENDIENTE',
+        num_parcialidad: f.num_parcialidad_siguiente || 1,
+        saldo_anterior: saldoAnt,
+        importe_pagado: monto,
+        saldo_insoluto: Math.max(0, saldoAnt - monto)
+      };
+    });
+
+    const complementoMock = {
+      serie: seriePago,
+      folio: folioPago,
+      cliente_nombre: pagoCliente.razon_social || pagoCliente.nombre,
+      cliente_rfc: pagoCliente.rfc || 'XAXX010101000',
+      cliente_cp: pagoCliente.codigo_postal || '31110',
+      cliente_regimen: pagoCliente.regimen_fiscal || '601',
+      fecha_pago: fechaPagoVal,
+      forma_pago_sat: formaPagoPago,
+      num_operacion: referenciaPago || 'Vista previa',
+      monto_total: totalAbonosCalculado,
+      cfdi_uuid: 'UUID-VISTA-PREVIA-BORRADOR'
+    };
+
+    try {
+      const html = await generarReciboPagoHTML(complementoMock, doctosMock, true);
+      setPreviewCustomHtml(html);
+      setPreviewTitle(`Borrador Recibo de Pago: ${seriePago}${folioPago}`);
+      setPreviewIsDraft(true);
+      setPreviewVenta(null);
+      setPreviewFacturaData(null);
+      setPreviewXmlText('');
+      setIsPagoModalOpen(false);
+      setReturnToPagoModal(true);
+      setPreviewModalVisible(true);
+    } catch (err: any) {
+      showAlert('Error en Vista Previa', err.message);
+    }
+  };
+
+  const handleVerReciboPagoPDF = async (comp: any) => {
+    try {
+      setIsSubmitting(true);
+      const html = await generarReciboPagoHTML(comp, comp.complementos_pago_doctos || [], false);
+      setPreviewCustomHtml(html);
+      setPreviewTitle(`Recibo de Pago: ${cleanFolio(comp.folio) || comp.cfdi_uuid?.slice(0, 8)}`);
+      setPreviewIsDraft(false);
+      setPreviewVenta(null);
+      setPreviewFacturaData(null);
+      setPreviewXmlText('');
+      setPreviewModalVisible(true);
+    } catch (err: any) {
+      showAlert('Error en PDF', err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDescargarReciboPagoPDF = async (comp: any) => {
+    try {
+      await exportarReciboPagoPDF(comp, comp.complementos_pago_doctos || [], 'download');
+    } catch (err: any) {
+      showAlert('Error al Descargar PDF', err.message);
+    }
+  };
+
+  const handleDescargarReciboXML = async (comp: any) => {
+    if (!comp.cfdi_xml_url) {
+      showAlert('Aviso', 'El XML de este complemento no está disponible.');
+      return;
+    }
+    try {
+      if (Platform.OS === 'web') {
+        window.open(comp.cfdi_xml_url, '_blank');
+      } else {
+        showAlert('XML', `URL del comprobante:\n${comp.cfdi_xml_url}`);
+      }
+    } catch (err: any) {
+      showAlert('Error', err.message);
+    }
+  };
+
+  const handleCancelarReciboPago = async (comp: any) => {
+    const doCancel = async () => {
+      try {
+        setIsSubmitting(true);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/cancelar-pago`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ complemento_id: comp.id, uuid: comp.cfdi_uuid, motivo: '02' })
+        });
+        const resJson = await res.json().catch(() => ({}));
+        if (!res.ok || !resJson.success) {
+          throw new Error(resJson.error || 'Error cancelando el pago ante el SAT');
+        }
+        showAlert('Éxito', 'El complemento de pago ha sido cancelado ante el SAT correctamente.');
+        fetchComplementosList();
+        fetchHistorialFacturas();
+      } catch (err: any) {
+        showAlert('Error al Cancelar', err.message);
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`¿Estás seguro de cancelar ante el SAT el Complemento de Pago ${cleanFolio(comp.folio)} por $${Number(comp.monto_total || 0).toLocaleString('es-MX')}?`)) {
+        await doCancel();
+      }
+    } else {
+      Alert.alert('Cancelar Pago SAT', `¿Cancelar el comprobante ${cleanFolio(comp.folio)}?`, [
+        { text: 'No', style: 'cancel' },
+        { text: 'Sí, Cancelar', style: 'destructive', onPress: doCancel }
+      ]);
+    }
+  };
+
+  const handleIniciarCobroREP = async (factura: FacturaEmitida) => {
+    const matchedCli = clientes.find(c => 
+      (c.nombre && factura.cliente && c.nombre.trim().toLowerCase() === factura.cliente.trim().toLowerCase()) ||
+      (c.rfc && (factura as any).cliente_rfc && c.rfc.trim().toUpperCase() === (factura as any).cliente_rfc.trim().toUpperCase())
+    ) || {
+      id: (factura as any).cliente_id || '',
+      nombre: factura.cliente || 'Cliente General',
+      rfc: (factura as any).cliente_rfc || 'XAXX010101000',
+      codigo_postal: '31110',
+      regimen_fiscal: '601',
+    };
+
+    setPagoCliente(matchedCli);
+    setReferenciaPago(`Pago factura ${cleanFolio(factura.folio || factura.factura_referencia) || '#' + factura.id}`);
+    setFormaPagoPago('03');
+    setSeriePago('P');
+    setIsPagoModalOpen(true);
+    fetchSiguienteFolioPago('P');
+
+    try {
+      setIsLoadingFacturasPendientes(true);
+      const headers = await getApiHeaders();
+      const params = new URLSearchParams();
+      if (matchedCli.id) params.append('cliente_id', matchedCli.id);
+      if (matchedCli.rfc) params.append('cliente_rfc', matchedCli.rfc);
+      if (matchedCli.nombre) params.append('cliente_nombre', matchedCli.nombre);
+
+      const res = await fetch(`${getApiUrl()}/api/sat/facturas-pendientes-cliente?${params.toString()}`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        const docs: any[] = json.facturas || [];
+        setFacturasPendientesCliente(docs);
+
+        const targetFactura = docs.find((d: any) => String(d.id) === String(factura.id)) || docs[0];
+        if (targetFactura) {
+          setSelectedFacturasMap({ [targetFactura.id]: true });
+          setAbonosMap({ [targetFactura.id]: String(targetFactura.saldo_pendiente) });
+        }
+      }
+    } catch (err) {
+      console.warn('Error al cargar facturas para cobro:', err);
+    } finally {
+      setIsLoadingFacturasPendientes(false);
+    }
+  };
+
+  const complementosFiltrados = useMemo(() => {
+    return complementosList.filter(c => {
+      if (filtroEstadoPago !== 'TODAS' && c.cfdi_estado !== filtroEstadoPago) return false;
+      if (complementosSearch.trim()) {
+        const q = normalizeText(complementosSearch);
+        const cl = normalizeText(c.cliente_nombre || '');
+        const fo = normalizeText(c.folio || '');
+        const uu = normalizeText(c.cfdi_uuid || '');
+        return cl.includes(q) || fo.includes(q) || uu.includes(q);
+      }
+      return true;
+    });
+  }, [complementosList, filtroEstadoPago, complementosSearch]);
+
+  const clientesPagoFiltrados = useMemo(() => {
+    if (!searchClientePago.trim()) return clientes;
+    const q = normalizeText(searchClientePago);
+    return clientes.filter(c =>
+      normalizeText(c.nombre || '').includes(q) ||
+      normalizeText(c.razon_social || '').includes(q) ||
+      normalizeText(c.rfc || '').includes(q)
+    );
+  }, [clientes, searchClientePago]);
+
   // Filtrado de historial
   const facturasFiltradas = useMemo(() => {
     return historialFacturas.filter(f => {
@@ -1067,6 +1511,31 @@ export default function FacturacionScreen() {
               ]}
             >
               Facturas Emitidas ({historialFacturas.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setActiveTab('pagos')}
+            style={[
+              styles.tabBtn,
+              activeTab === 'pagos' && {
+                borderBottomColor: '#801c1d',
+                borderBottomWidth: 2.5,
+              },
+            ]}
+          >
+            <Ionicons
+              name="cash-outline"
+              size={18}
+              color={activeTab === 'pagos' ? '#801c1d' : themeColors.textSecondary}
+            />
+            <Text
+              style={[
+                styles.tabBtnText,
+                { color: activeTab === 'pagos' ? '#801c1d' : themeColors.textSecondary, fontWeight: activeTab === 'pagos' ? 'bold' : '500' },
+              ]}
+            >
+              Complementos de Pago ({complementosList.length})
             </Text>
           </TouchableOpacity>
         </View>
@@ -1695,7 +2164,7 @@ export default function FacturacionScreen() {
             </View>
           </View>
         </ScrollView>
-      ) : (
+      ) : activeTab === 'historial' ? (
         /* HISTORIAL DE FACTURAS EMITIDAS */
         <View style={{ flex: 1, padding: Spacing.three, maxWidth: 1200, alignSelf: 'center', width: '100%' }}>
           {/* Barra de Búsqueda y Filtros */}
@@ -1843,7 +2312,247 @@ export default function FacturacionScreen() {
 
                         {!isCanceled && (
                           <TouchableOpacity
+                            onPress={() => handleIniciarCobroREP(factura)}
+                            style={[styles.smallActionBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d15', paddingHorizontal: 10 }]}
+                          >
+                            <Ionicons name="cash-outline" size={16} color="#801c1d" />
+                            <Text style={{ color: '#801c1d', fontSize: 11, fontWeight: '700' }}>Cobrar / REP</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {!isCanceled && (
+                          <TouchableOpacity
                             onPress={() => handleCancelarFacturaSAT(factura)}
+                            style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415' }]}
+                          >
+                            <Ionicons name="close-circle" size={16} color="#ef4444" />
+                            <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700' }}>Cancelar</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          )}
+        </View>
+      ) : (
+        /* PESTAÑA 3: COMPLEMENTOS DE PAGO (REP) */
+        <View style={{ flex: 1, padding: Spacing.three, maxWidth: 1200, alignSelf: 'center', width: '100%' }}>
+          {/* Header de Complementos de Pago */}
+          <View style={{ flexDirection: isDesktop ? 'row' : 'column', justifyContent: 'space-between', alignItems: isDesktop ? 'center' : 'stretch', gap: 10, marginBottom: 14 }}>
+            <View style={[styles.searchBox, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement, flex: 1 }]}>
+              <Ionicons name="search" size={18} color={themeColors.textSecondary} />
+              <TextInput
+                style={[styles.searchInput, { color: themeColors.text }]}
+                placeholder="Buscar por folio P0001, cliente, RFC o UUID fiscal..."
+                placeholderTextColor={themeColors.textSecondary}
+                value={complementosSearch}
+                onChangeText={setComplementosSearch}
+              />
+              {!!complementosSearch && (
+                <TouchableOpacity onPress={() => setComplementosSearch('')}>
+                  <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+              {(['TODAS', 'TIMBRADA', 'CANCELADA'] as const).map(est => (
+                <TouchableOpacity
+                  key={est}
+                  onPress={() => setFiltroEstadoPago(est)}
+                  style={[
+                    styles.chipBtn,
+                    {
+                      borderColor: filtroEstadoPago === est ? '#801c1d' : themeColors.border,
+                      backgroundColor: filtroEstadoPago === est ? '#801c1d' + '20' : themeColors.backgroundElement,
+                    },
+                  ]}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: filtroEstadoPago === est ? '800' : '500', color: filtroEstadoPago === est ? '#801c1d' : themeColors.textSecondary }}>
+                    {est}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+
+              <TouchableOpacity
+                onPress={() => {
+                  setPagoCliente(null);
+                  setFacturasPendientesCliente([]);
+                  setSelectedFacturasMap({});
+                  setAbonosMap({});
+                  setReferenciaPago('');
+                  setFormaPagoPago('03');
+                  setSeriePago('P');
+                  fetchSiguienteFolioPago('P');
+                  setIsPagoModalOpen(true);
+                }}
+                style={[styles.quickSelectBtn, { backgroundColor: '#801c1d', borderColor: '#801c1d', paddingHorizontal: 14, paddingVertical: 9 }]}
+              >
+                <Ionicons name="add-circle" size={16} color="#fff" />
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>+ Nuevo Complemento</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {isLoadingComplementos ? (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <ActivityIndicator size="large" color="#801c1d" />
+              <Text style={{ color: themeColors.textSecondary, marginTop: 8 }}>Cargando complementos de pago...</Text>
+            </View>
+          ) : complementosFiltrados.length === 0 ? (
+            <View style={[styles.emptyContainer, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}>
+              <Ionicons name="card-outline" size={48} color={themeColors.textSecondary} />
+              <Text style={[styles.emptyTitle, { color: themeColors.text }]}>No hay complementos de pago registrados</Text>
+              <Text style={{ color: themeColors.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                Los pagos timbrados ante el SAT (individuales o multi-factura) aparecerán en esta sección.
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setPagoCliente(null);
+                  setFacturasPendientesCliente([]);
+                  setSelectedFacturasMap({});
+                  setAbonosMap({});
+                  setReferenciaPago('');
+                  setFormaPagoPago('03');
+                  setSeriePago('P');
+                  fetchSiguienteFolioPago('P');
+                  setIsPagoModalOpen(true);
+                }}
+                style={[styles.quickSelectBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d' + '15', marginTop: 14 }]}
+              >
+                <Ionicons name="add-circle" size={16} color="#801c1d" />
+                <Text style={{ color: '#801c1d', fontWeight: 'bold' }}>Emitir Primer Complemento de Pago</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <ScrollView style={{ flex: 1 }}>
+              <View style={{ gap: 10 }}>
+                {complementosFiltrados.map((comp) => {
+                  const isCanceled = comp.cfdi_estado === 'CANCELADA';
+                  const doctos = comp.complementos_pago_doctos || [];
+                  const cleanFolioVal = cleanFolio(comp.folio) || '--';
+
+                  return (
+                    <View
+                      key={comp.id}
+                      style={[
+                        styles.facturaRowCard,
+                        {
+                          backgroundColor: themeColors.backgroundElement,
+                          borderColor: isCanceled ? '#ef4444' + '60' : themeColors.border,
+                          flexDirection: 'column',
+                          alignItems: 'stretch',
+                          gap: 10,
+                          padding: 14
+                        },
+                      ]}
+                    >
+                      {/* Cabecera de la Card */}
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text }}>
+                              {comp.cliente_nombre || 'Cliente'}
+                            </Text>
+                            <View
+                              style={[
+                                styles.statusBadge,
+                                { backgroundColor: isCanceled ? '#ef444420' : '#10b98120' },
+                              ]}
+                            >
+                              <Text style={{ fontSize: 10, fontWeight: '800', color: isCanceled ? '#ef4444' : '#10b981' }}>
+                                {comp.cfdi_estado || 'TIMBRADA'}
+                              </Text>
+                            </View>
+                            <View
+                              style={[
+                                styles.statusBadge,
+                                { backgroundColor: '#801c1d18', borderColor: '#801c1d40', borderWidth: 1 },
+                              ]}
+                            >
+                              <Text style={{ fontSize: 9, fontWeight: '800', color: '#801c1d' }}>
+                                CFDI REP 2.0
+                              </Text>
+                            </View>
+                          </View>
+
+                          <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }}>
+                            Folio Pago: <Text style={{ fontWeight: 'bold', color: '#801c1d' }}>{cleanFolioVal}</Text> | Fecha Pago: {comp.fecha_pago ? String(comp.fecha_pago).slice(0, 10) : '--'} | RFC: <Text style={{ fontWeight: '600', color: themeColors.text }}>{comp.cliente_rfc || 'N/A'}</Text>
+                          </Text>
+
+                          {comp.cfdi_uuid && (
+                            <Text style={{ fontSize: 10, color: '#0284c7', marginTop: 3, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
+                              UUID: {comp.cfdi_uuid}
+                            </Text>
+                          )}
+                        </View>
+
+                        <View style={{ alignItems: 'flex-end', justifyContent: 'center' }}>
+                          <Text style={{ fontSize: 11, color: themeColors.textSecondary, fontWeight: '700' }}>TOTAL PAGADO</Text>
+                          <Text style={{ fontSize: 18, fontWeight: 'bold', color: isCanceled ? themeColors.textSecondary : '#15803d' }}>
+                            ${Number(comp.monto_total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Documentos Relacionados */}
+                      {doctos.length > 0 && (
+                        <View style={{ backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
+                          <Text style={{ fontSize: 10, fontWeight: '800', color: themeColors.textSecondary, textTransform: 'uppercase', marginBottom: 4 }}>
+                            Documentos Relacionados ({doctos.length} Factura{doctos.length === 1 ? '' : 's'}):
+                          </Text>
+                          <View style={{ gap: 4 }}>
+                            {doctos.map((doc: any, dIdx: number) => (
+                              <View key={doc.id || dIdx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text style={{ fontSize: 11, color: themeColors.text }}>
+                                  • Factura <Text style={{ fontWeight: '700' }}>{(doc.serie || 'A') + cleanFolio(doc.folio)}</Text> (Parcialidad {doc.num_parcialidad})
+                                </Text>
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: '#15803d' }}>
+                                  Abono: ${Number(doc.importe_pagado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                  {Number(doc.saldo_insoluto || 0) <= 0.01 ? (
+                                    <Text style={{ color: '#16a34a', fontSize: 10 }}> (Saldada)</Text>
+                                  ) : (
+                                    <Text style={{ color: themeColors.textSecondary, fontSize: 10 }}> (Saldo Rest: ${Number(doc.saldo_insoluto).toFixed(2)})</Text>
+                                  )}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      )}
+
+                      {/* Barra de Acciones */}
+                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: 8 }}>
+                        <TouchableOpacity
+                          onPress={() => handleVerReciboPagoPDF(comp)}
+                          style={[styles.smallActionBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d15', paddingHorizontal: 10 }]}
+                        >
+                          <Ionicons name="eye-outline" size={16} color="#801c1d" />
+                          <Text style={{ color: '#801c1d', fontSize: 11, fontWeight: '700' }}>Ver Recibo PDF</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => handleDescargarReciboPagoPDF(comp)}
+                          style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c715' }]}
+                        >
+                          <Ionicons name="download-outline" size={16} color="#0284c7" />
+                          <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Descargar PDF</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => handleDescargarReciboXML(comp)}
+                          style={[styles.smallActionBtn, { borderColor: '#10b981', backgroundColor: '#10b98115' }]}
+                        >
+                          <Ionicons name="code-download" size={16} color="#10b981" />
+                          <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>XML</Text>
+                        </TouchableOpacity>
+
+                        {!isCanceled && (
+                          <TouchableOpacity
+                            onPress={() => handleCancelarReciboPago(comp)}
                             style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415' }]}
                           >
                             <Ionicons name="close-circle" size={16} color="#ef4444" />
@@ -1862,18 +2571,22 @@ export default function FacturacionScreen() {
 
       {/* MODAL PARA SELECCIONAR CLIENTE DEL CATÁLOGO */}
       <Modal visible={isClientModalOpen} animationType="slide" transparent onRequestClose={() => setIsClientModalOpen(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+        <Pressable style={styles.modalOverlay} onPress={() => setIsClientModalOpen(false)}>
+          <Pressable onPress={e => e.stopPropagation()} style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="people" size={20} color="#0284c7" />
                 <Text style={[styles.modalTitle, { color: themeColors.text }]}>Seleccionar Cliente del Catálogo</Text>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <TouchableOpacity onPress={fetchClientes} disabled={isLoadingClientes} style={{ padding: 4 }}>
+                <TouchableOpacity onPress={fetchClientes} disabled={isLoadingClientes} style={[{ padding: 6 }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}>
                   <Ionicons name="refresh" size={20} color={isLoadingClientes ? themeColors.textSecondary : "#0284c7"} />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setIsClientModalOpen(false)} style={{ padding: 4 }}>
+                <TouchableOpacity
+                  onPress={() => setIsClientModalOpen(false)}
+                  hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                  style={[{ padding: 6 }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}
+                >
                   <Ionicons name="close" size={22} color={themeColors.text} />
                 </TouchableOpacity>
               </View>
@@ -1928,7 +2641,7 @@ export default function FacturacionScreen() {
                       <TouchableOpacity
                         key={c.id}
                         onPress={() => handleSelectClient(c)}
-                        style={[styles.clientOptionItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+                        style={[styles.clientOptionItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}
                       >
                         <View style={{ flex: 1, paddingRight: 8 }}>
                           <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text }}>
@@ -1950,20 +2663,373 @@ export default function FacturacionScreen() {
                 </View>
               </ScrollView>
             )}
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
-      {/* MODAL DE VISTA PREVIA INTERACTIVA DE FACTURA */}
+      {/* MODAL PRINCIPAL: NUEVO COMPLEMENTO DE PAGO MULTI-FACTURA */}
+      <Modal visible={isPagoModalOpen} animationType="slide" transparent onRequestClose={() => setIsPagoModalOpen(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setIsPagoModalOpen(false)}>
+          <Pressable onPress={e => e.stopPropagation()} style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, maxWidth: 850, maxHeight: '90%' }]}>
+            {/* Header del Modal */}
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="cash" size={22} color="#801c1d" />
+                <View>
+                  <Text style={[styles.modalTitle, { color: themeColors.text }]}>Nuevo Complemento de Recepción de Pagos (REP)</Text>
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>CFDI 4.0 con Pagos 2.0 • Folio {seriePago}{folioPago}</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsPagoModalOpen(false)}
+                hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                style={[{ padding: 6 }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}
+              >
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 16 }}>
+              {/* 1. SELECCIÓN DE CLIENTE RECEPTOR */}
+              <View style={[styles.card, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                <View style={styles.cardHeader}>
+                  <Text style={[styles.cardTitle, { color: themeColors.text, fontSize: 13 }]}>1. Cliente Receptor (Quien Realiza el Depósito)</Text>
+                  {pagoCliente && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setPagoCliente(null);
+                        setFacturasPendientesCliente([]);
+                        setSelectedFacturasMap({});
+                        setAbonosMap({});
+                        setSearchClientePago('');
+                      }}
+                      style={[styles.quickSelectBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d15' }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}
+                    >
+                      <Ionicons name="swap-horizontal" size={14} color="#801c1d" />
+                      <Text style={{ color: '#801c1d', fontSize: 12, fontWeight: '700' }}>Cambiar Cliente</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {pagoCliente ? (
+                  <View style={{ backgroundColor: themeColors.backgroundElement, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.text }}>
+                      {pagoCliente.razon_social || pagoCliente.nombre}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 3 }}>
+                      RFC: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{pagoCliente.rfc || 'XAXX010101000'}</Text> | CP: {pagoCliente.codigo_postal || '31110'} | Régimen: {pagoCliente.regimen_fiscal || '601'}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ gap: 8 }}>
+                    <View style={[styles.searchBox, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}>
+                      <Ionicons name="search" size={18} color={themeColors.textSecondary} />
+                      <TextInput
+                        style={[styles.searchInput, { color: themeColors.text }]}
+                        placeholder="Buscar cliente por nombre o RFC..."
+                        placeholderTextColor={themeColors.textSecondary}
+                        value={searchClientePago}
+                        onChangeText={setSearchClientePago}
+                        autoFocus
+                      />
+                      {!!searchClientePago && (
+                        <TouchableOpacity onPress={() => setSearchClientePago('')}>
+                          <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
+                      <View style={{ gap: 6 }}>
+                        {clientesPagoFiltrados.slice(0, 15).map(c => {
+                          const displayTitle = c.razon_social && c.razon_social !== c.nombre
+                            ? `${c.razon_social} (${c.nombre})`
+                            : (c.razon_social || c.nombre || 'Cliente');
+                          return (
+                            <TouchableOpacity
+                              key={c.id}
+                              onPress={() => handleSelectClienteParaPago(c)}
+                              style={[
+                                styles.clientOptionItem,
+                                { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement },
+                                Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined
+                              ]}
+                            >
+                              <View style={{ flex: 1, paddingRight: 8 }}>
+                                <Text style={{ fontSize: 13, fontWeight: 'bold', color: themeColors.text }}>{displayTitle}</Text>
+                                <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>RFC: {c.rfc || 'Sin RFC'} | CP: {c.codigo_postal || 'N/D'}</Text>
+                              </View>
+                              <Ionicons name="checkmark-circle-outline" size={18} color="#801c1d" />
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+
+              {/* 2. FACTURAS CON SALDO PENDIENTE DEL CLIENTE */}
+              {pagoCliente && (
+                <View style={[styles.card, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                  <View style={styles.cardHeader}>
+                    <Text style={[styles.cardTitle, { color: themeColors.text, fontSize: 13 }]}>
+                      2. Facturas PPD con Saldo Pendiente ({facturasPendientesCliente.length})
+                    </Text>
+                    <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                      Selecciona una o más facturas para aplicar el pago
+                    </Text>
+                  </View>
+
+                  {isLoadingFacturasPendientes ? (
+                    <View style={{ padding: 24, alignItems: 'center', gap: 6 }}>
+                      <ActivityIndicator size="small" color="#801c1d" />
+                      <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Consultando facturas del cliente...</Text>
+                    </View>
+                  ) : facturasPendientesCliente.length === 0 ? (
+                    <View style={{ padding: 20, alignItems: 'center', backgroundColor: themeColors.backgroundElement, borderRadius: 8 }}>
+                      <Ionicons name="checkmark-done-circle" size={32} color="#16a34a" />
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text, marginTop: 4 }}>
+                        ¡El cliente no tiene facturas con saldo pendiente!
+                      </Text>
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, textAlign: 'center', marginTop: 2 }}>
+                        Todas sus facturas están liquidadas o no se han emitido facturas PPD.
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={{ gap: 8 }}>
+                      {facturasPendientesCliente.map((f: any) => {
+                        const isSelected = !!selectedFacturasMap[f.id];
+                        const saldoPend = Number(f.saldo_pendiente || 0);
+                        const abonoVal = abonosMap[f.id] ?? '';
+
+                        return (
+                          <View
+                            key={f.id}
+                            style={{
+                              padding: 12,
+                              borderRadius: 8,
+                              borderWidth: 1.5,
+                              borderColor: isSelected ? '#801c1d' : themeColors.border,
+                              backgroundColor: isSelected ? '#801c1d08' : themeColors.backgroundElement,
+                              gap: 10
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <TouchableOpacity
+                                onPress={() => handleToggleFacturaSeleccionada(f)}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}
+                              >
+                                <Ionicons
+                                  name={isSelected ? "checkbox" : "square-outline"}
+                                  size={22}
+                                  color={isSelected ? "#801c1d" : themeColors.textSecondary}
+                                />
+                                <View>
+                                  <Text style={{ fontSize: 14, fontWeight: '800', color: themeColors.text }}>
+                                    Factura {f.fullFolio || f.folio}
+                                  </Text>
+                                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                                    Fecha: {f.fecha} • Total Factura: ${f.precio_total?.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+
+                              <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={{ fontSize: 10, color: themeColors.textSecondary, fontWeight: '700' }}>SALDO PENDIENTE</Text>
+                                <Text style={{ fontSize: 14, fontWeight: '800', color: '#b91c1c' }}>
+                                  ${saldoPend.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                </Text>
+                              </View>
+                            </View>
+
+                            {/* Fila de Abono cuando está seleccionada */}
+                            {isSelected && (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: 8 }}>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                                  Monto a abonar ($):
+                                </Text>
+                                <TextInput
+                                  style={{
+                                    height: 38,
+                                    borderWidth: 1,
+                                    borderColor: '#801c1d',
+                                    borderRadius: 6,
+                                    paddingHorizontal: 10,
+                                    fontSize: 14,
+                                    fontWeight: '700',
+                                    color: themeColors.text,
+                                    backgroundColor: themeColors.background,
+                                    width: 140
+                                  }}
+                                  value={abonoVal}
+                                  onChangeText={(txt) => handleCambiarAbono(f.id, txt, saldoPend)}
+                                  keyboardType="numeric"
+                                  placeholder="0.00"
+                                />
+                                <TouchableOpacity
+                                  onPress={() => handlePagarSaldoCompleto(f.id, saldoPend)}
+                                  style={{
+                                    backgroundColor: '#801c1d18',
+                                    borderColor: '#801c1d',
+                                    borderWidth: 1,
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 6,
+                                    borderRadius: 6
+                                  }}
+                                >
+                                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#801c1d' }}>Pagar Todo (${saldoPend.toFixed(2)})</Text>
+                                </TouchableOpacity>
+                              </View>
+                            )}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* 3. DATOS DE LA TRANSFERENCIA O DEPÓSITO */}
+              {pagoCliente && (
+                <View style={[styles.card, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                  <Text style={[styles.cardTitle, { color: themeColors.text, fontSize: 13, marginBottom: 12 }]}>
+                    3. Datos del Depósito / Pago Recibido
+                  </Text>
+
+                  {/* Banner Total del Pago */}
+                  <View style={{ backgroundColor: '#f0fdf4', borderColor: '#22c55e', borderWidth: 1.5, borderRadius: 8, padding: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <View>
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#15803d', textTransform: 'uppercase' }}>
+                        Monto Total del Depósito
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#166534' }}>
+                        Suma total de abonos a las facturas seleccionadas
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 22, fontWeight: '900', color: '#15803d' }}>
+                      ${totalAbonosCalculado.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Text>
+                  </View>
+
+                  <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: 12, marginBottom: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Fecha del Depósito *</Text>
+                      <TextInput
+                        style={[styles.input, { color: themeColors.text, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                        value={fechaPagoVal}
+                        onChangeText={setFechaPagoVal}
+                        placeholder="AAAA-MM-DD"
+                      />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Serie y Folio de Pago</Text>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <TextInput
+                          style={[styles.input, { width: 50, color: themeColors.text, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, textAlign: 'center', fontWeight: '800' }]}
+                          value={seriePago}
+                          onChangeText={setSeriePago}
+                        />
+                        <TextInput
+                          style={[styles.input, { flex: 1, color: themeColors.text, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, fontWeight: '800' }]}
+                          value={folioPago}
+                          onChangeText={setFolioPago}
+                        />
+                      </View>
+                    </View>
+                  </View>
+
+                  <Text style={[styles.fieldLabel, { color: themeColors.textSecondary, marginBottom: 6 }]}>Forma de Pago SAT *</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      {FORMAS_PAGO.map(fp => (
+                        <TouchableOpacity
+                          key={fp.code}
+                          onPress={() => setFormaPagoPago(fp.code)}
+                          style={[
+                            styles.chipBtn,
+                            {
+                              borderColor: formaPagoPago === fp.code ? '#801c1d' : themeColors.border,
+                              backgroundColor: formaPagoPago === fp.code ? '#801c1d20' : themeColors.backgroundElement
+                            }
+                          ]}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: formaPagoPago === fp.code ? '800' : '500', color: formaPagoPago === fp.code ? '#801c1d' : themeColors.textSecondary }}>
+                            {fp.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+
+                  <CustomInput
+                    label="Referencia Bancaria / No. Operación (Opcional)"
+                    value={referenciaPago}
+                    onChangeText={setReferenciaPago}
+                    placeholder="Ej. Transferencia SPEI #982341"
+                  />
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Footer de Acciones */}
+            <View style={[styles.modalFooter, { borderTopColor: themeColors.border, gap: 10, padding: 14, flexDirection: 'row', justifyContent: 'flex-end' }]}>
+              <TouchableOpacity
+                onPress={() => setIsPagoModalOpen(false)}
+                disabled={isSubmittingPago}
+                style={[styles.modalActionBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, paddingHorizontal: 16 }]}
+              >
+                <Text style={[styles.modalActionText, { color: themeColors.text }]}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handlePrevisualizarReciboPago}
+                disabled={isSubmittingPago || totalAbonosCalculado <= 0}
+                style={[styles.modalActionBtn, { backgroundColor: '#801c1d15', borderColor: '#801c1d', paddingHorizontal: 16 }]}
+              >
+                <Ionicons name="eye-outline" size={17} color="#801c1d" />
+                <Text style={[styles.modalActionText, { color: '#801c1d', fontSize: 13, fontWeight: '700' }]}>Vista Previa</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleTimbrarPagoModal}
+                disabled={isSubmittingPago || totalAbonosCalculado <= 0}
+                style={[styles.modalActionBtn, { backgroundColor: '#801c1d', borderColor: '#801c1d', paddingHorizontal: 18 }]}
+              >
+                {isSubmittingPago ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                    <Text style={[styles.modalActionText, { color: '#fff', fontSize: 13, fontWeight: '800' }]}>
+                      Timbrar Complemento (${totalAbonosCalculado.toLocaleString('es-MX', { minimumFractionDigits: 2 })})
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* MODAL DE VISTA PREVIA INTERACTIVA DE FACTURA / RECIBO DE PAGO */}
       <FacturaPreviewModal
         visible={previewModalVisible}
-        onClose={() => setPreviewModalVisible(false)}
+        onClose={() => {
+          setPreviewModalVisible(false);
+          if (returnToPagoModal) {
+            setReturnToPagoModal(false);
+            setIsPagoModalOpen(true);
+          }
+        }}
         venta={previewVenta}
         facturaData={previewFacturaData}
         xmlText={previewXmlText}
+        customHtml={previewCustomHtml}
         isDraft={previewIsDraft}
         title={previewTitle}
-        onConfirmTimbrar={previewIsDraft ? () => {
+        onConfirmTimbrar={previewIsDraft && !previewCustomHtml ? () => {
           setPreviewModalVisible(false);
           handleTimbrarFactura();
         } : undefined}
@@ -2229,5 +3295,30 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     gap: 10,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+  },
+  modalFooter: {
+    borderTopWidth: 1,
+    paddingTop: 12,
+  },
+  modalActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+  },
+  modalActionText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
