@@ -19,7 +19,7 @@ module.exports = {
       }
     },
     android: {
-      versionCode: 66,
+      versionCode: 67,
       adaptiveIcon: {
         backgroundColor: "#E6F4FE",
         foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -43,6 +43,9 @@ module.exports = {
       "expo-router",
       "expo-font",
       "expo-image",
+      "expo-sharing",
+      "expo-status-bar",
+      "expo-web-browser",
       [
         "expo-splash-screen",
         {

@@ -85,6 +85,336 @@ const hasPolicyAlert = (g: Gasto): { alert: boolean; reason: string } => {
 
 export const ReportGenerator = {
   /**
+   * Genera un reporte PDF completo de movimientos de inventario (Entradas, Salidas, Retiros, Compras)
+   */
+  async exportMovimientosToPDF(movimientos: any[], title: string = 'Reporte de Movimientos de Inventario'): Promise<void> {
+    if (movimientos.length === 0) {
+      throw new Error('No hay movimientos para exportar.');
+    }
+    const branding = await getCompanyBranding();
+
+    const totalMovs = movimientos.length;
+    let totalEntradas = 0;
+    let totalSalidas = 0;
+    movimientos.forEach(m => {
+      const q = Number(m.cantidad || 0);
+      if (m.tipo === 'ENTRADA') totalEntradas += q;
+      else totalSalidas += q;
+    });
+
+    let tableRows = '';
+    movimientos.forEach((m, idx) => {
+      const fecha = m.fecha ? new Date(m.fecha).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }) : '-';
+      const isEntrada = m.tipo === 'ENTRADA';
+      const typeBadgeColor = isEntrada ? '#10B981' : '#EF4444';
+      const subtipoLabel = m.subtipo || m.tipo;
+
+      const prodName = m.producto_nombre || 'Producto';
+      const prodSku = m.producto_sku || '-';
+      const cantFormatted = `${isEntrada ? '+' : '-'}${m.cantidad} ${m.producto_unidad || 'pza'}`;
+      const responsable = m.usuario_nombre || m.empleado_nombre || 'Almacén';
+      const folioDetalle = m.detalle_motivo || m.folio_factura || '-';
+      const clientInfo = m.cliente_nombre ? `${m.cliente_nombre}${m.tipo_gasto ? ` [${m.tipo_gasto}]` : ''}` : '';
+
+      tableRows += `
+        <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
+          <td style="font-size: 10px; color: #4b5563; white-space: nowrap;">${fecha}</td>
+          <td>
+            <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: ${typeBadgeColor};">
+              ${m.tipo}
+            </span>
+            ${subtipoLabel !== m.tipo ? `<br/><small style="font-size: 8px; color: #6b7280; font-weight: 600;">${subtipoLabel}</small>` : ''}
+          </td>
+          <td>
+            <strong style="font-size: 11px; color: #111827;">${prodName}</strong><br/>
+            <small style="font-size: 9px; color: #6b7280;">SKU: ${prodSku}</small>
+          </td>
+          <td style="text-align: right; font-weight: bold; font-size: 11px; color: ${typeBadgeColor}; white-space: nowrap;">
+            ${cantFormatted}
+          </td>
+          <td style="font-size: 10px; color: #374151;">${responsable}</td>
+          <td style="font-size: 9px; color: #4b5563;">
+            ${folioDetalle}
+            ${clientInfo ? `<br/><span style="color: #2563EB; font-weight: 600;">${clientInfo}</span>` : ''}
+          </td>
+        </tr>
+      `;
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 20px; color: #1f2937; font-size: 11px; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #E11D48; padding-bottom: 12px; margin-bottom: 16px; }
+          .logo { max-height: 48px; }
+          .title { font-size: 18px; font-weight: bold; color: #111827; margin: 0; }
+          .subtitle { font-size: 11px; color: #6b7280; margin-top: 4px; }
+          .summary-cards { display: flex; gap: 12px; margin-bottom: 16px; }
+          .card { flex: 1; padding: 10px; background: #f3f4f6; border-radius: 6px; border: 1px solid #e5e7eb; }
+          .card-title { font-size: 9px; color: #6b7280; text-transform: uppercase; font-weight: bold; }
+          .card-val { font-size: 16px; font-weight: bold; color: #111827; margin-top: 2px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+          th { background-color: #1f2937; color: #ffffff; text-align: left; padding: 8px 6px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+          td { padding: 6px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+          .footer { margin-top: 24px; text-align: center; font-size: 9px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 class="title">${title}</h1>
+            <div class="subtitle">Generado el: ${new Date().toLocaleString('es-MX')} • Empresa: ${branding.name}</div>
+          </div>
+          ${branding.logo ? `<img class="logo" src="${branding.logo}" />` : `<h2 style="color: #E11D48; margin: 0;">${branding.name}</h2>`}
+        </div>
+
+        <div class="summary-cards">
+          <div class="card">
+            <div class="card-title">Total Registros</div>
+            <div class="card-val">${totalMovs}</div>
+          </div>
+          <div class="card" style="border-left: 4px solid #10B981;">
+            <div class="card-title" style="color: #059669;">Total Entradas</div>
+            <div class="card-val" style="color: #059669;">+${totalEntradas} un.</div>
+          </div>
+          <div class="card" style="border-left: 4px solid #EF4444;">
+            <div class="card-title" style="color: #DC2626;">Total Salidas / Retiros</div>
+            <div class="card-val" style="color: #DC2626;">-${totalSalidas} un.</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th width="12%">Fecha</th>
+              <th width="10%">Tipo</th>
+              <th width="32%">Producto</th>
+              <th width="12%" style="text-align: right;">Cantidad</th>
+              <th width="16%">Responsable</th>
+              <th width="18%">Concepto / Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Documento oficial generado desde Portal ${branding.name} • Control y Auditoría de Almacén
+        </div>
+      </body>
+      </html>
+    `;
+
+    await ReportGenerator._printOrDownload(htmlContent, `reporte_movimientos_${Date.now()}.pdf`);
+  },
+
+  /**
+   * Exporta el listado de movimientos de inventario a formato CSV compatible con Excel
+   */
+  async exportMovimientosToCSV(movimientos: any[], filename: string = 'reporte_movimientos_inventario.csv'): Promise<void> {
+    if (movimientos.length === 0) {
+      throw new Error('No hay movimientos para exportar.');
+    }
+
+    const headers = [
+      'ID',
+      'Fecha',
+      'Tipo',
+      'Subtipo',
+      'SKU',
+      'Producto',
+      'Cantidad',
+      'Unidad',
+      'Responsable / Usuario',
+      'Proveedor',
+      'Cliente',
+      'Tipo de Gasto',
+      'Folio / Concepto / Detalle'
+    ];
+
+    const rows = movimientos.map(m => [
+      escapeCSVCell(m.id),
+      escapeCSVCell(m.fecha ? new Date(m.fecha).toISOString().replace('T', ' ').substring(0, 19) : ''),
+      escapeCSVCell(m.tipo || 'MOVIMIENTO'),
+      escapeCSVCell(m.subtipo || m.tipo || ''),
+      escapeCSVCell(m.producto_sku || '-'),
+      escapeCSVCell(m.producto_nombre || 'Producto'),
+      escapeCSVCell(m.cantidad || 0),
+      escapeCSVCell(m.producto_unidad || 'pza'),
+      escapeCSVCell(m.usuario_nombre || m.empleado_nombre || 'Almacén'),
+      escapeCSVCell(m.proveedor_nombre || ''),
+      escapeCSVCell(m.cliente_nombre || ''),
+      escapeCSVCell(m.tipo_gasto || ''),
+      escapeCSVCell(m.detalle_motivo || m.folio_factura || '')
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+
+    if (Platform.OS === 'web') {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const fileUri = `${cacheDirectory}${filename}`;
+      await writeAsStringAsync(fileUri, csvContent, { encoding: EncodingType.UTF8 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Exportar Movimientos CSV' });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    }
+  },
+
+  /**
+   * Genera el vale individual de un movimiento o retiro de material en PDF
+   */
+  async exportSingleMovimientoValePDF(mov: any): Promise<void> {
+    const branding = await getCompanyBranding();
+    const fecha = mov.fecha ? new Date(mov.fecha).toLocaleString('es-MX', { dateStyle: 'long', timeStyle: 'short' }) : new Date().toLocaleDateString('es-MX');
+    const isEntrada = mov.tipo === 'ENTRADA';
+    const tipoColor = isEntrada ? '#10B981' : '#E11D48';
+    const tipoTitle = isEntrada ? 'VALE DE ENTRADA / INGRESO DE MATERIAL' : 'VALE DE SALIDA / RETIRO DE MATERIAL';
+
+    const items = Array.isArray(mov.materiales) && mov.materiales.length > 0 
+      ? mov.materiales 
+      : [{
+          sku: mov.producto_sku || '-',
+          nombre: mov.producto_nombre || 'Producto',
+          cantidad: mov.cantidad || 0,
+          unidad: mov.producto_unidad || 'pza'
+        }];
+
+    let itemsRows = '';
+    items.forEach((item: any, idx: number) => {
+      itemsRows += `
+        <tr>
+          <td style="text-align: center;">${idx + 1}</td>
+          <td><code>${item.sku || '-'}</code></td>
+          <td><strong>${item.nombre}</strong></td>
+          <td style="text-align: right; font-weight: bold; font-size: 13px; color: ${tipoColor};">${item.cantidad} ${item.unidad || 'pza'}</td>
+        </tr>
+      `;
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 30px; color: #1f2937; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid ${tipoColor}; padding-bottom: 15px; }
+          .logo { max-height: 50px; }
+          .title { font-size: 20px; font-weight: bold; color: ${tipoColor}; margin: 0; }
+          .folio { font-size: 12px; color: #6b7280; margin-top: 4px; }
+          .info-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-top: 20px; display: flex; flex-wrap: wrap; gap: 15px; }
+          .info-col { flex: 1; min-width: 200px; }
+          .info-label { font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; }
+          .info-val { font-size: 13px; font-weight: bold; color: #111827; margin-top: 2px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 25px; }
+          th { background-color: #1f2937; color: #fff; padding: 10px; font-size: 11px; text-transform: uppercase; }
+          td { padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 12px; }
+          .signatures { display: flex; justify-content: space-between; margin-top: 70px; }
+          .sig-box { width: 42%; text-align: center; border-top: 1px solid #111827; padding-top: 8px; font-size: 11px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 class="title">${tipoTitle}</h1>
+            <div class="folio">Folio / Identificador: <strong>${mov.id ? mov.id.substring(0, 13) : 'VALE-INTTEC'}</strong></div>
+          </div>
+          ${branding.logo ? `<img class="logo" src="${branding.logo}" />` : `<h2 style="color: ${tipoColor}; margin: 0;">${branding.name}</h2>`}
+        </div>
+
+        <div class="info-box">
+          <div class="info-col">
+            <div class="info-label">Fecha y Hora</div>
+            <div class="info-val">${fecha}</div>
+          </div>
+          <div class="info-col">
+            <div class="info-label">Responsable / Empleado</div>
+            <div class="info-val">${mov.usuario_nombre || mov.empleado_nombre || 'Personal Autorizado'}</div>
+          </div>
+          ${mov.cliente_nombre ? `
+          <div class="info-col">
+            <div class="info-label">Cliente / Destino</div>
+            <div class="info-val">${mov.cliente_nombre} ${mov.sucursal_nombre ? `(${mov.sucursal_nombre})` : ''}</div>
+          </div>
+          ` : ''}
+          ${mov.tipo_gasto ? `
+          <div class="info-col">
+            <div class="info-label">Tipo de Gasto / Proyecto</div>
+            <div class="info-val">${mov.tipo_gasto}</div>
+          </div>
+          ` : ''}
+          <div class="info-col" style="width: 100%;">
+            <div class="info-label">Concepto / Motivo</div>
+            <div class="info-val">${mov.detalle_motivo || mov.motivo || mov.folio_factura || 'Movimiento de material en almacén'}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th width="8%">#</th>
+              <th width="22%">SKU</th>
+              <th width="50%">Descripción del Material</th>
+              <th width="20%" style="text-align: right;">Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRows}
+          </tbody>
+        </table>
+
+        <div class="signatures">
+          <div class="sig-box">
+            <strong>Entregó / Autorizó</strong><br/>
+            <span>Encargado de Almacén</span>
+          </div>
+          <div class="sig-box">
+            <strong>Recibió / Conforme</strong><br/>
+            <span>${mov.usuario_nombre || mov.empleado_nombre || 'Empleado Receptor'}</span>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    await ReportGenerator._printOrDownload(htmlContent, `vale_movimiento_${mov.id || Date.now()}.pdf`);
+  },
+
+  /**
+   * Helper unificado para imprimir en Web o compartir en Móvil
+   */
+  async _printOrDownload(htmlContent: string, defaultFilename: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      const newWindow = window.open('', '_blank');
+      if (newWindow) {
+        newWindow.document.write(htmlContent);
+        newWindow.document.close();
+      }
+    } else {
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: defaultFilename });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    }
+  },
+
+  /**
    * Genera un reporte PDF de los gastos y lo comparte mediante la hoja nativa
    */
   async exportToPDF(gastos: Gasto[], title: string = 'Reporte de Control de Gastos'): Promise<void> {
@@ -1782,6 +2112,607 @@ export const ReportGenerator = {
   },
 
   /**
+   * Genera un reporte PDF consolidado del historial de retiros de material y lo comparte
+   */
+  async exportRetirosToPDF(
+    retiros: any[],
+    title: string = 'Reporte de Retiros de Material'
+  ): Promise<void> {
+    if (retiros.length === 0) {
+      throw new Error('No hay retiros registrados para exportar.');
+    }
+    const branding = await getCompanyBranding();
+
+    const totalRetiros = retiros.length;
+    let totalPiezas = 0;
+    const tiposCount: Record<string, number> = { Servicio: 0, Proyecto: 0, Venta: 0, Operativo: 0 };
+
+    retiros.forEach((r) => {
+      const tipo = r.tipo_gasto || 'Operativo';
+      tiposCount[tipo] = (tiposCount[tipo] || 0) + 1;
+      const mats = Array.isArray(r.materiales) ? r.materiales : [];
+      mats.forEach((m: any) => {
+        totalPiezas += Number(m.cantidad || 0);
+      });
+    });
+
+    let tableRows = '';
+    retiros.forEach((r) => {
+      const fecha = r.created_at ? new Date(r.created_at).toLocaleString('es-MX', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      }) : 'N/A';
+
+      const mats = Array.isArray(r.materiales) ? r.materiales : [];
+      const matsHtml = mats.map((m: any) => 
+        `<div style="margin-bottom: 3px;"><strong>${m.cantidad} ${m.unidad || 'pza'}</strong> - ${m.nombre || 'Producto'} <span style="color: #666; font-size: 9px;">(${m.sku || '-'})</span></div>`
+      ).join('');
+
+      let tipoBadgeColor = '#4B5563';
+      if (r.tipo_gasto === 'Servicio') tipoBadgeColor = '#2563EB';
+      else if (r.tipo_gasto === 'Proyecto') tipoBadgeColor = '#7C3AED';
+      else if (r.tipo_gasto === 'Venta') tipoBadgeColor = '#059669';
+      else if (r.tipo_gasto === 'Operativo') tipoBadgeColor = '#D97706';
+
+      let clienteDisplay = r.cliente_nombre || '-';
+      if (r.is_split) {
+        clienteDisplay = `<span style="color: #7C3AED; font-weight: bold;">[Dividido en varios clientes]</span>`;
+      } else if (r.sucursal_nombre) {
+        clienteDisplay += `<br/><small style="color: #666;">Suc: ${r.sucursal_nombre}</small>`;
+      }
+
+      tableRows += `
+        <tr>
+          <td style="white-space: nowrap; font-size: 10px;">${fecha}</td>
+          <td><strong>${r.empleado_nombre || 'Desconocido'}</strong></td>
+          <td><span style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; color: #fff; background-color: ${tipoBadgeColor};">${r.tipo_gasto || 'Operativo'}</span></td>
+          <td>${clienteDisplay}</td>
+          <td style="font-size: 10px;">
+            ${r.detalle_servicio_proyecto ? `<strong>Detalle:</strong> ${r.detalle_servicio_proyecto}<br/>` : ''}
+            ${r.motivo ? `<strong>Motivo:</strong> ${r.motivo}<br/>` : ''}
+            ${r.proveedor ? `<small style="color: #666;">Prov: ${r.proveedor}</small>` : ''}
+          </td>
+          <td style="font-size: 10px;">${matsHtml || '<span style="color: #999;">Sin partidas</span>'}</td>
+        </tr>
+      `;
+    });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${title}</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 24px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @media print {
+            body {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            @page {
+              size: letter landscape;
+              margin: 10mm;
+            }
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 22px;
+            font-weight: bold;
+            margin: 0;
+          }
+          .subtitle {
+            color: #666;
+            font-size: 11px;
+            margin: 4px 0 0 0;
+          }
+          .summary-card {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 10px 14px;
+            text-align: center;
+          }
+          .summary-card .label {
+            font-size: 10px;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: 600;
+          }
+          .summary-card .value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #0d1b2a;
+            margin-top: 2px;
+          }
+          table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 10.5px;
+          }
+          table.data-table th {
+            background-color: #0d1b2a;
+            color: white;
+            text-align: left;
+            padding: 8px 6px;
+            font-weight: 600;
+          }
+          table.data-table td {
+            padding: 8px 6px;
+            border-bottom: 1px solid #e9ecef;
+            vertical-align: top;
+          }
+          table.data-table tr:nth-child(even) {
+            background-color: #fcfcfd;
+          }
+          .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 9px;
+            color: #aaa;
+            border-top: 1px solid #eee;
+            padding-top: 10px;
+          }
+          .logo-img {
+            width: 240px;
+            height: 70px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 15px; border: none;">
+          <tr>
+            <td style="vertical-align: middle; border: none; padding: 0;">
+              <h1 class="title">${title}</h1>
+              <p class="subtitle">Generado el: ${new Date().toLocaleString('es-MX')}</p>
+            </td>
+            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
+              <img class="logo-img" src="${branding.logo}" />
+            </td>
+          </tr>
+        </table>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; border: none;">
+          <tr>
+            <td style="width: 25%; padding-right: 6px; border: none;">
+              <div class="summary-card">
+                <div class="label">Total Retiros</div>
+                <div class="value">${totalRetiros}</div>
+              </div>
+            </td>
+            <td style="width: 25%; padding-left: 3px; padding-right: 3px; border: none;">
+              <div class="summary-card">
+                <div class="label">Unidades Retiradas</div>
+                <div class="value" style="color: #2563EB;">${Math.round(totalPiezas * 100) / 100}</div>
+              </div>
+            </td>
+            <td style="width: 25%; padding-left: 3px; padding-right: 3px; border: none;">
+              <div class="summary-card">
+                <div class="label">Servicios / Proyectos</div>
+                <div class="value" style="color: #7C3AED;">${(tiposCount.Servicio || 0) + (tiposCount.Proyecto || 0)}</div>
+              </div>
+            </td>
+            <td style="width: 25%; padding-left: 6px; border: none;">
+              <div class="summary-card">
+                <div class="label">Ventas / Operativos</div>
+                <div class="value" style="color: #059669;">${(tiposCount.Venta || 0) + (tiposCount.Operativo || 0)}</div>
+              </div>
+            </td>
+          </tr>
+        </table>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 13%">Fecha / Hora</th>
+              <th style="width: 14%">Empleado</th>
+              <th style="width: 10%">Tipo</th>
+              <th style="width: 18%">Cliente / Sucursal</th>
+              <th style="width: 20%">Detalle / Motivo</th>
+              <th style="width: 25%">Materiales Retirados</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Documento Oficial - Control de Inventario y Retiros de Material - Sistema Automatizado ${branding.name}
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      if (Platform.OS === 'web') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+
+          setTimeout(() => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+            }, 1000);
+          }, 500);
+        }
+        return;
+      }
+
+      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      const pdfFileName = `reporte_retiros_${Date.now()}.pdf`;
+      const safeUri = `${cacheDirectory}${pdfFileName}`;
+      
+      await writeAsStringAsync(safeUri, base64 || '', {
+        encoding: EncodingType.Base64,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(safeUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Exportar Reporte Retiros PDF',
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    } catch (error: any) {
+      logger.error('Error generating retiros PDF:', error);
+      throw new Error(error.message || 'Error al generar el reporte de retiros.');
+    }
+  },
+
+  /**
+   * Genera un Vale de Salida de Almacén individual en PDF para un retiro específico
+   */
+  async exportSingleRetiroValePDF(retiro: any): Promise<void> {
+    if (!retiro) throw new Error('No se especificó la información del retiro.');
+    const branding = await getCompanyBranding();
+
+    const fechaStr = retiro.created_at ? new Date(retiro.created_at).toLocaleString('es-MX', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    }) : 'N/A';
+
+    const mats = Array.isArray(retiro.materiales) ? retiro.materiales : [];
+    let matsRows = '';
+    mats.forEach((m: any, idx: number) => {
+      matsRows += `
+        <tr>
+          <td style="text-align: center;">${idx + 1}</td>
+          <td><strong>${m.sku || '-'}</strong></td>
+          <td>${m.nombre || 'Producto'}</td>
+          <td style="text-align: right; font-weight: bold;">${m.cantidad}</td>
+          <td style="text-align: center;">${m.unidad || 'pza'}</td>
+        </tr>
+      `;
+    });
+
+    let clientDetail = retiro.cliente_nombre || 'N/A';
+    if (retiro.is_split) {
+      clientDetail = 'Múltiples clientes (Dividido)';
+    } else if (retiro.sucursal_nombre) {
+      clientDetail += ` (Sucursal: ${retiro.sucursal_nombre})`;
+    }
+
+    const folioStr = retiro.id ? retiro.id.substring(0, 8).toUpperCase() : `RET-${Date.now().toString().slice(-6)}`;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Vale de Salida de Material - ${folioStr}</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 30px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @page {
+            size: letter portrait;
+            margin: 15mm;
+          }
+          .vale-box {
+            border: 2px solid #0d1b2a;
+            border-radius: 8px;
+            padding: 20px;
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 20px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin: 0;
+          }
+          .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+          }
+          .info-table td {
+            padding: 6px 4px;
+            font-size: 11px;
+            vertical-align: top;
+          }
+          .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 11px;
+          }
+          .items-table th {
+            background-color: #0d1b2a;
+            color: white;
+            padding: 8px;
+            text-align: left;
+          }
+          .items-table td {
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+          }
+          .items-table tr:nth-child(even) {
+            background-color: #f9fafb;
+          }
+          .signatures-table {
+            width: 100%;
+            margin-top: 60px;
+            border-collapse: collapse;
+          }
+          .signature-box {
+            width: 45%;
+            text-align: center;
+            border-top: 1px solid #333;
+            padding-top: 8px;
+            font-size: 11px;
+          }
+          .logo-img {
+            width: 220px;
+            height: 60px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="vale-box">
+          <table style="width: 100%; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 10px; border-collapse: collapse;">
+            <tr>
+              <td>
+                <div class="title">Vale de Salida de Almacén</div>
+                <div style="font-size: 12px; font-weight: bold; color: #2563EB; margin-top: 3px;">Folio: #${folioStr}</div>
+              </td>
+              <td style="text-align: right;">
+                <img class="logo-img" src="${branding.logo}" />
+              </td>
+            </tr>
+          </table>
+
+          <table class="info-table">
+            <tr>
+              <td style="width: 50%;"><strong>Empleado Solicitante:</strong> ${retiro.empleado_nombre || 'Desconocido'}</td>
+              <td style="width: 50%;"><strong>Fecha y Hora:</strong> ${fechaStr}</td>
+            </tr>
+            <tr>
+              <td><strong>Tipo de Destino:</strong> ${retiro.tipo_gasto || 'Operativo'}</td>
+              <td><strong>Cliente / Destino:</strong> ${clientDetail}</td>
+            </tr>
+            ${retiro.detalle_servicio_proyecto ? `<tr><td colspan="2"><strong>Detalle de Servicio o Proyecto:</strong> ${retiro.detalle_servicio_proyecto}</td></tr>` : ''}
+            ${retiro.motivo ? `<tr><td colspan="2"><strong>Motivo / Referencia:</strong> ${retiro.motivo}</td></tr>` : ''}
+            ${retiro.proveedor ? `<tr><td colspan="2"><strong>Proveedor / Comercio:</strong> ${retiro.proveedor}</td></tr>` : ''}
+          </table>
+
+          <div style="font-weight: bold; font-size: 12px; margin-top: 10px; color: #0d1b2a;">MATERIALES RETIRADOS:</div>
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th style="width: 8%; text-align: center;">#</th>
+                <th style="width: 22%;">SKU</th>
+                <th style="width: 46%;">Descripción del Material</th>
+                <th style="width: 12%; text-align: right;">Cantidad</th>
+                <th style="width: 12%; text-align: center;">Unidad</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${matsRows || '<tr><td colspan="5" style="text-align:center; color:#888;">Sin partidas</td></tr>'}
+            </tbody>
+          </table>
+
+          <table class="signatures-table">
+            <tr>
+              <td class="signature-box">
+                <strong>ENTREGÓ</strong><br/>
+                Encargado de Almacén / Administración
+              </td>
+              <td style="width: 10%;"></td>
+              <td class="signature-box">
+                <strong>RECIBIÓ</strong><br/>
+                ${retiro.empleado_nombre || 'Empleado Responsable'}
+              </td>
+            </tr>
+          </table>
+
+          <div style="text-align: center; font-size: 9px; color: #888; margin-top: 40px;">
+            Este documento ampara la entrega y responsabilidad del material especificado perteneciente a ${branding.name}.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    try {
+      if (Platform.OS === 'web') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+
+          setTimeout(() => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+            }, 1000);
+          }, 500);
+        }
+        return;
+      }
+
+      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      const pdfFileName = `vale_retiro_${folioStr}.pdf`;
+      const safeUri = `${cacheDirectory}${pdfFileName}`;
+      
+      await writeAsStringAsync(safeUri, base64 || '', {
+        encoding: EncodingType.Base64,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(safeUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: `Compartir Vale de Retiro ${folioStr}`,
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    } catch (error: any) {
+      logger.error('Error generating vale retiro PDF:', error);
+      throw new Error(error.message || 'Error al generar el vale de retiro.');
+    }
+  },
+
+  /**
+   * Genera un archivo CSV de retiros de material y lo comparte
+   */
+  async exportRetirosToCSV(
+    retiros: any[],
+    fileName: string = 'reporte_retiros_material.csv'
+  ): Promise<void> {
+    if (retiros.length === 0) {
+      throw new Error('No hay registros de retiro para exportar.');
+    }
+
+    let csvContent = '\uFEFF'; // BOM
+    csvContent += 'ID Retiro,Fecha,Empleado,Tipo Destino,Cliente,Sucursal,Proveedor,Detalle,Motivo,SKU,Material,Cantidad,Unidad\n';
+
+    retiros.forEach((r) => {
+      const fecha = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : '';
+      const mats = Array.isArray(r.materiales) ? r.materiales : [];
+
+      if (mats.length === 0) {
+        const row = [
+          escapeCSVCell(r.id),
+          escapeCSVCell(fecha),
+          escapeCSVCell(r.empleado_nombre),
+          escapeCSVCell(r.tipo_gasto || 'Operativo'),
+          escapeCSVCell(r.cliente_nombre || (r.is_split ? 'Dividido' : '')),
+          escapeCSVCell(r.sucursal_nombre || ''),
+          escapeCSVCell(r.proveedor || ''),
+          escapeCSVCell(r.detalle_servicio_proyecto || ''),
+          escapeCSVCell(r.motivo || ''),
+          '""',
+          '""',
+          '0',
+          '""'
+        ].join(',');
+        csvContent += row + '\n';
+      } else {
+        mats.forEach((m: any) => {
+          const row = [
+            escapeCSVCell(r.id),
+            escapeCSVCell(fecha),
+            escapeCSVCell(r.empleado_nombre),
+            escapeCSVCell(r.tipo_gasto || 'Operativo'),
+            escapeCSVCell(r.cliente_nombre || (r.is_split ? 'Dividido' : '')),
+            escapeCSVCell(r.sucursal_nombre || ''),
+            escapeCSVCell(r.proveedor || ''),
+            escapeCSVCell(r.detalle_servicio_proyecto || ''),
+            escapeCSVCell(r.motivo || ''),
+            escapeCSVCell(m.sku || ''),
+            escapeCSVCell(m.nombre || ''),
+            m.cantidad || 0,
+            escapeCSVCell(m.unidad || 'pza')
+          ].join(',');
+          csvContent += row + '\n';
+        });
+      }
+    });
+
+    try {
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', fileName);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      const fileUri = `${cacheDirectory}${fileName}`;
+      await writeAsStringAsync(fileUri, csvContent, {
+        encoding: EncodingType.UTF8,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Exportar Reporte Retiros CSV',
+          UTI: 'public.comma-separated-values-text',
+        });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    } catch (error: any) {
+      logger.error('Error generating retiros CSV:', error);
+      throw new Error(error.message || 'Error al generar reporte CSV de retiros.');
+    }
+  },
+
+
+  /**
    * Genera un reporte PDF de las ventas registradas y lo comparte
    */
   async exportVentasToPDF(
@@ -2470,66 +3401,328 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     logger.error('Error generando PDF:', error);
     if (Platform.OS === 'web') {
       window.alert('Error: No se pudo generar el documento PDF corporativo. ' + (error.message || ''));
-    } else {
       Alert.alert('Error', 'No se pudo generar el documento PDF corporativo. ' + (error.message || ''));
     }
   }
 }
 
+/**
+ * Limpia el folio eliminando cualquier texto descriptivo adicional (ej. '- Caja gris (1)', descripciones, etc.),
+ * garantizando que sólo quede el identificador limpio (ej. 'A0001', '4301442723', etc.).
+ */
+export function cleanFolio(rawFolio?: any): string {
+  if (!rawFolio && rawFolio !== 0) return '';
+  let str = String(rawFolio).trim();
+  if (str.includes(' - ')) {
+    str = str.split(' - ')[0].trim();
+  } else if (/\s*-\s*[a-zA-Z]/.test(str)) {
+    str = str.split(/\s*-\s*/)[0].trim();
+  } else if (/\s+[a-zA-Z(]/.test(str)) {
+    str = str.split(/\s+/)[0].trim();
+  }
+  return str;
+}
 
-
-
-export async function exportarFacturaOdooPDF(venta: any, facturaData: any, action: any = 'view') {
+export async function generarFacturaHTML(venta: any, facturaData: any, isDraft = false): Promise<string> {
   const branding = await getCompanyBranding();
-  const title = `Factura - ${facturaData.folio_number || facturaData.uuid}`;
-  
-  // Formatters
-  const formatMoney = (val: any) => `$ ${Number(val || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-  const formatDate = (dateString: any) => {
-    if (!dateString) return '';
-    const d = new Date(dateString);
-    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth()+1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+
+  // Diccionarios de mapeo para SAT
+  const formatRegimenFiscal = (val: any) => {
+    if (!val) return '612 - Personas físicas con actividades empresariales y profesionales';
+    const str = String(val).trim();
+    if (str.includes('-')) return str;
+    const map: Record<string, string> = {
+      '601': '601 - General de Ley Personas Morales',
+      '603': '603 - Personas Morales con Fines no Lucrativos',
+      '605': '605 - Sueldos y Salarios e Ingresos Asimilados a Salarios',
+      '606': '606 - Arrendamiento',
+      '607': '607 - Régimen de Enajenación o Adquisición de Bienes',
+      '608': '608 - Demás ingresos',
+      '610': '610 - Residentes en el Extranjero sin Establecimiento Permanente en México',
+      '611': '611 - Ingresos por Dividendos (socios y accionistas)',
+      '612': '612 - Personas físicas con actividades empresariales y profesionales',
+      '614': '614 - Ingresos por intereses',
+      '615': '615 - Régimen de los ingresos por obtención de premios',
+      '616': '616 - Sin obligaciones fiscales',
+      '620': '620 - Sociedades Cooperativas de Producción que optan por diferir sus ingresos',
+      '621': '621 - Incorporación Fiscal',
+      '622': '622 - Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras',
+      '623': '623 - Opcional para Grupos de Sociedades',
+      '624': '624 - Coordinados',
+      '625': '625 - Régimen de las Actividades Empresariales con ingresos a través de Plataformas Tecnológicas',
+      '626': '626 - Régimen Simplificado de Confianza',
+    };
+    return map[str] || str;
   };
 
-  // Resolucion exhaustiva y precisa de Subtotal, IVA y Total
-  let subtotal = Number(facturaData.subtotal || 0);
-  if (!subtotal && Array.isArray(facturaData.items) && facturaData.items.length > 0) {
+  const formatUsoCFDI = (val: any) => {
+    if (!val) return 'G03 - Gastos en general';
+    const str = String(val).trim();
+    if (str.includes('-')) return str;
+    const map: Record<string, string> = {
+      'G01': 'G01 - Adquisición de mercancías',
+      'G02': 'G02 - Devoluciones, descuentos o bonificaciones',
+      'G03': 'G03 - Gastos en general',
+      'I01': 'I01 - Construcciones',
+      'I02': 'I02 - Mobiliario y equipo de oficina por inversiones',
+      'I03': 'I03 - Equipo de transporte',
+      'I04': 'I04 - Equipo de cómputo y accesorios',
+      'I08': 'I08 - Otra maquinaria y equipo',
+      'D01': 'D01 - Honorarios médicos, dentales y gastos hospitalarios',
+      'D02': 'D02 - Gastos médicos por incapacidad o discapacidad',
+      'D03': 'D03 - Gastos funerales',
+      'D04': 'D04 - Donativos',
+      'S01': 'S01 - Sin efectos fiscales',
+      'CP01': 'CP01 - Pagos',
+      'CN01': 'CN01 - Nómina',
+    };
+    return map[str] || `${str} - Gastos en general`;
+  };
+
+  const formatFormaPago = (val: any) => {
+    if (!val) return '03 - Transferencia electrónica de fondos';
+    const str = String(val).trim();
+    if (str.includes('-')) return str;
+    const map: Record<string, string> = {
+      '01': '01 - Efectivo',
+      '02': '02 - Cheque nominativo',
+      '03': '03 - Transferencia electrónica de fondos',
+      '04': '04 - Tarjeta de crédito',
+      '05': '05 - Monedero electrónico',
+      '06': '06 - Dinero electrónico',
+      '08': '08 - Vales de despensa',
+      '12': '12 - Dación en pago',
+      '13': '13 - Pago por subrogación',
+      '14': '14 - Pago por consignación',
+      '15': '15 - Condonación',
+      '17': '17 - Compensación',
+      '23': '23 - Novación',
+      '24': '24 - Confusión',
+      '25': '25 - Remisión de deuda',
+      '26': '26 - Prescripción o caducidad',
+      '27': '27 - A satisfacción del acreedor',
+      '28': '28 - Tarjeta de débito',
+      '29': '29 - Tarjeta de servicios',
+      '30': '30 - Aplicación de anticipos',
+      '31': '31 - Intermediario pagos',
+      '99': '99 - Por definir',
+    };
+    return map[str] || str;
+  };
+
+  // Resolución de Serie y Folio formateado (ej. A0001)
+  const serie = (facturaData?.series || facturaData?.serie || venta?.cfdi_serie || venta?.factura_serie || 'A').toUpperCase().trim();
+  let folioNum = cleanFolio(facturaData?.folio_number || facturaData?.folio || venta?.cfdi_folio || venta?.factura_folio || venta?.folio || '');
+  if (folioNum.toUpperCase().startsWith(serie)) {
+    folioNum = folioNum.slice(serie.length).trim();
+  }
+  if (/^\d+$/.test(folioNum)) {
+    folioNum = String(parseInt(folioNum, 10)).padStart(4, '0');
+  } else if (!folioNum) {
+    folioNum = '0001';
+  }
+  const displayFolio = `${serie}${folioNum}`;
+
+  // Resolución de nombres y folios limpios
+  const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
+  const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  const fullFileName = `${clienteSanitized}_${displayFolio}`;
+  const title = isDraft ? `[BORRADOR] ${fullFileName}` : fullFileName;
+  
+  // Formatters de Dinero y Fecha
+  const formatMoney = (val: any) => `$ ${Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const resolveDateStr = () => {
+    return (
+      facturaData?.created_at ||
+      facturaData?.date ||
+      facturaData?.fecha ||
+      facturaData?.stamp?.date ||
+      venta?.fecha ||
+      venta?.created_at ||
+      new Date().toISOString()
+    );
+  };
+
+  const rawDate = resolveDateStr();
+  let fechaEmision = '2026-08-25';
+  try {
+    const d = new Date(rawDate);
+    if (!isNaN(d.getTime())) {
+      fechaEmision = d.toISOString().split('T')[0];
+    } else {
+      fechaEmision = String(rawDate).slice(0, 10);
+    }
+  } catch (_) {
+    fechaEmision = String(rawDate).slice(0, 10);
+  }
+
+  // Resolución de Subtotal, IVA y Total
+  let subtotal = Number(facturaData?.subtotal || 0);
+  if (!subtotal && Array.isArray(facturaData?.items) && facturaData.items.length > 0) {
     subtotal = facturaData.items.reduce((sum: number, it: any) => {
       const q = Number(it.quantity || 1);
       const p = Number(it.product?.price || 0);
       return sum + (q * p);
     }, 0);
   }
-  if (!subtotal && (venta.subtotal_venta || venta.subtotal)) {
+  if (!subtotal && (venta?.subtotal_venta || venta?.subtotal)) {
     subtotal = Number(venta.subtotal_venta || venta.subtotal);
   }
 
-  let total = Number(facturaData.total || venta.precio_total_facturado || venta.precio_total_venta || 0);
+  let total = Number(facturaData?.total || venta?.precio_total_facturado || venta?.precio_total_venta || 0);
 
   let iva = 0;
-  if (facturaData.taxes?.[0]?.amount !== undefined && facturaData.taxes?.[0]?.amount !== null && !isNaN(facturaData.taxes[0].amount)) {
+  if (facturaData?.taxes?.[0]?.amount !== undefined && facturaData?.taxes?.[0]?.amount !== null && !isNaN(facturaData.taxes[0].amount)) {
     iva = Number(facturaData.taxes[0].amount);
-  } else if (facturaData.total_impuestos_trasladados !== undefined && !isNaN(facturaData.total_impuestos_trasladados)) {
+  } else if (facturaData?.total_impuestos_trasladados !== undefined && !isNaN(facturaData.total_impuestos_trasladados)) {
     iva = Number(facturaData.total_impuestos_trasladados);
-  } else if (facturaData.iva !== undefined && !isNaN(facturaData.iva)) {
+  } else if (facturaData?.iva !== undefined && !isNaN(facturaData.iva)) {
     iva = Number(facturaData.iva);
-  } else if (Array.isArray(facturaData.items) && facturaData.items.some((it: any) => it.taxes?.[0]?.amount)) {
+  } else if (Array.isArray(facturaData?.items) && facturaData.items.some((it: any) => it.taxes?.[0]?.amount)) {
     iva = facturaData.items.reduce((sum: number, it: any) => sum + Number(it.taxes?.[0]?.amount || 0), 0);
   }
 
-  // Fallbacks si IVA sigue en 0
   if (!iva && total > 0 && subtotal > 0 && total > subtotal) {
     iva = total - subtotal;
   } else if (!iva && subtotal > 0) {
     iva = subtotal * 0.16;
   }
 
-  // Si total no estaba definido, calcularlo
   if (!total && subtotal > 0) {
     total = subtotal + iva;
   } else if (total > 0 && !subtotal) {
     subtotal = total / 1.16;
     if (!iva) iva = total - subtotal;
+  }
+
+  // Resolución de campos fiscales SAT para los sellos
+  const effectiveUuid = (
+    facturaData?.uuid || 
+    facturaData?.stamp?.uuid || 
+    venta?.cfdi_uuid || 
+    ''
+  ).trim();
+
+  const satCertNumber = (
+    facturaData?.stamp?.sat_cert_number || 
+    facturaData?.no_certificado_sat || 
+    facturaData?.noCertificadoSAT || 
+    '00001000000504465028'
+  );
+
+  const selloEmisor = (
+    facturaData?.stamp?.signature || 
+    facturaData?.stamp?.cfd_signature || 
+    facturaData?.sello_emisor || 
+    facturaData?.selloCFD || 
+    (effectiveUuid ? 'SELLO_CFD_EMISOR_REGISTRADO' : '')
+  );
+
+  const selloSat = (
+    facturaData?.stamp?.sat_signature || 
+    facturaData?.sello_sat || 
+    facturaData?.selloSAT || 
+    (effectiveUuid ? 'SELLO_SAT_OFICIAL_REGISTRADO' : '')
+  );
+
+  const pacRfc = facturaData?.stamp?.pac_rfc || facturaData?.stamp?.rfc_prov_certif || 'FIN1203015JA';
+  const fechaTimbradoStr = facturaData?.stamp?.date || fechaEmision;
+
+  const cadenaOriginal = (
+    facturaData?.stamp?.original_chain || 
+    facturaData?.cadena_original || 
+    (effectiveUuid ? `||1.1|${effectiveUuid}|${fechaTimbradoStr}|${pacRfc}|${selloEmisor}|${satCertNumber}||` : '')
+  );
+
+  const emisorRfc = facturaData?.issuer?.tax_id || 'FETR83041461A';
+  const receptorRfc = facturaData?.customer?.tax_id || venta?.cliente_rfc || 'XAXX010101000';
+
+  const satVerificationUrl = facturaData?.verification_url || (
+    effectiveUuid 
+      ? `https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${effectiveUuid}&re=${emisorRfc}&rr=${receptorRfc}&tt=${total.toFixed(6)}&fe=${(selloEmisor || '').slice(-8)}`
+      : ''
+  );
+
+  // Cliente
+  const clientName = (
+    facturaData?.customer?.legal_name || 
+    venta?.cliente || 
+    'PÚBLICO EN GENERAL'
+  ).toUpperCase();
+
+  const clientRfc = (
+    facturaData?.customer?.tax_id || 
+    venta?.cliente_rfc || 
+    'XAXX010101000'
+  ).toUpperCase();
+
+  const clientRegimenCode = (
+    facturaData?.customer?.tax_system || 
+    facturaData?.customer?.fiscal_regime || 
+    venta?.cliente_regimen || 
+    '612'
+  );
+  const clientRegimen = formatRegimenFiscal(clientRegimenCode);
+
+  const clientCp = (
+    facturaData?.customer?.address?.zip || 
+    facturaData?.customer?.tax_zip_code || 
+    facturaData?.customer?.zip || 
+    venta?.cliente_cp || 
+    '32690'
+  );
+
+  const clientAddressStreet = facturaData?.customer?.address?.street || venta?.cliente_direccion || '';
+  const clientAddressExterior = facturaData?.customer?.address?.exterior || '';
+  const clientAddressCity = facturaData?.customer?.address?.city || '';
+  const clientAddressStr = [clientAddressStreet, clientAddressExterior, clientAddressCity].filter(Boolean).join(', ');
+
+  // Detalles comerciales
+  const ordenCompra = venta?.orden_compra || facturaData?.orden_compra || facturaData?.purchase_order || 'NA';
+  const usoCfdiCode = facturaData?.use || facturaData?.customer?.cfdi_use || venta?.uso_cfdi || 'G03';
+  const usoCfdi = formatUsoCFDI(usoCfdiCode);
+  const metodoPago = facturaData?.payment_method || venta?.metodo_pago_sat || 'PUE';
+  const formaPagoCode = facturaData?.payment_form || venta?.forma_pago_sat || venta?.metodo_pago || '03';
+  const formaPago = formatFormaPago(formaPagoCode);
+
+  // Items
+  const rawItems = (Array.isArray(facturaData?.items) && facturaData.items.length > 0)
+    ? facturaData.items
+    : (Array.isArray(venta?.detalles) && venta.detalles.length > 0)
+      ? venta.detalles
+      : (Array.isArray(venta?.items) && venta.items.length > 0)
+        ? venta.items
+        : [];
+
+  const items = rawItems.map((it: any) => {
+    const description = it.product?.description || it.descripcion || it.nombre_producto || it.producto_nombre || it.concepto || it.nombre || 'Producto / Servicio';
+    const satCode = it.product?.product_key || it.sat_clave_prod || it.clave_sat || it.sku || it.sku_interno || '46171610';
+    const quantity = Number(it.quantity || it.cantidad || 1);
+    const price = Number(it.product?.price || it.precio_unitario || it.precio || 0);
+    const taxRate = it.taxes?.[0]?.rate !== undefined 
+      ? `${Math.round(it.taxes[0].rate * 100)}%` 
+      : (it.tasa_iva !== undefined ? `${Math.round(it.tasa_iva * 100)}%` : '16%');
+    const amount = Number(it.total || (quantity * price));
+    return {
+      description,
+      satCode,
+      quantity,
+      price,
+      taxRate,
+      amount
+    };
+  });
+
+  if (items.length === 0 && (total > 0 || subtotal > 0)) {
+    items.push({
+      description: venta?.concepto || facturaData?.concept || 'Venta de equipos y servicios de tecnología',
+      satCode: '46171610',
+      quantity: 1,
+      price: subtotal > 0 ? subtotal : total / 1.16,
+      taxRate: '16%',
+      amount: subtotal > 0 ? subtotal : total / 1.16
+    });
   }
 
   const htmlContent = `
@@ -2540,183 +3733,512 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
       <title>${title}</title>
       <style>
         @page { size: letter; margin: 0; }
-        body { font-family: 'Helvetica', Arial, sans-serif; color: #333; margin: 0; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        .page-container { width: 100%; min-height: 100vh; box-sizing: border-box; position: relative; }
-        .header-content { padding: 15px 40px 0 40px; display: flex; justify-content: space-between; align-items: flex-start; height: 174px; position: relative; z-index: 10; }
-        .company-details { text-align: right; font-size: 11px; line-height: 1.4; color: #333; margin-top: 5px; }
-        .page-body { padding: 0px 40px 100px 40px; position: relative; z-index: 10; margin-top: -50px; }
-        .row { display: flex; flex-wrap: wrap; margin-bottom: 20px; }
-        .col-6 { width: 50%; box-sizing: border-box; }
-        .col-7 { width: 58.333333%; box-sizing: border-box; padding-right: 20px; }
-        .col-5 { width: 41.666667%; box-sizing: border-box; }
-        .text-end { text-align: right; }
-        .text-center { text-align: center; }
-        .fw-bold { font-weight: bold; }
-        .mb-4 { margin-bottom: 24px; }
-        .mt-4 { margin-top: 24px; }
-        .mt-2 { margin-top: 8px; }
-        .ps-1 { padding-left: 2px; }
-        .text-muted { color: #6c757d; }
-        .inttec-red { color: #8B1D22; }
-        .section-header { border-bottom: 2px solid #8B1D22; font-weight: bold; margin-bottom: 8px; color: #8B1D22; text-transform: uppercase; padding-bottom: 3px; font-size: 10px; }
-        .table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
-        .table-red { border: 1px solid #dee2e6; border-top: none; }
-        .table-red thead th { background-color: #8B1D22; color: #FFFFFF !important; padding: 8px 8px; font-size: 10px; border-right: 1px solid #fff; }
-        .table-red thead th:last-child { border-right: none; }
-        .table-red tbody td { border: 1px solid #dee2e6; padding: 8px; font-size: 10px; }
-        .info-text { font-size: 10.5px; line-height: 1.4; color: #333; }
-        .table-details { width: 100%; border-collapse: collapse; border: 1px solid #dee2e6; }
-        .table-details td { padding: 4px 8px; border: 1px solid #dee2e6; font-size: 10px; }
-        .label-col { width: 35%; background-color: #f4f5f6; font-weight: normal; color: #111; }
-        .value-col { width: 65%; text-align: right; }
-        .table-totals { width: 100%; border-collapse: collapse; }
-        .table-totals td { padding: 6px 0; border-bottom: 1px solid #dee2e6; font-size: 11px; }
-        .table-totals tr:last-child td { border-bottom: none; border-top: 2px solid #333; font-size: 16px; font-weight: bold; padding-top: 10px; color: #111;}
-        .footer-bank { position: relative; border-top: 1px solid #000; padding-top: 10px; font-size: 9px; color: #333; line-height: 1.4; display: flex; justify-content: space-between; margin-top: 40px; margin-bottom: 20px;}
-        .footer-bank strong { color: #111; font-weight: bold; }
-        .sat-block { margin-top: 30px; border-top: 1px dashed #ccc; padding-top: 20px; display: flex; gap: 20px; page-break-inside: avoid; }
-        .sat-qr { width: 130px; height: 130px; flex-shrink: 0; }
-        .sat-info { flex: 1; font-size: 7px; color: #555; word-break: break-all; line-height: 1.2; }
-        .sat-title { font-weight: bold; color: #333; margin-top: 6px; margin-bottom: 2px; font-size: 8px; text-transform: uppercase; }
+        * { box-sizing: border-box; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          color: #1e293b;
+          margin: 0;
+          padding: 0;
+          background-color: #ffffff;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .page-container {
+          width: 100%;
+          min-height: 100vh;
+          position: relative;
+          background: #ffffff;
+        }
+
+        /* Top background wave/banner */
+        .top-banner {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 125px;
+          z-index: 1;
+          pointer-events: none;
+          overflow: hidden;
+        }
+
+        .header-content {
+          position: relative;
+          z-index: 2;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          padding: 26px 45px 0 45px;
+        }
+        .company-logo {
+          max-height: 70px;
+          max-width: 320px;
+          object-fit: contain;
+        }
+        .company-header-info {
+          text-align: right;
+          font-size: 11px;
+          line-height: 1.35;
+          color: #1e293b;
+        }
+        .company-header-info .brand-title {
+          font-weight: 800;
+          font-size: 11.5px;
+          color: #0f172a;
+          margin-bottom: 2px;
+        }
+
+        /* Invoice Body */
+        .invoice-body {
+          position: relative;
+          z-index: 2;
+          padding: 10px 45px 40px 45px;
+        }
+
+        /* Title block right */
+        .title-block {
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 15px;
+          margin-bottom: 24px;
+        }
+        .title-block-inner {
+          text-align: right;
+        }
+        .factura-title {
+          color: #801c1d;
+          font-size: 26px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
+          line-height: 1;
+          margin: 0;
+        }
+        .factura-folio {
+          font-size: 19px;
+          color: #475569;
+          font-weight: 500;
+          margin-top: 4px;
+          letter-spacing: 0.5px;
+        }
+        .uuid-label {
+          font-size: 8px;
+          font-weight: 800;
+          color: #1e293b;
+          letter-spacing: 0.5px;
+          text-transform: uppercase;
+          margin-top: 8px;
+        }
+        .uuid-value {
+          font-family: 'Courier New', Courier, monospace;
+          font-size: 8.5px;
+          color: #1e293b;
+          font-weight: 600;
+          margin-top: 1px;
+        }
+
+        /* 2-Columns Info Section */
+        .info-grid {
+          display: flex;
+          gap: 28px;
+          margin-bottom: 22px;
+        }
+        .info-col-client {
+          flex: 1.1;
+        }
+        .info-col-details {
+          flex: 0.9;
+        }
+        .section-heading {
+          color: #801c1d;
+          font-size: 9.5px;
+          font-weight: 800;
+          text-transform: uppercase;
+          border-bottom: 1.5px solid #801c1d;
+          padding-bottom: 2px;
+          margin-bottom: 7px;
+          letter-spacing: 0.2px;
+        }
+        .client-box {
+          font-size: 9.5px;
+          line-height: 1.45;
+          color: #1e293b;
+        }
+        .client-name {
+          font-weight: 800;
+          font-size: 10px;
+          color: #0f172a;
+          margin-bottom: 2px;
+        }
+
+        /* Details Table */
+        .details-table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        .details-table tr.alt-row {
+          background-color: #f8fafc;
+        }
+        .details-table td {
+          padding: 2.5px 6px;
+          font-size: 9px;
+          line-height: 1.35;
+        }
+        .details-lbl {
+          color: #334155;
+          font-weight: 500;
+          width: 38%;
+        }
+        .details-val {
+          color: #0f172a;
+          text-align: right;
+          font-weight: 500;
+          width: 62%;
+        }
+
+        /* Items Table */
+        .items-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-top: 6px;
+          margin-bottom: 8px;
+        }
+        .items-table thead th {
+          background-color: #801c1d;
+          color: #ffffff;
+          font-size: 9px;
+          font-weight: 800;
+          padding: 6px 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.3px;
+        }
+        .items-table tbody td {
+          padding: 8px 8px;
+          font-size: 9px;
+          border-bottom: 1px solid #e2e8f0;
+          vertical-align: middle;
+        }
+        .col-desc {
+          color: #0f172a;
+          font-weight: 700;
+          line-height: 1.35;
+        }
+        .col-center {
+          text-align: center;
+          color: #334155;
+        }
+        .col-right {
+          text-align: right;
+          color: #334155;
+        }
+
+        /* Totals Block */
+        .totals-container {
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 14px;
+        }
+        .totals-table {
+          width: 275px;
+          border-collapse: collapse;
+        }
+        .totals-table td {
+          padding: 4px 10px;
+          font-size: 9.5px;
+        }
+        .tot-lbl {
+          background-color: #f8fafc;
+          color: #334155;
+          width: 50%;
+          border-bottom: 1px solid #e2e8f0;
+          border-right: 1px solid #e2e8f0;
+          font-weight: 500;
+        }
+        .tot-val {
+          text-align: right;
+          color: #0f172a;
+          width: 50%;
+          border-bottom: 1px solid #e2e8f0;
+          font-weight: 500;
+        }
+        .tot-iva-row .tot-lbl,
+        .tot-iva-row .tot-val {
+          border-bottom: 2px solid #0f172a;
+        }
+        .tot-total-row td {
+          padding-top: 8px;
+          padding-bottom: 8px;
+          border-bottom: none;
+        }
+        .tot-grand-lbl {
+          font-size: 14px !important;
+          font-weight: 800;
+          color: #0f172a;
+          letter-spacing: 0.5px;
+        }
+        .tot-grand-val {
+          font-size: 15px !important;
+          font-weight: 800;
+          text-align: right;
+          color: #0f172a;
+        }
+
+        /* Divider */
+        .full-divider {
+          border-top: 1px solid #cbd5e1;
+          margin: 32px 0 20px 0;
+        }
+
+        /* SAT Stamps Block */
+        .sat-block {
+          display: flex;
+          align-items: flex-start;
+          gap: 16px;
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+        .sat-qr-col {
+          width: 95px;
+          flex-shrink: 0;
+        }
+        .sat-qr-img {
+          width: 95px;
+          height: 95px;
+          display: block;
+        }
+        .sat-box-col {
+          flex: 1;
+          border: 1px solid #cbd5e1;
+          border-radius: 4px;
+          padding: 7px 10px;
+        }
+        .sat-group {
+          margin-bottom: 5px;
+        }
+        .sat-group:last-child {
+          margin-bottom: 0;
+        }
+        .sat-tag {
+          color: #801c1d;
+          font-weight: 800;
+          font-size: 7.5px;
+          display: block;
+          margin-bottom: 1px;
+        }
+        .sat-stamp {
+          font-family: 'Courier New', Courier, monospace;
+          font-size: 6px;
+          line-height: 1.25;
+          color: #334155;
+          word-break: break-all;
+        }
+
+        /* Bottom Footer */
+        .invoice-footer {
+          border-top: 1.5px solid #801c1d;
+          margin-top: 32px;
+          padding-top: 8px;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+        .issuer-name {
+          color: #801c1d;
+          font-weight: 800;
+          font-size: 9.5px;
+          margin-bottom: 3px;
+          letter-spacing: 0.2px;
+          text-transform: uppercase;
+        }
+        .issuer-details {
+          font-size: 8px;
+          color: #334155;
+          line-height: 1.4;
+        }
+        .footer-page {
+          font-size: 8px;
+          color: #64748b;
+          font-weight: normal;
+        }
+
+        @media print {
+          @page { size: letter; margin: 0; }
+          body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: #fff !important; }
+          .page-container { width: 100% !important; min-height: auto !important; }
+          .invoice-body { padding: 10px 45px 30px 45px !important; }
+          .sat-block { page-break-inside: avoid !important; break-inside: avoid !important; }
+          .invoice-footer { page-break-inside: avoid !important; break-inside: avoid !important; }
+        }
       </style>
     </head>
     <body>
+      ${isDraft ? `
+        <div style="background-color: #fef3c7; border-bottom: 2px solid #f59e0b; color: #b45309; text-align: center; padding: 8px 16px; font-weight: 800; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; z-index: 100; position: relative;">
+          ⚠️ VISTA PREVIA / BORRADOR — DOCUMENTO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
+        </div>
+        <div style="position: fixed; top: 38%; left: 0; width: 100%; text-align: center; font-size: 80px; font-weight: 900; color: rgba(220, 38, 38, 0.08); transform: rotate(-30deg); pointer-events: none; z-index: 999; letter-spacing: 12px; font-family: sans-serif;">
+          BORRADOR
+        </div>
+      ` : ''}
+
       <div class="page-container">
-        <!-- HEADER BG ODOO -->
-        <div style="position: absolute; top: -90px; left: 0; width: 100%; height: 174px; z-index: 1;">
-            <div style="position: absolute; top: 87px; left: 0; width: 100%; height: 0; border-top: 87px solid #EAE6E2;"></div>
-            <div style="position: absolute; top: 174px; left: 0; width: 60%; height: 0; border-top: 87px solid #EAE6E2;"></div>
-            <div style="position: absolute; top: 174px; left: 60%; width: 0; height: 0; border-top: 87px solid #EAE6E2; border-right: 80px solid transparent;"></div>
+        <!-- Top wave banner -->
+        <div class="top-banner">
+          <svg viewBox="0 0 1000 125" preserveAspectRatio="none" style="width: 100%; height: 125px; display: block;">
+            <path d="M 0,0 L 1000,0 L 1000,105 C 800,128, 480,135, 0,115 Z" fill="#F0EFEA" />
+          </svg>
         </div>
-        
+
+        <!-- Header Content -->
         <div class="header-content">
-          <div style="width: 50%;">
-            <img src="${branding.logo}" alt="Logo" style="max-height: 150px; height: 170px; width: 450px; object-fit: contain; margin-top: -10px; z-index: 10; position: relative;">
+          <div>
+            <img src="${branding.logo}" alt="Logo" class="company-logo" />
           </div>
-          <div class="company-details" style="width: 50%;">
-            <div style="font-weight: bold; font-size: 13px;">${facturaData.issuer?.legal_name || branding.name}</div>
-            <div>RFC: ${facturaData.issuer?.tax_id || 'FETR83041461A'}</div>
-            <div>${facturaData.issuer?.zip ? `Lugar Expedición (CP): ${facturaData.issuer.zip}` : 'Ozorno 811, 31107 Chihuahua, CHH'}</div>
-            <div>Régimen Fiscal: ${facturaData.issuer?.tax_system || '612'}</div>
+          <div class="company-header-info">
+            <div class="brand-title">INTTEC</div>
+            <div>Ozorno 811</div>
+            <div>31107 Chihuahua, CHH</div>
+            <div>México</div>
           </div>
         </div>
 
-        <div class="page-body">
-          <div class="row mb-4" style="margin-top: -15px;">
-              <div class="col-6"></div>
-              <div class="col-6 text-end">
-                  <h1 class="inttec-red fw-bold" style="font-size: 26px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">FACTURA</h1>
-                  <h2 class="text-muted" style="font-size: 20px; font-weight: normal; margin-top: 0;">${facturaData.folio_number || (facturaData.uuid ? facturaData.uuid.split('-')[0] : '')}</h2>
-              </div>
+        <div class="invoice-body">
+          <!-- Title & Folio -->
+          <div class="title-block">
+            <div class="title-block-inner">
+              <h1 class="factura-title">FACTURA</h1>
+              <div class="factura-folio">${displayFolio}</div>
+              <div class="uuid-label">FOLIO FISCAL (UUID):</div>
+              <div class="uuid-value">${effectiveUuid || (isDraft ? 'PENDIENTE DE ASIGNACIÓN (BORRADOR)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
+            </div>
           </div>
 
-          <div class="row mb-4">
-              <div class="col-7">
-                  <div class="section-header">Datos del Cliente</div>
-                  <div class="info-text ps-1">
-                      <strong style="font-size: 11px;">${facturaData.customer?.legal_name || venta.cliente}</strong><br/>
-                      <strong>RFC:</strong> ${facturaData.customer?.tax_id || 'XAXX010101000'}<br/>
-                      <strong>CP:</strong> ${facturaData.customer?.address?.zip || ''}<br/>
-                      <strong>Régimen Fiscal:</strong> ${facturaData.customer?.tax_system || '616'}<br/>
-                      <strong>Uso CFDI:</strong> ${facturaData.use || 'S01'}
-                  </div>
+          <!-- 2 Columns Info Section -->
+          <div class="info-grid">
+            <div class="info-col-client">
+              <div class="section-heading">DATOS DEL CLIENTE</div>
+              <div class="client-box">
+                <div class="client-name">${clientName}</div>
+                <div><strong>RFC:</strong> ${clientRfc}</div>
+                <div><strong>Regimen Fiscal:</strong> ${clientRegimen}</div>
+                <div>${clientAddressStr ? clientAddressStr + ', ' : ', , '}CP: ${clientCp}</div>
               </div>
-              <div class="col-5">
-                  <div class="section-header">Detalles Comerciales</div>
-                  <table class="table-details">
-                      <tr><td class="label-col">Fecha Emisión:</td><td class="value-col">${formatDate(facturaData.created_at)}</td></tr>
-                      <tr><td class="label-col">Método de Pago:</td><td class="value-col">${facturaData.payment_method || 'PUE'}</td></tr>
-                      <tr><td class="label-col">Forma de Pago:</td><td class="value-col">${facturaData.payment_form || '01'}</td></tr>
-                      <tr><td class="label-col">Moneda:</td><td class="value-col">MXN</td></tr>
-                      ${venta.orden_compra ? `<tr><td class="label-col">Orden de compra:</td><td class="value-col">${venta.orden_compra}</td></tr>` : ''}
-                  </table>
-              </div>
+            </div>
+
+            <div class="info-col-details">
+              <div class="section-heading">DETALLES DE FACTURACIÓN</div>
+              <table class="details-table">
+                <tr class="alt-row">
+                  <td class="details-lbl">Orden Compra:</td>
+                  <td class="details-val">${ordenCompra}</td>
+                </tr>
+                <tr>
+                  <td class="details-lbl">Fecha Emisión:</td>
+                  <td class="details-val">${fechaEmision}</td>
+                </tr>
+                <tr class="alt-row">
+                  <td class="details-lbl">Uso CFDI:</td>
+                  <td class="details-val">${usoCfdi}</td>
+                </tr>
+                <tr>
+                  <td class="details-lbl">Método Pago:</td>
+                  <td class="details-val">${metodoPago}</td>
+                </tr>
+                <tr class="alt-row">
+                  <td class="details-lbl">Forma Pago:</td>
+                  <td class="details-val">${formaPago}</td>
+                </tr>
+              </table>
+            </div>
           </div>
 
-          <table class="table table-red mt-4">
-              <thead>
-                  <tr>
-                      <th width="15%" class="text-center">CLAVE SAT</th>
-                      <th width="40%" style="text-align: left;">DESCRIPCIÓN</th>
-                      <th class="text-center">CANT</th>
-                      <th class="text-end">PRECIO UNIT</th>
-                      <th class="text-center">IVA</th>
-                      <th class="text-end">IMPORTE</th>
-                  </tr>
-              </thead>
-              <tbody>
-                  ${(facturaData.items || []).map((item: any) => {
-                      const itemTax = item.taxes?.[0];
-                      const itemRateStr = itemTax?.rate !== undefined ? `${Math.round(itemTax.rate * 100)}%` : '16%';
-                      const itemImporte = (item.quantity || 0) * (item.product?.price || 0);
-                      return `
-                      <tr>
-                          <td class="text-center">${item.product?.product_key || ''}<br/><span style="font-size: 8px;">(${item.product?.unit_key || ''})</span></td>
-                          <td>${item.product?.description || ''}</td>
-                          <td class="text-center">${item.quantity}</td>
-                          <td class="text-end">${formatMoney(item.product?.price)}</td>
-                          <td class="text-center">${itemRateStr}</td>
-                          <td class="text-end">${formatMoney(itemImporte)}</td>
-                      </tr>
-                      `;
-                  }).join('')}
-              </tbody>
+          <!-- Products Table -->
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th style="width: 44%; text-align: left;">DESCRIPCIÓN</th>
+                <th style="width: 18%; text-align: center;">CÓDIGO PRODUCTO</th>
+                <th style="width: 8%; text-align: center;">CANT</th>
+                <th style="width: 12%; text-align: right;">PRECIO</th>
+                <th style="width: 6%; text-align: center;">IVA</th>
+                <th style="width: 12%; text-align: right;">IMPORTE</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map((it: any) => `
+                <tr>
+                  <td class="col-desc">${it.description}</td>
+                  <td class="col-center">${it.satCode}</td>
+                  <td class="col-center">${Number(it.quantity).toFixed(1)}</td>
+                  <td class="col-right">${formatMoney(it.price)}</td>
+                  <td class="col-center">${it.taxRate}</td>
+                  <td class="col-right">${formatMoney(it.amount)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
           </table>
 
-          <div class="row mt-4">
-              <div class="col-7">
-                  <div class="info-text mt-2">
-                      <div class="section-header">Informacion Adicional</div>
-                      <div style="padding-top: 4px;">Este documento es una representación impresa de un CFDI 4.0</div>
-                  </div>
-              </div>
-              <div class="col-5">
-                  <table class="table-totals">
-                      <tr><td>Subtotal</td><td class="text-end">${formatMoney(subtotal)}</td></tr>
-                      <tr><td>IVA Trasladado (16%)</td><td class="text-end">${formatMoney(iva)}</td></tr>
-                      <tr><td>TOTAL</td><td class="text-end">${formatMoney(total)}</td></tr>
-                  </table>
-              </div>
+          <!-- Totals -->
+          <div class="totals-container">
+            <table class="totals-table">
+              <tr>
+                <td class="tot-lbl">Subtotal</td>
+                <td class="tot-val">${formatMoney(subtotal)}</td>
+              </tr>
+              <tr class="tot-iva-row">
+                <td class="tot-lbl">IVA 16%</td>
+                <td class="tot-val">${formatMoney(iva)}</td>
+              </tr>
+              <tr class="tot-total-row">
+                <td class="tot-grand-lbl">TOTAL</td>
+                <td class="tot-grand-val">${formatMoney(total)}</td>
+              </tr>
+            </table>
           </div>
 
-          <!-- SAT Block -->
-          ${facturaData.uuid ? `
+          <!-- Full Width Divider -->
+          <div class="full-divider"></div>
+
+          <!-- SAT Fiscal Section -->
           <div class="sat-block">
-            ${facturaData.status === 'canceled' ? '<div style="position: absolute; top: 40%; left: 30%; transform: rotate(-45deg); font-size: 100px; color: rgba(255,0,0,0.15); font-weight: bold; border: 10px solid rgba(255,0,0,0.15); border-radius: 20px; padding: 20px; z-index: -1;">CANCELADO</div>' : ''}
-            <div class="sat-qr">
-              <img src="${facturaData.verification_url ? `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(facturaData.verification_url)}` : 'https://via.placeholder.com/150?text=QR'}" style="width: 100%; height: 100%;" />
+            <div class="sat-qr-col">
+              ${effectiveUuid ? `
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(satVerificationUrl || effectiveUuid)}" class="sat-qr-img" alt="QR SAT" />
+              ` : `
+                <div style="width: 95px; height: 95px; border: 1px dashed #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #94a3b8; font-weight: bold; padding: 4px;">
+                  QR SAT<br>(Borrador)
+                </div>
+              `}
             </div>
-            <div class="sat-info">
-              <div class="sat-title">Folio Fiscal (UUID)</div>
-              <div>${facturaData.uuid}</div>
-              
-              <div class="sat-title">No. Certificado SAT</div>
-              <div>${facturaData.stamp?.sat_cert_number || ''}</div>
-
-              <div class="sat-title">Sello Digital del Emisor</div>
-              <div>${facturaData.stamp?.signature || ''}</div>
-
-              <div class="sat-title">Sello Digital del SAT</div>
-              <div>${facturaData.stamp?.sat_signature || ''}</div>
-
-              <div class="sat-title">Cadena Original del Complemento de Certificación Digital del SAT</div>
-              <div>${facturaData.stamp?.original_chain || ''}</div>
+            <div class="sat-box-col">
+              <div class="sat-group">
+                <span class="sat-tag">Sello Digital Emisor:</span>
+                <div class="sat-stamp">${selloEmisor || 'N/A'}</div>
+              </div>
+              <div class="sat-group">
+                <span class="sat-tag">Sello Digital SAT:</span>
+                <div class="sat-stamp">${selloSat || 'N/A'}</div>
+              </div>
+              <div class="sat-group">
+                <span class="sat-tag">Cadena Original SAT:</span>
+                <div class="sat-stamp">${cadenaOriginal || 'N/A'}</div>
+              </div>
             </div>
           </div>
-          ` : ''}
-          
-          <div class="footer-bank">
-            <div style="width: 40%;">
-              <strong>RAFAEL ALONSO FERNANDEZ TINAJERO</strong><br>
-              RFC: FETR83041461A<br>
-              TEL: 6142477119<br>
-              MAIL: rfernandez@inttec.net
+
+          <!-- Footer -->
+          <div class="invoice-footer">
+            <div>
+              <div class="issuer-name">RAFAEL ALONSO FERNANDEZ TINAJERO</div>
+              <div class="issuer-details">
+                RFC: FETR83041461A | Régimen Fiscal: 601<br/>
+                Dirección: Ozorno 811, Chihuahua, Chihuahua, CP: 31107<br/>
+                Banco: | Cuenta: 012150001930925930
+              </div>
             </div>
-            <div style="width: 45%;">
-              <strong>CUENTA BANCARIA BBVA</strong><br>
-              NO. CUENTA: 0193092593<br>
-              CLABE: 012150001930925930<br>
-              CUENTAHABIENTE: Rafael Alonso Fernandez Tinajero
+            <div class="footer-page">
+              Página 1 de 1
             </div>
           </div>
         </div>
@@ -2725,8 +4247,31 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
     </html>
   `;
 
+  return htmlContent;
+}
+
+export async function exportarFacturaOdooPDF(venta: any, facturaData: any, action: any = 'view') {
   try {
+    const htmlContent = await generarFacturaHTML(venta, facturaData, false);
+
+    const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
+    const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+    const serie = (facturaData?.series || facturaData?.serie || venta?.cfdi_serie || venta?.factura_serie || 'A').toUpperCase().trim();
+    let folioNum = cleanFolio(facturaData?.folio_number || facturaData?.folio || venta?.cfdi_folio || venta?.factura_folio || venta?.folio || '');
+    if (folioNum.toUpperCase().startsWith(serie)) {
+      folioNum = folioNum.slice(serie.length).trim();
+    }
+    if (/^\d+$/.test(folioNum)) {
+      folioNum = String(parseInt(folioNum, 10)).padStart(4, '0');
+    } else if (!folioNum) {
+      folioNum = '0001';
+    }
+    const fullFileName = `${clienteSanitized}_${serie}${folioNum}`;
+
     if (Platform.OS === 'web') {
+      const prevDocTitle = document.title;
+      document.title = fullFileName;
+
       if (action === 'download') {
         const iframe = document.createElement('iframe');
         iframe.style.position = 'fixed';
@@ -2741,22 +4286,26 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
         if (iframeDoc) {
           iframeDoc.open();
           iframeDoc.write(htmlContent);
+          iframeDoc.title = fullFileName;
           iframeDoc.close();
 
           iframe.onload = () => {
             iframe.contentWindow?.focus();
             iframe.contentWindow?.print();
             setTimeout(() => {
-              document.body.removeChild(iframe);
-            }, 1000);
+              try { document.body.removeChild(iframe); } catch (_) {}
+              document.title = prevDocTitle;
+            }, 1500);
           };
         }
       } else {
         const newWindow = window.open('', '_blank');
         if (newWindow) {
           newWindow.document.write(htmlContent);
+          newWindow.document.title = fullFileName;
           newWindow.document.close();
         }
+        document.title = prevDocTitle;
       }
     } else {
       if (action === 'view') {
@@ -2764,7 +4313,7 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
       } else {
         const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
         
-        const customNameUri = `${cacheDirectory}Factura_${facturaData.folio_number || facturaData.uuid || venta.id}.pdf`;
+        const customNameUri = `${cacheDirectory}${fullFileName}.pdf`;
         
         await writeAsStringAsync(customNameUri, base64 || '', {
           encoding: EncodingType.Base64,
@@ -2773,7 +4322,7 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(customNameUri, {
             mimeType: 'application/pdf',
-            dialogTitle: 'Compartir Factura CFDI'
+            dialogTitle: `${fullFileName}.pdf`
           });
         } else {
           throw new Error('La función de compartir no está disponible.');

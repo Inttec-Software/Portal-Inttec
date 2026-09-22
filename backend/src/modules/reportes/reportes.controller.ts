@@ -9,17 +9,24 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const client = getSupabaseClient(company, env);
 
+    const limitQuery = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    let gastosQuery = client.from('gastos').select(`
+      *,
+      subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
+      proveedor_rel:proveedores(id, nombre),
+      cliente_rel:clientes(id, nombre),
+      sucursal_rel:sucursales_cliente(id, nombre)
+    `).order('created_at', { ascending: false });
+
+    if (limitQuery && !isNaN(limitQuery) && limitQuery > 0) {
+      gastosQuery = gastosQuery.limit(limitQuery);
+    }
+
     const [gastosRes, usersRes, vehiculosRes, gasolinaRes, provRes] = await Promise.all([
-      client.from('gastos').select(`
-        *,
-        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-        proveedor_rel:proveedores(id, nombre),
-        cliente_rel:clientes(id, nombre),
-        sucursal_rel:sucursales_cliente(id, nombre)
-      `).order('created_at', { ascending: false }),
+      gastosQuery,
       client.from('usuarios').select('*').order('nombre'),
       client.from('vehiculos').select('*').eq('archivado', false).order('marca'),
-      client.from('registro_gasolina').select('*, vehiculos(marca, modelo)').order('created_at', { ascending: false }),
+      client.from('registro_gasolina').select('*, vehiculos(marca, modelo)').order('created_at', { ascending: false }).limit(250),
       client.from('proveedores').select('id, nombre, rfc').order('nombre')
     ]);
 
@@ -89,13 +96,20 @@ export const getEmpleadoGastos = async (req: Request, res: Response) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'No autorizado' });
 
-    const gastosRes = await client.from('gastos').select(`
+    const limitQuery = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    let query = client.from('gastos').select(`
         *,
         subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
         proveedor_rel:proveedores(id, nombre),
         cliente_rel:clientes(id, nombre),
         sucursal_rel:sucursales_cliente(id, nombre)
       `).eq('empleado_id', userId).order('created_at', { ascending: false });
+
+    if (limitQuery && !isNaN(limitQuery) && limitQuery > 0) {
+      query = query.limit(limitQuery);
+    }
+
+    const gastosRes = await query;
 
     const rawGastos = gastosRes.data || [];
 

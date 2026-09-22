@@ -454,32 +454,32 @@ export default function EmpleadoGastos() {
     }, [user]);
 
   async function refreshData(userId: string, silent = false) {
-    if (!silent) {
+    if (!silent && gastos.length === 0) {
       setIsLoading(true);
-      setGastos([]);
-      setOfflineGastos([]);
-      setVehiculos([]);
-      setMisRegistrosGasolina([]);
     }
     try {
-      // 1. Obtener de Backend
       const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/empleado`, { headers });
-      if (!res.ok) throw new Error('Error al obtener gastos');
-      const data = await res.json();
-      setGastos(data.gastos || []);
+      const [reportesRes, localQueue, activeVehicles, allGasLogs] = await Promise.all([
+        fetch(`${getApiUrl()}/api/reportes/empleado`, { headers })
+          .then(async (res) => {
+            if (!res.ok) throw new Error('Error al obtener gastos');
+            return res.json();
+          })
+          .catch((err) => {
+            console.error('Error al obtener reportes de empleado:', err);
+            return null;
+          }),
+        SyncService.getOfflineQueue().catch(() => []),
+        VehiculoService.getVehiculos(true).catch(() => []),
+        VehiculoService.getRegistrosGasolina().catch(() => []),
+      ]);
 
-      // 2. Obtener cola local offline
-      const localQueue = await SyncService.getOfflineQueue();
-      setOfflineGastos(localQueue.filter((item) => item.empleado_id === userId));
-
-      // 3. Obtener vehículos activos
-      const activeVehicles = await VehiculoService.getVehiculos(true);
+      if (reportesRes?.gastos) {
+        setGastos(reportesRes.gastos);
+      }
+      setOfflineGastos((localQueue || []).filter((item) => item.empleado_id === userId));
       setVehiculos(activeVehicles || []);
-
-      // 4. Obtener mis registros de gasolina
-      const allGasLogs = await VehiculoService.getRegistrosGasolina();
-      const myGasLogs = allGasLogs.filter(reg => reg.empleado_id === userId);
+      const myGasLogs = (allGasLogs || []).filter((reg: any) => reg.empleado_id === userId);
       setMisRegistrosGasolina(myGasLogs);
     } catch (err: any) {
       console.error('Error al cargar datos:', err);

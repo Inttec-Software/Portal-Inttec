@@ -11,6 +11,7 @@ import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { Cotizacion } from '@/types/ventas';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
+import { ModuleCache } from '@/services/moduleCache';
 
 const getStatusConfig = (estado: string, isDark: boolean) => {
   switch(estado) {
@@ -153,8 +154,9 @@ export default function CotizacionesListScreen() {
   // Se considera Desktop si es ambiente web y el ancho de pantalla es >= 1024
   const isDesktop = Platform.OS === 'web' && width >= 1024;
 
-  const [cotizaciones, setCotizaciones] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const cachedCotizaciones = ModuleCache.get<any[]>('cotizaciones_list');
+  const [cotizaciones, setCotizaciones] = useState<any[]>(() => cachedCotizaciones || []);
+  const [isLoading, setIsLoading] = useState(() => !cachedCotizaciones);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
@@ -178,13 +180,18 @@ export default function CotizacionesListScreen() {
     );
   });
 
-  const fetchCotizaciones = async () => {
+  const fetchCotizaciones = async (silent = false) => {
+    if (!silent && !ModuleCache.has('cotizaciones_list')) {
+      setIsLoading(true);
+    }
     try {
       const headers = await getApiHeaders();
       const res = await fetch(`${getApiUrl()}/api/cotizaciones`, { headers });
       if (!res.ok) throw new Error('Error en API');
       const data = await res.json();
-      setCotizaciones(data.cotizaciones || []);
+      const items = data.cotizaciones || [];
+      ModuleCache.set('cotizaciones_list', items);
+      setCotizaciones(items);
     } catch (err) {
       console.error('Error fetching cotizaciones:', err);
     } finally {

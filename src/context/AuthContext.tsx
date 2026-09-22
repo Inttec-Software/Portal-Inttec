@@ -150,10 +150,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     const initSession = async () => {
       try {
-        const savedCompany = await CompanyService.loadSavedCompany();
-        if (active) setCompanyState(savedCompany);
-        const savedEnv = await EnvService.loadSavedEnv();
-        if (active) setEnvState(savedEnv);
+        const [savedCompany, savedEnv] = await Promise.all([
+          CompanyService.loadSavedCompany(),
+          EnvService.loadSavedEnv(),
+        ]);
+        if (active) {
+          setCompanyState(savedCompany);
+          setEnvState(savedEnv);
+        }
         
         const currentUser = await AuthService.getCurrentUser();
         if (active) setUser(currentUser);
