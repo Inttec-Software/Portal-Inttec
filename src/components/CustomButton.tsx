@@ -8,6 +8,7 @@ import {
   TextStyle,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 
 interface CustomButtonProps {
@@ -18,7 +19,7 @@ interface CustomButtonProps {
   disabled?: boolean;
   style?: ViewStyle;
   textStyle?: TextStyle;
-  icon?: React.ReactNode;
+  icon?: React.ReactNode | keyof typeof Ionicons.glyphMap | string;
 }
 
 export default function CustomButton({
@@ -57,6 +58,21 @@ export default function CustomButton({
 
   const isBtnDisabled = disabled || loading;
 
+  const renderIcon = () => {
+    if (!icon) return null;
+    if (typeof icon === 'string') {
+      return (
+        <Ionicons
+          name={icon as any}
+          size={18}
+          color={textColor}
+          style={{ marginRight: 8 }}
+        />
+      );
+    }
+    return icon;
+  };
+
   return (
     <TouchableOpacity
       activeOpacity={0.8}
@@ -81,7 +97,7 @@ export default function CustomButton({
         <ActivityIndicator color={textColor} size="small" />
       ) : (
         <>
-          {icon}
+          {renderIcon()}
           <Text style={[styles.text, { color: textColor }, textStyle]}>{title}</Text>
         </>
       )}

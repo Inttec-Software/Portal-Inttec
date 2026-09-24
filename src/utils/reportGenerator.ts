@@ -107,7 +107,10 @@ export const ReportGenerator = {
       const fecha = m.fecha ? new Date(m.fecha).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }) : '-';
       const isEntrada = m.tipo === 'ENTRADA';
       const typeBadgeColor = isEntrada ? '#10B981' : '#EF4444';
-      const subtipoLabel = m.subtipo || m.tipo;
+      const isGasto = m.tipo === 'GASTO' || m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO';
+      const isSalida = m.tipo === 'SALIDA' || m.subtipo === 'SALIDA' || m.subtipo === 'RETIRO';
+      const subtipoLabel = isGasto ? 'Gasto' : (isSalida ? 'SALIDA' : (m.subtipo || m.tipo));
+      const subtipoColor = isGasto ? '#8B5CF6' : (isSalida ? '#EF4444' : (m.subtipo === 'DEVOLUCIÓN' ? '#2563EB' : '#6b7280'));
 
       const prodName = m.producto_nombre || 'Producto';
       const prodSku = m.producto_sku || '-';
@@ -120,10 +123,20 @@ export const ReportGenerator = {
         <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
           <td style="font-size: 10px; color: #4b5563; white-space: nowrap;">${fecha}</td>
           <td>
-            <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: ${typeBadgeColor};">
-              ${m.tipo}
-            </span>
-            ${subtipoLabel !== m.tipo ? `<br/><small style="font-size: 8px; color: #6b7280; font-weight: 600;">${subtipoLabel}</small>` : ''}
+            ${isGasto ? `
+              <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: #8B5CF6;">
+                GASTO
+              </span>
+            ` : isSalida ? `
+              <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: #EF4444;">
+                SALIDA
+              </span>
+            ` : `
+              <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: ${typeBadgeColor};">
+                ${m.tipo}
+              </span>
+              ${subtipoLabel !== m.tipo ? `<br/><span style="display: inline-block; margin-top: 2px; padding: 1px 4px; font-size: 8px; color: ${subtipoColor}; font-weight: 700; border: 1px solid ${subtipoColor}40; border-radius: 3px; background: ${subtipoColor}15;">${subtipoLabel}</span>` : ''}
+            `}
           </td>
           <td>
             <strong style="font-size: 11px; color: #111827;">${prodName}</strong><br/>
@@ -281,8 +294,9 @@ export const ReportGenerator = {
     const branding = await getCompanyBranding();
     const fecha = mov.fecha ? new Date(mov.fecha).toLocaleString('es-MX', { dateStyle: 'long', timeStyle: 'short' }) : new Date().toLocaleDateString('es-MX');
     const isEntrada = mov.tipo === 'ENTRADA';
-    const tipoColor = isEntrada ? '#10B981' : '#E11D48';
-    const tipoTitle = isEntrada ? 'VALE DE ENTRADA / INGRESO DE MATERIAL' : 'VALE DE SALIDA / RETIRO DE MATERIAL';
+    const isGasto = mov.tipo === 'GASTO' || mov.subtipo === 'GASTO' || mov.subtipo === 'CONSUMO';
+    const tipoColor = isEntrada ? '#10B981' : isGasto ? '#8B5CF6' : '#0d1b2a';
+    const tipoTitle = isEntrada ? 'VALE DE ENTRADA / INGRESO DE MATERIAL' : isGasto ? 'VALE DE GASTO DE MATERIAL' : 'VALE DE SALIDA Y CARTA RESPONSIVA DE MATERIAL';
 
     const items = Array.isArray(mov.materiales) && mov.materiales.length > 0 
       ? mov.materiales 
@@ -314,7 +328,7 @@ export const ReportGenerator = {
           body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 30px; color: #1f2937; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid ${tipoColor}; padding-bottom: 15px; }
           .logo { max-height: 50px; }
-          .title { font-size: 20px; font-weight: bold; color: ${tipoColor}; margin: 0; }
+          .title { font-size: 18px; font-weight: bold; color: ${tipoColor}; margin: 0; }
           .folio { font-size: 12px; color: #6b7280; margin-top: 4px; }
           .info-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-top: 20px; display: flex; flex-wrap: wrap; gap: 15px; }
           .info-col { flex: 1; min-width: 200px; }
@@ -323,11 +337,41 @@ export const ReportGenerator = {
           table { width: 100%; border-collapse: collapse; margin-top: 25px; }
           th { background-color: #1f2937; color: #fff; padding: 10px; font-size: 11px; text-transform: uppercase; }
           td { padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 12px; }
-          .signatures { display: flex; justify-content: space-between; margin-top: 70px; }
-          .sig-box { width: 42%; text-align: center; border-top: 1px solid #111827; padding-top: 8px; font-size: 11px; }
+          .signatures { display: flex; justify-content: center; margin-top: 35px; }
+          .sig-box { width: 55%; max-width: 320px; text-align: center; font-size: 11px; }
+          .sig-image-container { height: 60px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
+          .sig-line { border-top: 1.5px solid #111827; width: 100%; margin: 0 0 6px 0; }
+          .no-print { margin-bottom: 20px; display: flex; justify-content: flex-end; gap: 10px; }
+          .btn-download {
+            background-color: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: background-color 0.2s;
+          }
+          .btn-download:hover { background-color: #1d4ed8; }
+          @media print {
+            .no-print { display: none !important; }
+            body { margin: 0; padding: 10mm; }
+          }
         </style>
       </head>
       <body>
+        <div class="no-print">
+          <button class="btn-download" onclick="window.print()">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+            Descargar / Imprimir PDF
+          </button>
+        </div>
+
         <div class="header">
           <div>
             <h1 class="title">${tipoTitle}</h1>
@@ -377,14 +421,30 @@ export const ReportGenerator = {
           </tbody>
         </table>
 
+        ${!isEntrada ? `
+        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; margin-top: 25px; font-size: 10px; color: #334155; line-height: 1.4;">
+          <strong style="color: #0f172a; text-transform: uppercase; font-size: 10px; display: block; margin-bottom: 4px;">
+            Compromiso de Resguardo y Carta Responsiva de Material
+          </strong>
+          Por medio de la presente, el trabajador manifiesta recibir en óptimas condiciones y a entera satisfacción los materiales y equipos especificados, comprometiéndose a destinarlos única y exclusivamente a las actividades laborales asignadas por <strong>${branding.name}</strong>, asumiendo la custodia, conservación y responsabilidad de devolución de sobrantes o herramientas al término de los trabajos.
+        </div>
+        ` : ''}
+
         <div class="signatures">
           <div class="sig-box">
-            <strong>Entregó / Autorizó</strong><br/>
-            <span>Encargado de Almacén</span>
-          </div>
-          <div class="sig-box">
-            <strong>Recibió / Conforme</strong><br/>
+            <div class="sig-image-container">
+              ${mov.firma_base64 || mov.firma_url || mov.firma ? `
+                <img src="${mov.firma_base64 || mov.firma_url || mov.firma}" style="max-height: 58px; max-width: 200px; object-fit: contain;" />
+              ` : '<div style="height: 45px;"></div>'}
+            </div>
+            <div class="sig-line"></div>
+            <strong>${!isEntrada ? 'TRABAJADOR / RESPONSABLE RECEPTOR' : 'RECIBIÓ / CONFORME'}</strong><br/>
             <span>${mov.usuario_nombre || mov.empleado_nombre || 'Empleado Receptor'}</span>
+            ${mov.firmado_en || mov.firma_base64 ? `
+              <div style="font-size: 9px; color: #64748b; margin-top: 4px;">
+                Firmado digitalmente: ${mov.firmado_en ? new Date(mov.firmado_en).toLocaleString('es-MX') : fecha}
+              </div>
+            ` : ''}
           </div>
         </div>
       </body>
@@ -402,7 +462,16 @@ export const ReportGenerator = {
       const newWindow = window.open('', '_blank');
       if (newWindow) {
         newWindow.document.write(htmlContent);
+        newWindow.document.title = defaultFilename.replace('.pdf', '');
         newWindow.document.close();
+        setTimeout(() => {
+          try {
+            newWindow.focus();
+            newWindow.print();
+          } catch (e) {
+            console.error('Error al imprimir documento:', e);
+          }
+        }, 500);
       }
     } else {
       const { uri } = await Print.printToFileAsync({ html: htmlContent });
@@ -2487,29 +2556,67 @@ export const ReportGenerator = {
           }
           .signatures-table {
             width: 100%;
-            margin-top: 60px;
+            margin-top: 30px;
             border-collapse: collapse;
           }
           .signature-box {
-            width: 45%;
+            width: 60%;
             text-align: center;
-            border-top: 1px solid #333;
-            padding-top: 8px;
             font-size: 11px;
+            margin: 0 auto;
+          }
+          .sig-image-container {
+            height: 60px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            margin-bottom: 2px;
+          }
+          .sig-line {
+            border-top: 1.5px solid #0d1b2a;
+            width: 100%;
+            margin: 0 0 6px 0;
           }
           .logo-img {
             width: 220px;
             height: 60px;
             object-fit: contain;
           }
+          .no-print { margin-bottom: 20px; display: flex; justify-content: flex-end; gap: 10px; }
+          .btn-download {
+            background-color: #0d1b2a;
+            color: #ffffff;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: background-color 0.2s;
+          }
+          .btn-download:hover { background-color: #1e3a5f; }
+          @media print {
+            .no-print { display: none !important; }
+            body { padding: 0 !important; }
+          }
         </style>
       </head>
       <body>
+        <div class="no-print">
+          <button class="btn-download" onclick="window.print()">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+            Descargar / Imprimir PDF
+          </button>
+        </div>
         <div class="vale-box">
           <table style="width: 100%; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 10px; border-collapse: collapse;">
             <tr>
               <td>
-                <div class="title">Vale de Salida de Almacén</div>
+                <div class="title">Vale de Salida y Carta Responsiva de Material</div>
                 <div style="font-size: 12px; font-weight: bold; color: #2563EB; margin-top: 3px;">Folio: #${folioStr}</div>
               </td>
               <td style="text-align: right;">
@@ -2548,21 +2655,36 @@ export const ReportGenerator = {
             </tbody>
           </table>
 
+          <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; margin-top: 25px; font-size: 10px; color: #334155; line-height: 1.4;">
+            <strong style="color: #0d1b2a; text-transform: uppercase; font-size: 10px; display: block; margin-bottom: 4px;">
+              Compromiso de Resguardo y Carta Responsiva de Material
+            </strong>
+            Por medio de la presente, el trabajador manifiesta recibir en óptimas condiciones y a entera satisfacción los materiales y equipos especificados, comprometiéndose a destinarlos única y exclusivamente a las actividades laborales asignadas por <strong>${branding.name}</strong>, asumiendo la custodia, conservación y responsabilidad de devolución de sobrantes o herramientas al término de los trabajos.
+          </div>
+
           <table class="signatures-table">
             <tr>
-              <td class="signature-box">
-                <strong>ENTREGÓ</strong><br/>
-                Encargado de Almacén / Administración
+              <td style="width: 20%;"></td>
+              <td class="signature-box" style="width: 60%;">
+                <div class="sig-image-container">
+                  ${retiro.firma_base64 || retiro.firma_url || retiro.firma ? `
+                    <img src="${retiro.firma_base64 || retiro.firma_url || retiro.firma}" style="max-height: 58px; max-width: 200px; object-fit: contain;" />
+                  ` : '<div style="height: 45px;"></div>'}
+                </div>
+                <div class="sig-line"></div>
+                <strong>TRABAJADOR / RESPONSABLE RECEPTOR</strong><br/>
+                <span>${retiro.empleado_nombre || 'Empleado Responsable'}</span>
+                ${retiro.firmado_en || retiro.firma_base64 ? `
+                  <div style="font-size: 9px; color: #64748b; margin-top: 4px;">
+                    Firmado digitalmente: ${retiro.firmado_en ? new Date(retiro.firmado_en).toLocaleString('es-MX') : fechaStr}
+                  </div>
+                ` : ''}
               </td>
-              <td style="width: 10%;"></td>
-              <td class="signature-box">
-                <strong>RECIBIÓ</strong><br/>
-                ${retiro.empleado_nombre || 'Empleado Responsable'}
-              </td>
+              <td style="width: 20%;"></td>
             </tr>
           </table>
 
-          <div style="text-align: center; font-size: 9px; color: #888; margin-top: 40px;">
+          <div style="text-align: center; font-size: 9px; color: #888; margin-top: 30px;">
             Este documento ampara la entrega y responsabilidad del material especificado perteneciente a ${branding.name}.
           </div>
         </div>

@@ -569,8 +569,19 @@ CREATE TABLE IF NOT EXISTS public.retiros_material (
   splits_json JSONB,
   materiales JSONB NOT NULL, -- [{ producto_id, sku, nombre, cantidad, unidad }]
   motivo TEXT,
+  firma_base64 TEXT, -- Firma digital autógrafa del empleado
+  responsiva_aceptada BOOLEAN DEFAULT true, -- Confirmación de aceptación de términos de responsiva
+  firmado_en TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  dispositivo_info TEXT, -- Información del navegador/dispositivo firmante
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Si las tablas ya existen, agregar columnas faltantes:
+ALTER TABLE public.retiros_material ADD COLUMN IF NOT EXISTS firma_base64 TEXT;
+ALTER TABLE public.retiros_material ADD COLUMN IF NOT EXISTS responsiva_aceptada BOOLEAN DEFAULT true;
+ALTER TABLE public.retiros_material ADD COLUMN IF NOT EXISTS firmado_en TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE public.retiros_material ADD COLUMN IF NOT EXISTS dispositivo_info TEXT;
+ALTER TABLE public.movimientos_inventario ADD COLUMN IF NOT EXISTS firma_base64 TEXT;
 
 
 
