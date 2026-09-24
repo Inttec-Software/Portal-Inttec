@@ -76,10 +76,18 @@ export const getClientes = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const client = getSupabaseClient(company, env);
 
-    const { data, error } = await client
+    let query = client
       .from('clientes')
-      .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi')
-      .order('nombre');
+      .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi');
+
+    const q = String(req.query.q || '').trim();
+    if (q) {
+      query = query
+        .or(`razon_social.ilike.%${q}%,nombre.ilike.%${q}%,rfc.ilike.%${q}%`)
+        .limit(20);
+    }
+
+    const { data, error } = await query.order('nombre');
 
     if (error) throw error;
     return res.json(data || []);

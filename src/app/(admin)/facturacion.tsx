@@ -66,13 +66,14 @@ interface FacturaPartida {
 }
 
 interface FacturaEmitida {
-  id: string;
+  id: string | number;
   cliente: string;
   fecha: string;
   factura_referencia?: string;
   folio?: string;
   cfdi_uuid?: string;
-  cfdi_estado?: 'TIMBRADA' | 'CANCELADA' | 'PENDIENTE';
+  cfdi_estado?: 'TIMBRADA' | 'CANCELADA' | 'PENDIENTE' | 'BORRADOR';
+  es_borrador?: boolean;
   cfdi_xml_url?: string;
   precio_total_facturado: number;
   created_at?: string;
@@ -121,13 +122,16 @@ export default function FacturacionScreen() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
 
-  const [activeTab, setActiveTab] = useState<'emitir' | 'historial' | 'pagos'>('emitir');
+  const [activeTab, setActiveTab] = useState<'emitir' | 'historial' | 'pagos'>('historial');
 
-  // Catálogo de Clientes
+  // Catálogo de Clientes y Autocompletado Reactivo
   const [clientes, setClientes] = useState<ClienteCatalogo[]>([]);
-  const [isClientModalOpen, setIsClientModalOpen] = useState(false);
   const [isLoadingClientes, setIsLoadingClientes] = useState(false);
-  const [clientSearch, setClientSearch] = useState('');
+  const [currentDraftId, setCurrentDraftId] = useState<string | number | null>(null);
+  const [clientSuggestions, setClientSuggestions] = useState<ClienteCatalogo[]>([]);
+  const [isSearchingClients, setIsSearchingClients] = useState(false);
+  const [showClientDropdown, setShowClientDropdown] = useState(false);
+  const searchTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   // Catálogo de Productos / Inventario
   const [productos, setProductos] = useState<ProductoCatalogo[]>([]);
@@ -168,7 +172,7 @@ export default function FacturacionScreen() {
   const [historialFacturas, setHistorialFacturas] = useState<FacturaEmitida[]>([]);
   const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
   const [historialSearch, setHistorialSearch] = useState('');
-  const [filtroEstado, setFiltroEstado] = useState<'TODAS' | 'TIMBRADA' | 'CANCELADA'>('TODAS');
+  const [filtroEstado, setFiltroEstado] = useState<'TODAS' | 'BORRADOR' | 'TIMBRADA' | 'CANCELADA'>('TODAS');
 
   // Complementos de Pago (REP)
   const [complementosList, setComplementosList] = useState<any[]>([]);
@@ -395,7 +399,7 @@ export default function FacturacionScreen() {
           const ventasList: any[] = json.ventas || json.data || [];
           if (Array.isArray(ventasList) && ventasList.length > 0) {
             const facturadas = ventasList
-              .filter(v => v.cfdi_uuid || v.cfdi_estado === 'TIMBRADA' || v.cfdi_estado === 'CANCELADA')
+              .filter(v => v.cfdi_uuid || v.cfdi_estado === 'TIMBRADA' || v.cfdi_estado === 'CANCELADA' || v.cfdi_estado === 'BORRADOR' || v.es_borrador)
               .map(f => {
                 const isDirecta = f.tipo_proyecto === 'Factura Directa';
                 const cleanFolioVal = cleanFolio(f.folio);
@@ -417,7 +421,7 @@ export default function FacturacionScreen() {
       const { data } = await supabase
         .from('ventas')
         .select('id, cliente, fecha, factura_referencia, folio, cfdi_uuid, cfdi_estado, cfdi_xml_url, precio_total_facturado, created_at, orden_compra, tipo_proyecto')
-        .or('cfdi_uuid.neq.null,cfdi_estado.eq.TIMBRADA,cfdi_estado.eq.CANCELADA')
+        .or('cfdi_uuid.neq.null,cfdi_estado.eq.TIMBRADA,cfdi_estado.eq.CANCELADA,cfdi_estado.eq.BORRADOR')
         .order('created_at', { ascending: false });
 
       if (data) {
@@ -460,13 +464,68 @@ export default function FacturacionScreen() {
     return { subtotal, totalIva, total };
   }, [partidas]);
 
-  const handleSelectClient = (c: ClienteCatalogo) => {
+  const handleClienteNombreChange = (text: string) => {
+    setClienteNombre(text);
+
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    if (!text || text.trim().length === 0) {
+      setClientSuggestions([]);
+      setShowClientDropdown(false);
+      return;
+    }
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        setIsSearchingClients(true);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/clientes-search?q=${encodeURIComponent(text.trim())}`, { headers });
+        if (res.ok) {
+          const json = await res.json();
+          const items: ClienteCatalogo[] = json.clientes || [];
+          setClientSuggestions(items);
+          setShowClientDropdown(items.length > 0);
+        } else {
+          // Fallback a filtrado de catálogo local
+          const q = normalizeText(text);
+          const localFiltered = clientes.filter(c =>
+            normalizeText(c.nombre || '').includes(q) ||
+            normalizeText(c.razon_social || '').includes(q) ||
+            normalizeText(c.rfc || '').includes(q)
+          );
+          setClientSuggestions(localFiltered);
+          setShowClientDropdown(localFiltered.length > 0);
+        }
+      } catch (err) {
+        console.warn('Error en búsqueda reactiva de clientes:', err);
+        const q = normalizeText(text);
+        const localFiltered = clientes.filter(c =>
+          normalizeText(c.nombre || '').includes(q) ||
+          normalizeText(c.razon_social || '').includes(q) ||
+          normalizeText(c.rfc || '').includes(q)
+        );
+        setClientSuggestions(localFiltered);
+        setShowClientDropdown(localFiltered.length > 0);
+      } finally {
+        setIsSearchingClients(false);
+      }
+    }, 280);
+  };
+
+  const handleSelectSearchedClient = (c: ClienteCatalogo) => {
     setClienteNombre(c.razon_social || c.nombre || '');
-    if (c.rfc) setClienteRfc(c.rfc.trim().toUpperCase());
-    if (c.codigo_postal) setClienteCp(c.codigo_postal);
+    setClienteRfc(c.rfc ? c.rfc.trim().toUpperCase() : 'XAXX010101000');
+    setClienteCp(c.codigo_postal ? c.codigo_postal.trim() : '31110');
     if (c.regimen_fiscal) setClienteRegimen(c.regimen_fiscal);
     if (c.uso_cfdi) setClienteUso(c.uso_cfdi);
-    setIsClientModalOpen(false);
+    setShowClientDropdown(false);
+    setClientSuggestions([]);
+  };
+
+  const handleSelectClient = (c: ClienteCatalogo) => {
+    handleSelectSearchedClient(c);
   };
 
   const getFilteredProductsForPartida = (searchText: string) => {
@@ -570,6 +629,7 @@ export default function FacturacionScreen() {
   };
 
   const handleResetForm = () => {
+    setCurrentDraftId(null);
     setClienteNombre('');
     setClienteRfc('XAXX010101000');
     setClienteCp('31110');
@@ -593,6 +653,385 @@ export default function FacturacionScreen() {
         objeto_imp: '02',
       },
     ]);
+  };
+
+  // Creación de nuevo borrador con reserva de folio auto-incremental
+  const handleNuevaFactura = async () => {
+    try {
+      setIsSubmitting(true);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/sat/borrador`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          serie: serie || 'A',
+          cliente: 'PUBLICO EN GENERAL',
+          cliente_rfc: 'XAXX010101000',
+          cliente_cp: '31110',
+          partidas: [
+            {
+              descripcion: '',
+              cantidad: 1,
+              precio_unitario: 0,
+              clave_sat: '01010101',
+              clave_unidad: 'H87',
+              unidad: 'Pieza',
+              objeto_imp: '02'
+            }
+          ]
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Error al reservar folio y crear borrador');
+      }
+
+      const draft = data.borrador;
+      setCurrentDraftId(draft.id);
+      setSerie(draft.serie || 'A');
+      setFolio(draft.folio || '0000');
+      setClienteNombre('');
+      setClienteRfc(draft.receptor?.rfc || 'XAXX010101000');
+      setClienteCp(draft.receptor?.codigo_postal || '31110');
+      setClienteRegimen(draft.receptor?.regimen_fiscal || '601');
+      setClienteUso(draft.receptor?.uso_cfdi || 'G03');
+      setFormaPago('03');
+      setMetodoPago('PUE');
+      setOrdenCompra('');
+      setPartidas([
+        {
+          id: '1',
+          descripcion: '',
+          cantidad: '1',
+          precio_unitario: '0',
+          clave_sat: '01010101',
+          clave_unidad: 'H87',
+          unidad: 'Pieza',
+          objeto_imp: '02',
+        }
+      ]);
+
+      setActiveTab('emitir');
+      fetchHistorialFacturas();
+    } catch (err: any) {
+      console.error('Error al crear borrador:', err);
+      showAlert('Error al Crear Borrador', err.message || 'No se pudo crear el borrador.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Ver detalles de un borrador en FacturaPreviewModal
+  const handleVerBorrador = async (factura: FacturaEmitida) => {
+    try {
+      setIsSubmitting(true);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/sat/borrador/${factura.id}`, { headers });
+      let draftData: any = null;
+      if (res.ok) {
+        const json = await res.json();
+        draftData = json.borrador || json.data;
+      }
+
+      const folioVal = draftData?.folio || cleanFolio(factura.folio) || '0000';
+      const serieVal = draftData?.serie || 'A';
+      const clienteVal = draftData?.cliente || factura.cliente || 'PUBLICO EN GENERAL';
+      const totalVal = Number(draftData?.precio_total_facturado || factura.precio_total_facturado || 0);
+      const subtotalVal = Math.round((totalVal / 1.16) * 100) / 100;
+      const ivaVal = Math.round((totalVal - subtotalVal) * 100) / 100;
+
+      const previewPartidas = draftData?.partidas && draftData.partidas.length > 0
+        ? draftData.partidas.map((p: any) => {
+            const c = parseFloat(p.cantidad) || 1;
+            const pu = parseFloat(p.precio_unitario) || 0;
+            const imp = c * pu;
+            const hasIva = p.objeto_imp === '02';
+            const ivaItem = hasIva ? imp * 0.16 : 0;
+            return {
+              quantity: c,
+              product: {
+                product_key: p.clave_sat || '01010101',
+                unit_key: p.clave_unidad || 'H87',
+                description: p.descripcion || 'Concepto borrador',
+                price: pu,
+              },
+              taxes: hasIva ? [{
+                amount: ivaItem,
+                base: imp,
+                rate: 0.16,
+                type: 'IVA',
+              }] : []
+            };
+          })
+        : [{
+            quantity: 1,
+            product: {
+              product_key: '01010101',
+              unit_key: 'H87',
+              description: factura.descripcion || 'Concepto en borrador',
+              price: subtotalVal,
+            },
+            taxes: [{
+              amount: ivaVal,
+              base: subtotalVal,
+              rate: 0.16,
+              type: 'IVA',
+            }]
+          }];
+
+      const fakeDraftData = {
+        uuid: `BORRADOR-${factura.id}`,
+        folio_number: folioVal,
+        series: serieVal,
+        created_at: factura.fecha || factura.created_at || new Date().toISOString(),
+        payment_form: draftData?.forma_pago || '03',
+        payment_method: draftData?.metodo_pago || 'PUE',
+        use: draftData?.receptor?.uso_cfdi || 'G03',
+        subtotal: subtotalVal,
+        total: totalVal,
+        total_impuestos_trasladados: ivaVal,
+        iva: ivaVal,
+        taxes: [{
+          amount: ivaVal,
+          base: subtotalVal,
+          rate: 0.16,
+          type: 'IVA'
+        }],
+        issuer: {
+          tax_id: 'FETR83041461A',
+          legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
+          tax_system: '612',
+          zip: '31110'
+        },
+        customer: {
+          tax_id: draftData?.receptor?.rfc || (factura as any).cliente_rfc || 'XAXX010101000',
+          legal_name: clienteVal,
+          tax_system: draftData?.receptor?.regimen_fiscal || '601',
+          address: { zip: draftData?.receptor?.codigo_postal || '31110' }
+        },
+        items: previewPartidas,
+        stamp: {
+          uuid: `BORRADOR-${factura.id}`,
+          date: new Date().toISOString(),
+          sat_cert_number: '30001000000500003416',
+          signature: 'VISTA_PREVIA_BORRADOR',
+          sat_signature: 'SELLO_SAT_BORRADOR',
+          pac_rfc: 'FIN1203015JA',
+          original_chain: `||1.1|BORRADOR-${factura.id}||`
+        }
+      };
+
+      setPreviewVenta(factura);
+      setPreviewFacturaData(fakeDraftData);
+      setPreviewXmlText('');
+      setPreviewIsDraft(true);
+      setPreviewTitle(`Borrador: Factura ${serieVal}${folioVal}`);
+      setPreviewModalVisible(true);
+    } catch (err: any) {
+      showAlert('Error al Ver Borrador', err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Modificar un borrador: carga los datos en el formulario y activa currentDraftId
+  const handleModificarBorrador = async (factura: FacturaEmitida) => {
+    try {
+      setIsSubmitting(true);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/sat/borrador/${factura.id}`, { headers });
+      if (!res.ok) {
+        throw new Error(`Error al consultar borrador (${res.status})`);
+      }
+      const json = await res.json();
+      const draft = json.borrador;
+      if (!draft) throw new Error('No se recibió la información del borrador');
+
+      setCurrentDraftId(draft.id);
+      setSerie(draft.serie || 'A');
+      setFolio(draft.folio || '0000');
+      setClienteNombre(draft.cliente || draft.receptor?.nombre || draft.receptor?.razon_social || '');
+      setClienteRfc(draft.receptor?.rfc || 'XAXX010101000');
+      setClienteCp(draft.receptor?.codigo_postal || '31110');
+      setClienteRegimen(draft.receptor?.regimen_fiscal || '601');
+      setClienteUso(draft.receptor?.uso_cfdi || 'G03');
+      setFormaPago(draft.forma_pago || '03');
+      setMetodoPago(draft.metodo_pago || 'PUE');
+      setOrdenCompra(draft.orden_compra || '');
+      setMoneda(draft.moneda || 'MXN');
+
+      if (Array.isArray(draft.partidas) && draft.partidas.length > 0) {
+        setPartidas(draft.partidas.map((p: any, idx: number) => ({
+          id: String(p.id || idx + 1),
+          descripcion: p.descripcion || '',
+          cantidad: String(p.cantidad || 1),
+          precio_unitario: String(p.precio_unitario || 0),
+          clave_sat: p.clave_sat || '01010101',
+          clave_unidad: p.clave_unidad || 'H87',
+          unidad: p.unidad || 'Pieza',
+          objeto_imp: p.objeto_imp || '02',
+        })));
+      } else {
+        setPartidas([
+          {
+            id: '1',
+            descripcion: '',
+            cantidad: '1',
+            precio_unitario: '0',
+            clave_sat: '01010101',
+            clave_unidad: 'H87',
+            unidad: 'Pieza',
+            objeto_imp: '02',
+          }
+        ]);
+      }
+
+      setActiveTab('emitir');
+    } catch (err: any) {
+      console.error('Error cargando borrador para modificar:', err);
+      showAlert('Error al Cargar Borrador', err.message || 'No se pudo cargar el borrador.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Guardar cambios en el borrador existente preservando el folio reservado
+  const handleGuardarBorrador = async () => {
+    if (!currentDraftId) {
+      showAlert('Aviso', 'No hay un borrador activo seleccionado para guardar.');
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const headers = await getApiHeaders();
+      const payload = {
+        cliente: clienteNombre.trim() || 'PUBLICO EN GENERAL',
+        cliente_rfc: clienteRfc.trim().toUpperCase() || 'XAXX010101000',
+        cliente_cp: clienteCp.trim() || '31110',
+        cliente_regimen: clienteRegimen,
+        cliente_uso: clienteUso,
+        forma_pago: formaPago,
+        metodo_pago: metodoPago,
+        orden_compra: ordenCompra.trim(),
+        partidas: partidas.map(p => ({
+          descripcion: p.descripcion.trim() || 'Concepto sin descripción',
+          cantidad: parseFloat(p.cantidad) || 1,
+          precio_unitario: parseFloat(p.precio_unitario) || 0,
+          clave_sat: p.clave_sat.trim() || '01010101',
+          clave_unidad: p.clave_unidad.trim() || 'H87',
+          unidad: p.unidad || 'Pieza',
+          objeto_imp: p.objeto_imp || '02'
+        }))
+      };
+
+      const res = await fetch(`${getApiUrl()}/api/sat/borrador/${currentDraftId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(payload)
+      });
+      const resJson = await res.json().catch(() => ({}));
+      if (!res.ok || !resJson.success) {
+        throw new Error(resJson.error || 'Error al actualizar borrador');
+      }
+
+      showAlert('Éxito', `Borrador Folio ${serie}${folio} guardado correctamente.`);
+      fetchHistorialFacturas();
+    } catch (err: any) {
+      console.error('Error al guardar borrador:', err);
+      showAlert('Error al Guardar', err.message || 'No se pudo guardar el borrador.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Eliminar borrador físicamente de la base de datos
+  const handleEliminarBorrador = async (factura: FacturaEmitida) => {
+    const doDelete = async () => {
+      try {
+        setIsSubmitting(true);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/borrador/${factura.id}`, {
+          method: 'DELETE',
+          headers
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Error al eliminar borrador');
+        }
+        showAlert('Borrador Eliminado', `El borrador #${factura.id} con folio ${factura.folio || ''} ha sido eliminado.`);
+        if (currentDraftId === factura.id) {
+          setCurrentDraftId(null);
+          handleResetForm();
+        }
+        fetchHistorialFacturas();
+      } catch (err: any) {
+        console.error('Error al eliminar borrador:', err);
+        showAlert('Error al Eliminar', err.message || 'No se pudo eliminar el borrador.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`¿Estás seguro de eliminar el borrador #${factura.id} (${cleanFolio(factura.folio) || 'Folio reservado'})? Esta acción no se puede deshacer.`)) {
+        await doDelete();
+      }
+    } else {
+      Alert.alert(
+        'Eliminar Borrador',
+        `¿Deseas eliminar el borrador #${factura.id} (${cleanFolio(factura.folio) || 'Folio reservado'})?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Eliminar Borrador', style: 'destructive', onPress: doDelete }
+        ]
+      );
+    }
+  };
+
+  // Timbrar factura directamente desde el borrador
+  const handleTimbrarFacturaBorrador = async (factura: FacturaEmitida) => {
+    const doTimbrar = async () => {
+      try {
+        setIsSubmitting(true);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/timbrar-factura`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ venta_id: factura.id })
+        });
+        const resJson = await res.json().catch(() => ({}));
+        if (!res.ok || !resJson.success) {
+          throw new Error(resJson.error || 'Error al timbrar borrador');
+        }
+        showAlert('Factura Timbrada', `La factura ha sido timbrada exitosamente ante el SAT.\n\nUUID:\n${resJson.cfdi_uuid || resJson.uuid}`);
+        if (currentDraftId === factura.id) {
+          setCurrentDraftId(null);
+          handleResetForm();
+        }
+        fetchHistorialFacturas();
+      } catch (err: any) {
+        console.error('Error al timbrar borrador:', err);
+        showAlert('Error al Timbrar', err.message || 'No se pudo timbrar la factura.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`¿Deseas timbrar ante el SAT el borrador con folio ${cleanFolio(factura.folio)} del cliente ${factura.cliente}?`)) {
+        await doTimbrar();
+      }
+    } else {
+      Alert.alert(
+        'Timbrar Factura',
+        `¿Deseas timbrar ante el SAT el borrador ${cleanFolio(factura.folio)} de ${factura.cliente}?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Timbrar Factura', onPress: doTimbrar }
+        ]
+      );
+    }
   };
 
   // Emisión y Timbrado Oficial CFDI 4.0
@@ -626,7 +1065,8 @@ export default function FacturacionScreen() {
 
     setIsSubmitting(true);
     try {
-      const payload = {
+      const payload: any = {
+        venta_id: currentDraftId || undefined,
         cliente_override: {
           nombre: clienteNombre.trim().toUpperCase(),
           razon_social: clienteNombre.trim().toUpperCase(),
@@ -699,6 +1139,7 @@ export default function FacturacionScreen() {
         throw new Error('No se pudo obtener el UUID de timbrado.');
       }
 
+      setCurrentDraftId(null);
       showAlert('Éxito', `Factura timbrada exitosamente (CFDI 4.0).\n\nFolio Fiscal (UUID):\n${data.cfdi_uuid}`);
       fetchHistorialFacturas();
       setActiveTab('historial');
@@ -1445,14 +1886,14 @@ export default function FacturacionScreen() {
   }, [historialFacturas, filtroEstado, historialSearch]);
 
   const clientesFiltrados = useMemo(() => {
-    if (!clientSearch.trim()) return clientes;
-    const q = normalizeText(clientSearch);
+    if (!clienteNombre.trim()) return clientes;
+    const q = normalizeText(clienteNombre);
     return clientes.filter(c =>
       normalizeText(c.nombre || '').includes(q) ||
       normalizeText(c.razon_social || '').includes(q) ||
       normalizeText(c.rfc || '').includes(q)
     );
-  }, [clientes, clientSearch]);
+  }, [clientes, clienteNombre]);
 
   const categoriasMap = useMemo(() => {
     return new Map(categorias.map(c => [c.id, c.nombre]));
@@ -1477,35 +1918,10 @@ export default function FacturacionScreen() {
         {/* Pestañas */}
         <View style={styles.tabsContainer}>
           <TouchableOpacity
-            onPress={() => setActiveTab('emitir')}
-            style={[
-              styles.tabBtn,
-              activeTab === 'emitir' && {
-                borderBottomColor: '#0284c7',
-                borderBottomWidth: 2.5,
-              },
-            ]}
-          >
-            <Ionicons
-              name="add-circle-outline"
-              size={18}
-              color={activeTab === 'emitir' ? '#0284c7' : themeColors.textSecondary}
-            />
-            <Text
-              style={[
-                styles.tabBtnText,
-                { color: activeTab === 'emitir' ? '#0284c7' : themeColors.textSecondary, fontWeight: activeTab === 'emitir' ? 'bold' : '500' },
-              ]}
-            >
-              Emitir Factura (CFDI 4.0)
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
             onPress={() => setActiveTab('historial')}
             style={[
               styles.tabBtn,
-              activeTab === 'historial' && {
+              (activeTab === 'historial' || activeTab === 'emitir') && {
                 borderBottomColor: '#0284c7',
                 borderBottomWidth: 2.5,
               },
@@ -1514,15 +1930,15 @@ export default function FacturacionScreen() {
             <Ionicons
               name="list-outline"
               size={18}
-              color={activeTab === 'historial' ? '#0284c7' : themeColors.textSecondary}
+              color={(activeTab === 'historial' || activeTab === 'emitir') ? '#0284c7' : themeColors.textSecondary}
             />
             <Text
               style={[
                 styles.tabBtnText,
-                { color: activeTab === 'historial' ? '#0284c7' : themeColors.textSecondary, fontWeight: activeTab === 'historial' ? 'bold' : '500' },
+                { color: (activeTab === 'historial' || activeTab === 'emitir') ? '#0284c7' : themeColors.textSecondary, fontWeight: (activeTab === 'historial' || activeTab === 'emitir') ? 'bold' : '500' },
               ]}
             >
-              Facturas Emitidas ({historialFacturas.length})
+              Facturas ({historialFacturas.length})
             </Text>
           </TouchableOpacity>
 
@@ -1557,34 +1973,133 @@ export default function FacturacionScreen() {
       {activeTab === 'emitir' ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: Spacing.three, gap: Spacing.three, maxWidth: 1100, alignSelf: 'center', width: '100%' }}>
           
+          {/* Barra Superior del Editor: Volver al Listado */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <TouchableOpacity
+              onPress={() => {
+                setActiveTab('historial');
+                setCurrentDraftId(null);
+                handleResetForm();
+              }}
+              style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', paddingVertical: 8, paddingHorizontal: 12 }]}
+            >
+              <Ionicons name="arrow-back" size={16} color="#0284c7" />
+              <Text style={{ color: '#0284c7', fontWeight: 'bold', fontSize: 13 }}>Volver al Listado</Text>
+            </TouchableOpacity>
+
+            {currentDraftId && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#f59e0b' }}>
+                <Ionicons name="document-text" size={14} color="#d97706" />
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d97706' }}>
+                  Borrador Activo #{currentDraftId} (Folio {serie}{folio})
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Banner de Edición de Borrador si aplica */}
+          {currentDraftId && (
+            <View style={[styles.draftBannerContainer, { backgroundColor: '#fffbeb', borderColor: '#f59e0b' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                <Ionicons name="bookmark" size={24} color="#d97706" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#92400e' }}>
+                    Editando Borrador Folio {serie}{folio}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={handleGuardarBorrador}
+                disabled={isSubmitting}
+                style={[styles.quickSelectBtn, { borderColor: '#d97706', backgroundColor: '#fef3c7', paddingVertical: 8, paddingHorizontal: 12 }]}
+              >
+                <Ionicons name="save-outline" size={16} color="#d97706" />
+                <Text style={{ color: '#d97706', fontSize: 12, fontWeight: 'bold' }}>Guardar Borrador</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* SECCIÓN 1: DATOS FISCALES DEL RECEPTOR */}
-          <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, position: 'relative', zIndex: 1000 }]}>
             <View style={styles.cardHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="person" size={18} color="#0284c7" />
                 <Text style={[styles.cardTitle, { color: themeColors.text }]}>1. Datos Fiscales del Receptor (Cliente)</Text>
               </View>
-              <TouchableOpacity
-                onPress={() => {
-                  setClientSearch('');
-                  setIsClientModalOpen(true);
-                  if (clientes.length === 0) {
-                    fetchClientes();
-                  }
-                }}
-                style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15' }]}
-              >
-                <Ionicons name="search" size={14} color="#0284c7" />
-                <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: '700' }}>Cargar del Catálogo</Text>
-              </TouchableOpacity>
             </View>
 
-            <CustomInput
-              label="Razón Social / Nombre Oficial *"
-              value={clienteNombre}
-              onChangeText={setClienteNombre}
-              placeholder="Ej. RAUL HERNANDEZ PEREZ o TECNOLOGIAS INTTEC"
-            />
+            {/* Campo Razón Social con Autocompletado Reactivo */}
+            <View style={{ position: 'relative', zIndex: 10000, marginBottom: 12 }}>
+              <Text style={[styles.fieldLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>
+                Razón Social / Nombre Oficial *
+              </Text>
+              <View style={[styles.clientAutocompleteInputContainer, { backgroundColor: themeColors.background, borderColor: showClientDropdown ? '#0284c7' : themeColors.border }]}>
+                <Ionicons name="business-outline" size={18} color="#0284c7" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={[styles.clientAutocompleteInput, { color: themeColors.text }]}
+                  value={clienteNombre}
+                  onChangeText={handleClienteNombreChange}
+                  onFocus={() => {
+                    if (clientSuggestions.length > 0) setShowClientDropdown(true);
+                  }}
+                  placeholder="Escribe la razón social o nombre"
+                  placeholderTextColor={themeColors.textSecondary}
+                />
+                {isSearchingClients && (
+                  <ActivityIndicator size="small" color="#0284c7" style={{ marginLeft: 8 }} />
+                )}
+                {!!clienteNombre && !isSearchingClients && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setClienteNombre('');
+                      setShowClientDropdown(false);
+                      setClientSuggestions([]);
+                    }}
+                    style={{ padding: 4 }}
+                  >
+                    <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Lista Desplegable de Autocompletado */}
+              {showClientDropdown && clientSuggestions.length > 0 && (
+                <View style={[styles.clientDropdownMenu, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <View style={[styles.clientDropdownHeader, { borderBottomColor: themeColors.border }]}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.textSecondary }}>
+                      COINCIDENCIAS EN EL CATÁLOGO ({clientSuggestions.length})
+                    </Text>
+                    <TouchableOpacity onPress={() => setShowClientDropdown(false)} style={{ padding: 2 }}>
+                      <Ionicons name="close" size={16} color={themeColors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled">
+                    {clientSuggestions.map(c => {
+                      const displayName = c.razon_social && c.razon_social !== c.nombre
+                        ? `${c.razon_social} (${c.nombre})`
+                        : (c.razon_social || c.nombre || 'Cliente');
+                      return (
+                        <TouchableOpacity
+                          key={c.id || c.rfc}
+                          onPress={() => handleSelectSearchedClient(c)}
+                          style={[styles.clientDropdownItem, { borderBottomColor: themeColors.border }]}
+                        >
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: themeColors.text }}>
+                              {displayName}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                              RFC: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{c.rfc || 'Sin RFC'}</Text> | CP: {c.codigo_postal || 'N/D'} | Régimen: {c.regimen_fiscal || '601'}
+                            </Text>
+                          </View>
+                          <Ionicons name="chevron-forward" size={16} color="#0284c7" />
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
 
             <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: 12 }}>
               <View style={{ flex: 1.2 }}>
@@ -2157,6 +2672,17 @@ export default function FacturacionScreen() {
                 <Text style={{ color: '#0284c7', fontWeight: '700', fontSize: 13 }}>Vista Previa / Borrador PDF</Text>
               </TouchableOpacity>
 
+              {currentDraftId && (
+                <TouchableOpacity
+                  onPress={handleGuardarBorrador}
+                  disabled={isSubmitting}
+                  style={[styles.actionBtn, { borderColor: '#f59e0b', backgroundColor: '#fef3c7', flex: 1 }]}
+                >
+                  <Ionicons name="save-outline" size={18} color="#d97706" />
+                  <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 13 }}>Guardar Borrador</Text>
+                </TouchableOpacity>
+              )}
+
               <TouchableOpacity
                 onPress={handleTimbrarFactura}
                 disabled={isSubmitting}
@@ -2168,7 +2694,7 @@ export default function FacturacionScreen() {
                   <>
                     <Ionicons name="receipt-outline" size={18} color="#fff" />
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
-                      Emitir y Timbrar Factura Oficial ante SAT
+                      {currentDraftId ? 'Timbrar Factura' : 'Emitir y Timbrar Factura Oficial ante SAT'}
                     </Text>
                   </>
                 )}
@@ -2179,6 +2705,33 @@ export default function FacturacionScreen() {
       ) : activeTab === 'historial' ? (
         /* HISTORIAL DE FACTURAS EMITIDAS */
         <View style={{ flex: 1, padding: Spacing.three, maxWidth: 1200, alignSelf: 'center', width: '100%' }}>
+          {/* Header del Listado con Botón Nueva Factura */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <View>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text }}>Comprobantes y Facturas</Text>
+              <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Facturas timbradas y borradores con folio reservado</Text>
+            </View>
+            {/* Botón Nueva Factura: handleNuevaFactura */}
+            <TouchableOpacity
+              accessibilityLabel="Nueva Factura"
+              onPress={handleNuevaFactura}
+              disabled={isSubmitting}
+              style={[
+                styles.actionBtn,
+                {
+                  backgroundColor: '#0284c7',
+                  borderColor: '#0284c7',
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 8,
+                }
+              ]}
+            >
+              <Ionicons name="add-circle" size={18} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Nueva Factura</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Barra de Búsqueda y Filtros */}
           <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: 10, marginBottom: 14 }}>
             <View style={[styles.searchBox, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement, flex: 1 }]}>
@@ -2198,7 +2751,7 @@ export default function FacturacionScreen() {
             </View>
 
             <View style={{ flexDirection: 'row', gap: 6 }}>
-              {(['TODAS', 'TIMBRADA', 'CANCELADA'] as const).map(est => (
+              {(['TODAS', 'BORRADOR', 'TIMBRADA', 'CANCELADA'] as const).map(est => (
                 <TouchableOpacity
                   key={est}
                   onPress={() => setFiltroEstado(est)}
@@ -2226,13 +2779,13 @@ export default function FacturacionScreen() {
           ) : facturasFiltradas.length === 0 ? (
             <View style={[styles.emptyContainer, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}>
               <Ionicons name="receipt-outline" size={48} color={themeColors.textSecondary} />
-              <Text style={[styles.emptyTitle, { color: themeColors.text }]}>No hay facturas emitidas</Text>
+              <Text style={[styles.emptyTitle, { color: themeColors.text }]}>No hay facturas registradas</Text>
               <Text style={{ color: themeColors.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
-                Las facturas timbradas desde este módulo o desde el módulo de Ventas aparecerán aquí.
+                Las facturas timbradas y los borradores guardados aparecerán en este listado.
               </Text>
-              <TouchableOpacity onPress={() => setActiveTab('emitir')} style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', marginTop: 14 }]}>
+              <TouchableOpacity onPress={handleNuevaFactura} style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', marginTop: 14 }]}>
                 <Ionicons name="add-circle" size={16} color="#0284c7" />
-                <Text style={{ color: '#0284c7', fontWeight: 'bold' }}>Emitir Primera Factura</Text>
+                <Text style={{ color: '#0284c7', fontWeight: 'bold' }}>Nueva Factura</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -2240,6 +2793,7 @@ export default function FacturacionScreen() {
               <View style={{ gap: 8 }}>
                 {facturasFiltradas.map((factura) => {
                   const isCanceled = factura.cfdi_estado === 'CANCELADA';
+                  const isDraft = factura.cfdi_estado === 'BORRADOR' || factura.es_borrador;
                   return (
                     <View
                       key={factura.id}
@@ -2247,7 +2801,9 @@ export default function FacturacionScreen() {
                         styles.facturaRowCard,
                         {
                           backgroundColor: themeColors.backgroundElement,
-                          borderColor: isCanceled ? '#ef4444' + '60' : themeColors.border,
+                          borderColor: isDraft ? '#f59e0b' : isCanceled ? '#ef4444' + '60' : themeColors.border,
+                          borderLeftWidth: isDraft ? 4 : 1,
+                          borderLeftColor: isDraft ? '#f59e0b' : isCanceled ? '#ef4444' : themeColors.border,
                         },
                       ]}
                     >
@@ -2256,16 +2812,29 @@ export default function FacturacionScreen() {
                           <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text }}>
                             {factura.cliente || 'Cliente General'}
                           </Text>
-                          <View
-                            style={[
-                              styles.statusBadge,
-                              { backgroundColor: isCanceled ? '#ef444420' : '#10b98120' },
-                            ]}
-                          >
-                            <Text style={{ fontSize: 10, fontWeight: '800', color: isCanceled ? '#ef4444' : '#10b981' }}>
-                              {factura.cfdi_estado || 'TIMBRADA'}
-                            </Text>
-                          </View>
+                          {isDraft ? (
+                            <View
+                              style={[
+                                styles.statusBadge,
+                                { backgroundColor: '#fef3c7', borderColor: '#f59e0b', borderWidth: 1 },
+                              ]}
+                            >
+                              <Text style={{ fontSize: 10, fontWeight: '800', color: '#d97706' }}>
+                                BORRADOR
+                              </Text>
+                            </View>
+                          ) : (
+                            <View
+                              style={[
+                                styles.statusBadge,
+                                { backgroundColor: isCanceled ? '#ef444420' : '#10b98120' },
+                              ]}
+                            >
+                              <Text style={{ fontSize: 10, fontWeight: '800', color: isCanceled ? '#ef4444' : '#10b981' }}>
+                                {factura.cfdi_estado || 'TIMBRADA'}
+                              </Text>
+                            </View>
+                          )}
                           <View
                             style={[
                               styles.statusBadge,
@@ -2299,47 +2868,85 @@ export default function FacturacionScreen() {
                       </View>
 
                       <View style={{ alignItems: 'flex-end', justifyContent: 'center', paddingHorizontal: 8 }}>
-                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: isCanceled ? themeColors.textSecondary : '#10b981' }}>
+                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: isDraft ? '#d97706' : isCanceled ? themeColors.textSecondary : '#10b981' }}>
                           ${(factura.precio_total_facturado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </Text>
                       </View>
 
                       {/* Botones de acción por factura */}
-                      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                        <TouchableOpacity
-                          onPress={() => handleVerPDF(factura)}
-                          style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', paddingHorizontal: 10 }]}
-                        >
-                          <Ionicons name="eye-outline" size={16} color="#0284c7" />
-                          <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Ver Factura</Text>
-                        </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {isDraft ? (
+                          <>
+                            <TouchableOpacity
+                              onPress={() => handleVerBorrador(factura)}
+                              style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', paddingHorizontal: 10 }]}
+                            >
+                              <Ionicons name="eye-outline" size={16} color="#0284c7" />
+                              <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Ver Borrador</Text>
+                            </TouchableOpacity>
 
-                        <TouchableOpacity
-                          onPress={() => handleDescargarXML(factura)}
-                          style={[styles.smallActionBtn, { borderColor: '#10b981', backgroundColor: '#10b98115' }]}
-                        >
-                          <Ionicons name="code-download" size={16} color="#10b981" />
-                          <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>XML</Text>
-                        </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => handleModificarBorrador(factura)}
+                              style={[styles.smallActionBtn, { borderColor: '#f59e0b', backgroundColor: '#fef3c7', paddingHorizontal: 10 }]}
+                            >
+                              <Ionicons name="create-outline" size={16} color="#d97706" />
+                              <Text style={{ color: '#d97706', fontSize: 11, fontWeight: '700' }}>Modificar</Text>
+                            </TouchableOpacity>
 
-                        {!isCanceled && (
-                          <TouchableOpacity
-                            onPress={() => handleIniciarCobroREP(factura)}
-                            style={[styles.smallActionBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d15', paddingHorizontal: 10 }]}
-                          >
-                            <Ionicons name="cash-outline" size={16} color="#801c1d" />
-                            <Text style={{ color: '#801c1d', fontSize: 11, fontWeight: '700' }}>Cobrar / REP</Text>
-                          </TouchableOpacity>
-                        )}
+                            <TouchableOpacity
+                              onPress={() => handleTimbrarFacturaBorrador(factura)}
+                              style={[styles.smallActionBtn, { borderColor: '#10b981', backgroundColor: '#10b98120', paddingHorizontal: 10 }]}
+                            >
+                              <Ionicons name="receipt-outline" size={16} color="#10b981" />
+                              <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>Timbrar Factura</Text>
+                            </TouchableOpacity>
 
-                        {!isCanceled && (
-                          <TouchableOpacity
-                            onPress={() => handleCancelarFacturaSAT(factura)}
-                            style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415' }]}
-                          >
-                            <Ionicons name="close-circle" size={16} color="#ef4444" />
-                            <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700' }}>Cancelar</Text>
-                          </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => handleEliminarBorrador(factura)}
+                              style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415', paddingHorizontal: 10 }]}
+                            >
+                              <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                              <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700' }}>Eliminar Borrador</Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : (
+                          <>
+                            <TouchableOpacity
+                              onPress={() => handleVerPDF(factura)}
+                              style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', paddingHorizontal: 10 }]}
+                            >
+                              <Ionicons name="eye-outline" size={16} color="#0284c7" />
+                              <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Ver Factura</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => handleDescargarXML(factura)}
+                              style={[styles.smallActionBtn, { borderColor: '#10b981', backgroundColor: '#10b98115' }]}
+                            >
+                              <Ionicons name="code-download" size={16} color="#10b981" />
+                              <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>XML</Text>
+                            </TouchableOpacity>
+
+                            {!isCanceled && (
+                              <TouchableOpacity
+                                onPress={() => handleIniciarCobroREP(factura)}
+                                style={[styles.smallActionBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d15', paddingHorizontal: 10 }]}
+                              >
+                                <Ionicons name="cash-outline" size={16} color="#801c1d" />
+                                <Text style={{ color: '#801c1d', fontSize: 11, fontWeight: '700' }}>Cobrar / REP</Text>
+                              </TouchableOpacity>
+                            )}
+
+                            {!isCanceled && (
+                              <TouchableOpacity
+                                onPress={() => handleCancelarFacturaSAT(factura)}
+                                style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415' }]}
+                              >
+                                <Ionicons name="close-circle" size={16} color="#ef4444" />
+                                <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700' }}>Cancelar</Text>
+                              </TouchableOpacity>
+                            )}
+                          </>
                         )}
                       </View>
                     </View>
@@ -2581,103 +3188,6 @@ export default function FacturacionScreen() {
         </View>
       )}
 
-      {/* MODAL PARA SELECCIONAR CLIENTE DEL CATÁLOGO */}
-      <Modal visible={isClientModalOpen} animationType="slide" transparent onRequestClose={() => setIsClientModalOpen(false)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setIsClientModalOpen(false)}>
-          <Pressable onPress={e => e.stopPropagation()} style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-            <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="people" size={20} color="#0284c7" />
-                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Seleccionar Cliente del Catálogo</Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <TouchableOpacity onPress={fetchClientes} disabled={isLoadingClientes} style={[{ padding: 6 }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}>
-                  <Ionicons name="refresh" size={20} color={isLoadingClientes ? themeColors.textSecondary : "#0284c7"} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setIsClientModalOpen(false)}
-                  hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
-                  style={[{ padding: 6 }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}
-                >
-                  <Ionicons name="close" size={22} color={themeColors.text} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={[styles.searchBox, { borderColor: themeColors.border, backgroundColor: themeColors.background, marginBottom: 12 }]}>
-              <Ionicons name="search" size={18} color={themeColors.textSecondary} />
-              <TextInput
-                style={[styles.searchInput, { color: themeColors.text }]}
-                placeholder="Buscar por nombre, razón social o RFC..."
-                placeholderTextColor={themeColors.textSecondary}
-                value={clientSearch}
-                onChangeText={setClientSearch}
-                autoFocus
-              />
-              {!!clientSearch && (
-                <TouchableOpacity onPress={() => setClientSearch('')}>
-                  <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {isLoadingClientes ? (
-              <View style={{ padding: 32, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <ActivityIndicator size="small" color="#0284c7" />
-                <Text style={{ fontSize: 13, color: themeColors.textSecondary }}>Cargando catálogo de clientes...</Text>
-              </View>
-            ) : clientesFiltrados.length === 0 ? (
-              <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                <Ionicons name="alert-circle-outline" size={36} color={themeColors.textSecondary} style={{ opacity: 0.6 }} />
-                <Text style={{ fontSize: 13, color: themeColors.textSecondary, textAlign: 'center' }}>
-                  {clientSearch.trim()
-                    ? `No se encontraron clientes que coincidan con "${clientSearch}".`
-                    : 'No hay clientes disponibles en el catálogo.'}
-                </Text>
-                <TouchableOpacity
-                  onPress={fetchClientes}
-                  style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', marginTop: 4 }]}
-                >
-                  <Ionicons name="refresh" size={14} color="#0284c7" />
-                  <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: '700' }}>Recargar Clientes</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <ScrollView style={{ maxHeight: 400 }}>
-                <View style={{ gap: 6 }}>
-                  {clientesFiltrados.map(c => {
-                    const displayTitle = c.razon_social && c.razon_social !== c.nombre
-                      ? `${c.razon_social} (${c.nombre})`
-                      : (c.razon_social || c.nombre || 'Cliente');
-                    return (
-                      <TouchableOpacity
-                        key={c.id}
-                        onPress={() => handleSelectClient(c)}
-                        style={[styles.clientOptionItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}
-                      >
-                        <View style={{ flex: 1, paddingRight: 8 }}>
-                          <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text }}>
-                            {displayTitle}
-                          </Text>
-                          <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
-                            RFC: <Text style={{ fontWeight: '600', color: themeColors.text }}>{c.rfc || 'Sin RFC'}</Text> | CP: {c.codigo_postal || 'N/D'} | Régimen: {c.regimen_fiscal || '601'}
-                          </Text>
-                          {c.uso_cfdi && (
-                            <Text style={{ fontSize: 10, color: '#0284c7', marginTop: 1 }}>
-                              Uso CFDI: {c.uso_cfdi}
-                            </Text>
-                          )}
-                        </View>
-                        <Ionicons name="chevron-forward" size={18} color="#0284c7" />
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {/* MODAL PRINCIPAL: NUEVO COMPLEMENTO DE PAGO MULTI-FACTURA */}
       <Modal visible={isPagoModalOpen} animationType="slide" transparent onRequestClose={() => setIsPagoModalOpen(false)}>
@@ -3365,5 +3875,63 @@ const styles = StyleSheet.create({
   modalActionText: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  draftBannerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 12,
+  },
+  clientAutocompleteInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    minHeight: 44,
+  },
+  clientAutocompleteInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+  },
+  clientDropdownMenu: {
+    position: 'absolute',
+    top: 68,
+    left: 0,
+    right: 0,
+    borderWidth: 1,
+    borderRadius: 10,
+    zIndex: 99999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 10,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+      },
+    }),
+    overflow: 'hidden',
+  },
+  clientDropdownHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  clientDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
   },
 });

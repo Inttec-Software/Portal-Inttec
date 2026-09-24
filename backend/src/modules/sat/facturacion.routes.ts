@@ -4,6 +4,7 @@ import { buildUnsignedCFDI } from './finkok/xmlBuilder';
 import { buildUnsignedCFDIPagos, CFDIPagoParams, DoctoRelacionadoParam } from './finkok/xmlBuilderPagos';
 import { signStampFinkok, signCancelFinkok } from './finkok/soapClient';
 import { invalidateCache } from '../../middlewares/cache.middleware';
+import { folioMutex } from '../../utils/mutex';
 
 const router = Router();
 
@@ -25,11 +26,15 @@ export function cleanFolio(rawFolio?: any): string {
 }
 
 /**
- * Resuelve o calcula el folio consecutivo estándar para facturación (ej. A0001, A0002...).
- * Si el usuario envió un número o folio explícito (ej. 1, '1', '0001', 'A0001'), se normaliza a 4 dígitos ('0001').
- * Si no se envió ningún folio, se calcula automáticamente consultando la base de datos para obtener el último folio y sumar 1.
+ * Resuelve o calcula el folio consecutivo estándar para facturación (ej. A0000, A0001, A0002...).
+ * - Si no existen folios previos para la serie, inicia en "0000" (ej. A0000).
+ * - Incrementa de 1 en 1: 0000 -> 0001 -> 0002 -> ...
+ * - Siempre formateado a 4+ dígitos con ceros iniciales (String(n).padStart(4, '0')).
+ * - Considera todos los estados (BORRADOR, TIMBRADA, CANCELADA, PENDIENTE) para que los
+ *   borradores mantengan su folio consecutivo permanentemente reservado sin colisiones.
+ * - Si el usuario envió un número o folio explícito (ej. 0, '0', '0000', 'A0000'), se normaliza a 4+ dígitos ('0000').
  */
-async function resolveConsecutiveFolio(
+export async function resolveConsecutiveFolio(
   supabaseClient: any,
   requestedSerie?: string,
   requestedFolio?: string
@@ -41,36 +46,41 @@ async function resolveConsecutiveFolio(
     folio = folio.slice(serie.length).trim();
   }
 
-  // Consultar siempre las ventas timbradas/emitidas para conocer el estado actual
-  let maxNum = 0;
+  // Consultar todas las ventas (en cualquier estado: BORRADOR, TIMBRADA, CANCELADA, PENDIENTE)
+  // para conocer el estado actual y respetar folios reservados
+  let maxNum: number | null = null;
   try {
-    const { data: existingVentas } = await supabaseClient
+    const { data: existingVentas, error: queryErr } = await supabaseClient
       .from('ventas')
-      .select('folio, cfdi_folio')
-      .or('cfdi_estado.eq.TIMBRADA,cfdi_estado.eq.CANCELADA,tipo_proyecto.eq.Factura Directa');
+      .select('folio, cfdi_folio, factura_referencia');
 
-    (existingVentas || []).forEach((v: any) => {
-      [v.folio, v.cfdi_folio].filter(Boolean).forEach((c: any) => {
-        const raw = cleanFolio(c).toUpperCase();
-        let numPart = '';
-        if (raw.startsWith(serie)) {
-          numPart = raw.slice(serie.length);
-        } else if (/^\d+$/.test(raw)) {
-          numPart = raw;
-        }
-        if (numPart && /^\d+$/.test(numPart)) {
-          const parsed = parseInt(numPart, 10);
-          if (!isNaN(parsed) && parsed > maxNum && parsed < 1000000) {
-            maxNum = parsed;
+    if (!queryErr && existingVentas) {
+      existingVentas.forEach((v: any) => {
+        [v.folio, v.cfdi_folio, v.factura_referencia].filter(Boolean).forEach((c: any) => {
+          const raw = cleanFolio(c).toUpperCase();
+          let numPart = '';
+          if (raw.startsWith(serie)) {
+            numPart = raw.slice(serie.length).replace(/^[-_\s]+/, '');
+          } else if (/^\d+$/.test(raw) && serie === 'A') {
+            numPart = raw;
           }
-        }
+          if (numPart && /^\d+$/.test(numPart)) {
+            const parsed = parseInt(numPart, 10);
+            if (!isNaN(parsed) && parsed >= 0 && parsed < 1000000) {
+              if (maxNum === null || parsed > maxNum) {
+                maxNum = parsed;
+              }
+            }
+          }
+        });
       });
-    });
+    }
   } catch (err) {
     console.warn('Error consultando folios anteriores:', err);
   }
 
-  const nextAutoNum = maxNum + 1;
+  // Si no existe ningún folio previo, arranca en 0 ("0000")
+  const nextAutoNum = maxNum === null ? 0 : maxNum + 1;
 
   if (/^\d+$/.test(folio)) {
     const num = parseInt(folio, 10);
@@ -79,7 +89,7 @@ async function resolveConsecutiveFolio(
       serie,
       folio: padded,
       fullFolio: `${serie}${padded}`,
-      ultimoNumero: maxNum,
+      ultimoNumero: maxNum === null ? 0 : maxNum,
       siguienteNumero: num
     };
   }
@@ -89,7 +99,7 @@ async function resolveConsecutiveFolio(
     serie,
     folio: padded,
     fullFolio: `${serie}${padded}`,
-    ultimoNumero: maxNum,
+    ultimoNumero: maxNum === null ? 0 : maxNum,
     siguienteNumero: nextAutoNum
   };
 }
@@ -124,11 +134,9 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
     const effectiveReceptor = cliente_override || custom_receptor || null;
     const effectiveCondiciones = { ...(custom_condiciones || {}), ...(cfdi_config || {}) };
 
-    const { serie: serieFinal, folio: folioFinal, fullFolio } = await resolveConsecutiveFolio(
-      supabaseClient,
-      effectiveCondiciones.serie,
-      effectiveCondiciones.folio
-    );
+    let serieFinal: string;
+    let folioFinal: string;
+    let fullFolio: string;
 
     if (resolvedVentaId) {
       const { data: ventaDB, error: ventaError } = await supabaseClient
@@ -139,6 +147,19 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
 
       if (ventaError || !ventaDB) throw new Error('Venta no encontrada');
       if (ventaDB.cfdi_estado === 'TIMBRADA') throw new Error('La venta ya se encuentra timbrada');
+
+      // Respetar rigurosamente el folio previamente reservado por el borrador o venta existente
+      const requestedSerie = effectiveCondiciones.serie || ventaDB.cfdi_serie || (ventaDB.folio ? ventaDB.folio.replace(/\d+$/, '') : 'A');
+      const requestedFolio = effectiveCondiciones.folio || ventaDB.cfdi_folio || cleanFolio(ventaDB.folio);
+
+      const lockKey = `${company}:${env}:${(requestedSerie || 'A').toUpperCase()}`;
+      const resolved = await folioMutex.runExclusive(lockKey, async () => {
+        return await resolveConsecutiveFolio(supabaseClient, requestedSerie, requestedFolio);
+      });
+
+      serieFinal = resolved.serie;
+      folioFinal = resolved.folio;
+      fullFolio = resolved.fullFolio;
 
       venta = {
         ...ventaDB,
@@ -194,6 +215,16 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       if (!effectiveReceptor) {
         throw new Error('Los datos fiscales del cliente son obligatorios para facturar');
       }
+
+      const requestedSerie = effectiveCondiciones.serie || 'A';
+      const lockKey = `${company}:${env}:${(requestedSerie || 'A').toUpperCase()}`;
+      const resolved = await folioMutex.runExclusive(lockKey, async () => {
+        return await resolveConsecutiveFolio(supabaseClient, requestedSerie, effectiveCondiciones.folio);
+      });
+
+      serieFinal = resolved.serie;
+      folioFinal = resolved.folio;
+      fullFolio = resolved.fullFolio;
 
       cliente = {
         nombre: effectiveReceptor.nombre || effectiveReceptor.razon_social || 'PUBLICO EN GENERAL',
@@ -364,7 +395,7 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
 /**
  * GET /api/sat/siguiente-folio
  * Calcula el siguiente folio consecutivo para una serie determinada (por defecto 'A').
- * Formato estándar: 4 dígitos con ceros iniciales (ej. A0001, A0002, etc.)
+ * Formato estándar: 4+ dígitos con ceros iniciales (ej. A0000, A0001, etc.)
  */
 router.get('/siguiente-folio', async (req: Request, res: Response) => {
   try {
@@ -373,7 +404,11 @@ router.get('/siguiente-folio', async (req: Request, res: Response) => {
     const supabaseClient = getSupabaseClient(company, env);
 
     const serieParam = String(req.query.serie || 'A').toUpperCase().trim();
-    const result = await resolveConsecutiveFolio(supabaseClient, serieParam);
+    const lockKey = `${company}:${env}:${serieParam}`;
+
+    const result = await folioMutex.runExclusive(lockKey, async () => {
+      return await resolveConsecutiveFolio(supabaseClient, serieParam);
+    });
 
     return res.json({
       success: true,
@@ -384,11 +419,641 @@ router.get('/siguiente-folio', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       serie: 'A',
-      folio: '0001',
-      fullFolio: 'A0001',
+      folio: '0000',
+      fullFolio: 'A0000',
       ultimoNumero: 0,
-      siguienteNumero: 1
+      siguienteNumero: 0
     });
+  }
+});
+
+// ==============================================================================
+// SECCIÓN: GESTIÓN DE BORRADORES Y CLIENTES PARA CFDI 4.0
+// ==============================================================================
+
+/**
+ * GET /api/sat/clientes-search
+ * Búsqueda reactiva de clientes por razón social, nombre o RFC.
+ * Limita a 20 resultados con datos fiscales completos para CFDI 4.0.
+ */
+router.get('/clientes-search', async (req: Request, res: Response) => {
+  try {
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
+
+    const q = String(req.query.q || '').trim();
+
+    let query = supabaseClient
+      .from('clientes')
+      .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi');
+
+    if (q) {
+      query = query.or(`razon_social.ilike.%${q}%,nombre.ilike.%${q}%,rfc.ilike.%${q}%`);
+    }
+
+    const { data, error } = await query
+      .order('nombre', { ascending: true })
+      .limit(20);
+
+    if (error) throw error;
+
+    return res.json({
+      success: true,
+      clientes: data || []
+    });
+  } catch (err: any) {
+    console.error("Error en búsqueda reactiva de clientes:", err);
+    return res.status(500).json({ error: err.message || 'Error al buscar clientes' });
+  }
+});
+
+/**
+ * POST /api/sat/borrador
+ * Crea un borrador de factura en ventas con cfdi_estado = 'BORRADOR'.
+ * Reserva un folio incremental único de forma atómica bajo lock de serie/tenant.
+ * Inserta las partidas asociadas en ventas_partidas.
+ */
+router.post('/borrador', async (req: Request, res: Response) => {
+  try {
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
+
+    const body = req.body || {};
+    const requestedSerie = String(body.serie || body.cfdi_serie || 'A').toUpperCase().trim();
+    const lockKey = `${company}:${env}:${requestedSerie}`;
+
+    const createdDraft = await folioMutex.runExclusive(lockKey, async () => {
+      // 1. Resolver siguiente folio consecutivo seguro atómicamente dentro del mutex
+      const { serie: serieFinal, folio: folioFinal, fullFolio } = await resolveConsecutiveFolio(
+        supabaseClient,
+        requestedSerie,
+        body.folio || body.cfdi_folio
+      );
+
+      // 2. Extraer datos del receptor y configuración
+      const receptor = body.receptor || {};
+      const clienteNombre = String(
+        body.cliente ||
+        body.razon_social ||
+        receptor.razon_social ||
+        receptor.nombre ||
+        'PUBLICO EN GENERAL'
+      ).trim();
+
+      const receptorRfc = String(
+        receptor.rfc || body.cliente_rfc || body.rfc || 'XAXX010101000'
+      ).trim().toUpperCase();
+
+      const receptorCp = String(
+        receptor.codigo_postal || body.cliente_cp || body.codigo_postal || process.env.EMISOR_CP || '31110'
+      ).trim();
+
+      const receptorRegimen = String(
+        receptor.regimen_fiscal || body.cliente_regimen || body.regimen_fiscal || '616'
+      ).trim();
+
+      const receptorUso = String(
+        receptor.uso_cfdi || body.cliente_uso || body.uso_cfdi || 'G03'
+      ).trim();
+
+      // 3. Procesar partidas
+      const rawPartidas = Array.isArray(body.partidas) ? body.partidas : [];
+      let subtotalCalculado = 0;
+      let costoTotalCalculado = 0;
+
+      const sanitizedPartidas = rawPartidas.map((p: any) => {
+        const cant = Math.max(0.0001, parseFloat(p.cantidad) || 1);
+        const precioUnit = parseFloat(p.precio_unitario_venta || p.precio_unitario || 0) || 0;
+        const costoUnit = parseFloat(p.costo_unitario_proveedor || p.costo_unitario || 0) || 0;
+        const importe = cant * precioUnit;
+        subtotalCalculado += importe;
+        costoTotalCalculado += cant * costoUnit;
+
+        return {
+          descripcion: String(p.descripcion || 'Concepto').trim(),
+          cantidad: cant,
+          precio_unitario_venta: precioUnit,
+          costo_unitario_proveedor: costoUnit,
+          precio_total_venta: importe,
+          costo_total_proveedor: cant * costoUnit,
+          clave_sat: p.clave_sat || '01010101',
+          clave_unidad: p.clave_unidad || 'H87',
+          unidad: p.unidad || 'Pieza',
+        };
+      });
+
+      const totalFacturado = body.precio_total_facturado !== undefined
+        ? parseFloat(body.precio_total_facturado) || 0
+        : (body.total !== undefined
+            ? parseFloat(body.total) || 0
+            : subtotalCalculado * 1.16);
+
+      const draftMetadata = {
+        receptor: {
+          nombre: receptor.nombre || clienteNombre,
+          razon_social: receptor.razon_social || clienteNombre,
+          rfc: receptorRfc,
+          codigo_postal: receptorCp,
+          regimen_fiscal: receptorRegimen,
+          uso_cfdi: receptorUso
+        },
+        config: {
+          serie: serieFinal,
+          folio: folioFinal,
+          forma_pago: body.forma_pago || '03',
+          metodo_pago: body.metodo_pago || body.metodo_pago_cfdi || 'PUE',
+          moneda: body.moneda || 'MXN',
+          tipo_comprobante: body.tipo_comprobante || 'I',
+          orden_compra: body.orden_compra || null
+        },
+        user_notas: body.notas || null
+      };
+
+      const ventaPayload: any = {
+        cliente: clienteNombre,
+        fecha: body.fecha || new Date().toISOString().split('T')[0],
+        folio: fullFolio,
+        cfdi_serie: serieFinal,
+        cfdi_folio: folioFinal,
+        factura_referencia: fullFolio,
+        precio_total_facturado: totalFacturado,
+        costo_total: costoTotalCalculado,
+        cfdi_estado: 'BORRADOR',
+        estado_pago: 'PENDIENTE DE PAGO',
+        tipo_proyecto: body.tipo_proyecto || 'Factura Directa',
+        orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
+        notas: JSON.stringify(draftMetadata),
+        descripcion: body.descripcion || `Borrador ${fullFolio} - ${clienteNombre}`,
+        cotizacion_id: body.cotizacion_id || null,
+      };
+
+      const { data: createdVenta, error: insertErr } = await supabaseClient
+        .from('ventas')
+        .insert(ventaPayload)
+        .select()
+        .single();
+
+      if (insertErr) {
+        throw new Error(`Error al insertar borrador en ventas: ${insertErr.message}`);
+      }
+
+      const ventaId = createdVenta.id;
+      let insertedPartidas: any[] = [];
+
+      if (sanitizedPartidas.length > 0) {
+        const partidasToInsert = sanitizedPartidas.map((p: any) => ({
+          ...p,
+          venta_id: ventaId
+        }));
+
+        try {
+          const { data: pData, error: pErr } = await supabaseClient
+            .from('ventas_partidas')
+            .insert(partidasToInsert)
+            .select();
+
+          if (pErr) {
+            console.warn("Aviso insertando ventas_partidas (reintentando básico):", pErr);
+            const fallbackPartidas = partidasToInsert.map((p: any) => {
+              const { clave_sat, clave_unidad, ...rest } = p;
+              return rest;
+            });
+            const { data: pFallback } = await supabaseClient
+              .from('ventas_partidas')
+              .insert(fallbackPartidas)
+              .select();
+            insertedPartidas = pFallback || fallbackPartidas;
+          } else {
+            insertedPartidas = pData || partidasToInsert;
+          }
+        } catch (pEx) {
+          console.warn("Excepción al insertar partidas:", pEx);
+        }
+      }
+
+      try {
+        invalidateCache('ventas');
+        invalidateCache('sat');
+      } catch (_) {}
+
+      return {
+        ...createdVenta,
+        id: ventaId,
+        serie: serieFinal,
+        folio: folioFinal,
+        fullFolio,
+        cliente: clienteNombre,
+        receptor: draftMetadata.receptor,
+        forma_pago: draftMetadata.config.forma_pago,
+        metodo_pago: draftMetadata.config.metodo_pago,
+        moneda: draftMetadata.config.moneda,
+        tipo_comprobante: draftMetadata.config.tipo_comprobante,
+        orden_compra: draftMetadata.config.orden_compra || '',
+        precio_total_facturado: totalFacturado,
+        cfdi_estado: 'BORRADOR',
+        es_borrador: true,
+        partidas: insertedPartidas.length > 0 ? insertedPartidas : sanitizedPartidas,
+        notas: draftMetadata.user_notas
+      };
+    });
+
+    return res.status(201).json({
+      success: true,
+      mensaje: 'Borrador creado exitosamente con reserva de folio',
+      borrador: createdDraft
+    });
+  } catch (error: any) {
+    console.error("Error al crear borrador:", error);
+    return res.status(400).json({ error: error.message || 'Error al crear borrador' });
+  }
+});
+
+/**
+ * GET /api/sat/borrador/:id
+ * Obtiene el borrador y sus partidas de ventas y ventas_partidas para poblar el editor en frontend.
+ */
+router.get('/borrador/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID de borrador requerido' });
+
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
+
+    const { data: venta, error: ventaError } = await supabaseClient
+      .from('ventas')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (ventaError || !venta) {
+      return res.status(404).json({ error: 'Borrador no encontrado' });
+    }
+
+    const { data: partidas, error: partError } = await supabaseClient
+      .from('ventas_partidas')
+      .select('*')
+      .eq('venta_id', id);
+
+    if (partError) {
+      console.warn("Aviso consultando partidas del borrador:", partError);
+    }
+
+    let receptor: any = null;
+    let config: any = null;
+    let userNotas = venta.notas || '';
+
+    if (venta.notas && venta.notas.startsWith('{') && venta.notas.includes('receptor')) {
+      try {
+        const parsedMeta = JSON.parse(venta.notas);
+        receptor = parsedMeta.receptor || null;
+        config = parsedMeta.config || null;
+        userNotas = parsedMeta.user_notas || '';
+      } catch (_) {}
+    }
+
+    if (!receptor && venta.cliente) {
+      const { data: clienteDB } = await supabaseClient
+        .from('clientes')
+        .select('*')
+        .or(`nombre.eq.${venta.cliente},razon_social.eq.${venta.cliente}`)
+        .maybeSingle();
+
+      if (clienteDB) {
+        receptor = {
+          nombre: clienteDB.nombre,
+          razon_social: clienteDB.razon_social || clienteDB.nombre,
+          rfc: clienteDB.rfc,
+          codigo_postal: clienteDB.codigo_postal,
+          regimen_fiscal: clienteDB.regimen_fiscal,
+          uso_cfdi: clienteDB.uso_cfdi
+        };
+      }
+    }
+
+    if (!receptor) {
+      receptor = {
+        nombre: venta.cliente || 'PUBLICO EN GENERAL',
+        razon_social: venta.cliente || 'PUBLICO EN GENERAL',
+        rfc: 'XAXX010101000',
+        codigo_postal: process.env.EMISOR_CP || '31110',
+        regimen_fiscal: '616',
+        uso_cfdi: 'G03'
+      };
+    }
+
+    const serie = config?.serie || venta.cfdi_serie || (venta.folio ? venta.folio.replace(/\d+$/, '') : 'A');
+    const cleanFolioVal = cleanFolio(config?.folio || venta.cfdi_folio || venta.folio);
+    const folio = cleanFolioVal.startsWith(serie) ? cleanFolioVal.slice(serie.length) : cleanFolioVal;
+    const fullFolio = `${serie}${folio}`;
+
+    const formattedPartidas = (partidas || []).map((p: any) => ({
+      id: p.id,
+      descripcion: p.descripcion,
+      cantidad: String(p.cantidad || 1),
+      precio_unitario: String(p.precio_unitario_venta || p.precio_unitario || 0),
+      unidad: p.unidad || 'Pieza',
+      clave_sat: p.clave_sat || '01010101',
+      clave_unidad: p.clave_unidad || 'H87',
+      objeto_imp: p.objeto_imp || '02'
+    }));
+
+    return res.json({
+      success: true,
+      borrador: {
+        id: venta.id,
+        serie,
+        folio,
+        fullFolio,
+        cliente: venta.cliente,
+        receptor,
+        forma_pago: config?.forma_pago || '03',
+        metodo_pago: config?.metodo_pago || 'PUE',
+        moneda: config?.moneda || 'MXN',
+        tipo_comprobante: config?.tipo_comprobante || 'I',
+        orden_compra: venta.orden_compra || config?.orden_compra || '',
+        notas: userNotas,
+        precio_total_facturado: venta.precio_total_facturado,
+        cfdi_estado: venta.cfdi_estado,
+        es_borrador: venta.cfdi_estado === 'BORRADOR',
+        partidas: formattedPartidas,
+        created_at: venta.created_at
+      }
+    });
+  } catch (err: any) {
+    console.error("Error al obtener borrador:", err);
+    return res.status(500).json({ error: err.message || 'Error al obtener borrador' });
+  }
+});
+
+/**
+ * PUT /api/sat/borrador/:id
+ * Actualiza los datos de un borrador existente (cliente, partidas, totales, notas)
+ * manteniendo estrictamente su folio consecutivo reservado intacto.
+ */
+router.put('/borrador/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID de borrador requerido' });
+
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
+
+    // 1. Verificar existencia y estado
+    const { data: ventaDB, error: fetchErr } = await supabaseClient
+      .from('ventas')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !ventaDB) {
+      return res.status(404).json({ error: 'Borrador no encontrado' });
+    }
+
+    if (ventaDB.cfdi_estado !== 'BORRADOR') {
+      return res.status(400).json({
+        error: `Solo se pueden modificar comprobantes en estado BORRADOR. El comprobante actual está ${ventaDB.cfdi_estado}`
+      });
+    }
+
+    const body = req.body || {};
+    const receptor = body.receptor || {};
+    const clienteNombre = String(
+      body.cliente ||
+      body.razon_social ||
+      receptor.razon_social ||
+      receptor.nombre ||
+      ventaDB.cliente ||
+      'PUBLICO EN GENERAL'
+    ).trim();
+
+    const receptorRfc = String(
+      receptor.rfc || body.cliente_rfc || body.rfc || 'XAXX010101000'
+    ).trim().toUpperCase();
+
+    const receptorCp = String(
+      receptor.codigo_postal || body.cliente_cp || body.codigo_postal || process.env.EMISOR_CP || '31110'
+    ).trim();
+
+    const receptorRegimen = String(
+      receptor.regimen_fiscal || body.cliente_regimen || body.regimen_fiscal || '616'
+    ).trim();
+
+    const receptorUso = String(
+      receptor.uso_cfdi || body.cliente_uso || body.uso_cfdi || 'G03'
+    ).trim();
+
+    // Mantener el folio reservado intacto
+    const serieFinal = ventaDB.cfdi_serie || (ventaDB.folio ? ventaDB.folio.replace(/\d+$/, '') : 'A');
+    const folioFinal = ventaDB.cfdi_folio || cleanFolio(ventaDB.folio).replace(/^[a-zA-Z]+/, '');
+    const fullFolio = ventaDB.folio || `${serieFinal}${folioFinal}`;
+
+    // Procesar partidas
+    const rawPartidas = Array.isArray(body.partidas) ? body.partidas : [];
+    let subtotalCalculado = 0;
+    let costoTotalCalculado = 0;
+
+    const sanitizedPartidas = rawPartidas.map((p: any) => {
+      const cant = Math.max(0.0001, parseFloat(p.cantidad) || 1);
+      const precioUnit = parseFloat(p.precio_unitario_venta || p.precio_unitario || 0) || 0;
+      const costoUnit = parseFloat(p.costo_unitario_proveedor || p.costo_unitario || 0) || 0;
+      const importe = cant * precioUnit;
+      subtotalCalculado += importe;
+      costoTotalCalculado += cant * costoUnit;
+
+      return {
+        descripcion: String(p.descripcion || 'Concepto').trim(),
+        cantidad: cant,
+        precio_unitario_venta: precioUnit,
+        costo_unitario_proveedor: costoUnit,
+        precio_total_venta: importe,
+        costo_total_proveedor: cant * costoUnit,
+        clave_sat: p.clave_sat || '01010101',
+        clave_unidad: p.clave_unidad || 'H87',
+        unidad: p.unidad || 'Pieza',
+      };
+    });
+
+    const totalFacturado = body.precio_total_facturado !== undefined
+      ? parseFloat(body.precio_total_facturado) || 0
+      : (body.total !== undefined
+          ? parseFloat(body.total) || 0
+          : subtotalCalculado * 1.16);
+
+    const draftMetadata = {
+      receptor: {
+        nombre: receptor.nombre || clienteNombre,
+        razon_social: receptor.razon_social || clienteNombre,
+        rfc: receptorRfc,
+        codigo_postal: receptorCp,
+        regimen_fiscal: receptorRegimen,
+        uso_cfdi: receptorUso
+      },
+      config: {
+        serie: serieFinal,
+        folio: folioFinal,
+        forma_pago: body.forma_pago || '03',
+        metodo_pago: body.metodo_pago || body.metodo_pago_cfdi || 'PUE',
+        moneda: body.moneda || 'MXN',
+        tipo_comprobante: body.tipo_comprobante || 'I',
+        orden_compra: body.orden_compra || null
+      },
+      user_notas: body.notas !== undefined ? body.notas : null
+    };
+
+    const updatePayload: any = {
+      cliente: clienteNombre,
+      precio_total_facturado: totalFacturado,
+      costo_total: costoTotalCalculado,
+      orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
+      notas: JSON.stringify(draftMetadata),
+      descripcion: body.descripcion || `Borrador ${fullFolio} - ${clienteNombre}`
+    };
+
+    if (body.fecha) updatePayload.fecha = body.fecha;
+    if (body.tipo_proyecto) updatePayload.tipo_proyecto = body.tipo_proyecto;
+
+    const { data: updatedVenta, error: updateErr } = await supabaseClient
+      .from('ventas')
+      .update(updatePayload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateErr) {
+      throw new Error(`Error al actualizar borrador en ventas: ${updateErr.message}`);
+    }
+
+    // Actualizar partidas si fueron enviadas
+    if (Array.isArray(body.partidas)) {
+      await supabaseClient
+        .from('ventas_partidas')
+        .delete()
+        .eq('venta_id', id);
+
+      if (sanitizedPartidas.length > 0) {
+        const partidasToInsert = sanitizedPartidas.map((p: any) => ({
+          ...p,
+          venta_id: id
+        }));
+
+        try {
+          const { error: pErr } = await supabaseClient
+            .from('ventas_partidas')
+            .insert(partidasToInsert);
+
+          if (pErr) {
+            console.warn("Aviso insertando ventas_partidas en update (reintentando básico):", pErr);
+            const fallbackPartidas = partidasToInsert.map((p: any) => {
+              const { clave_sat, clave_unidad, ...rest } = p;
+              return rest;
+            });
+            await supabaseClient.from('ventas_partidas').insert(fallbackPartidas);
+          }
+        } catch (pEx) {
+          console.warn("Excepción al actualizar partidas:", pEx);
+        }
+      }
+    }
+
+    try {
+      invalidateCache('ventas');
+      invalidateCache('sat');
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      mensaje: 'Borrador actualizado exitosamente manteniendo su folio reservado',
+      borrador: {
+        ...updatedVenta,
+        id,
+        serie: serieFinal,
+        folio: folioFinal,
+        fullFolio,
+        cliente: clienteNombre,
+        receptor: draftMetadata.receptor,
+        forma_pago: draftMetadata.config.forma_pago,
+        metodo_pago: draftMetadata.config.metodo_pago,
+        moneda: draftMetadata.config.moneda,
+        tipo_comprobante: draftMetadata.config.tipo_comprobante,
+        orden_compra: draftMetadata.config.orden_compra || '',
+        precio_total_facturado: totalFacturado,
+        cfdi_estado: 'BORRADOR',
+        es_borrador: true,
+        partidas: sanitizedPartidas,
+        notas: draftMetadata.user_notas
+      }
+    });
+  } catch (err: any) {
+    console.error("Error al actualizar borrador:", err);
+    return res.status(400).json({ error: err.message || 'Error al actualizar borrador' });
+  }
+});
+
+/**
+ * DELETE /api/sat/borrador/:id
+ * Elimina el borrador y sus partidas (únicamente permitido si cfdi_estado === 'BORRADOR').
+ */
+router.delete('/borrador/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID de borrador requerido' });
+
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
+
+    // 1. Verificar existencia y estado
+    const { data: venta, error: fetchErr } = await supabaseClient
+      .from('ventas')
+      .select('id, cfdi_estado, folio')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !venta) {
+      return res.status(404).json({ error: 'Borrador no encontrado' });
+    }
+
+    if (venta.cfdi_estado !== 'BORRADOR') {
+      return res.status(400).json({
+        error: `Solo se pueden eliminar comprobantes en estado BORRADOR. El comprobante actual está ${venta.cfdi_estado}`
+      });
+    }
+
+    // 2. Eliminar partidas asociadas
+    await supabaseClient
+      .from('ventas_partidas')
+      .delete()
+      .eq('venta_id', id);
+
+    // 3. Eliminar registro de ventas
+    const { error: deleteErr } = await supabaseClient
+      .from('ventas')
+      .delete()
+      .eq('id', id);
+
+    if (deleteErr) {
+      throw new Error(`Error al eliminar borrador: ${deleteErr.message}`);
+    }
+
+    try {
+      invalidateCache('ventas');
+      invalidateCache('sat');
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      mensaje: 'Borrador eliminado exitosamente',
+      id,
+      folio: venta.folio
+    });
+  } catch (err: any) {
+    console.error("Error al eliminar borrador:", err);
+    return res.status(400).json({ error: err.message || 'Error al eliminar borrador' });
   }
 });
 
@@ -487,19 +1152,23 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
         cotizacion_id,
         cotizaciones(folio)
       `)
-      .or('cfdi_estado.eq.TIMBRADA,cfdi_estado.eq.CANCELADA')
+      .or('cfdi_estado.eq.TIMBRADA,cfdi_estado.eq.CANCELADA,cfdi_estado.eq.BORRADOR')
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
     const facturas = (data || []).map((f: any) => {
       const isDirecta = f.tipo_proyecto === 'Factura Directa';
+      const isBorrador = String(f.cfdi_estado || '').toUpperCase() === 'BORRADOR';
       let origen = 'FACTURA_DIRECTA';
       let origenLabel = 'Factura Directa';
 
       const cleanFolioVal = cleanFolio(f.folio);
 
-      if (!isDirecta) {
+      if (isBorrador) {
+        origen = 'BORRADOR';
+        origenLabel = `Borrador ${cleanFolioVal || f.folio}`;
+      } else if (!isDirecta) {
         origen = 'VENTA';
         const numRef = cleanFolioVal || f.factura_referencia || f.cotizaciones?.folio || `#${f.id}`;
         origenLabel = `Venta ${numRef}`;
@@ -508,6 +1177,8 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
       return {
         ...f,
         folio: cleanFolioVal || f.folio,
+        es_borrador: isBorrador,
+        cfdi_estado: f.cfdi_estado || (isBorrador ? 'BORRADOR' : 'PENDIENTE'),
         origen,
         origenLabel
       };
