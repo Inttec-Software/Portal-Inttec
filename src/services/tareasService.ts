@@ -1,5 +1,3 @@
-import { AuthService } from './supabase';
-import { CompanyService, EnvService } from './supabase';
 import { getApiHeaders as getHeaders, getApiUrl } from './apiHelper';
 
 const handleResponse = async (res: Response, fallbackMsg: string) => {

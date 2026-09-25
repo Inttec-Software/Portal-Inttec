@@ -14,7 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing } from '@/constants/theme';
-import { generarFacturaHTML, exportarFacturaOdooPDF, cleanFolio } from '@/utils/reportGenerator';
+import { generarFacturaHTML, exportarFacturaOdooPDF, exportarReciboPagoPDF, cleanFolio } from '@/utils/reportGenerator';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { cacheDirectory, writeAsStringAsync } from 'expo-file-system/legacy';
@@ -86,9 +86,13 @@ export default function FacturaPreviewModal({
   };
 
   const getCleanFileName = (ext: string) => {
-    const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
+    const isPago = isDraft
+      ? (title?.includes('Pago') || title?.includes('Recibo'))
+      : (facturaData?.serie === 'P' || title?.includes('Pago') || title?.includes('Recibo') || Boolean(facturaData?.complementos_pago_doctos));
+    const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || facturaData?.cliente_nombre || 'Cliente';
     const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-    const serie = (facturaData?.series || facturaData?.serie || venta?.cfdi_serie || venta?.factura_serie || 'A').toUpperCase().trim();
+    const defaultSerie = isPago ? 'P' : 'A';
+    const serie = (facturaData?.series || facturaData?.serie || venta?.cfdi_serie || venta?.factura_serie || defaultSerie).toUpperCase().trim();
     let folioNum = cleanFolio(facturaData?.folio_number || facturaData?.folio || venta?.cfdi_folio || venta?.factura_folio || venta?.folio || '');
     if (folioNum.toUpperCase().startsWith(serie)) {
       folioNum = folioNum.slice(serie.length).trim();
@@ -99,7 +103,8 @@ export default function FacturaPreviewModal({
       folioNum = '0001';
     }
     const fullFolio = `${serie}${folioNum}`;
-    return `${clienteSanitized}_${fullFolio}.${ext}`;
+    const prefix = isPago ? `${clienteSanitized}_Pago_${fullFolio}` : `${clienteSanitized}_${fullFolio}`;
+    return `${prefix}.${ext}`;
   };
 
   const handlePrint = async () => {
@@ -142,6 +147,14 @@ export default function FacturaPreviewModal({
   const handleDownloadPDF = async () => {
     try {
       setIsActionLoading(true);
+      if (customHtml) {
+        const isPago = facturaData?.serie === 'P' || facturaData?.folio_completo || title?.includes('Pago') || title?.includes('Recibo') || Boolean(facturaData?.complementos_pago_doctos);
+        if (isPago) {
+          const compData = facturaData || venta || {};
+          await exportarReciboPagoPDF(compData, compData.complementos_pago_doctos || [], 'download');
+          return;
+        }
+      }
       const safeVenta = venta || { cliente: 'Cliente' };
       const safeFacturaData = facturaData || { folio_number: '1' };
       await exportarFacturaOdooPDF(safeVenta, safeFacturaData, 'download');

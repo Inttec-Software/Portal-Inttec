@@ -28,14 +28,10 @@ import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { base64ToArrayBuffer } from '@/services/sync';
-import { exportarFacturaOdooPDF, exportarCotizacionOdooPDF, exportarReciboPagoPDF, generarReciboPagoHTML, cleanFolio } from '@/utils/reportGenerator';
-import { parseCFDIXML } from '@/utils/cfdiParser';
-import FacturaPreviewModal from '@/components/FacturaPreviewModal';
+import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
-import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
-import { SAT_UNIDADES } from '@/constants/satCatalog';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -71,45 +67,6 @@ const getEstadoPagoStyle = (estado?: EstadoPagoVenta) => {
   }
 };
 
-const getEstadoCfdiStyle = (estado?: string | null) => {
-  switch (estado) {
-    case 'TIMBRADA':
-      return { bg: 'rgba(16, 185, 129, 0.15)', text: '#10b981', border: '#10b981', label: 'CFDI TIMBRADO' };
-    case 'CANCELADA':
-      return { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444', border: '#ef4444', label: 'CANCELADA' };
-    default:
-      return { bg: 'rgba(245, 158, 11, 0.15)', text: '#f59e0b', border: '#f59e0b', label: 'SIN TIMBRAR' };
-  }
-};
-
-const REGIMENES_FISCALES = [
-  { code: '601', label: '601 - General de Ley Personas Morales' },
-  { code: '612', label: '612 - Personas Físicas con Actividades Empresariales y Profesionales' },
-  { code: '626', label: '626 - Régimen Simplificado de Confianza (RESICO)' },
-  { code: '605', label: '605 - Sueldos y Salarios e Ingresos Asimilados a Salarios' },
-  { code: '616', label: '616 - Sin obligaciones fiscales (Público General)' },
-  { code: '603', label: '603 - Personas Morales con Fines no Lucrativos' },
-  { code: '621', label: '621 - Incorporación Fiscal' },
-];
-
-const USOS_CFDI = [
-  { code: 'G03', label: 'G03 - Gastos en general' },
-  { code: 'G01', label: 'G01 - Adquisición de mercancías' },
-  { code: 'S01', label: 'S01 - Sin efectos fiscales' },
-  { code: 'CP01', label: 'CP01 - Pagos' },
-  { code: 'I04', label: 'I04 - Equipo de cómputo y accesorios' },
-  { code: 'I08', label: 'I08 - Otra maquinaria y equipo' },
-  { code: 'I01', label: 'I01 - Construcciones' },
-];
-
-const FORMAS_PAGO_CFDI = [
-  { code: '03', label: '03 - Transferencia electrónica de fondos' },
-  { code: '01', label: '01 - Efectivo' },
-  { code: '04', label: '04 - Tarjeta de crédito' },
-  { code: '28', label: '28 - Tarjeta de débito' },
-  { code: '02', label: '02 - Cheque nominativo' },
-  { code: '99', label: '99 - Por definir' },
-];
 
 const TIPOS_PROYECTO = ['Venta', 'Servicio', 'Proyecto'];
 
@@ -296,7 +253,6 @@ export default function VentasScreen() {
   const [isSubmittingPago, setIsSubmittingPago] = useState(false);
   const [showPagoDatePicker, setShowPagoDatePicker] = useState(false);
   const [pagoDateValue, setPagoDateValue] = useState(new Date());
-  const [pagoTimbrarREP, setPagoTimbrarREP] = useState(true);
 
   // === Clientes de Supabase ===
   const [clientes, setClientes] = useState<any[]>([]);
@@ -305,40 +261,6 @@ export default function VentasScreen() {
   const [sucursalesCliente, setSucursalesCliente] = useState<SucursalCliente[]>([]);
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
   const [sucursalSearch, setSucursalSearch] = useState('');
-
-  // === Modal de Pre-Timbrado / Edición Fiscal CFDI 4.0 ===
-  const [isTimbradoModalVisible, setIsTimbradoModalVisible] = useState(false);
-  const [timbrandoVenta, setTimbrandoVenta] = useState<Venta | null>(null);
-  const [cfdiClienteNombre, setCfdiClienteNombre] = useState('');
-  const [cfdiClienteRfc, setCfdiClienteRfc] = useState('');
-  const [cfdiClienteCp, setCfdiClienteCp] = useState('');
-  const [cfdiClienteRegimen, setCfdiClienteRegimen] = useState('601');
-  const [cfdiClienteUso, setCfdiClienteUso] = useState('G03');
-  const [cfdiFormaPago, setCfdiFormaPago] = useState('03');
-  const [cfdiMetodoPago, setCfdiMetodoPago] = useState('PUE');
-  const [cfdiSerie, setCfdiSerie] = useState('A');
-  const [cfdiFolio, setCfdiFolio] = useState('');
-  const [cfdiPartidas, setCfdiPartidas] = useState<Array<{
-    id: string;
-    descripcion: string;
-    cantidad: string;
-    precio_unitario_venta: string;
-    clave_sat: string;
-    clave_unidad: string;
-    unidad: string;
-  }>>([]);
-  const [isSubmittingTimbrado, setIsSubmittingTimbrado] = useState(false);
-
-  // Estados de Vista Previa Modal (CFDI 4.0)
-  const [previewModalVisible, setPreviewModalVisible] = useState(false);
-  const [previewVenta, setPreviewVenta] = useState<any>(null);
-  const [previewFacturaData, setPreviewFacturaData] = useState<any>(null);
-  const [previewXmlText, setPreviewXmlText] = useState<string>('');
-  const [previewCustomHtml, setPreviewCustomHtml] = useState<string>('');
-  const [previewIsDraft, setPreviewIsDraft] = useState<boolean>(false);
-  const [previewTitle, setPreviewTitle] = useState<string>('');
-  const [returnToDetailModal, setReturnToDetailModal] = useState<boolean>(false);
-  const [returnToTimbradoModal, setReturnToTimbradoModal] = useState<boolean>(false);
 
   // === Auth Check ===
   useEffect(() => {
@@ -549,7 +471,6 @@ export default function VentasScreen() {
     setPagoFecha(`${yyyy}-${mm}-${dd}`);
     setPagoMetodo('Transferencia');
     setPagoReferencia('');
-    setPagoTimbrarREP(!!venta.cfdi_uuid);
 
     await loadPagosForSelectedVenta(venta.id, venta);
   };
@@ -603,92 +524,29 @@ export default function VentasScreen() {
 
     setIsSubmittingPago(true);
     try {
-      let complementoData: any = null;
+      const payload = {
+        monto: montoNum,
+        fecha_pago: pagoFecha,
+        metodo_pago: pagoMetodo || 'Transferencia',
+        referencia: pagoReferencia.trim() || null,
+        registrado_por: currentUser?.id || null,
+      };
 
-      if (selectedVenta.cfdi_uuid && pagoTimbrarREP) {
-        // Timbrar Complemento de Recepción de Pagos (REP) ante el SAT
-        const mapForma = (met: string) => {
-          const m = (met || '').toLowerCase();
-          if (m.includes('transferencia')) return '03';
-          if (m.includes('efectivo')) return '01';
-          if (m.includes('tarjeta') || m.includes('credito') || m.includes('debito')) return '04';
-          if (m.includes('cheque')) return '02';
-          return '03';
-        };
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pagos`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('Error al registrar pago');
 
-        const repPayload = {
-          cliente: {
-            id: (selectedVenta as any).cliente_id || null,
-            nombre: selectedVenta.cliente || 'Cliente General',
-            rfc: (selectedVenta as any).cliente_rfc || 'XAXX010101000',
-            codigo_postal: (selectedVenta as any).cliente_cp || '31110',
-            regimen_fiscal: (selectedVenta as any).cliente_regimen || '601',
-          },
-          fecha_pago: pagoFecha,
-          forma_pago: mapForma(pagoMetodo || 'Transferencia'),
-          referencia: pagoReferencia.trim() || undefined,
-          doctos: [{
-            venta_id: selectedVenta.id,
-            importe_a_pagar: montoNum
-          }]
-        };
-
-        const headers = await getApiHeaders();
-        const repRes = await fetch(`${getApiUrl()}/api/sat/timbrar-pago`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(repPayload)
-        });
-
-        const repJson = await repRes.json().catch(() => ({}));
-        if (!repRes.ok || !repJson.success) {
-          throw new Error(repJson.error || `Error al timbrar complemento de pago (${repRes.status})`);
-        }
-
-        complementoData = repJson;
-        showAlert('Pago y REP Timbrado', `Se registró el abono de ${formatCurrency(montoNum)} y se timbró el Complemento de Pago con folio ${repJson.folio} (UUID: ${repJson.uuid?.slice(0, 8)}...).`);
-      } else {
-        // Registro normal interno
-        const payload = {
-          monto: montoNum,
-          fecha_pago: pagoFecha,
-          metodo_pago: pagoMetodo || 'Transferencia',
-          referencia: pagoReferencia.trim() || null,
-          registrado_por: currentUser?.id || null,
-        };
-
-        const headers = await getApiHeaders();
-        const res = await fetch(`${getApiUrl()}/api/ventas/${selectedVenta.id}/pagos`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(payload)
-        });
-        if (!res.ok) throw new Error('Error al registrar pago');
-
-        showAlert('Éxito', `Se registró la parcialidad de ${formatCurrency(montoNum)} correctamente.`);
-      }
+      showAlert('Éxito', `Se registró la parcialidad de ${formatCurrency(montoNum)} correctamente.`);
 
       const updatedPagos = await loadPagosForSelectedVenta(selectedVenta.id);
       const nuevoTotalPagado = updatedPagos.reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0);
       const nuevoSaldo = Math.max(0, (Number(selectedVenta.precio_total_facturado) || 0) - nuevoTotalPagado);
       setPagoMonto(nuevoSaldo > 0 ? String(nuevoSaldo) : '');
       setPagoReferencia('');
-
-      if (complementoData?.complemento) {
-        try {
-          const html = await generarReciboPagoHTML(complementoData.complemento, complementoData.doctos || [], false);
-          setPreviewCustomHtml(html);
-          setPreviewTitle(`Recibo de Pago: ${cleanFolio(complementoData.complemento.folio) || complementoData.complemento.cfdi_uuid?.slice(0, 8)}`);
-          setPreviewIsDraft(false);
-          setPreviewVenta(selectedVenta);
-          setPreviewFacturaData(null);
-          setPreviewXmlText('');
-          setIsPagoModalVisible(false);
-          setPreviewModalVisible(true);
-        } catch (_) {
-          exportarReciboPagoPDF(complementoData.complemento, complementoData.doctos || [], 'view');
-        }
-      }
     } catch (err: any) {
       console.error('Error al registrar pago:', err);
       const isMissingTable = err?.code === '42P01' || err?.message?.includes('ventas_pagos');
@@ -1364,622 +1222,7 @@ export default function VentasScreen() {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
-  // === Timbrado CFDI con Finkok (Menú de Pre-Emisión y Edición) ===
-  const handleOpenTimbradoModal = async (ventaToStamp: Venta) => {
-    setTimbrandoVenta(ventaToStamp);
 
-    // Buscar cliente en catálogo
-    const clienteData = clientes.find(c => c.nombre?.trim().toLowerCase() === ventaToStamp.cliente?.trim().toLowerCase());
-
-    setCfdiClienteNombre(clienteData?.razon_social || clienteData?.nombre || ventaToStamp.cliente || 'PUBLICO EN GENERAL');
-    setCfdiClienteRfc(clienteData?.rfc || 'XAXX010101000');
-    setCfdiClienteCp(clienteData?.codigo_postal || '31110');
-    setCfdiClienteRegimen(clienteData?.regimen_fiscal || '601');
-    setCfdiClienteUso(clienteData?.uso_cfdi || 'G03');
-
-    setCfdiFormaPago('03'); // Transferencia por defecto
-    setCfdiMetodoPago('PUE');
-    setCfdiSerie('A');
-    setCfdiFolio('0001');
-
-    try {
-      const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/sat/siguiente-folio?serie=A`, { headers });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.folio) {
-          setCfdiFolio(json.folio);
-        }
-      }
-    } catch (_) {}
-
-    // Cargar partidas de la venta
-    try {
-      let partidasList = selectedVentaPartidas;
-      if (partidasList.length === 0 || selectedVenta?.id !== ventaToStamp.id) {
-        const headers = await getApiHeaders();
-        const res = await fetch(`${getApiUrl()}/api/ventas/${ventaToStamp.id}/partidas`, { headers });
-        if (res.ok) {
-          const data = await res.json();
-          partidasList = data.partidas || [];
-        }
-      }
-
-      if (partidasList.length > 0) {
-        setCfdiPartidas(partidasList.map(p => ({
-          id: String(p.id || Math.random()),
-          descripcion: p.descripcion || 'Producto / Servicio',
-          cantidad: String(p.cantidad || 1),
-          precio_unitario_venta: String(p.precio_unitario_venta || 0),
-          clave_sat: (p as any).clave_sat || '01010101',
-          clave_unidad: (p as any).clave_unidad || 'H87',
-          unidad: p.unidad || 'Pieza'
-        })));
-      } else {
-        setCfdiPartidas([{
-          id: '1',
-          descripcion: ventaToStamp.descripcion || 'Venta de productos / servicios',
-          cantidad: '1',
-          precio_unitario_venta: String(ventaToStamp.precio_total_facturado || 0),
-          clave_sat: '01010101',
-          clave_unidad: 'H87',
-          unidad: 'Pieza'
-        }]);
-      }
-    } catch (err) {
-      setCfdiPartidas([{
-        id: '1',
-        descripcion: ventaToStamp.descripcion || 'Venta de productos / servicios',
-        cantidad: '1',
-        precio_unitario_venta: String(ventaToStamp.precio_total_facturado || 0),
-        clave_sat: '01010101',
-        clave_unidad: 'H87',
-        unidad: 'Pieza'
-      }]);
-    }
-
-    setIsTimbradoModalVisible(true);
-  };
-
-  const handleCloseTimbradoModal = () => {
-    setIsTimbradoModalVisible(false);
-    if (returnToDetailModal) {
-      setReturnToDetailModal(false);
-      setIsDetailModalVisible(true);
-    }
-  };
-
-  const handleAddCfdiPartida = () => {
-    setCfdiPartidas(prev => [
-      ...prev,
-      {
-        id: Date.now().toString(),
-        descripcion: '',
-        cantidad: '1',
-        precio_unitario_venta: '0',
-        clave_sat: '01010101',
-        clave_unidad: 'H87',
-        unidad: 'Pieza'
-      }
-    ]);
-  };
-
-  const handleUpdateCfdiPartida = (id: string, field: string, val: string) => {
-    setCfdiPartidas(prev => prev.map(p => {
-      if (p.id !== id) return p;
-      const updated = { ...p, [field]: val };
-      if (field === 'clave_unidad') {
-        const u = SAT_UNIDADES.find(x => x.clave.toUpperCase() === (val || '').trim().toUpperCase());
-        if (u) {
-          updated.unidad = u.nombre;
-        }
-      }
-      return updated;
-    }));
-  };
-
-  const handleRemoveCfdiPartida = (id: string) => {
-    if (cfdiPartidas.length <= 1) {
-      showAlert('Aviso', 'Debes mantener al menos una partida para facturar.');
-      return;
-    }
-    setCfdiPartidas(prev => prev.filter(p => p.id !== id));
-  };
-
-  const handleExecuteTimbrado = async () => {
-    if (!timbrandoVenta) return;
-
-    if (!cfdiClienteNombre.trim()) {
-      showAlert('Validación', 'Ingresa la Razón Social / Nombre del receptor.');
-      return;
-    }
-    if (!cfdiClienteRfc.trim()) {
-      showAlert('Validación', 'Ingresa el RFC del receptor.');
-      return;
-    }
-    if (!cfdiClienteCp.trim()) {
-      showAlert('Validación', 'Ingresa el Código Postal del receptor (Domicilio Fiscal en CFDI 4.0).');
-      return;
-    }
-    if (cfdiPartidas.length === 0) {
-      showAlert('Validación', 'Agrega al menos una partida a facturar.');
-      return;
-    }
-
-    setIsSubmittingTimbrado(true);
-    try {
-      const formattedPartidas = cfdiPartidas.map(p => ({
-        id: p.id,
-        descripcion: p.descripcion || 'Producto / Servicio',
-        cantidad: parseFloat(p.cantidad) || 1,
-        precio_unitario_venta: parseFloat(p.precio_unitario_venta) || 0,
-        clave_sat: p.clave_sat || '01010101',
-        clave_unidad: p.clave_unidad || 'H87',
-        unidad: p.unidad || 'Pieza'
-      }));
-
-      const payload = {
-        venta_id: timbrandoVenta.id,
-        custom_receptor: {
-          nombre: cfdiClienteNombre.toUpperCase().trim(),
-          razon_social: cfdiClienteNombre.toUpperCase().trim(),
-          rfc: cfdiClienteRfc.toUpperCase().trim(),
-          codigo_postal: cfdiClienteCp.trim(),
-          regimen_fiscal: cfdiClienteRegimen,
-          uso_cfdi: cfdiClienteUso
-        },
-        custom_condiciones: {
-          metodo_pago: cfdiFormaPago,
-          forma_pago: cfdiFormaPago,
-          metodo_pago_cfdi: cfdiMetodoPago,
-          serie: cfdiSerie.trim(),
-          folio: cfdiFolio.trim()
-        },
-        custom_partidas: formattedPartidas
-      };
-
-      // 1. Intentar backend oficial con Finkok
-      let data: any = null;
-      let timbradoSuccess = false;
-
-      try {
-        const headers = await getApiHeaders();
-        const apiUrl = getApiUrl();
-        const resp = await fetch(`${apiUrl}/api/sat/timbrar-factura`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(payload),
-        });
-
-        const resJson = await resp.json().catch(() => ({}));
-        if (resp.ok && resJson.success) {
-          data = resJson;
-          timbradoSuccess = true;
-        } else if (resJson.error) {
-          throw new Error(resJson.error);
-        } else {
-          throw new Error(`Error del servidor (${resp.status})`);
-        }
-      } catch (backendErr: any) {
-        console.warn('Backend timbrado fallo:', backendErr);
-        // Si el backend respondió un error de validación o del SAT/Finkok, no ocultarlo ni reintentar con Edge Function
-        const isNetworkOrOffline = !backendErr.message || 
-          backendErr.message.includes('Network') || 
-          backendErr.message.includes('Failed to fetch') || 
-          backendErr.message.includes('Error del servidor (5');
-
-        if (!isNetworkOrOffline) {
-          throw backendErr;
-        }
-
-        const { data: edgeData, error: edgeError } = await supabase.functions.invoke('facturar-venta', {
-          body: payload
-        });
-
-        if (edgeError) throw edgeError;
-        if (edgeData?.error) throw new Error(edgeData.error);
-        data = edgeData;
-        timbradoSuccess = true;
-      }
-
-      if (!timbradoSuccess || !data?.cfdi_uuid) {
-        throw new Error('No se pudo obtener el UUID de timbrado fiscal.');
-      }
-
-      showAlert('Éxito', `Factura timbrada exitosamente ante el SAT con Finkok.\n\nFolio Fiscal (UUID):\n${data.cfdi_uuid}`);
-      setIsTimbradoModalVisible(false);
-      setReturnToDetailModal(false);
-      setReturnToTimbradoModal(false);
-      if (selectedVenta?.id === timbrandoVenta.id) {
-        setSelectedVenta(prev => prev ? {
-          ...prev,
-          cfdi_uuid: data.cfdi_uuid,
-          cfdi_estado: 'TIMBRADA',
-          cfdi_xml_url: data.xml_url
-        } : null);
-      }
-      loadHistorial();
-    } catch (err: any) {
-      let errorMsg = err.message || 'Error desconocido al timbrar.';
-      if (err?.context) {
-        try {
-          if (typeof err.context.json === 'function') {
-            const body = await err.context.json();
-            if (body?.error) errorMsg = body.error;
-            else if (body?.message) errorMsg = body.message;
-          } else if (typeof err.context.text === 'function') {
-            const txt = await err.context.text();
-            if (txt) {
-              try {
-                const parsed = JSON.parse(txt);
-                if (parsed?.error) errorMsg = parsed.error;
-                else if (parsed?.message) errorMsg = parsed.message;
-              } catch (_) {
-                errorMsg = txt;
-              }
-            }
-          }
-        } catch (_) {}
-      }
-      console.error('Error al timbrar con Finkok:', errorMsg);
-      showAlert('Error al timbrar con Finkok', errorMsg);
-    } finally {
-      setIsSubmittingTimbrado(false);
-    }
-  };
-
-  const handlePreTimbradoPreview = async () => {
-    if (!timbrandoVenta) return;
-    try {
-      const subtotalCalc = cfdiPartidas.reduce((sum, p) => sum + ((parseFloat(p.cantidad) || 0) * (parseFloat(p.precio_unitario_venta) || 0)), 0);
-      const ivaCalc = subtotalCalc * 0.16;
-      const totalCalc = subtotalCalc + ivaCalc;
-
-      const uuidSimulado = `BORRADOR-${Date.now()}`;
-      const fakeVenta = {
-        ...timbrandoVenta,
-        folio: `${cfdiSerie}${cfdiFolio || '1'}`,
-        cliente: cfdiClienteNombre || timbrandoVenta.cliente,
-        precio_total_facturado: totalCalc,
-        subtotal_venta: subtotalCalc,
-      };
-
-      const fakeFacturaData = {
-        uuid: uuidSimulado,
-        folio_number: cfdiFolio || '1',
-        series: cfdiSerie,
-        created_at: new Date().toISOString(),
-        payment_form: cfdiFormaPago,
-        payment_method: cfdiMetodoPago,
-        use: cfdiClienteUso,
-        subtotal: subtotalCalc,
-        total: totalCalc,
-        total_impuestos_trasladados: ivaCalc,
-        iva: ivaCalc,
-        taxes: [
-          {
-            amount: ivaCalc,
-            type: 'IVA',
-            rate: 0.16,
-          }
-        ],
-        issuer: {
-          tax_id: 'FETR83041461A',
-          legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
-          tax_system: '612',
-          zip: '31110',
-        },
-        customer: {
-          tax_id: cfdiClienteRfc || 'XAXX010101000',
-          legal_name: cfdiClienteNombre || 'PUBLICO EN GENERAL',
-          tax_system: cfdiClienteRegimen,
-          address: { zip: cfdiClienteCp || '31110' },
-        },
-        items: cfdiPartidas.map(p => {
-          const cant = parseFloat(p.cantidad) || 1;
-          const pu = parseFloat(p.precio_unitario_venta) || 0;
-          const imp = cant * pu;
-          const itemIva = imp * 0.16;
-          return {
-            quantity: cant,
-            product: {
-              product_key: p.clave_sat || '01010101',
-              unit_key: p.clave_unidad || 'H87',
-              description: p.descripcion || 'Producto / Servicio',
-              price: pu,
-            },
-            taxes: [{
-              amount: itemIva,
-              base: imp,
-              rate: 0.16,
-              type: 'IVA'
-            }]
-          };
-        }),
-        stamp: {
-          uuid: uuidSimulado,
-          date: new Date().toISOString(),
-          sat_cert_number: '30001000000500003416',
-          signature: 'VISTA_PREVIA_BORRADOR_SELLO_CFD',
-          sat_signature: 'VISTA_PREVIA_BORRADOR_SELLO_SAT',
-          pac_rfc: 'FIN1203015JA',
-          original_chain: `||1.1|${uuidSimulado}|${new Date().toISOString()}|FIN1203015JA||`,
-        }
-      };
-
-      setPreviewVenta(fakeVenta);
-      setPreviewFacturaData(fakeFacturaData);
-      setPreviewXmlText('');
-      setPreviewCustomHtml('');
-      setPreviewIsDraft(true);
-      setPreviewTitle(`Borrador: Venta #${timbrandoVenta.id} (${cfdiSerie}${cfdiFolio})`);
-      setIsTimbradoModalVisible(false);
-      setReturnToTimbradoModal(true);
-      setPreviewModalVisible(true);
-    } catch (err: any) {
-      showAlert('Error en Vista Previa', err.message || 'No se pudo generar la vista previa.');
-    }
-  };
-
-  const handleTimbrarFactura = async (ventaToStamp?: Venta) => {
-    const targetVenta = ventaToStamp || selectedVenta;
-    if (!targetVenta) return;
-    if (isDetailModalVisible) {
-      setReturnToDetailModal(true);
-      setIsDetailModalVisible(false);
-    }
-    await handleOpenTimbradoModal(targetVenta);
-  };
-
-  const handleViewFacturaPDF = async (targetVenta?: Venta) => {
-    const ventaToView = targetVenta || selectedVenta;
-    if (!ventaToView) return;
-    if (isDetailModalVisible) {
-      setReturnToDetailModal(true);
-      setIsDetailModalVisible(false);
-    }
-    setIsSubmitting(true);
-    try {
-      const uuid = ventaToView.cfdi_uuid;
-      let xmlText = '';
-
-      // 1. Intentar backend endpoint dedicado
-      try {
-        const headers = await getApiHeaders();
-        const resp = await fetch(`${getApiUrl()}/api/sat/factura-xml/${uuid || ventaToView.id}`, { headers });
-        if (resp.ok) {
-          const j = await resp.json();
-          if (j.xml && j.xml.includes('<')) xmlText = j.xml;
-        }
-      } catch (_) {}
-
-      // 2. URL pública directa
-      if (!xmlText && ventaToView.cfdi_xml_url && ventaToView.cfdi_xml_url.startsWith('http')) {
-        try {
-          const resp = await fetch(ventaToView.cfdi_xml_url);
-          if (resp.ok) xmlText = await resp.text();
-        } catch (_) {}
-      }
-
-      // 3. Descarga desde Supabase Storage (probando mayúsculas y minúsculas)
-      if (!xmlText && uuid) {
-        try {
-          const { data: dUpper } = await supabase.storage.from('facturas').download(`${uuid.toUpperCase()}.xml`);
-          if (dUpper) xmlText = await dUpper.text();
-        } catch (_) {}
-
-        if (!xmlText) {
-          try {
-            const { data: dLower } = await supabase.storage.from('facturas').download(`${uuid.toLowerCase()}.xml`);
-            if (dLower) xmlText = await dLower.text();
-          } catch (_) {}
-        }
-      }
-
-      const isCanceled = ventaToView.cfdi_estado === 'CANCELADA';
-      let facturaData: any = null;
-
-      if (xmlText) {
-        facturaData = parseCFDIXML(xmlText, isCanceled ? 'canceled' : 'valid');
-      } else {
-        // Estructura representativa sintética si no hay XML en storage
-        const total = Number(ventaToView.precio_total_facturado) || 0;
-        const subtotal = Math.round((total / 1.16) * 100) / 100;
-        const iva = Math.round((total - subtotal) * 100) / 100;
-        facturaData = {
-          verification_url: '',
-          status: isCanceled ? 'canceled' : 'valid',
-          type: 'I',
-          folio_number: ventaToView.folio || ventaToView.factura_referencia || String(ventaToView.id).slice(0, 8),
-          series: '',
-          date: ventaToView.fecha || ventaToView.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
-          expedition_place: '31000',
-          payment_form: '03',
-          payment_method: 'PUE',
-          currency: 'MXN',
-          subtotal,
-          total,
-          total_taxes: iva,
-          issuer: {
-            tax_id: 'INT110101XYZ',
-            legal_name: 'INTTEC SOFTWARE Y SISTEMAS SA DE CV',
-            fiscal_regime: '601',
-          },
-          receiver: {
-            tax_id: 'XAXX010101000',
-            legal_name: ventaToView.cliente || 'CLIENTE GENERAL',
-            fiscal_regime: '616',
-            tax_zip_code: '31000',
-            cfdi_use: 'G03',
-          },
-          items: [{
-            quantity: 1,
-            product: {
-              product_key: '81111500',
-              unit_key: 'E48',
-              unit: 'Unidad de servicio',
-              description: ventaToView.descripcion || 'Venta de productos / servicios',
-              price: subtotal,
-            },
-            taxes: [{
-              amount: iva,
-              base: subtotal,
-              rate: 0.16,
-              type: 'IVA',
-            }],
-          }],
-          stamp: {
-            uuid: uuid || 'UUID-NO-DISPONIBLE',
-            date: ventaToView.created_at || ventaToView.fecha,
-            sat_cert_number: '00001000000504465028',
-            sat_signature: 'SELLO_DIGITAL_SAT_CFDI',
-            cfd_signature: 'SELLO_CFD_EMISOR',
-            rfc_prov_certif: 'FIN1203015JA',
-          },
-        };
-      }
-
-      // 4. Abrir en FacturaPreviewModal interactivo
-      setPreviewVenta(ventaToView);
-      setPreviewFacturaData(facturaData);
-      setPreviewXmlText(xmlText);
-      setPreviewCustomHtml('');
-      setPreviewIsDraft(false);
-      setPreviewTitle(`Factura: ${cleanFolio(ventaToView.folio) || facturaData.folio_number || uuid?.slice(0, 8) || 'Venta'}`);
-      setPreviewModalVisible(true);
-    } catch (err: any) {
-      console.error('Error al generar PDF CFDI:', err);
-      showAlert('Error al generar PDF', err.message || 'No se pudo generar el documento PDF.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDownloadFacturaXML = async () => {
-    if (!selectedVenta) return;
-    setIsSubmitting(true);
-    try {
-      const uuid = selectedVenta.cfdi_uuid;
-      const clienteSanitized = (selectedVenta.cliente || 'Cliente').replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-      const folioSanitized = cleanFolio(selectedVenta.folio || selectedVenta.factura_referencia || uuid?.slice(0, 8) || selectedVenta.id).replace(/[^a-zA-Z0-9]/g, '_');
-      const fileName = `${clienteSanitized}_${folioSanitized}.xml`;
-
-      let xmlText = '';
-
-      // 1. Intentar backend
-      try {
-        const headers = await getApiHeaders();
-        const resp = await fetch(`${getApiUrl()}/api/sat/factura-xml/${uuid || selectedVenta.id}`, { headers });
-        if (resp.ok) {
-          const j = await resp.json();
-          if (j.xml && j.xml.includes('<')) xmlText = j.xml;
-        }
-      } catch (_) {}
-
-      // 2. URL pública
-      if (!xmlText && selectedVenta.cfdi_xml_url && selectedVenta.cfdi_xml_url.startsWith('http')) {
-        try {
-          const resp = await fetch(selectedVenta.cfdi_xml_url);
-          if (resp.ok) xmlText = await resp.text();
-        } catch (_) {}
-      }
-
-      // 3. Storage
-      if (!xmlText && uuid) {
-        try {
-          const { data: dUpper } = await supabase.storage.from('facturas').download(`${uuid.toUpperCase()}.xml`);
-          if (dUpper) xmlText = await dUpper.text();
-        } catch (_) {}
-
-        if (!xmlText) {
-          try {
-            const { data: dLower } = await supabase.storage.from('facturas').download(`${uuid.toLowerCase()}.xml`);
-            if (dLower) xmlText = await dLower.text();
-          } catch (_) {}
-        }
-      }
-
-      if (!xmlText) {
-        showAlert('Aviso', 'Esta factura histórica no cuenta con archivo XML almacenado en el servidor.');
-        return;
-      }
-
-      if (Platform.OS === 'web') {
-        const blob = new Blob([xmlText], { type: 'application/xml;charset=utf-8;' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else {
-        const { cacheDirectory, writeAsStringAsync } = await import('expo-file-system/legacy');
-        const { shareAsync, isAvailableAsync } = await import('expo-sharing');
-
-        const fileUri = `${cacheDirectory}${fileName}`;
-        await writeAsStringAsync(fileUri, xmlText, { encoding: 'utf8' as any });
-
-        if (await isAvailableAsync()) {
-          await shareAsync(fileUri, {
-            mimeType: 'application/xml',
-            dialogTitle: 'Compartir XML CFDI 4.0'
-          });
-        } else {
-          showAlert('Éxito', `XML guardado en ${fileUri}`);
-        }
-      }
-    } catch (err: any) {
-      console.error('Error al descargar XML:', err);
-      showAlert('Error al descargar XML', err.message || 'No se pudo descargar el archivo XML.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleCancelarFactura = async () => {
-    if (!selectedVenta) return;
-
-    const performCancel = async () => {
-      setIsSubmitting(true);
-      try {
-        const { data, error } = await supabase.functions.invoke('cancelar-factura', {
-          body: { venta_id: selectedVenta.id, motivo: '02' }
-        });
-        if (error) throw error;
-        if (data?.error) throw new Error(data.error);
-
-        showAlert('Éxito', 'La factura ha sido cancelada correctamente ante el SAT.');
-        setIsDetailModalVisible(false);
-        loadHistorial();
-      } catch (err: any) {
-        console.error('Error cancelando factura:', err);
-        showAlert('Error al cancelar', err.message || 'Ocurrió un error al intentar cancelar la factura ante el SAT.');
-      } finally {
-        setIsSubmitting(false);
-      }
-    };
-
-    if (Platform.OS === 'web') {
-      if (window.confirm('¿Estás seguro de que deseas cancelar esta factura ante el SAT? Esta acción no se puede deshacer.')) {
-        await performCancel();
-      }
-    } else {
-      Alert.alert(
-        'Cancelar Factura ante el SAT',
-        '¿Estás seguro de que deseas cancelar esta factura ante el SAT? Esta acción no se puede deshacer.',
-        [
-          { text: 'No, regresar', style: 'cancel' },
-          { 
-            text: 'Sí, cancelar', 
-            style: 'destructive',
-            onPress: performCancel
-          }
-        ]
-      );
-    }
-  };
 
   // ===========================
   // RENDER
@@ -2572,7 +1815,7 @@ export default function VentasScreen() {
           {/* Fila 1 */}
           <View style={{ flexDirection: 'row', gap: Spacing.two }}>
             <View style={[styles.financialCard, { backgroundColor: themeColors.accent + '22', borderColor: themeColors.accent + '50' }]}>
-              <Text style={[styles.financialLabel, { color: themeColors.accent, fontWeight: '800' }]}>FACTURADO</Text>
+              <Text style={[styles.financialLabel, { color: themeColors.accent, fontWeight: '800' }]}>TOTAL VENTA</Text>
               <Text style={[styles.financialAmount, { color: themeColors.accent, fontWeight: '900' }]}>
                 {formatCurrency(calculatedTotals.precioTotal)}
               </Text>
@@ -2868,7 +2111,7 @@ export default function VentasScreen() {
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Referencia</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Proyecto</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Estado Pago</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Facturado</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Total Venta</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '7%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
               <View style={{ width: '7%', alignItems: 'center' }}>
@@ -2906,19 +2149,11 @@ export default function VentasScreen() {
                       ) : <Text style={{ color: themeColors.textSecondary }}>--</Text>}
                     </View>
 
-                    {/* Badge Estado de Pago y CFDI */}
-                    <View style={{ width: '12%', justifyContent: 'center', gap: 4 }}>
+                    {/* Badge Estado de Pago */}
+                    <View style={{ width: '12%', justifyContent: 'center' }}>
                       <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                         <Text style={{ color: styleCfg.text, fontSize: 9, fontWeight: '800' }}>{estadoPago}</Text>
                       </View>
-                      {(() => {
-                        const cfdiCfg = getEstadoCfdiStyle(item.cfdi_estado);
-                        return (
-                          <View style={{ backgroundColor: cfdiCfg.bg, borderColor: cfdiCfg.border, borderWidth: 1, paddingVertical: 1, paddingHorizontal: 5, borderRadius: 10, alignSelf: 'flex-start' }}>
-                            <Text style={{ color: cfdiCfg.text, fontSize: 8, fontWeight: '800' }}>{cfdiCfg.label}</Text>
-                          </View>
-                        );
-                      })()}
                     </View>
 
                     <Text style={[styles.tableCell, { width: '11%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]}>{formatCurrency(item.precio_total_facturado)}</Text>
@@ -2937,28 +2172,6 @@ export default function VentasScreen() {
                     
                     {/* Acciones */}
                     <View style={{ width: '9%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
-                      {item.cfdi_estado === 'TIMBRADA' ? (
-                        <TouchableOpacity
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            handleViewFacturaPDF(item);
-                          }}
-                          style={{ padding: 5, backgroundColor: '#10b98120', borderColor: '#10b98150', borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }}
-                        >
-                          <Ionicons name="receipt" size={15} color="#10b981" />
-                        </TouchableOpacity>
-                      ) : (
-                        <TouchableOpacity
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            handleTimbrarFactura(item);
-                          }}
-                          style={{ padding: 5, backgroundColor: '#0284c720', borderColor: '#0284c750', borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }}
-                        >
-                          <Ionicons name="receipt-outline" size={14} color="#0284c7" />
-                        </TouchableOpacity>
-                      )}
-
                       <TouchableOpacity
                         onPress={(e) => {
                           e.stopPropagation();
@@ -3037,14 +2250,6 @@ export default function VentasScreen() {
                     <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10 }}>
                       <Text style={{ color: styleCfg.text, fontSize: 9, fontWeight: '800' }}>{estadoPago}</Text>
                     </View>
-                    {(() => {
-                      const cfdiCfg = getEstadoCfdiStyle(item.cfdi_estado);
-                      return (
-                        <View style={{ backgroundColor: cfdiCfg.bg, borderColor: cfdiCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10 }}>
-                          <Text style={{ color: cfdiCfg.text, fontSize: 8, fontWeight: '800' }}>{cfdiCfg.label}</Text>
-                        </View>
-                      );
-                    })()}
                   </View>
                 </View>
 
@@ -3099,7 +2304,7 @@ export default function VentasScreen() {
                     )}
                   </View>
                   <View style={{ alignItems: 'center', flex: 1 }}>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FACTURADO</Text>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>TOTAL</Text>
                     <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '800', marginTop: 1 }}>
                       {formatCurrency(item.precio_total_facturado)}
                     </Text>
@@ -3120,52 +2325,6 @@ export default function VentasScreen() {
 
                 {/* 5. Botones de Acción */}
                 <View style={{ flexDirection: 'row', gap: 6 }}>
-                  {item.cfdi_estado === 'TIMBRADA' ? (
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleViewFacturaPDF(item);
-                      }}
-                      style={{
-                        flex: 1.1,
-                        backgroundColor: '#10b98118',
-                        borderColor: '#10b98150',
-                        borderWidth: 1,
-                        borderRadius: 8,
-                        paddingVertical: 6,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexDirection: 'row',
-                        gap: 4
-                      }}
-                    >
-                      <Ionicons name="receipt-outline" size={13} color="#10b981" />
-                      <Text style={{ color: '#10b981', fontWeight: '700', fontSize: 11 }}>Factura</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleTimbrarFactura(item);
-                      }}
-                      style={{
-                        flex: 1.1,
-                        backgroundColor: '#0284c718',
-                        borderColor: '#0284c750',
-                        borderWidth: 1,
-                        borderRadius: 8,
-                        paddingVertical: 6,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexDirection: 'row',
-                        gap: 4
-                      }}
-                    >
-                      <Ionicons name="receipt-outline" size={12} color="#0284c7" />
-                      <Text style={{ color: '#0284c7', fontWeight: '700', fontSize: 11 }}>Facturar</Text>
-                    </TouchableOpacity>
-                  )}
-
                   <TouchableOpacity
                     onPress={(e) => {
                       e.stopPropagation();
@@ -3177,15 +2336,15 @@ export default function VentasScreen() {
                       borderColor: themeColors.primary + '40',
                       borderWidth: 1,
                       borderRadius: 8,
-                      paddingVertical: 6,
+                      paddingVertical: 8,
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexDirection: 'row',
                       gap: 4
                     }}
                   >
-                    <Ionicons name="copy-outline" size={13} color={themeColors.primary} />
-                    <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 11 }}>Duplicar</Text>
+                    <Ionicons name="copy-outline" size={14} color={themeColors.primary} />
+                    <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 12 }}>Duplicar</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -3194,20 +2353,20 @@ export default function VentasScreen() {
                       handleOpenPagoModal(item);
                     }}
                     style={{
-                      flex: 1.3,
+                      flex: 1,
                       backgroundColor: themeColors.success + '15',
                       borderColor: themeColors.success + '40',
                       borderWidth: 1,
                       borderRadius: 8,
-                      paddingVertical: 6,
+                      paddingVertical: 8,
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexDirection: 'row',
                       gap: 4
                     }}
                   >
-                    <Ionicons name="cash-outline" size={13} color={themeColors.success} />
-                    <Text style={{ color: themeColors.success, fontWeight: '700', fontSize: 11 }}>+ Reg. Pago</Text>
+                    <Ionicons name="cash-outline" size={14} color={themeColors.success} />
+                    <Text style={{ color: themeColors.success, fontWeight: '700', fontSize: 12 }}>+ Reg. Pago</Text>
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>
@@ -3386,7 +2545,7 @@ export default function VentasScreen() {
                   
                   <View style={{ gap: Spacing.one }}>
                     <View style={styles.modalRow}>
-                      <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>Total Facturado:</Text>
+                      <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>Total Venta:</Text>
                       <Text style={[styles.modalValue, { color: themeColors.accent, fontSize: 16, fontWeight: '800' }]}>
                         {formatCurrency(selectedVenta.precio_total_facturado)}
                       </Text>
@@ -3429,89 +2588,7 @@ export default function VentasScreen() {
                   </View>
                 </View>
 
-                {/* Bloque Facturación Electrónica (CFDI 4.0 con Finkok) */}
-                <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Ionicons name="receipt" size={18} color={selectedVenta.cfdi_estado === 'TIMBRADA' ? themeColors.success : themeColors.accent} />
-                      <Text style={[styles.modalSectionTitle, { color: themeColors.text, marginBottom: 0 }]}>
-                        Factura Electrónica (CFDI 4.0)
-                      </Text>
-                    </View>
-                    {(() => {
-                      const cfdiCfg = getEstadoCfdiStyle(selectedVenta.cfdi_estado);
-                      return (
-                        <View style={{ backgroundColor: cfdiCfg.bg, borderColor: cfdiCfg.border, borderWidth: 1, paddingVertical: 3, paddingHorizontal: 8, borderRadius: 12 }}>
-                          <Text style={{ color: cfdiCfg.text, fontSize: 10, fontWeight: '800' }}>{cfdiCfg.label}</Text>
-                        </View>
-                      );
-                    })()}
-                  </View>
 
-                  {selectedVenta.cfdi_estado === 'TIMBRADA' ? (
-                    <View style={{ gap: 8 }}>
-                      <View style={{ backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
-                        <Text style={{ fontSize: 10, color: themeColors.textSecondary, fontWeight: '700' }}>FOLIO FISCAL (UUID SAT):</Text>
-                        <Text style={{ fontSize: 12, color: themeColors.text, fontWeight: '600', marginTop: 2, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }} selectable>
-                          {selectedVenta.cfdi_uuid}
-                        </Text>
-                      </View>
-
-                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-                        <TouchableOpacity
-                          onPress={() => handleViewFacturaPDF(selectedVenta)}
-                          disabled={isSubmitting}
-                          style={[styles.modalActionBtn, { flex: 1, backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
-                        >
-                          <Ionicons name="eye-outline" size={16} color={themeColors.primary} />
-                          <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>Ver Factura</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          onPress={handleDownloadFacturaXML}
-                          disabled={isSubmitting}
-                          style={[styles.modalActionBtn, { flex: 1, backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
-                        >
-                          <Ionicons name="code-outline" size={16} color={themeColors.primary} />
-                          <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>XML CFDI</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={{ gap: 8 }}>
-                      <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
-                        Esta venta aún no ha sido timbrada ante el SAT. Puedes generar y timbrar el comprobante CFDI 4.0 directamente con el PAC Finkok.
-                      </Text>
-
-                      <TouchableOpacity
-                        onPress={() => handleTimbrarFactura(selectedVenta)}
-                        disabled={isSubmitting}
-                        style={{
-                          backgroundColor: themeColors.success,
-                          borderRadius: 8,
-                          paddingVertical: 11,
-                          paddingHorizontal: 16,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexDirection: 'row',
-                          gap: 8,
-                          marginTop: 4
-                        }}
-                      >
-                        {isSubmitting ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <>
-                            <Ionicons name="receipt-outline" size={18} color="#fff" />
-                            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>
-                              Timbrar Factura CFDI 4.0
-                            </Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
 
                 {/* Bloque Estado de Pago y Historial de Parcialidades */}
                 <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
@@ -3539,7 +2616,7 @@ export default function VentasScreen() {
                     return (
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', padding: 12, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: themeColors.border }}>
                         <View style={{ alignItems: 'center', flex: 1 }}>
-                          <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>TOTAL FACTURADO</Text>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>TOTAL VENTA</Text>
                           <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
                             {formatCurrency(selectedVenta.precio_total_facturado)}
                           </Text>
@@ -3845,42 +2922,22 @@ export default function VentasScreen() {
                   <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>PDF Venta</Text>
                 </TouchableOpacity>
 
-                {selectedVenta?.cfdi_estado === 'TIMBRADA' ? (
-                  <>
-                    <TouchableOpacity
-                      onPress={() => handleViewFacturaPDF(selectedVenta)}
-                      disabled={isSubmitting}
-                      style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
-                    >
-                      <Ionicons name="eye-outline" size={18} color={themeColors.primary} />
-                      <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>Ver Factura</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={handleDownloadFacturaXML}
-                      disabled={isSubmitting}
-                      style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
-                    >
-                      <Ionicons name="code-outline" size={18} color={themeColors.primary} />
-                      <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>XML CFDI</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : (
-                  <TouchableOpacity
-                    onPress={() => handleTimbrarFactura()}
-                    disabled={isSubmitting}
-                    style={[styles.modalActionBtn, { backgroundColor: themeColors.success + '15', borderColor: themeColors.success }]}
-                  >
-                    {isSubmitting ? (
-                      <ActivityIndicator size="small" color={themeColors.success} />
-                    ) : (
-                      <Ionicons name="receipt-outline" size={18} color={themeColors.success} />
-                    )}
-                    <Text style={[styles.modalActionText, { color: themeColors.success, fontSize: 12 }]}>Facturar</Text>
-                  </TouchableOpacity>
-                )}
+                <TouchableOpacity
+                  onPress={() => {
+                    if (selectedVenta) {
+                      setIsDetailModalVisible(false);
+                      handleOpenPagoModal(selectedVenta);
+                    }
+                  }}
+                  disabled={isSubmitting}
+                  style={[styles.modalActionBtn, { backgroundColor: themeColors.success + '15', borderColor: themeColors.success }]}
+                >
+                  <Ionicons name="cash-outline" size={18} color={themeColors.success} />
+                  <Text style={[styles.modalActionText, { color: themeColors.success, fontSize: 12 }]}>Registrar Pago</Text>
+                </TouchableOpacity>
               </View>
 
-              {/* FILA 2: Edición y Cancelación */}
+              {/* FILA 2: Edición y Eliminación */}
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TouchableOpacity
                   onPress={handleEditVenta}
@@ -3908,21 +2965,6 @@ export default function VentasScreen() {
                   <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
                   <Text style={[styles.modalActionText, { color: themeColors.danger, fontSize: 12 }]}>Eliminar</Text>
                 </TouchableOpacity>
-
-                {selectedVenta?.cfdi_estado === 'TIMBRADA' && (
-                  <TouchableOpacity
-                    onPress={handleCancelarFactura}
-                    disabled={isSubmitting}
-                    style={[styles.modalActionBtn, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}
-                  >
-                    {isSubmitting ? (
-                      <ActivityIndicator size="small" color={themeColors.danger} />
-                    ) : (
-                      <Ionicons name="close-circle-outline" size={18} color={themeColors.danger} />
-                    )}
-                    <Text style={[styles.modalActionText, { color: themeColors.danger, fontSize: 12 }]}>Cancelar CFDI</Text>
-                  </TouchableOpacity>
-                )}
               </View>
             </View>
           </Pressable>
@@ -3979,7 +3021,7 @@ export default function VentasScreen() {
 
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', padding: 12, borderRadius: 10, marginTop: 12, borderWidth: 1, borderColor: themeColors.border }}>
                     <View style={{ alignItems: 'center', flex: 1 }}>
-                      <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>FACTURADO</Text>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>TOTAL VENTA</Text>
                       <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
                         {formatCurrency(selectedVenta.precio_total_facturado)}
                       </Text>
@@ -4064,36 +3106,7 @@ export default function VentasScreen() {
                     placeholderTextColor={themeColors.textSecondary}
                   />
 
-                  {selectedVenta?.cfdi_uuid ? (
-                    <TouchableOpacity
-                      onPress={() => setPagoTimbrarREP(!pagoTimbrarREP)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 10,
-                        backgroundColor: pagoTimbrarREP ? '#801c1d10' : themeColors.background,
-                        borderColor: pagoTimbrarREP ? '#801c1d' : themeColors.border,
-                        borderWidth: 1.5,
-                        borderRadius: 8,
-                        padding: 10,
-                        marginBottom: 16
-                      }}
-                    >
-                      <Ionicons
-                        name={pagoTimbrarREP ? "checkbox" : "square-outline"}
-                        size={22}
-                        color={pagoTimbrarREP ? "#801c1d" : themeColors.textSecondary}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 13, fontWeight: '800', color: pagoTimbrarREP ? '#801c1d' : themeColors.text }}>
-                          Timbrar Complemento de Pago SAT (CFDI 4.0)
-                        </Text>
-                        <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                          Genera automáticamente el Recibo Fiscal Electrónico (REP) con sello digital ante Finkok / SAT.
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  ) : null}
+
 
                   <TouchableOpacity
                     onPress={handleRegistrarPago}
@@ -4174,382 +3187,7 @@ export default function VentasScreen() {
         </Pressable>
       </Modal>
 
-      {/* Modal de Pre-Timbrado / Edición de Factura CFDI 4.0 */}
-      <Modal statusBarTranslucent={true}
-        visible={isTimbradoModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={handleCloseTimbradoModal}
-      >
-        <Pressable style={styles.modalOverlay} onPress={handleCloseTimbradoModal}>
-          <Pressable onPress={(e) => e.stopPropagation()} style={[styles.modalContent, { backgroundColor: themeColors.background, borderColor: themeColors.border, maxWidth: 700, maxHeight: '90%' }]}>
-            {/* Header del Modal */}
-            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="receipt" size={22} color={themeColors.success} />
-                <View>
-                  <Text style={[styles.modalTitle, { color: themeColors.text, fontSize: 17 }]}>Configurar y Timbrar Factura (CFDI 4.0)</Text>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>Revisa o edita los datos antes de emitir ante el SAT con Finkok</Text>
-                </View>
-              </View>
-              <TouchableOpacity
-                onPress={handleCloseTimbradoModal}
-                hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
-                style={styles.modalCloseBtn}
-              >
-                <Ionicons name="close" size={24} color={themeColors.text} />
-              </TouchableOpacity>
-            </View>
 
-            {timbrandoVenta ? (
-              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: Spacing.three, gap: Spacing.two }} showsVerticalScrollIndicator={false}>
-                {/* 1. SECCIÓN: DATOS DEL RECEPTOR (CLIENTE) */}
-                <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                  <Text style={[styles.modalSectionTitle, { color: themeColors.accent }]}>1. Datos Fiscales del Receptor (Cliente)</Text>
-                  
-                  <CustomInput
-                    label="Razón Social / Nombre Oficial *"
-                    value={cfdiClienteNombre}
-                    onChangeText={setCfdiClienteNombre}
-                    placeholder="Ej. EMPRESA EJEMPLO"
-                  />
-
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <View style={{ flex: 1.2 }}>
-                      <CustomInput
-                        label="RFC Receptor *"
-                        value={cfdiClienteRfc}
-                        onChangeText={setCfdiClienteRfc}
-                        placeholder="XAXX010101000"
-                        autoCapitalize="characters"
-                      />
-                    </View>
-                    <View style={{ flex: 0.8 }}>
-                      <CustomInput
-                        label="Código Postal (Domicilio) *"
-                        value={cfdiClienteCp}
-                        onChangeText={setCfdiClienteCp}
-                        placeholder="31110"
-                        keyboardType="numeric"
-                      />
-                    </View>
-                  </View>
-
-                  {/* Régimen Fiscal Selector */}
-                  <View style={{ marginBottom: 8 }}>
-                    <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Régimen Fiscal Receptor *</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
-                      <View style={{ flexDirection: 'row', gap: 6 }}>
-                        {REGIMENES_FISCALES.map(reg => (
-                          <TouchableOpacity
-                            key={reg.code}
-                            onPress={() => setCfdiClienteRegimen(reg.code)}
-                            style={{
-                              paddingHorizontal: 10,
-                              paddingVertical: 6,
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              borderColor: cfdiClienteRegimen === reg.code ? themeColors.accent : themeColors.border,
-                              backgroundColor: cfdiClienteRegimen === reg.code ? themeColors.accent + '20' : themeColors.background
-                            }}
-                          >
-                            <Text style={{ fontSize: 11, fontWeight: cfdiClienteRegimen === reg.code ? '800' : '500', color: cfdiClienteRegimen === reg.code ? themeColors.accent : themeColors.textSecondary }}>
-                              {reg.code} ({reg.label.split('-')[1]?.trim().substring(0, 18)}...)
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </ScrollView>
-                  </View>
-
-                  {/* Uso CFDI Selector */}
-                  <View>
-                    <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Uso de CFDI *</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
-                      <View style={{ flexDirection: 'row', gap: 6 }}>
-                        {USOS_CFDI.map(uso => (
-                          <TouchableOpacity
-                            key={uso.code}
-                            onPress={() => setCfdiClienteUso(uso.code)}
-                            style={{
-                              paddingHorizontal: 10,
-                              paddingVertical: 6,
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              borderColor: cfdiClienteUso === uso.code ? themeColors.accent : themeColors.border,
-                              backgroundColor: cfdiClienteUso === uso.code ? themeColors.accent + '20' : themeColors.background
-                            }}
-                          >
-                            <Text style={{ fontSize: 11, fontWeight: cfdiClienteUso === uso.code ? '800' : '500', color: cfdiClienteUso === uso.code ? themeColors.accent : themeColors.textSecondary }}>
-                              {uso.label}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </ScrollView>
-                  </View>
-                </View>
-
-                {/* 2. SECCIÓN: CONDICIONES COMERCIALES */}
-                <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                  <Text style={[styles.modalSectionTitle, { color: themeColors.accent }]}>2. Forma y Método de Pago</Text>
-                  
-                  {/* Forma de Pago */}
-                  <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Forma de Pago SAT</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4, marginBottom: 10 }}>
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                      {FORMAS_PAGO_CFDI.map(fp => (
-                        <TouchableOpacity
-                          key={fp.code}
-                          onPress={() => setCfdiFormaPago(fp.code)}
-                          style={{
-                            paddingHorizontal: 10,
-                            paddingVertical: 6,
-                            borderRadius: 8,
-                            borderWidth: 1,
-                            borderColor: cfdiFormaPago === fp.code ? themeColors.accent : themeColors.border,
-                            backgroundColor: cfdiFormaPago === fp.code ? themeColors.accent + '20' : themeColors.background
-                          }}
-                        >
-                          <Text style={{ fontSize: 11, fontWeight: cfdiFormaPago === fp.code ? '800' : '500', color: cfdiFormaPago === fp.code ? themeColors.accent : themeColors.textSecondary }}>
-                            {fp.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </ScrollView>
-
-                  {/* Método de Pago */}
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Método de Pago</Text>
-                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
-                        {[
-                          { code: 'PUE', label: 'PUE (Contado)' },
-                          { code: 'PPD', label: 'PPD (Crédito)' }
-                        ].map(mp => (
-                          <TouchableOpacity
-                            key={mp.code}
-                            onPress={() => setCfdiMetodoPago(mp.code)}
-                            style={{
-                              flex: 1,
-                              paddingVertical: 8,
-                              borderRadius: 8,
-                              borderWidth: 1,
-                              alignItems: 'center',
-                              borderColor: cfdiMetodoPago === mp.code ? themeColors.accent : themeColors.border,
-                              backgroundColor: cfdiMetodoPago === mp.code ? themeColors.accent + '20' : themeColors.background
-                            }}
-                          >
-                            <Text style={{ fontSize: 11, fontWeight: cfdiMetodoPago === mp.code ? '800' : '500', color: cfdiMetodoPago === mp.code ? themeColors.accent : themeColors.textSecondary }}>
-                              {mp.label}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </View>
-
-                    <View style={{ width: 80 }}>
-                      <CustomInput
-                        label="Serie"
-                        value={cfdiSerie}
-                        onChangeText={setCfdiSerie}
-                        placeholder="A"
-                      />
-                    </View>
-                    <View style={{ flex: 0.8 }}>
-                      <CustomInput
-                        label="Folio"
-                        value={cfdiFolio}
-                        onChangeText={setCfdiFolio}
-                        placeholder="0001"
-                      />
-                    </View>
-                  </View>
-                </View>
-
-                {/* 3. SECCIÓN: PARTIDAS Y PRODUCTOS (EDITABLES) */}
-                <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <Text style={[styles.modalSectionTitle, { color: themeColors.accent, marginBottom: 0 }]}>
-                      3. Partidas / Conceptos a Facturar ({cfdiPartidas.length})
-                    </Text>
-                    <TouchableOpacity
-                      onPress={handleAddCfdiPartida}
-                      style={{ backgroundColor: themeColors.accent, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                    >
-                      <Ionicons name="add" size={14} color="#fff" />
-                      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Agregar</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={{ gap: 10 }}>
-                    {cfdiPartidas.map((partida, index) => {
-                      const cant = parseFloat(partida.cantidad) || 0;
-                      const pu = parseFloat(partida.precio_unitario_venta) || 0;
-                      const sub = cant * pu;
-
-                      return (
-                        <View key={partida.id || index} style={{ backgroundColor: themeColors.background, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, padding: 10 }}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                            <Text style={{ color: themeColors.accent, fontWeight: '800', fontSize: 12 }}>Partida #{index + 1}</Text>
-                            {cfdiPartidas.length > 1 && (
-                              <TouchableOpacity onPress={() => handleRemoveCfdiPartida(partida.id)} style={{ padding: 2 }}>
-                                <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
-                              </TouchableOpacity>
-                            )}
-                          </View>
-
-                          <TextInput
-                            style={{ height: 38, borderWidth: 1, borderColor: themeColors.border, borderRadius: 6, paddingHorizontal: 8, color: themeColors.text, backgroundColor: themeColors.backgroundElement, fontSize: 12, marginBottom: 6 }}
-                            value={partida.descripcion}
-                            onChangeText={val => handleUpdateCfdiPartida(partida.id, 'descripcion', val)}
-                            placeholder="Descripción del producto o servicio"
-                            placeholderTextColor={themeColors.textSecondary}
-                          />
-
-                          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 6 }}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginBottom: 2 }}>Cantidad</Text>
-                              <TextInput
-                                style={{ height: 36, borderWidth: 1, borderColor: themeColors.border, borderRadius: 6, paddingHorizontal: 8, color: themeColors.text, backgroundColor: themeColors.backgroundElement, fontSize: 12 }}
-                                value={partida.cantidad}
-                                onChangeText={val => handleUpdateCfdiPartida(partida.id, 'cantidad', val)}
-                                placeholder="1"
-                                keyboardType="numeric"
-                              />
-                            </View>
-
-                            <View style={{ flex: 1.5 }}>
-                              <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginBottom: 2 }}>Precio Unitario ($)</Text>
-                              <TextInput
-                                style={{ height: 36, borderWidth: 1, borderColor: themeColors.border, borderRadius: 6, paddingHorizontal: 8, color: themeColors.text, backgroundColor: themeColors.backgroundElement, fontSize: 12 }}
-                                value={partida.precio_unitario_venta}
-                                onChangeText={val => handleUpdateCfdiPartida(partida.id, 'precio_unitario_venta', val)}
-                                placeholder="0.00"
-                                keyboardType="numeric"
-                              />
-                            </View>
-
-                            <SatCatalogAutocomplete
-                              tipo="producto"
-                              label="Clave SAT"
-                              value={partida.clave_sat}
-                              onChangeValue={val => handleUpdateCfdiPartida(partida.id, 'clave_sat', val)}
-                              placeholder="01010101"
-                              style={{ flex: 1.2 }}
-                            />
-
-                            <SatCatalogAutocomplete
-                              tipo="unidad"
-                              label="Unidad SAT"
-                              value={partida.clave_unidad}
-                              onChangeValue={val => handleUpdateCfdiPartida(partida.id, 'clave_unidad', val)}
-                              placeholder="H87"
-                              style={{ flex: 1 }}
-                            />
-                          </View>
-
-                          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 2 }}>
-                            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                              Importe Partida: <Text style={{ color: themeColors.text, fontWeight: '700' }}>{formatCurrency(sub)}</Text>
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-
-                {/* 4. SECCIÓN: RESUMEN DE TOTALES FISCALES */}
-                {(() => {
-                  const subTotalCalculado = cfdiPartidas.reduce((sum, p) => sum + ((parseFloat(p.cantidad) || 0) * (parseFloat(p.precio_unitario_venta) || 0)), 0);
-                  const ivaCalculado = subTotalCalculado * 0.16;
-                  const totalCalculado = subTotalCalculado + ivaCalculado;
-
-                  return (
-                    <View style={{ backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', padding: 14, borderRadius: 10, borderWidth: 1, borderColor: themeColors.border }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Subtotal:</Text>
-                        <Text style={{ fontSize: 13, color: themeColors.text, fontWeight: '600' }}>{formatCurrency(subTotalCalculado)}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>IVA Trasladado (16%):</Text>
-                        <Text style={{ fontSize: 13, color: themeColors.text, fontWeight: '600' }}>{formatCurrency(ivaCalculado)}</Text>
-                      </View>
-                      <View style={{ height: 1, backgroundColor: themeColors.border, marginVertical: 6 }} />
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                        <Text style={{ fontSize: 14, color: themeColors.text, fontWeight: '800' }}>TOTAL CFDI A TIMBRAR:</Text>
-                        <Text style={{ fontSize: 16, color: themeColors.success, fontWeight: '800' }}>{formatCurrency(totalCalculado)}</Text>
-                      </View>
-                    </View>
-                  );
-                })()}
-              </ScrollView>
-            ) : null}
-
-            {/* Footer de Acciones */}
-            <View style={[styles.modalFooter, { borderTopColor: themeColors.border, gap: 10 }]}>
-              <TouchableOpacity
-                onPress={handleCloseTimbradoModal}
-                disabled={isSubmittingTimbrado}
-                style={[styles.modalActionBtn, { flex: 0.8, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-              >
-                <Text style={[styles.modalActionText, { color: themeColors.text }]}>Cancelar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={handlePreTimbradoPreview}
-                disabled={isSubmittingTimbrado}
-                style={[styles.modalActionBtn, { flex: 1, backgroundColor: themeColors.primary + '18', borderColor: themeColors.primary }]}
-              >
-                <Ionicons name="eye-outline" size={17} color={themeColors.primary} />
-                <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 13, fontWeight: '700' }]}>Vista Previa</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={handleExecuteTimbrado}
-                disabled={isSubmittingTimbrado}
-                style={[styles.modalActionBtn, { flex: 1.2, backgroundColor: themeColors.success, borderColor: themeColors.success }]}
-              >
-                {isSubmittingTimbrado ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-                    <Text style={[styles.modalActionText, { color: '#fff', fontSize: 13 }]}>Confirmar y Timbrar</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Visualizador Integrado de Facturas (Odoo Preview, Borrador y Timbradas) */}
-      <FacturaPreviewModal
-        visible={previewModalVisible}
-        onClose={() => {
-          setPreviewModalVisible(false);
-          if (returnToTimbradoModal) {
-            setReturnToTimbradoModal(false);
-            setIsTimbradoModalVisible(true);
-          } else if (returnToDetailModal) {
-            setReturnToDetailModal(false);
-            setIsDetailModalVisible(true);
-          }
-        }}
-        venta={previewVenta}
-        facturaData={previewFacturaData}
-        xmlText={previewXmlText}
-        customHtml={previewCustomHtml}
-        isDraft={previewIsDraft}
-        title={previewTitle}
-        onConfirmTimbrar={previewIsDraft && !previewCustomHtml ? () => {
-          setPreviewModalVisible(false);
-          handleExecuteTimbrado();
-        } : undefined}
-      />
       </View>
     </SafeAreaView>
   );
