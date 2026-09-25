@@ -1222,7 +1222,7 @@ export default function EditarGastoForm() {
                           ]}
                         >
                           <Text style={[styles.paymentOptionText, { color: incluyePropina === true ? '#ffffff' : themeColors.text, fontSize: 12 }]}>
-                            Sí
+                            No
                           </Text>
                         </TouchableOpacity>
 
@@ -1242,7 +1242,7 @@ export default function EditarGastoForm() {
                           ]}
                         >
                           <Text style={[styles.paymentOptionText, { color: incluyePropina === false ? '#ffffff' : themeColors.text, fontSize: 12 }]}>
-                            No
+                            Sí
                           </Text>
                         </TouchableOpacity>
                       </View>
