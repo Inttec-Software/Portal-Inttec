@@ -990,5 +990,60 @@ WHERE (cantidad_nuevo IS NULL OR cantidad_nuevo = 0)
   AND (cantidad_por_revisar IS NULL OR cantidad_por_revisar = 0)
   AND COALESCE(cantidad_disponible, 0) > 0;
 
+-- =========================================================================
+-- MÓDULO INDEPENDIENTE DE FACTURACIÓN FISCAL (CFDI 4.0)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.facturas_emitidas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  serie VARCHAR(10) NOT NULL DEFAULT 'A',
+  folio VARCHAR(20) NOT NULL,
+  cliente_id UUID REFERENCES public.clientes(id) ON DELETE SET NULL,
+  cliente_nombre TEXT NOT NULL,
+  cliente_rfc VARCHAR(15) NOT NULL,
+  cliente_cp VARCHAR(10),
+  cliente_regimen VARCHAR(10),
+  cliente_uso_cfdi VARCHAR(10) DEFAULT 'G03',
+  forma_pago VARCHAR(5) DEFAULT '03',
+  metodo_pago VARCHAR(5) DEFAULT 'PUE',
+  moneda VARCHAR(5) DEFAULT 'MXN',
+  subtotal NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  iva NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  total NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  total_pagado NUMERIC(14, 2) DEFAULT 0,
+  saldo_pendiente NUMERIC(14, 2) DEFAULT 0,
+  estado_pago VARCHAR(30) DEFAULT 'PENDIENTE DE PAGO',
+  cfdi_uuid VARCHAR(50) UNIQUE,
+  cfdi_estado VARCHAR(20) NOT NULL DEFAULT 'BORRADOR',
+  cfdi_xml_url TEXT,
+  cfdi_pdf_url TEXT,
+  fecha_emision TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  orden_compra TEXT,
+  notas JSONB,
+  venta_id UUID REFERENCES public.ventas(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.facturas_emitidas_partidas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  factura_id UUID NOT NULL REFERENCES public.facturas_emitidas(id) ON DELETE CASCADE,
+  descripcion TEXT NOT NULL,
+  cantidad NUMERIC(12, 4) NOT NULL DEFAULT 1,
+  precio_unitario NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  importe NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  clave_sat VARCHAR(20) NOT NULL DEFAULT '01010101',
+  clave_unidad VARCHAR(10) NOT NULL DEFAULT 'H87',
+  unidad VARCHAR(30) DEFAULT 'Pieza',
+  objeto_imp VARCHAR(5) DEFAULT '02',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_emit_uuid ON public.facturas_emitidas(cfdi_uuid);
+CREATE INDEX IF NOT EXISTS idx_fact_emit_folio ON public.facturas_emitidas(serie, folio);
+CREATE INDEX IF NOT EXISTS idx_fact_emit_estado ON public.facturas_emitidas(cfdi_estado);
+CREATE INDEX IF NOT EXISTS idx_fact_emit_cliente ON public.facturas_emitidas(cliente_id);
+CREATE INDEX IF NOT EXISTS idx_fact_emit_venta ON public.facturas_emitidas(venta_id);
+CREATE INDEX IF NOT EXISTS idx_fact_partidas_factura ON public.facturas_emitidas_partidas(factura_id);
+
 
 

@@ -46,33 +46,44 @@ export async function resolveConsecutiveFolio(
     folio = folio.slice(serie.length).trim();
   }
 
-  // Consultar todas las ventas (en cualquier estado: BORRADOR, TIMBRADA, CANCELADA, PENDIENTE)
-  // para conocer el estado actual y respetar folios reservados
+  // Consultar folios reservados en facturas_emitidas y ventas
   let maxNum: number | null = null;
+  const inspectFolio = (c: any) => {
+    const raw = cleanFolio(c).toUpperCase();
+    let numPart = '';
+    if (raw.startsWith(serie)) {
+      numPart = raw.slice(serie.length).replace(/^[-_\s]+/, '');
+    } else if (/^\d+$/.test(raw) && serie === 'A') {
+      numPart = raw;
+    }
+    if (numPart && /^\d+$/.test(numPart)) {
+      const parsed = parseInt(numPart, 10);
+      if (!isNaN(parsed) && parsed >= 0 && parsed < 1000000) {
+        if (maxNum === null || parsed > maxNum) {
+          maxNum = parsed;
+        }
+      }
+    }
+  };
+
   try {
-    const { data: existingVentas, error: queryErr } = await supabaseClient
+    const { data: existingFacturas } = await supabaseClient
+      .from('facturas_emitidas')
+      .select('folio, serie');
+
+    if (existingFacturas) {
+      existingFacturas.forEach((f: any) => {
+        inspectFolio(f.folio);
+      });
+    }
+
+    const { data: existingVentas } = await supabaseClient
       .from('ventas')
       .select('folio, cfdi_folio, factura_referencia');
 
-    if (!queryErr && existingVentas) {
+    if (existingVentas) {
       existingVentas.forEach((v: any) => {
-        [v.folio, v.cfdi_folio, v.factura_referencia].filter(Boolean).forEach((c: any) => {
-          const raw = cleanFolio(c).toUpperCase();
-          let numPart = '';
-          if (raw.startsWith(serie)) {
-            numPart = raw.slice(serie.length).replace(/^[-_\s]+/, '');
-          } else if (/^\d+$/.test(raw) && serie === 'A') {
-            numPart = raw;
-          }
-          if (numPart && /^\d+$/.test(numPart)) {
-            const parsed = parseInt(numPart, 10);
-            if (!isNaN(parsed) && parsed >= 0 && parsed < 1000000) {
-              if (maxNum === null || parsed > maxNum) {
-                maxNum = parsed;
-              }
-            }
-          }
-        });
+        [v.folio, v.cfdi_folio, v.factura_referencia].filter(Boolean).forEach(inspectFolio);
       });
     }
   } catch (err) {
@@ -138,19 +149,111 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
     let folioFinal: string;
     let fullFolio: string;
 
+    let isDraftInFacturas = false;
+    let existingFactura: any = null;
+    let actualVentaId: string | number | null = null;
+
     if (resolvedVentaId) {
-      const { data: ventaDB, error: ventaError } = await supabaseClient
-        .from('ventas')
+      // 1. Verificar si es un borrador en facturas_emitidas
+      const { data: fDB } = await supabaseClient
+        .from('facturas_emitidas')
         .select('*')
         .eq('id', resolvedVentaId)
-        .single();
+        .maybeSingle();
 
-      if (ventaError || !ventaDB) throw new Error('Venta no encontrada');
-      if (ventaDB.cfdi_estado === 'TIMBRADA') throw new Error('La venta ya se encuentra timbrada');
+      if (fDB) {
+        isDraftInFacturas = true;
+        existingFactura = fDB;
+        actualVentaId = fDB.venta_id || null;
+      } else {
+        // 2. Si no es borrador en facturas_emitidas, buscar en ventas (origen venta)
+        const { data: vDB } = await supabaseClient
+          .from('ventas')
+          .select('*')
+          .eq('id', resolvedVentaId)
+          .maybeSingle();
 
-      // Respetar rigurosamente el folio previamente reservado por el borrador o venta existente
-      const requestedSerie = effectiveCondiciones.serie || ventaDB.cfdi_serie || (ventaDB.folio ? ventaDB.folio.replace(/\d+$/, '') : 'A');
-      const requestedFolio = effectiveCondiciones.folio || ventaDB.cfdi_folio || cleanFolio(ventaDB.folio);
+        if (vDB) {
+          actualVentaId = vDB.id;
+          venta = vDB;
+        }
+      }
+    }
+
+    if (existingFactura) {
+      if (existingFactura.cfdi_estado === 'TIMBRADA') throw new Error('La factura ya se encuentra timbrada');
+
+      const requestedSerie = effectiveCondiciones.serie || existingFactura.serie || 'A';
+      const requestedFolio = effectiveCondiciones.folio || existingFactura.folio || cleanFolio(existingFactura.folio);
+
+      const lockKey = `${company}:${env}:${(requestedSerie || 'A').toUpperCase()}`;
+      const resolved = await folioMutex.runExclusive(lockKey, async () => {
+        return await resolveConsecutiveFolio(supabaseClient, requestedSerie, requestedFolio);
+      });
+
+      serieFinal = resolved.serie;
+      folioFinal = resolved.folio;
+      fullFolio = resolved.fullFolio;
+
+      let draftNotas: any = {};
+      if (existingFactura.notas && typeof existingFactura.notas === 'object') {
+        draftNotas = existingFactura.notas;
+      } else if (typeof existingFactura.notas === 'string' && existingFactura.notas.startsWith('{')) {
+        try { draftNotas = JSON.parse(existingFactura.notas); } catch (_) {}
+      }
+
+      cliente = {
+        nombre: existingFactura.cliente_nombre || 'PUBLICO EN GENERAL',
+        razon_social: existingFactura.cliente_nombre || 'PUBLICO EN GENERAL',
+        rfc: existingFactura.cliente_rfc || 'XAXX010101000',
+        regimen_fiscal: existingFactura.cliente_regimen || '616',
+        uso_cfdi: existingFactura.cliente_uso_cfdi || 'G03',
+        codigo_postal: existingFactura.cliente_cp || process.env.EMISOR_CP || '31110',
+        ...(draftNotas.receptor || {}),
+        ...(effectiveReceptor || {})
+      };
+
+      if (custom_partidas && Array.isArray(custom_partidas) && custom_partidas.length > 0) {
+        partidas = custom_partidas;
+      } else {
+        const { data: pDB } = await supabaseClient
+          .from('facturas_emitidas_partidas')
+          .select('*')
+          .eq('factura_id', existingFactura.id);
+
+        if (pDB && pDB.length > 0) {
+          partidas = pDB.map((p: any) => ({
+            ...p,
+            precio_unitario_venta: p.precio_unitario
+          }));
+        } else {
+          partidas = [{
+            descripcion: 'Concepto',
+            cantidad: 1,
+            precio_unitario_venta: existingFactura.subtotal || existingFactura.total || 0,
+            clave_sat: '01010101',
+            clave_unidad: 'H87',
+            unidad: 'Pieza'
+          }];
+        }
+      }
+
+      venta = {
+        id: existingFactura.id,
+        folio: fullFolio,
+        cfdi_serie: serieFinal,
+        cfdi_folio: folioFinal,
+        forma_pago: effectiveCondiciones.forma_pago || existingFactura.forma_pago || '03',
+        metodo_pago: effectiveCondiciones.forma_pago || existingFactura.forma_pago || '03',
+        metodo_pago_cfdi: effectiveCondiciones.metodo_pago_cfdi || existingFactura.metodo_pago || 'PUE',
+        precio_total_facturado: Number(existingFactura.total || 0),
+        orden_compra: effectiveCondiciones.orden_compra || existingFactura.orden_compra || null
+      };
+    } else if (actualVentaId && venta) {
+      if (venta.cfdi_estado === 'TIMBRADA') throw new Error('La venta ya se encuentra timbrada');
+
+      const requestedSerie = effectiveCondiciones.serie || venta.cfdi_serie || (venta.folio ? venta.folio.replace(/\d+$/, '') : 'A');
+      const requestedFolio = effectiveCondiciones.folio || venta.cfdi_folio || cleanFolio(venta.folio);
 
       const lockKey = `${company}:${env}:${(requestedSerie || 'A').toUpperCase()}`;
       const resolved = await folioMutex.runExclusive(lockKey, async () => {
@@ -162,12 +265,10 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       fullFolio = resolved.fullFolio;
 
       venta = {
-        ...ventaDB,
+        ...venta,
         ...effectiveCondiciones,
         cfdi_serie: serieFinal,
         cfdi_folio: folioFinal,
-        factura_serie: serieFinal,
-        factura_folio: folioFinal,
         folio: fullFolio,
       };
 
@@ -204,7 +305,7 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
         const { data: partidasDB, error: partidasError } = await supabaseClient
           .from('ventas_partidas')
           .select('*')
-          .eq('venta_id', resolvedVentaId);
+          .eq('venta_id', actualVentaId);
 
         if (partidasError || !partidasDB || partidasDB.length === 0) {
           throw new Error('La venta no tiene partidas o productos para facturar');
@@ -253,44 +354,7 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       const metodoPagoFinal = effectiveCondiciones.metodo_pago_cfdi || 'PUE';
       const ordenCompraFinal = effectiveCondiciones.orden_compra || null;
 
-      const { data: createdVenta, error: createVentaError } = await supabaseClient
-        .from('ventas')
-        .insert({
-          cliente: cliente.razon_social || cliente.nombre || 'PUBLICO EN GENERAL',
-          fecha: new Date().toISOString().split('T')[0],
-          folio: fullFolio,
-          cfdi_serie: serieFinal,
-          cfdi_folio: folioFinal,
-          precio_total_facturado: totalCalculado,
-          estado_pago: 'PAGADO',
-          cfdi_estado: 'PENDIENTE',
-          orden_compra: ordenCompraFinal,
-          tipo_proyecto: 'Factura Directa',
-        })
-        .select()
-        .single();
-
-      if (createVentaError) {
-        console.error("Error al registrar venta:", createVentaError);
-      }
-
-      resolvedVentaId = createdVenta?.id || null;
-
-      if (resolvedVentaId) {
-        const partidasToInsert = partidas.map(p => ({
-          venta_id: resolvedVentaId,
-          descripcion: p.descripcion || 'Concepto',
-          cantidad: parseFloat(p.cantidad) || 1,
-          precio_unitario_venta: parseFloat(p.precio_unitario_venta || p.precio_unitario || 0),
-          clave_sat: p.clave_sat || '01010101',
-          clave_unidad: p.clave_unidad || 'H87',
-          unidad: p.unidad || 'Pieza',
-        }));
-        await supabaseClient.from('ventas_partidas').insert(partidasToInsert);
-      }
-
       venta = {
-        id: resolvedVentaId,
         folio: `${serieFinal}${folioFinal}`,
         cfdi_serie: serieFinal,
         cfdi_folio: folioFinal,
@@ -298,7 +362,7 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
         metodo_pago: formaPagoFinal,
         metodo_pago_cfdi: metodoPagoFinal,
         precio_total_facturado: totalCalculado,
-        ...(createdVenta || {}),
+        orden_compra: ordenCompraFinal,
         ...effectiveCondiciones
       };
     }
@@ -350,24 +414,89 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       console.error("Storage aviso:", sErr);
     }
 
-    // Actualizar venta
-    if (resolvedVentaId) {
-      const updateData: any = {
-        cfdi_uuid: sat_uuid,
-        cfdi_estado: 'TIMBRADA',
-        cfdi_xml_url: xmlUrl || xmlFileName,
-        folio: fullFolio,
-        cfdi_folio: folioFinal,
-        cfdi_serie: serieFinal,
-      };
-      if (effectiveCondiciones.orden_compra) {
-        updateData.orden_compra = effectiveCondiciones.orden_compra.trim();
-      }
+    // Calcular montos finales
+    const subtotalFinal = partidas.reduce((sum, p) => {
+      const cant = parseFloat(p.cantidad) || 1;
+      const prec = parseFloat(p.precio_unitario_venta || p.precio_unitario || 0);
+      return sum + (cant * prec);
+    }, 0);
+    const ivaFinal = Math.round(subtotalFinal * 0.16 * 100) / 100;
+    const totalFinal = Math.round((subtotalFinal + ivaFinal) * 100) / 100;
 
+    // Guardar en tabla independiente facturas_emitidas
+    const facturaPayload: any = {
+      serie: serieFinal,
+      folio: folioFinal,
+      cliente_nombre: cliente.razon_social || cliente.nombre || 'PUBLICO EN GENERAL',
+      cliente_rfc: (cliente.rfc || 'XAXX010101000').toUpperCase().trim(),
+      cliente_cp: cliente.codigo_postal || '31110',
+      cliente_regimen: cliente.regimen_fiscal || '616',
+      cliente_uso_cfdi: cliente.uso_cfdi || 'G03',
+      forma_pago: venta.forma_pago || '03',
+      metodo_pago: venta.metodo_pago_cfdi || 'PUE',
+      moneda: 'MXN',
+      subtotal: subtotalFinal,
+      iva: ivaFinal,
+      total: totalFinal,
+      total_pagado: totalFinal, // PUE liquidado
+      saldo_pendiente: 0,
+      estado_pago: 'PAGADO',
+      cfdi_uuid: sat_uuid,
+      cfdi_estado: 'TIMBRADA',
+      cfdi_xml_url: xmlUrl || xmlFileName,
+      fecha_emision: new Date().toISOString(),
+      orden_compra: effectiveCondiciones.orden_compra || venta.orden_compra || null,
+      venta_id: actualVentaId || null
+    };
+
+    let targetFacturaId = existingFactura?.id || null;
+    if (existingFactura) {
+      await supabaseClient
+        .from('facturas_emitidas')
+        .update(facturaPayload)
+        .eq('id', existingFactura.id);
+    } else {
+      const { data: newF } = await supabaseClient
+        .from('facturas_emitidas')
+        .insert(facturaPayload)
+        .select('id')
+        .single();
+      targetFacturaId = newF?.id || null;
+    }
+
+    // Insertar partidas fiscales en facturas_emitidas_partidas
+    if (targetFacturaId) {
+      await supabaseClient
+        .from('facturas_emitidas_partidas')
+        .delete()
+        .eq('factura_id', targetFacturaId);
+
+      const factPartidas = partidas.map((p: any) => ({
+        factura_id: targetFacturaId,
+        descripcion: p.descripcion || 'Concepto',
+        cantidad: parseFloat(p.cantidad) || 1,
+        precio_unitario: parseFloat(p.precio_unitario_venta || p.precio_unitario || 0),
+        importe: (parseFloat(p.cantidad) || 1) * parseFloat(p.precio_unitario_venta || p.precio_unitario || 0),
+        clave_sat: p.clave_sat || '01010101',
+        clave_unidad: p.clave_unidad || 'H87',
+        unidad: p.unidad || 'Pieza',
+        objeto_imp: p.objeto_imp || '02'
+      }));
+      await supabaseClient.from('facturas_emitidas_partidas').insert(factPartidas);
+    }
+
+    // Si provenía de una venta operativa en ventas.tsx, actualizar la venta para vincularla sin duplicar
+    if (actualVentaId) {
       await supabaseClient
         .from('ventas')
-        .update(updateData)
-        .eq('id', resolvedVentaId);
+        .update({
+          cfdi_uuid: sat_uuid,
+          cfdi_estado: 'TIMBRADA',
+          cfdi_xml_url: xmlUrl || xmlFileName,
+          cfdi_serie: serieFinal,
+          cfdi_folio: folioFinal,
+        })
+        .eq('id', actualVentaId);
     }
 
     try {
@@ -521,26 +650,22 @@ router.post('/borrador', async (req: Request, res: Response) => {
       // 3. Procesar partidas
       const rawPartidas = Array.isArray(body.partidas) ? body.partidas : [];
       let subtotalCalculado = 0;
-      let costoTotalCalculado = 0;
 
       const sanitizedPartidas = rawPartidas.map((p: any) => {
         const cant = Math.max(0.0001, parseFloat(p.cantidad) || 1);
         const precioUnit = parseFloat(p.precio_unitario_venta || p.precio_unitario || 0) || 0;
-        const costoUnit = parseFloat(p.costo_unitario_proveedor || p.costo_unitario || 0) || 0;
         const importe = cant * precioUnit;
         subtotalCalculado += importe;
-        costoTotalCalculado += cant * costoUnit;
 
         return {
           descripcion: String(p.descripcion || 'Concepto').trim(),
           cantidad: cant,
           precio_unitario_venta: precioUnit,
-          costo_unitario_proveedor: costoUnit,
           precio_total_venta: importe,
-          costo_total_proveedor: cant * costoUnit,
           clave_sat: p.clave_sat || '01010101',
           clave_unidad: p.clave_unidad || 'H87',
           unidad: p.unidad || 'Pieza',
+          objeto_imp: p.objeto_imp || '02'
         };
       });
 
@@ -549,6 +674,9 @@ router.post('/borrador', async (req: Request, res: Response) => {
         : (body.total !== undefined
             ? parseFloat(body.total) || 0
             : subtotalCalculado * 1.16);
+
+      const subtotalCalc = Math.round((totalFacturado / 1.16) * 100) / 100;
+      const ivaCalc = Math.round((totalFacturado - subtotalCalc) * 100) / 100;
 
       const draftMetadata = {
         receptor: {
@@ -571,60 +699,63 @@ router.post('/borrador', async (req: Request, res: Response) => {
         user_notas: body.notas || null
       };
 
-      const ventaPayload: any = {
-        cliente: clienteNombre,
-        fecha: body.fecha || new Date().toISOString().split('T')[0],
-        folio: fullFolio,
-        cfdi_serie: serieFinal,
-        cfdi_folio: folioFinal,
-        factura_referencia: fullFolio,
-        precio_total_facturado: totalFacturado,
-        costo_total: costoTotalCalculado,
-        cfdi_estado: 'BORRADOR',
+      const facturaPayload: any = {
+        serie: serieFinal,
+        folio: folioFinal,
+        cliente_nombre: clienteNombre,
+        cliente_rfc: receptorRfc,
+        cliente_cp: receptorCp,
+        cliente_regimen: receptorRegimen,
+        cliente_uso_cfdi: receptorUso,
+        forma_pago: body.forma_pago || '03',
+        metodo_pago: body.metodo_pago || body.metodo_pago_cfdi || 'PUE',
+        moneda: body.moneda || 'MXN',
+        subtotal: subtotalCalc,
+        iva: ivaCalc,
+        total: totalFacturado,
+        total_pagado: 0,
+        saldo_pendiente: totalFacturado,
         estado_pago: 'PENDIENTE DE PAGO',
-        tipo_proyecto: body.tipo_proyecto || 'Factura Directa',
+        cfdi_estado: 'BORRADOR',
         orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
-        notas: JSON.stringify(draftMetadata),
-        descripcion: body.descripcion || `Borrador ${fullFolio} - ${clienteNombre}`,
-        cotizacion_id: body.cotizacion_id || null,
+        notas: draftMetadata,
+        fecha_emision: body.fecha || new Date().toISOString()
       };
 
-      const { data: createdVenta, error: insertErr } = await supabaseClient
-        .from('ventas')
-        .insert(ventaPayload)
+      const { data: createdFactura, error: insertErr } = await supabaseClient
+        .from('facturas_emitidas')
+        .insert(facturaPayload)
         .select()
         .single();
 
       if (insertErr) {
-        throw new Error(`Error al insertar borrador en ventas: ${insertErr.message}`);
+        throw new Error(`Error al insertar borrador en facturas_emitidas: ${insertErr.message}`);
       }
 
-      const ventaId = createdVenta.id;
+      const facturaId = createdFactura.id;
       let insertedPartidas: any[] = [];
 
       if (sanitizedPartidas.length > 0) {
         const partidasToInsert = sanitizedPartidas.map((p: any) => ({
-          ...p,
-          venta_id: ventaId
+          factura_id: facturaId,
+          descripcion: p.descripcion,
+          cantidad: p.cantidad,
+          precio_unitario: p.precio_unitario_venta,
+          importe: p.precio_total_venta,
+          clave_sat: p.clave_sat,
+          clave_unidad: p.clave_unidad,
+          unidad: p.unidad,
+          objeto_imp: p.objeto_imp || '02'
         }));
 
         try {
           const { data: pData, error: pErr } = await supabaseClient
-            .from('ventas_partidas')
+            .from('facturas_emitidas_partidas')
             .insert(partidasToInsert)
             .select();
 
           if (pErr) {
-            console.warn("Aviso insertando ventas_partidas (reintentando básico):", pErr);
-            const fallbackPartidas = partidasToInsert.map((p: any) => {
-              const { clave_sat, clave_unidad, ...rest } = p;
-              return rest;
-            });
-            const { data: pFallback } = await supabaseClient
-              .from('ventas_partidas')
-              .insert(fallbackPartidas)
-              .select();
-            insertedPartidas = pFallback || fallbackPartidas;
+            console.warn("Aviso insertando partidas de borrador en facturas_emitidas_partidas:", pErr);
           } else {
             insertedPartidas = pData || partidasToInsert;
           }
@@ -634,13 +765,12 @@ router.post('/borrador', async (req: Request, res: Response) => {
       }
 
       try {
-        invalidateCache('ventas');
         invalidateCache('sat');
       } catch (_) {}
 
       return {
-        ...createdVenta,
-        id: ventaId,
+        ...createdFactura,
+        id: facturaId,
         serie: serieFinal,
         folio: folioFinal,
         fullFolio,
@@ -672,7 +802,7 @@ router.post('/borrador', async (req: Request, res: Response) => {
 
 /**
  * GET /api/sat/borrador/:id
- * Obtiene el borrador y sus partidas de ventas y ventas_partidas para poblar el editor en frontend.
+ * Obtiene el borrador y sus partidas de facturas_emitidas (o fallback ventas) para poblar el editor.
  */
 router.get('/borrador/:id', async (req: Request, res: Response) => {
   try {
@@ -683,6 +813,74 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
     const env = (req as any).tenant?.env || 'cloud';
     const supabaseClient = getSupabaseClient(company, env);
 
+    // 1. Buscar primero en facturas_emitidas
+    const { data: factura, error: factError } = await supabaseClient
+      .from('facturas_emitidas')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (factura) {
+      const { data: partidas } = await supabaseClient
+        .from('facturas_emitidas_partidas')
+        .select('*')
+        .eq('factura_id', id);
+
+      let draftNotas: any = {};
+      if (factura.notas && typeof factura.notas === 'object') {
+        draftNotas = factura.notas;
+      } else if (typeof factura.notas === 'string' && factura.notas.startsWith('{')) {
+        try { draftNotas = JSON.parse(factura.notas); } catch (_) {}
+      }
+
+      const receptor = draftNotas.receptor || {
+        nombre: factura.cliente_nombre || 'PUBLICO EN GENERAL',
+        razon_social: factura.cliente_nombre || 'PUBLICO EN GENERAL',
+        rfc: factura.cliente_rfc || 'XAXX010101000',
+        codigo_postal: factura.cliente_cp || process.env.EMISOR_CP || '31110',
+        regimen_fiscal: factura.cliente_regimen || '616',
+        uso_cfdi: factura.cliente_uso_cfdi || 'G03'
+      };
+
+      const serie = factura.serie || 'A';
+      const cleanFolioVal = cleanFolio(factura.folio);
+      const fullFolio = `${serie}${cleanFolioVal}`;
+
+      const formattedPartidas = (partidas || []).map((p: any) => ({
+        id: p.id,
+        descripcion: p.descripcion,
+        cantidad: String(p.cantidad || 1),
+        precio_unitario: String(p.precio_unitario || 0),
+        unidad: p.unidad || 'Pieza',
+        clave_sat: p.clave_sat || '01010101',
+        clave_unidad: p.clave_unidad || 'H87',
+        objeto_imp: p.objeto_imp || '02'
+      }));
+
+      return res.json({
+        success: true,
+        borrador: {
+          id: factura.id,
+          serie,
+          folio: cleanFolioVal,
+          fullFolio,
+          cliente: factura.cliente_nombre,
+          receptor,
+          forma_pago: factura.forma_pago || '03',
+          metodo_pago: factura.metodo_pago || 'PUE',
+          moneda: factura.moneda || 'MXN',
+          orden_compra: factura.orden_compra || '',
+          notas: draftNotas.user_notas || '',
+          precio_total_facturado: Number(factura.total || 0),
+          cfdi_estado: factura.cfdi_estado,
+          es_borrador: factura.cfdi_estado === 'BORRADOR',
+          partidas: formattedPartidas,
+          created_at: factura.created_at
+        }
+      });
+    }
+
+    // 2. Fallback a tabla legacy ventas
     const { data: venta, error: ventaError } = await supabaseClient
       .from('ventas')
       .select('*')
@@ -693,14 +891,10 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Borrador no encontrado' });
     }
 
-    const { data: partidas, error: partError } = await supabaseClient
+    const { data: partidas } = await supabaseClient
       .from('ventas_partidas')
       .select('*')
       .eq('venta_id', id);
-
-    if (partError) {
-      console.warn("Aviso consultando partidas del borrador:", partError);
-    }
 
     let receptor: any = null;
     let config: any = null;
@@ -713,25 +907,6 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
         config = parsedMeta.config || null;
         userNotas = parsedMeta.user_notas || '';
       } catch (_) {}
-    }
-
-    if (!receptor && venta.cliente) {
-      const { data: clienteDB } = await supabaseClient
-        .from('clientes')
-        .select('*')
-        .or(`nombre.eq.${venta.cliente},razon_social.eq.${venta.cliente}`)
-        .maybeSingle();
-
-      if (clienteDB) {
-        receptor = {
-          nombre: clienteDB.nombre,
-          razon_social: clienteDB.razon_social || clienteDB.nombre,
-          rfc: clienteDB.rfc,
-          codigo_postal: clienteDB.codigo_postal,
-          regimen_fiscal: clienteDB.regimen_fiscal,
-          uso_cfdi: clienteDB.uso_cfdi
-        };
-      }
     }
 
     if (!receptor) {
@@ -791,8 +966,7 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
 
 /**
  * PUT /api/sat/borrador/:id
- * Actualiza los datos de un borrador existente (cliente, partidas, totales, notas)
- * manteniendo estrictamente su folio consecutivo reservado intacto.
+ * Actualiza los datos de un borrador existente manteniendo estrictamente su folio reservado.
  */
 router.put('/borrador/:id', async (req: Request, res: Response) => {
   try {
@@ -803,22 +977,12 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
     const env = (req as any).tenant?.env || 'cloud';
     const supabaseClient = getSupabaseClient(company, env);
 
-    // 1. Verificar existencia y estado
-    const { data: ventaDB, error: fetchErr } = await supabaseClient
-      .from('ventas')
+    // 1. Buscar en facturas_emitidas
+    const { data: facturaDB } = await supabaseClient
+      .from('facturas_emitidas')
       .select('*')
       .eq('id', id)
-      .single();
-
-    if (fetchErr || !ventaDB) {
-      return res.status(404).json({ error: 'Borrador no encontrado' });
-    }
-
-    if (ventaDB.cfdi_estado !== 'BORRADOR') {
-      return res.status(400).json({
-        error: `Solo se pueden modificar comprobantes en estado BORRADOR. El comprobante actual está ${ventaDB.cfdi_estado}`
-      });
-    }
+      .maybeSingle();
 
     const body = req.body || {};
     const receptor = body.receptor || {};
@@ -827,7 +991,7 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
       body.razon_social ||
       receptor.razon_social ||
       receptor.nombre ||
-      ventaDB.cliente ||
+      facturaDB?.cliente_nombre ||
       'PUBLICO EN GENERAL'
     ).trim();
 
@@ -847,34 +1011,25 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
       receptor.uso_cfdi || body.cliente_uso || body.uso_cfdi || 'G03'
     ).trim();
 
-    // Mantener el folio reservado intacto
-    const serieFinal = ventaDB.cfdi_serie || (ventaDB.folio ? ventaDB.folio.replace(/\d+$/, '') : 'A');
-    const folioFinal = ventaDB.cfdi_folio || cleanFolio(ventaDB.folio).replace(/^[a-zA-Z]+/, '');
-    const fullFolio = ventaDB.folio || `${serieFinal}${folioFinal}`;
-
     // Procesar partidas
     const rawPartidas = Array.isArray(body.partidas) ? body.partidas : [];
     let subtotalCalculado = 0;
-    let costoTotalCalculado = 0;
 
     const sanitizedPartidas = rawPartidas.map((p: any) => {
       const cant = Math.max(0.0001, parseFloat(p.cantidad) || 1);
       const precioUnit = parseFloat(p.precio_unitario_venta || p.precio_unitario || 0) || 0;
-      const costoUnit = parseFloat(p.costo_unitario_proveedor || p.costo_unitario || 0) || 0;
       const importe = cant * precioUnit;
       subtotalCalculado += importe;
-      costoTotalCalculado += cant * costoUnit;
 
       return {
         descripcion: String(p.descripcion || 'Concepto').trim(),
         cantidad: cant,
         precio_unitario_venta: precioUnit,
-        costo_unitario_proveedor: costoUnit,
         precio_total_venta: importe,
-        costo_total_proveedor: cant * costoUnit,
         clave_sat: p.clave_sat || '01010101',
         clave_unidad: p.clave_unidad || 'H87',
         unidad: p.unidad || 'Pieza',
+        objeto_imp: p.objeto_imp || '02'
       };
     });
 
@@ -883,6 +1038,13 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
       : (body.total !== undefined
           ? parseFloat(body.total) || 0
           : subtotalCalculado * 1.16);
+
+    const subtotalCalc = Math.round((totalFacturado / 1.16) * 100) / 100;
+    const ivaCalc = Math.round((totalFacturado - subtotalCalc) * 100) / 100;
+
+    const serieFinal = facturaDB?.serie || 'A';
+    const folioFinal = cleanFolio(facturaDB?.folio || '0000');
+    const fullFolio = `${serieFinal}${folioFinal}`;
 
     const draftMetadata = {
       receptor: {
@@ -905,71 +1067,71 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
       user_notas: body.notas !== undefined ? body.notas : null
     };
 
-    const updatePayload: any = {
-      cliente: clienteNombre,
-      precio_total_facturado: totalFacturado,
-      costo_total: costoTotalCalculado,
-      orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
-      notas: JSON.stringify(draftMetadata),
-      descripcion: body.descripcion || `Borrador ${fullFolio} - ${clienteNombre}`
-    };
+    if (facturaDB) {
+      if (facturaDB.cfdi_estado !== 'BORRADOR') {
+        return res.status(400).json({
+          error: `Solo se pueden modificar comprobantes en estado BORRADOR. El comprobante actual está ${facturaDB.cfdi_estado}`
+        });
+      }
 
-    if (body.fecha) updatePayload.fecha = body.fecha;
-    if (body.tipo_proyecto) updatePayload.tipo_proyecto = body.tipo_proyecto;
-
-    const { data: updatedVenta, error: updateErr } = await supabaseClient
-      .from('ventas')
-      .update(updatePayload)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (updateErr) {
-      throw new Error(`Error al actualizar borrador en ventas: ${updateErr.message}`);
-    }
-
-    // Actualizar partidas si fueron enviadas
-    if (Array.isArray(body.partidas)) {
       await supabaseClient
-        .from('ventas_partidas')
-        .delete()
-        .eq('venta_id', id);
+        .from('facturas_emitidas')
+        .update({
+          cliente_nombre: clienteNombre,
+          cliente_rfc: receptorRfc,
+          cliente_cp: receptorCp,
+          cliente_regimen: receptorRegimen,
+          cliente_uso_cfdi: receptorUso,
+          subtotal: subtotalCalc,
+          iva: ivaCalc,
+          total: totalFacturado,
+          saldo_pendiente: totalFacturado,
+          orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
+          notas: draftMetadata,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
 
-      if (sanitizedPartidas.length > 0) {
-        const partidasToInsert = sanitizedPartidas.map((p: any) => ({
-          ...p,
-          venta_id: id
-        }));
-
-        try {
-          const { error: pErr } = await supabaseClient
-            .from('ventas_partidas')
-            .insert(partidasToInsert);
-
-          if (pErr) {
-            console.warn("Aviso insertando ventas_partidas en update (reintentando básico):", pErr);
-            const fallbackPartidas = partidasToInsert.map((p: any) => {
-              const { clave_sat, clave_unidad, ...rest } = p;
-              return rest;
-            });
-            await supabaseClient.from('ventas_partidas').insert(fallbackPartidas);
-          }
-        } catch (pEx) {
-          console.warn("Excepción al actualizar partidas:", pEx);
+      if (Array.isArray(body.partidas)) {
+        await supabaseClient.from('facturas_emitidas_partidas').delete().eq('factura_id', id);
+        if (sanitizedPartidas.length > 0) {
+          const partsToInsert = sanitizedPartidas.map((p: any) => ({
+            factura_id: id,
+            descripcion: p.descripcion,
+            cantidad: p.cantidad,
+            precio_unitario: p.precio_unitario_venta,
+            importe: p.precio_total_venta,
+            clave_sat: p.clave_sat,
+            clave_unidad: p.clave_unidad,
+            unidad: p.unidad,
+            objeto_imp: p.objeto_imp || '02'
+          }));
+          await supabaseClient.from('facturas_emitidas_partidas').insert(partsToInsert);
         }
       }
+    } else {
+      // Fallback update en tabla ventas legacy si no existe en facturas_emitidas
+      await supabaseClient
+        .from('ventas')
+        .update({
+          cliente: clienteNombre,
+          precio_total_facturado: totalFacturado,
+          orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
+          notas: JSON.stringify(draftMetadata),
+          descripcion: body.descripcion || `Borrador ${fullFolio} - ${clienteNombre}`
+        })
+        .eq('id', id);
     }
 
     try {
-      invalidateCache('ventas');
       invalidateCache('sat');
+      invalidateCache('ventas');
     } catch (_) {}
 
     return res.json({
       success: true,
       mensaje: 'Borrador actualizado exitosamente manteniendo su folio reservado',
       borrador: {
-        ...updatedVenta,
         id,
         serie: serieFinal,
         folio: folioFinal,
@@ -996,7 +1158,7 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
 
 /**
  * DELETE /api/sat/borrador/:id
- * Elimina el borrador y sus partidas (únicamente permitido si cfdi_estado === 'BORRADOR').
+ * Elimina el borrador de facturas_emitidas (o ventas) únicamente si cfdi_estado === 'BORRADOR'.
  */
 router.delete('/borrador/:id', async (req: Request, res: Response) => {
   try {
@@ -1007,14 +1169,43 @@ router.delete('/borrador/:id', async (req: Request, res: Response) => {
     const env = (req as any).tenant?.env || 'cloud';
     const supabaseClient = getSupabaseClient(company, env);
 
-    // 1. Verificar existencia y estado
-    const { data: venta, error: fetchErr } = await supabaseClient
+    // 1. Intentar borrar en facturas_emitidas
+    const { data: factDB } = await supabaseClient
+      .from('facturas_emitidas')
+      .select('id, cfdi_estado, folio')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (factDB) {
+      if (factDB.cfdi_estado !== 'BORRADOR') {
+        return res.status(400).json({
+          error: `Solo se pueden eliminar comprobantes en estado BORRADOR. El comprobante actual está ${factDB.cfdi_estado}`
+        });
+      }
+
+      await supabaseClient.from('facturas_emitidas_partidas').delete().eq('factura_id', id);
+      await supabaseClient.from('facturas_emitidas').delete().eq('id', id);
+
+      try {
+        invalidateCache('sat');
+      } catch (_) {}
+
+      return res.json({
+        success: true,
+        mensaje: 'Borrador eliminado exitosamente de facturas_emitidas',
+        id,
+        folio: factDB.folio
+      });
+    }
+
+    // 2. Fallback a ventas legacy
+    const { data: venta } = await supabaseClient
       .from('ventas')
       .select('id, cfdi_estado, folio')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (fetchErr || !venta) {
+    if (!venta) {
       return res.status(404).json({ error: 'Borrador no encontrado' });
     }
 
@@ -1024,21 +1215,8 @@ router.delete('/borrador/:id', async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Eliminar partidas asociadas
-    await supabaseClient
-      .from('ventas_partidas')
-      .delete()
-      .eq('venta_id', id);
-
-    // 3. Eliminar registro de ventas
-    const { error: deleteErr } = await supabaseClient
-      .from('ventas')
-      .delete()
-      .eq('id', id);
-
-    if (deleteErr) {
-      throw new Error(`Error al eliminar borrador: ${deleteErr.message}`);
-    }
+    await supabaseClient.from('ventas_partidas').delete().eq('venta_id', id);
+    await supabaseClient.from('ventas').delete().eq('id', id);
 
     try {
       invalidateCache('ventas');
@@ -1067,28 +1245,49 @@ router.post('/cancelar-factura', async (req: Request, res: Response) => {
     const supabaseClient = getSupabaseClient(company, env);
 
     const { venta_id, motivo = '02', folio_sustitucion = '' } = req.body || {};
-    if (!venta_id) throw new Error('Falta el ID de la venta (venta_id)');
+    if (!venta_id) throw new Error('Falta el ID del comprobante');
 
     const FINKOK_USERNAME = process.env.FINKOK_USERNAME || '';
     const FINKOK_PASSWORD = process.env.FINKOK_PASSWORD || '';
     const FINKOK_ENV = (req.body.finkok_env || process.env.FINKOK_ENV || 'production').toLowerCase();
     const isProduction = FINKOK_ENV === 'production';
 
-    const { data: venta, error: ventaError } = await supabaseClient
-      .from('ventas')
-      .select('cfdi_uuid, cfdi_estado')
-      .eq('id', venta_id)
-      .single();
+    // 1. Buscar en facturas_emitidas
+    const { data: factData } = await supabaseClient
+      .from('facturas_emitidas')
+      .select('id, cfdi_uuid, cfdi_estado, venta_id')
+      .or(`id.eq.${venta_id},cfdi_uuid.eq.${venta_id}`)
+      .maybeSingle();
 
-    if (ventaError || !venta) throw new Error('No se encontró la venta');
-    if (venta.cfdi_estado !== 'TIMBRADA' || !venta.cfdi_uuid) {
-      throw new Error('La venta no se encuentra timbrada o no tiene Folio Fiscal');
+    // 2. Fallback a ventas
+    let targetUUID = factData?.cfdi_uuid;
+    let targetEstado = factData?.cfdi_estado;
+    let actualVentaId = factData?.venta_id;
+
+    if (!targetUUID) {
+      const { data: venta } = await supabaseClient
+        .from('ventas')
+        .select('id, cfdi_uuid, cfdi_estado')
+        .eq('id', venta_id)
+        .maybeSingle();
+      if (venta) {
+        targetUUID = venta.cfdi_uuid;
+        targetEstado = venta.cfdi_estado;
+        actualVentaId = venta.id;
+      }
+    }
+
+    if (!targetUUID) {
+      throw new Error('No se encontró el comprobante para cancelar');
+    }
+    if (targetEstado !== 'TIMBRADA') {
+      throw new Error('El comprobante no se encuentra timbrado o ya fue cancelado');
     }
 
     const rfcEmisor = process.env.EMISOR_RFC || (isProduction ? 'FETR83041461A' : 'EKU9003173C9');
 
     const cancelResult = await signCancelFinkok(
-      venta.cfdi_uuid,
+      targetUUID,
       rfcEmisor,
       FINKOK_USERNAME,
       FINKOK_PASSWORD,
@@ -1097,12 +1296,26 @@ router.post('/cancelar-factura', async (req: Request, res: Response) => {
       isProduction
     );
 
-    await supabaseClient
-      .from('ventas')
-      .update({
-        cfdi_estado: 'CANCELADA'
-      })
-      .eq('id', venta_id);
+    // Actualizar en facturas_emitidas
+    if (factData?.id) {
+      await supabaseClient
+        .from('facturas_emitidas')
+        .update({ cfdi_estado: 'CANCELADA', updated_at: new Date().toISOString() })
+        .eq('id', factData.id);
+    } else {
+      await supabaseClient
+        .from('facturas_emitidas')
+        .update({ cfdi_estado: 'CANCELADA', updated_at: new Date().toISOString() })
+        .eq('cfdi_uuid', targetUUID);
+    }
+
+    // Actualizar en ventas si existe enlace
+    if (actualVentaId) {
+      await supabaseClient
+        .from('ventas')
+        .update({ cfdi_estado: 'CANCELADA' })
+        .eq('id', actualVentaId);
+    }
 
     try {
       invalidateCache('ventas');
@@ -1113,7 +1326,7 @@ router.post('/cancelar-factura', async (req: Request, res: Response) => {
       success: true,
       mensaje: 'Factura cancelada exitosamente ante el SAT',
       estatus: cancelResult.estatus,
-      uuid: venta.cfdi_uuid
+      uuid: targetUUID
     });
   } catch (error: any) {
     console.error("Error al cancelar factura:", error);
@@ -1123,8 +1336,8 @@ router.post('/cancelar-factura', async (req: Request, res: Response) => {
 
 /**
  * GET /api/sat/facturas-emitidas
- * Obtiene el listado completo de facturas emitidas (timbradas o canceladas),
- * identificando con precisión su origen (desde Venta o Emisión Directa).
+ * Obtiene el listado completo de facturas emitidas desde la tabla independiente facturas_emitidas
+ * (con fallback a ventas legacy si aún no hay registros).
  */
 router.get('/facturas-emitidas', async (req: Request, res: Response) => {
   try {
@@ -1132,6 +1345,48 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
     const env = (req as any).tenant?.env || 'cloud';
     const supabaseClient = getSupabaseClient(company, env);
 
+    // 1. Consultar facturas_emitidas
+    const { data: factsData, error: factsErr } = await supabaseClient
+      .from('facturas_emitidas')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!factsErr && factsData && factsData.length > 0) {
+      const facturas = factsData.map((f: any) => {
+        const isBorrador = f.cfdi_estado === 'BORRADOR';
+        const cleanFolioVal = cleanFolio(f.folio);
+        const fullFolio = `${f.serie || 'A'}${cleanFolioVal}`;
+
+        return {
+          id: f.id,
+          cliente: f.cliente_nombre,
+          fecha: f.fecha_emision ? String(f.fecha_emision).slice(0, 10) : '',
+          folio: fullFolio,
+          cfdi_folio: cleanFolioVal,
+          cfdi_serie: f.serie || 'A',
+          cfdi_uuid: f.cfdi_uuid,
+          cfdi_estado: f.cfdi_estado || (isBorrador ? 'BORRADOR' : 'TIMBRADA'),
+          es_borrador: isBorrador,
+          cfdi_xml_url: f.cfdi_xml_url,
+          cfdi_pdf_url: f.cfdi_pdf_url,
+          precio_total_facturado: Number(f.total || 0),
+          subtotal: Number(f.subtotal || 0),
+          iva: Number(f.iva || 0),
+          total_pagado: Number(f.total_pagado || 0),
+          saldo_pendiente: Number(f.saldo_pendiente || 0),
+          estado_pago: f.estado_pago,
+          orden_compra: f.orden_compra,
+          venta_id: f.venta_id,
+          created_at: f.created_at,
+          origen: isBorrador ? 'BORRADOR' : (f.venta_id ? 'VENTA' : 'FACTURA_DIRECTA'),
+          origenLabel: isBorrador ? `Borrador ${cleanFolioVal}` : (f.venta_id ? 'Venta vinculada' : 'Factura Directa')
+        };
+      });
+
+      return res.json({ success: true, facturas });
+    }
+
+    // 2. Fallback a ventas legacy
     const { data, error } = await supabaseClient
       .from('ventas')
       .select(`
@@ -1193,8 +1448,8 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
 
 /**
  * GET /api/sat/factura-xml/:identificador
- * Obtiene el contenido del XML timbrado de una factura, buscando por UUID (mayúsculas/minúsculas),
- * URL pública en storage o ID de venta.
+ * Obtiene el contenido del XML timbrado de una factura, buscando por UUID, URL o ID
+ * en facturas_emitidas (o fallback ventas).
  */
 router.get('/factura-xml/:identificador', async (req: Request, res: Response) => {
   try {
@@ -1205,17 +1460,28 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
     const env = (req as any).tenant?.env || 'cloud';
     const supabaseClient = getSupabaseClient(company, env);
 
-    // 1. Buscar venta si el identificador es UUID o ID
-    const { data: venta } = await supabaseClient
-      .from('ventas')
+    // 1. Buscar en facturas_emitidas
+    const { data: factura } = await supabaseClient
+      .from('facturas_emitidas')
       .select('id, cfdi_uuid, cfdi_xml_url')
       .or(`cfdi_uuid.eq.${identificador},id.eq.${identificador}`)
       .maybeSingle();
 
-    const uuid = venta?.cfdi_uuid || identificador;
-    const xmlUrl = venta?.cfdi_xml_url;
+    // 2. Si no, buscar en ventas
+    let uuid = factura?.cfdi_uuid;
+    let xmlUrl = factura?.cfdi_xml_url;
 
-    // 2. Si tiene URL pública de storage, intentar fetch directo
+    if (!uuid) {
+      const { data: venta } = await supabaseClient
+        .from('ventas')
+        .select('id, cfdi_uuid, cfdi_xml_url')
+        .or(`cfdi_uuid.eq.${identificador},id.eq.${identificador}`)
+        .maybeSingle();
+      uuid = venta?.cfdi_uuid || identificador;
+      xmlUrl = venta?.cfdi_xml_url;
+    }
+
+    // 3. Si tiene URL pública de storage, intentar fetch directo
     if (xmlUrl && xmlUrl.startsWith('http')) {
       try {
         const fetchResp = await fetch(xmlUrl);
@@ -1228,7 +1494,7 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
       } catch (_) {}
     }
 
-    // 3. Descargar desde storage probando variaciones de nombre (mayúsculas y minúsculas)
+    // 4. Descargar desde storage probando variaciones de nombre
     const fileNamesToTry = [
       `${uuid.toUpperCase()}.xml`,
       `${uuid.toLowerCase()}.xml`,
@@ -1368,7 +1634,8 @@ router.get('/siguiente-folio-pago', async (req: Request, res: Response) => {
 
 /**
  * GET /api/sat/facturas-pendientes-cliente
- * Busca y lista todas las facturas emitidas (timbradas) de un cliente que tienen saldo pendiente.
+ * Busca y lista todas las facturas emitidas (timbradas) de un cliente que tienen saldo pendiente
+ * en facturas_emitidas (con fallback a ventas legacy).
  */
 router.get('/facturas-pendientes-cliente', async (req: Request, res: Response) => {
   try {
@@ -1377,12 +1644,6 @@ router.get('/facturas-pendientes-cliente', async (req: Request, res: Response) =
     const supabaseClient = getSupabaseClient(company, env);
 
     const { cliente_id, cliente_nombre, cliente_rfc } = req.query;
-
-    let query = supabaseClient
-      .from('ventas')
-      .select('id, folio, cfdi_folio, cfdi_serie, cfdi_uuid, cfdi_estado, cliente, precio_total_facturado, total_pagado, saldo_pendiente, estado_pago, fecha, created_at')
-      .not('cfdi_uuid', 'is', null)
-      .neq('cfdi_estado', 'CANCELADA');
 
     let resolvedNames: string[] = [];
     if (cliente_id) {
@@ -1417,6 +1678,80 @@ router.get('/facturas-pendientes-cliente', async (req: Request, res: Response) =
       }
     }
 
+    // 1. Intentar consultar en facturas_emitidas
+    let facturasEmitidasQuery = supabaseClient
+      .from('facturas_emitidas')
+      .select('*')
+      .eq('cfdi_estado', 'TIMBRADA')
+      .not('cfdi_uuid', 'is', null);
+
+    if (resolvedNames.length > 0) {
+      const orClauses = resolvedNames.map(n => `cliente_nombre.ilike.%${n}%`).join(',');
+      facturasEmitidasQuery = facturasEmitidasQuery.or(orClauses);
+    } else if (cliente_rfc) {
+      facturasEmitidasQuery = facturasEmitidasQuery.ilike('cliente_rfc', String(cliente_rfc).trim());
+    }
+
+    const { data: factsData, error: factsErr } = await facturasEmitidasQuery.order('created_at', { ascending: false });
+
+    if (!factsErr && factsData && factsData.length > 0) {
+      const factIds = factsData.map((f: any) => f.id);
+      const factUuids = factsData.map((f: any) => f.cfdi_uuid).filter(Boolean);
+      let doctosPorFactura: Record<string, any[]> = {};
+      try {
+        const { data: compDocs } = await supabaseClient
+          .from('complementos_pago_doctos')
+          .select('factura_id, uuid_documento, importe_pagado')
+          .or(`factura_id.in.(${factIds.join(',')}),uuid_documento.in.(${factUuids.join(',')})`);
+        (compDocs || []).forEach((cd: any) => {
+          if (cd.factura_id) {
+            if (!doctosPorFactura[cd.factura_id]) doctosPorFactura[cd.factura_id] = [];
+            doctosPorFactura[cd.factura_id].push(cd);
+          }
+          if (cd.uuid_documento) {
+            if (!doctosPorFactura[cd.uuid_documento]) doctosPorFactura[cd.uuid_documento] = [];
+            doctosPorFactura[cd.uuid_documento].push(cd);
+          }
+        });
+      } catch (_) {}
+
+      const pendientes = factsData.map((f: any) => {
+        const total = Number(f.total || 0);
+        const docsPrev = doctosPorFactura[f.id] || (f.cfdi_uuid ? doctosPorFactura[f.cfdi_uuid] : []) || [];
+        const pagadoFromDocs = docsPrev.reduce((acc: number, p: any) => acc + (Number(p.importe_pagado) || 0), 0);
+        const pagado = f.total_pagado !== undefined && Number(f.total_pagado) > 0 ? Number(f.total_pagado) : pagadoFromDocs;
+        const saldo = f.saldo_pendiente !== undefined && f.saldo_pendiente !== null ? Number(f.saldo_pendiente) : Math.max(0, Math.round((total - pagado) * 100) / 100);
+        const cleanFolioVal = cleanFolio(f.folio) || String(f.id);
+
+        return {
+          id: f.id,
+          folio: cleanFolioVal,
+          serie: (f.serie || 'A').toUpperCase().trim(),
+          fullFolio: `${(f.serie || 'A').toUpperCase().trim()}${cleanFolioVal}`,
+          cfdi_uuid: f.cfdi_uuid,
+          cliente: f.cliente_nombre,
+          cliente_rfc: f.cliente_rfc || null,
+          fecha: f.fecha_emision ? String(f.fecha_emision).slice(0, 10) : '',
+          precio_total: total,
+          total_pagado: pagado,
+          saldo_pendiente: saldo,
+          num_parcialidad_siguiente: docsPrev.length + 1,
+          metodo_pago: f.metodo_pago || 'PPD'
+        };
+      }).filter((f: any) => f.saldo_pendiente > 0.05);
+
+      if (pendientes.length > 0) {
+        return res.json({ success: true, facturas: pendientes });
+      }
+    }
+
+    // 2. Fallback a ventas legacy
+    let query = supabaseClient
+      .from('ventas')
+      .select('id, folio, cfdi_folio, cfdi_serie, cfdi_uuid, cfdi_estado, cliente, precio_total_facturado, total_pagado, saldo_pendiente, estado_pago, fecha, created_at')
+      .not('cfdi_uuid', 'is', null)
+      .neq('cfdi_estado', 'CANCELADA');
+
     if (resolvedNames.length > 0) {
       const orClauses = resolvedNames.map(n => `cliente.ilike.%${n}%`).join(',');
       query = query.or(orClauses);
@@ -1426,7 +1761,6 @@ router.get('/facturas-pendientes-cliente', async (req: Request, res: Response) =
 
     if (error) throw error;
 
-    // Calcular saldos reales consultando ventas_pagos para exactitud contable
     const ventaIds = (facturas || []).map(f => f.id);
     let pagosPorVenta: Record<number, any[]> = {};
 
@@ -1466,7 +1800,7 @@ router.get('/facturas-pendientes-cliente', async (req: Request, res: Response) =
         num_parcialidad_siguiente: pagosVenta.length + 1,
         metodo_pago: (f as any).metodo_pago_cfdi || (f as any).metodo_pago || 'PPD'
       };
-    }).filter(f => f.saldo_pendiente > 0.05); // Solo las que tienen saldo pendiente mayor a 5 centavos
+    }).filter(f => f.saldo_pendiente > 0.05);
 
     return res.json({ success: true, facturas: pendientes });
   } catch (err: any) {
@@ -1527,42 +1861,92 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
     let montoTotalPagos = 0;
 
     for (const item of doctos) {
-      const vId = item.venta_id ? (typeof item.venta_id === 'number' ? item.venta_id : String(item.venta_id).trim()) : null;
-      if (!vId) continue;
+      const docId = item.factura_id || item.venta_id || item.id;
+      const cleanDocId = docId ? (typeof docId === 'number' ? docId : String(docId).trim()) : null;
+      if (!cleanDocId) continue;
 
-      // Obtener venta
-      const { data: vData, error: vErr } = await supabaseClient
-        .from('ventas')
+      let cfdiUuid = '';
+      let serieFactura = 'A';
+      let cleanFolioVal = '';
+      let fechaDoc = '';
+      let totalDoc = 0;
+      let pagadoPrevio = 0;
+      let numParcialidad = 1;
+      let facturaId: string | null = null;
+      let ventaId: any = null;
+
+      // 1.1 Intentar buscar en facturas_emitidas
+      const { data: fData } = await supabaseClient
+        .from('facturas_emitidas')
         .select('*')
-        .eq('id', vId)
-        .single();
+        .eq('id', cleanDocId)
+        .maybeSingle();
 
-      if (vErr || !vData) {
-        throw new Error(`No se encontró la factura/venta con ID ${vId}`);
+      if (fData) {
+        facturaId = fData.id;
+        ventaId = fData.venta_id || null;
+        cfdiUuid = fData.cfdi_uuid;
+        serieFactura = (fData.serie || 'A').toUpperCase().trim();
+        cleanFolioVal = cleanFolio(fData.folio) || String(fData.id);
+        fechaDoc = fData.fecha_emision ? String(fData.fecha_emision).slice(0, 10) : '';
+        totalDoc = Number(fData.total || 0);
+
+        if (!cfdiUuid) {
+          throw new Error(`La factura #${serieFactura}${cleanFolioVal} no tiene un UUID fiscal registrado.`);
+        }
+
+        // Historial de abonos previos en complementos_pago_doctos
+        let compDocs: any[] = [];
+        try {
+          const { data: cd } = await supabaseClient
+            .from('complementos_pago_doctos')
+            .select('importe_pagado, num_parcialidad')
+            .or(`factura_id.eq.${facturaId},uuid_documento.eq.${cfdiUuid}`);
+          compDocs = cd || [];
+        } catch (_) {}
+
+        pagadoPrevio = compDocs.reduce((acc: number, p: any) => acc + (Number(p.importe_pagado) || 0), 0);
+        if (pagadoPrevio === 0 && fData.total_pagado) {
+          pagadoPrevio = Number(fData.total_pagado || 0);
+        }
+        numParcialidad = compDocs.length + 1;
+      } else {
+        // 1.2 Fallback a ventas legacy
+        const { data: vData, error: vErr } = await supabaseClient
+          .from('ventas')
+          .select('*')
+          .eq('id', cleanDocId)
+          .single();
+
+        if (vErr || !vData) {
+          throw new Error(`No se encontró la factura/venta con ID ${cleanDocId}`);
+        }
+
+        if (!vData.cfdi_uuid) {
+          throw new Error(`La venta #${vData.folio || cleanDocId} no tiene un UUID fiscal registrado (no ha sido timbrada como factura).`);
+        }
+
+        ventaId = vData.id;
+        cfdiUuid = vData.cfdi_uuid;
+        serieFactura = (vData.cfdi_serie || 'A').toUpperCase().trim();
+        cleanFolioVal = cleanFolio(vData.cfdi_folio || vData.folio) || String(cleanDocId);
+        fechaDoc = vData.fecha ? String(vData.fecha).slice(0, 10) : '';
+        totalDoc = Number(vData.precio_total_facturado || vData.precio_total_venta || 0);
+
+        const { data: pagosPrevios } = await supabaseClient
+          .from('ventas_pagos')
+          .select('monto')
+          .eq('venta_id', ventaId);
+
+        pagadoPrevio = (pagosPrevios || []).reduce((acc: number, p: any) => acc + (Number(p.monto) || 0), 0);
+        numParcialidad = (pagosPrevios || []).length + 1;
       }
 
-      if (!vData.cfdi_uuid) {
-        throw new Error(`La venta #${vData.folio || vId} no tiene un UUID fiscal registrado (no ha sido timbrada como factura).`);
-      }
-
-      // Obtener historial de pagos previos para calcular saldo y parcialidad exacta
-      const { data: pagosPrevios } = await supabaseClient
-        .from('ventas_pagos')
-        .select('monto')
-        .eq('venta_id', vId);
-
-      const totalVenta = Number(vData.precio_total_facturado || vData.precio_total_venta || 0);
-      const pagadoPrevio = (pagosPrevios || []).reduce((acc: number, p: any) => acc + (Number(p.monto) || 0), 0);
-      const saldoAnterior = Math.max(0, Math.round((totalVenta - pagadoPrevio) * 100) / 100);
-
+      const saldoAnterior = Math.max(0, Math.round((totalDoc - pagadoPrevio) * 100) / 100);
       const importeAbono = Math.min(Number(item.importe_a_pagar || 0), saldoAnterior);
       if (importeAbono <= 0) continue;
 
       const saldoInsoluto = Math.max(0, Math.round((saldoAnterior - importeAbono) * 100) / 100);
-      const numParcialidad = (pagosPrevios || []).length + 1;
-
-      const cleanFolioVal = cleanFolio(vData.cfdi_folio || vData.folio) || String(vId);
-      const serieFactura = (vData.cfdi_serie || 'A').toUpperCase().trim();
 
       const baseDR = Number((importeAbono / 1.16).toFixed(2));
       const ivaDR = Number((importeAbono - baseDR).toFixed(2));
@@ -1570,7 +1954,7 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
       montoTotalPagos += importeAbono;
 
       doctosRelacionados.push({
-        uuid: vData.cfdi_uuid,
+        uuid: cfdiUuid,
         serie: serieFactura,
         folio: cleanFolioVal,
         moneda: 'MXN',
@@ -1582,13 +1966,15 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
       });
 
       doctosDetallesParaGuardar.push({
-        venta_id: vId,
-        uuid_documento: vData.cfdi_uuid,
+        factura_id: facturaId,
+        venta_id: ventaId,
+        uuid_documento: cfdiUuid,
         serie: serieFactura,
         folio: cleanFolioVal,
-        fecha: vData.fecha,
+        fecha: fechaDoc,
         moneda_dr: 'MXN',
         num_parcialidad: numParcialidad,
+        pagado_previo: pagadoPrevio,
         saldo_anterior: saldoAnterior,
         importe_pagado: importeAbono,
         saldo_insoluto: saldoInsoluto,
@@ -1726,8 +2112,21 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
     if (complementoCreado?.id) {
       try {
         const doctosToInsert = doctosDetallesParaGuardar.map(d => ({
-          ...d,
-          complemento_pago_id: complementoCreado.id
+          complemento_pago_id: complementoCreado.id,
+          factura_id: d.factura_id || null,
+          venta_id: d.venta_id || null,
+          uuid_documento: d.uuid_documento,
+          serie: d.serie,
+          folio: d.folio,
+          fecha: d.fecha ? `${d.fecha}T12:00:00Z` : new Date().toISOString(),
+          moneda_dr: d.moneda_dr || 'MXN',
+          num_parcialidad: d.num_parcialidad,
+          saldo_anterior: d.saldo_anterior,
+          importe_pagado: d.importe_pagado,
+          saldo_insoluto: d.saldo_insoluto,
+          objeto_imp_dr: d.objeto_imp_dr || '02',
+          base_iva: d.base_iva,
+          importe_iva: d.importe_iva
         }));
         await supabaseClient.from('complementos_pago_doctos').insert(doctosToInsert);
       } catch (dErr) {
@@ -1735,26 +2134,50 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
       }
     }
 
-    // 8. Actualizar ventas_pagos y estado de cada venta afectada
+    // 8. Actualizar facturas_emitidas y/o ventas_pagos según corresponda
     for (const d of doctosDetallesParaGuardar) {
-      try {
-        await supabaseClient.from('ventas_pagos').insert([{
-          venta_id: d.venta_id,
-          monto: d.importe_pagado,
-          fecha_pago: fechaPagoStr,
-          metodo_pago: formaPagoStr === '03' ? 'Transferencia' : formaPagoStr === '01' ? 'Efectivo' : 'Tarjeta',
-          referencia: referencia ? `CFDI REP ${serieFinal}${folioFinal} - ${referencia}` : `CFDI REP ${serieFinal}${folioFinal}`,
-          complemento_pago_id: complementoCreado?.id || null,
-          cfdi_uuid: sat_uuid,
-          parcialidad: d.num_parcialidad,
-          saldo_anterior: d.saldo_anterior,
-          saldo_insoluto: d.saldo_insoluto
-        }]);
+      // 8.1 Si corresponde a facturas_emitidas, actualizar su total pagado y saldo pendiente
+      if (d.factura_id) {
+        try {
+          const nuevoSaldo = d.saldo_insoluto;
+          const nuevoTotalPagado = Number(((d.pagado_previo || 0) + d.importe_pagado).toFixed(2));
+          const estadoPago = nuevoSaldo <= 0.01 ? 'PAGADA' : 'PARCIAL';
 
-        // Sincronizar saldo de la venta
-        await syncVentaPagoInterno(supabaseClient, d.venta_id);
-      } catch (pErr) {
-        console.warn(`Aviso registrando pago en ventas_pagos para venta ${d.venta_id}:`, pErr);
+          await supabaseClient
+            .from('facturas_emitidas')
+            .update({
+              total_pagado: nuevoTotalPagado,
+              saldo_pendiente: nuevoSaldo,
+              estado_pago: estadoPago,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', d.factura_id);
+        } catch (fErr) {
+          console.warn(`Aviso actualizando saldo en facturas_emitidas para factura ${d.factura_id}:`, fErr);
+        }
+      }
+
+      // 8.2 Si está vinculada a una venta en el módulo comercial, sincronizar el pago interno
+      if (d.venta_id) {
+        try {
+          await supabaseClient.from('ventas_pagos').insert([{
+            venta_id: d.venta_id,
+            monto: d.importe_pagado,
+            fecha_pago: fechaPagoStr,
+            metodo_pago: formaPagoStr === '03' ? 'Transferencia' : formaPagoStr === '01' ? 'Efectivo' : 'Tarjeta',
+            referencia: referencia ? `CFDI REP ${serieFinal}${folioFinal} - ${referencia}` : `CFDI REP ${serieFinal}${folioFinal}`,
+            complemento_pago_id: complementoCreado?.id || null,
+            cfdi_uuid: sat_uuid,
+            parcialidad: d.num_parcialidad,
+            saldo_anterior: d.saldo_anterior,
+            saldo_insoluto: d.saldo_insoluto
+          }]);
+
+          // Sincronizar saldo de la venta
+          await syncVentaPagoInterno(supabaseClient, d.venta_id);
+        } catch (pErr) {
+          console.warn(`Aviso registrando pago en ventas_pagos para venta ${d.venta_id}:`, pErr);
+        }
       }
     }
 
@@ -1876,16 +2299,56 @@ router.post('/cancelar-pago', async (req: Request, res: Response) => {
       isProduction
     );
 
-    // Actualizar estado en complementos_pago
-    if (complemento_id || targetUuid) {
+    // Actualizar estado en complementos_pago y revertir saldos de documentos afectados
+    let compId = complemento_id || compRecord?.id;
+    if (!compId && targetUuid) {
       try {
-        let updateQuery = supabaseClient.from('complementos_pago').update({ cfdi_estado: 'CANCELADA' });
-        if (complemento_id) {
-          updateQuery = updateQuery.eq('id', complemento_id);
-        } else {
-          updateQuery = updateQuery.eq('cfdi_uuid', targetUuid);
+        const { data: cFound } = await supabaseClient
+          .from('complementos_pago')
+          .select('id')
+          .eq('cfdi_uuid', targetUuid)
+          .maybeSingle();
+        compId = cFound?.id;
+      } catch (_) {}
+    }
+
+    if (compId) {
+      try {
+        await supabaseClient.from('complementos_pago').update({ cfdi_estado: 'CANCELADA' }).eq('id', compId);
+
+        // Obtener doctos para restaurar saldos
+        const { data: compDocs } = await supabaseClient
+          .from('complementos_pago_doctos')
+          .select('*')
+          .eq('complemento_pago_id', compId);
+
+        for (const d of compDocs || []) {
+          if (d.factura_id) {
+            const { data: f } = await supabaseClient.from('facturas_emitidas').select('total, total_pagado').eq('id', d.factura_id).maybeSingle();
+            if (f) {
+              const nuevoPagado = Math.max(0, Number((Number(f.total_pagado || 0) - Number(d.importe_pagado || 0)).toFixed(2)));
+              const nuevoSaldo = Math.max(0, Number((Number(f.total || 0) - nuevoPagado).toFixed(2)));
+              const nuevoEstado = nuevoPagado <= 0.01 ? 'PENDIENTE DE PAGO' : 'PARCIAL';
+              await supabaseClient.from('facturas_emitidas').update({
+                total_pagado: nuevoPagado,
+                saldo_pendiente: nuevoSaldo,
+                estado_pago: nuevoEstado,
+                updated_at: new Date().toISOString()
+              }).eq('id', d.factura_id);
+            }
+          }
+
+          if (d.venta_id) {
+            await supabaseClient.from('ventas_pagos').delete().eq('complemento_pago_id', compId);
+            await syncVentaPagoInterno(supabaseClient, d.venta_id);
+          }
         }
-        await updateQuery;
+      } catch (errRev) {
+        console.warn("Aviso revirtiendo saldos al cancelar complemento:", errRev);
+      }
+    } else if (targetUuid) {
+      try {
+        await supabaseClient.from('complementos_pago').update({ cfdi_estado: 'CANCELADA' }).eq('cfdi_uuid', targetUuid);
       } catch (_) {}
     }
 

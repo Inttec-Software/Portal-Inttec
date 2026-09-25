@@ -893,7 +893,14 @@ export default function VentasScreen() {
 
   // === Filtrar Historial ===
   const ventasFiltradas = useMemo(() => {
-    let filtradas = ventasHistorial;
+    let filtradas = ventasHistorial.filter(v => {
+      if (v.tipo_proyecto === 'Factura Directa') {
+        const ref = (v.factura_referencia || '').trim();
+        const fol = (v.folio || '').trim();
+        if (!ref || ref === fol) return false;
+      }
+      return true;
+    });
 
     if (filterDate) {
       const dd = String(filterDate.getDate()).padStart(2, '0');
