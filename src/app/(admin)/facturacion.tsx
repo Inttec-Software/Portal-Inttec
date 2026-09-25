@@ -27,6 +27,8 @@ import { exportarFacturaOdooPDF, exportarReciboPagoPDF, generarReciboPagoHTML, c
 import FacturaPreviewModal from '@/components/FacturaPreviewModal';
 import { normalizeText } from '@/utils/helpers';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Sharing from 'expo-sharing';
+import { cacheDirectory, writeAsStringAsync } from 'expo-file-system/legacy';
 
 interface ClienteCatalogo {
   id: string;
@@ -1259,7 +1261,7 @@ export default function FacturacionScreen() {
       setPreviewTitle(`Borrador Recibo de Pago: ${seriePago}${folioPago}`);
       setPreviewIsDraft(true);
       setPreviewVenta(null);
-      setPreviewFacturaData(null);
+      setPreviewFacturaData({ ...complementoMock, complementos_pago_doctos: doctosMock });
       setPreviewXmlText('');
       setIsPagoModalOpen(false);
       setReturnToPagoModal(true);
@@ -1273,12 +1275,22 @@ export default function FacturacionScreen() {
     try {
       setIsSubmitting(true);
       const html = await generarReciboPagoHTML(comp, comp.complementos_pago_doctos || [], false);
+      let xmlContent = '';
+      try {
+        xmlContent = await retrieveXml({
+          cfdi_uuid: comp.cfdi_uuid,
+          cfdi_xml_url: comp.cfdi_xml_url,
+          cliente: comp.cliente_nombre,
+          folio: comp.folio,
+        } as any);
+      } catch (_) {}
+
       setPreviewCustomHtml(html);
       setPreviewTitle(`Recibo de Pago: ${cleanFolio(comp.folio) || comp.cfdi_uuid?.slice(0, 8)}`);
       setPreviewIsDraft(false);
       setPreviewVenta(null);
-      setPreviewFacturaData(null);
-      setPreviewXmlText('');
+      setPreviewFacturaData(comp);
+      setPreviewXmlText(xmlContent);
       setPreviewModalVisible(true);
     } catch (err: any) {
       showAlert('Error en PDF', err.message);
@@ -1296,18 +1308,48 @@ export default function FacturacionScreen() {
   };
 
   const handleDescargarReciboXML = async (comp: any) => {
-    if (!comp.cfdi_xml_url) {
-      showAlert('Aviso', 'El XML de este complemento no está disponible.');
-      return;
-    }
     try {
+      const xmlText = await retrieveXml({
+        cfdi_uuid: comp.cfdi_uuid,
+        cfdi_xml_url: comp.cfdi_xml_url,
+        cliente: comp.cliente_nombre,
+        folio: comp.folio,
+      } as any);
+
+      if (!xmlText) {
+        if (comp.cfdi_xml_url && comp.cfdi_xml_url.startsWith('http')) {
+          if (Platform.OS === 'web') {
+            window.open(comp.cfdi_xml_url, '_blank');
+            return;
+          }
+        }
+        showAlert('Aviso', 'El archivo XML de este complemento no está disponible en el servidor.');
+        return;
+      }
+
+      const clienteSanitized = (comp.cliente_nombre || 'Cliente').replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+      const folioSanitized = cleanFolio(comp.folio || comp.cfdi_uuid?.slice(0, 8) || 'Pago').replace(/[^a-zA-Z0-9]/g, '_');
+      const fileName = `${clienteSanitized}_Pago_${folioSanitized}.xml`;
+
       if (Platform.OS === 'web') {
-        window.open(comp.cfdi_xml_url, '_blank');
+        const blob = new Blob([xmlText], { type: 'application/xml;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
       } else {
-        showAlert('XML', `URL del comprobante:\n${comp.cfdi_xml_url}`);
+        const fileUri = `${cacheDirectory}${fileName}`;
+        await writeAsStringAsync(fileUri, xmlText, { encoding: 'utf8' as any });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, { mimeType: 'application/xml' });
+        }
       }
     } catch (err: any) {
-      showAlert('Error', err.message);
+      showAlert('Error al Descargar XML', err.message);
     }
   };
 

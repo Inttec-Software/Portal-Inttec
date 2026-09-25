@@ -527,7 +527,7 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
  */
 router.get('/factura-xml/:identificador', async (req: Request, res: Response) => {
   try {
-    const { identificador } = req.params;
+    const identificador = String(req.params.identificador || '').trim();
     if (!identificador) return res.status(400).json({ error: 'Identificador requerido' });
 
     const company = (req as any).tenant?.company || 'inttec';
@@ -535,11 +535,18 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
     const supabaseClient = getSupabaseClient(company, env);
 
     // 1. Buscar venta si el identificador es UUID o ID
-    const { data: venta } = await supabaseClient
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identificador);
+    let ventaQuery = supabaseClient
       .from('ventas')
-      .select('id, cfdi_uuid, cfdi_xml_url')
-      .or(`cfdi_uuid.eq.${identificador},id.eq.${identificador}`)
-      .maybeSingle();
+      .select('id, cfdi_uuid, cfdi_xml_url');
+
+    if (isUUID) {
+      ventaQuery = ventaQuery.or(`cfdi_uuid.eq.${identificador},id.eq.${identificador}`);
+    } else {
+      ventaQuery = ventaQuery.or(`folio.eq.${identificador},cfdi_folio.eq.${identificador}`);
+    }
+
+    const { data: venta } = await ventaQuery.maybeSingle();
 
     const uuid = venta?.cfdi_uuid || identificador;
     const xmlUrl = venta?.cfdi_xml_url;
@@ -747,8 +754,13 @@ router.get('/facturas-pendientes-cliente', async (req: Request, res: Response) =
     }
 
     if (resolvedNames.length > 0) {
-      const orClauses = resolvedNames.map(n => `cliente.ilike.%${n}%`).join(',');
-      query = query.or(orClauses);
+      const cleanNames = resolvedNames
+        .map(n => n.replace(/[,()"]/g, ' ').replace(/\s+/g, ' ').trim())
+        .filter(n => n.length > 0);
+      if (cleanNames.length > 0) {
+        const orClauses = cleanNames.map(n => `cliente.ilike.%${n}%`).join(',');
+        query = query.or(orClauses);
+      }
     }
 
     const { data: facturas, error } = await query.order('created_at', { ascending: false });
@@ -1057,16 +1069,27 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
           ...d,
           complemento_pago_id: complementoCreado.id
         }));
-        await supabaseClient.from('complementos_pago_doctos').insert(doctosToInsert);
-      } catch (dErr) {
-        console.warn("Aviso insertando en complementos_pago_doctos:", dErr);
+        const { error: insErr } = await supabaseClient.from('complementos_pago_doctos').insert(doctosToInsert);
+        if (insErr) {
+          console.warn("Aviso insertando en complementos_pago_doctos con venta_id:", insErr.message);
+          // Fallback defensivo si la columna venta_id en Supabase aún es BIGINT y no ha sido migrada a UUID:
+          if (insErr.message?.includes('bigint') || insErr.code === '22P02') {
+            const fallbackDoctos = doctosToInsert.map(({ venta_id, ...rest }) => rest);
+            const { error: fbErr } = await supabaseClient.from('complementos_pago_doctos').insert(fallbackDoctos);
+            if (fbErr) {
+              console.error("Error definitivo insertando en complementos_pago_doctos:", fbErr.message);
+            }
+          }
+        }
+      } catch (dErr: any) {
+        console.warn("Aviso insertando en complementos_pago_doctos:", dErr?.message || dErr);
       }
     }
 
     // 8. Actualizar ventas_pagos y estado de cada venta afectada
     for (const d of doctosDetallesParaGuardar) {
       try {
-        await supabaseClient.from('ventas_pagos').insert([{
+        const { error: vpErr } = await supabaseClient.from('ventas_pagos').insert([{
           venta_id: d.venta_id,
           monto: d.importe_pagado,
           fecha_pago: fechaPagoStr,
@@ -1078,6 +1101,10 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
           saldo_anterior: d.saldo_anterior,
           saldo_insoluto: d.saldo_insoluto
         }]);
+
+        if (vpErr) {
+          console.warn(`Aviso registrando pago en ventas_pagos para venta ${d.venta_id}:`, vpErr.message);
+        }
 
         // Sincronizar saldo de la venta
         await syncVentaPagoInterno(supabaseClient, d.venta_id);

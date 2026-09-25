@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS complementos_pago (
 CREATE TABLE IF NOT EXISTS complementos_pago_doctos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   complemento_pago_id UUID NOT NULL REFERENCES complementos_pago(id) ON DELETE CASCADE,
-  venta_id BIGINT,
+  venta_id UUID,
   uuid_documento VARCHAR(50) NOT NULL,
   serie VARCHAR(10),
   folio VARCHAR(20),
@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS complementos_pago_doctos (
   importe_iva NUMERIC(12, 2) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Si la tabla complementos_pago_doctos ya existía previamente con venta_id BIGINT, migrar a UUID:
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'complementos_pago_doctos' AND column_name = 'venta_id' AND data_type = 'bigint'
+  ) THEN
+    ALTER TABLE complementos_pago_doctos ALTER COLUMN venta_id TYPE UUID USING NULL;
+  END IF;
+END $$;
 
 -- 3. Extender ventas_pagos para vincular con el CFDI de pago
 ALTER TABLE ventas_pagos ADD COLUMN IF NOT EXISTS complemento_pago_id UUID;
