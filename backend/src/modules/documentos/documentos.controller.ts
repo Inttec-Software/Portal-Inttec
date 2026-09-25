@@ -10,7 +10,14 @@ export const obtenerDocumentosAdmin = async (req: Request, res: Response) => {
       .select('*, documentos_firmados(id, estado)')
       .order('created_at', { ascending: false });
     if (error) throw error;
-    return res.json(data);
+
+    const formattedData = (data || []).map((doc: any) => ({
+      ...doc,
+      total_asignados: doc.documentos_firmados ? doc.documentos_firmados.length : 0,
+      total_firmados: doc.documentos_firmados ? doc.documentos_firmados.filter((f: any) => f.estado === 'FIRMADO').length : 0,
+    }));
+
+    return res.json(formattedData);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -62,6 +69,73 @@ export const crearDocumento = async (req: Request, res: Response) => {
       }));
       const { error: asigError } = await client.from('documentos_firmados').insert(asignaciones);
       if (asigError) console.error('Error asignando empleados:', asigError);
+
+      const docTitulo = newDoc.titulo || doc.titulo || 'Documento Corporativo';
+
+      // 1. Guardar notificaciones internas en la base de datos (In-App)
+      try {
+        const notificaciones = targetEmpleados.map((emp) => ({
+          usuario_id: emp.id,
+          titulo: '📝 Nuevo Documento por Firmar',
+          mensaje: `Se te ha asignado el documento "${docTitulo}" para tu firma digital.`,
+          tipo: 'DOCUMENTO_NUEVO',
+          referencia_id: newDoc.id,
+        }));
+        await client.from('notificaciones').insert(notificaciones);
+      } catch (notifErr) {
+        console.warn('[Documentos] No se pudieron insertar notificaciones en BD:', notifErr);
+      }
+
+      // 2. Enviar notificaciones push a los dispositivos móviles de los empleados mediante Expo
+      try {
+        const pushMessages = targetEmpleados
+          .filter(
+            (emp) =>
+              emp.expo_push_token &&
+              typeof emp.expo_push_token === 'string' &&
+              emp.expo_push_token.trim().length > 0
+          )
+          .map((emp) => ({
+            to: emp.expo_push_token.trim(),
+            sound: 'default',
+            title: '📝 Nuevo Documento por Firmar',
+            body: `Tienes un nuevo documento pendiente de firma: "${docTitulo}".`,
+            data: {
+              screen: '/(empleado)/documentos',
+              documentoId: newDoc.id,
+              type: 'DOCUMENTO_NUEVO',
+            },
+            priority: 'high',
+            channelId: 'default',
+          }));
+
+        if (pushMessages.length > 0) {
+          console.log(`[Documentos] Enviando ${pushMessages.length} notificaciones push a empleados...`);
+          // Expo Push API permite lotes de hasta 100 mensajes
+          const chunkSize = 100;
+          for (let i = 0; i < pushMessages.length; i += chunkSize) {
+            const chunk = pushMessages.slice(i, i + chunkSize);
+            fetch('https://exp.host/--/api/v2/push/send', {
+              method: 'POST',
+              headers: {
+                Accept: 'application/json',
+                'Accept-encoding': 'gzip, deflate',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(chunk),
+            })
+              .then(async (r) => {
+                const resJson = await r.json();
+                console.log('[Documentos] Push notifications enviadas:', resJson);
+              })
+              .catch((err) => {
+                console.warn('[Documentos] Error al enviar lote push notifications:', err);
+              });
+          }
+        }
+      } catch (pushErr) {
+        console.warn('[Documentos] Error procesando push notifications:', pushErr);
+      }
     }
     return res.json(newDoc);
   } catch (error: any) {

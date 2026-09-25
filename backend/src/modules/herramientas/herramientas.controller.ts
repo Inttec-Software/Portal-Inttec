@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getSupabaseClient } from '../../config/supabase';
+import * as XLSX from 'xlsx';
 
 // ==========================================
 // 1. CATÁLOGO MAESTRO DE HERRAMIENTAS
@@ -934,5 +935,259 @@ export const getTrazabilidadHerramienta = async (req: Request, res: Response) =>
   } catch (error: any) {
     console.error('[Herramientas] Error in getTrazabilidadHerramienta:', error);
     return res.status(500).json({ error: error.message });
+  }
+};
+
+// ==========================================
+// 5. IMPORTACIÓN MASIVA DESDE EXCEL / CSV
+// ==========================================
+
+// POST /api/herramientas/importar-excel
+export const importarHerramientasExcel = async (req: Request, res: Response) => {
+  try {
+    const { company: activeCompany, env } = req.tenant!;
+    const secondaryCompany = activeCompany === 'inttec' ? 'daravisa' : 'inttec';
+
+    const primaryClient = getSupabaseClient(activeCompany, env);
+    const secondaryClient = getSupabaseClient(secondaryCompany, env);
+
+    const { fileBase64, previewOnly, overwriteExisting = true } = req.body;
+
+    if (!fileBase64 || typeof fileBase64 !== 'string') {
+      return res.status(400).json({ error: 'Se requiere el archivo Excel en formato Base64' });
+    }
+
+    const buffer = Buffer.from(fileBase64, 'base64');
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+      return res.status(400).json({ error: 'El archivo Excel no contiene hojas de cálculo' });
+    }
+
+    const worksheet = workbook.Sheets[firstSheetName];
+    const rawRows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+    if (!rawRows || rawRows.length === 0) {
+      return res.status(400).json({ error: 'El archivo Excel no contiene filas de datos' });
+    }
+
+    // 1. Obtener herramientas existentes para detectar duplicados por código o nombre
+    const { data: existingTools } = await primaryClient.from('herramientas').select('id, codigo, nombre');
+    const existingByCode = new Map<string, any>((existingTools || []).map((t: any) => [String(t.codigo || '').trim().toUpperCase(), t]));
+    const existingByName = new Map<string, any>((existingTools || []).map((t: any) => [String(t.nombre || '').trim().toLowerCase(), t]));
+
+    // Calcular próximo código numérico H-X
+    let nextNum = 0;
+    (existingTools || []).forEach((t: any) => {
+      if (!t.codigo) return;
+      const match = String(t.codigo).trim().match(/^H-(\d+)$/i);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (!isNaN(n) && n > nextNum) nextNum = n;
+      }
+    });
+
+    const parsedTools: any[] = [];
+    const errors: string[] = [];
+
+    const normalizeCol = (str: string) =>
+      String(str || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]/g, '_');
+
+    for (let i = 0; i < rawRows.length; i++) {
+      const row = rawRows[i];
+      const rowKeys = Object.keys(row);
+      if (rowKeys.length === 0) continue;
+
+      let rawCode = '';
+      let rawName = '';
+      let rawCat = '';
+      let rawDesc = '';
+      let rawSerie = '';
+      let rawEstado = '';
+      let rawActivo: any = true;
+
+      for (const key of rowKeys) {
+        const normKey = normalizeCol(key);
+        const val = String(row[key] ?? '').trim();
+
+        if (normKey === 'codigo' || normKey === 'code' || normKey === 'clave' || normKey === 'sku' || normKey === 'id') {
+          if (!rawCode) rawCode = val;
+        } else if (normKey.includes('nombre') || normKey.includes('herramienta') || normKey.includes('articulo') || normKey.includes('item') || normKey === 'name') {
+          if (!rawName) rawName = val;
+        } else if (normKey.includes('categoria') || normKey.includes('category') || normKey === 'tipo' || normKey === 'familia') {
+          if (!rawCat) rawCat = val;
+        } else if (normKey.includes('descrip') || normKey.includes('detalle') || normKey.includes('nota') || normKey.includes('observaci')) {
+          if (!rawDesc) rawDesc = val;
+        } else if (normKey.includes('serie') || normKey.includes('serial') || normKey === 'sn') {
+          if (!rawSerie) rawSerie = val;
+        } else if (normKey.includes('estado') || normKey.includes('condicion') || normKey.includes('status')) {
+          if (!rawEstado) rawEstado = val;
+        } else if (normKey.includes('activ') || normKey === 'status_activo') {
+          rawActivo = val;
+        }
+      }
+
+      // Si no encontró el nombre por header, pero la fila tiene valores
+      if (!rawName) {
+        const firstVal = Object.values(row).find((v: any) => v && typeof v === 'string' && v.trim().length > 1);
+        if (firstVal) {
+          rawName = String(firstVal).trim();
+        }
+      }
+
+      if (!rawName || rawName === '') {
+        continue;
+      }
+
+      // Normalizar Categoría
+      const normCatLower = rawCat.toLowerCase();
+      let finalCat = 'Manual';
+      if (normCatLower.includes('elec')) finalCat = 'Eléctrica';
+      else if (normCatLower.includes('med')) finalCat = 'Medición';
+      else if (normCatLower.includes('segur') || normCatLower.includes('epp') || normCatLower.includes('protec')) finalCat = 'Seguridad';
+      else if (normCatLower.includes('cort')) finalCat = 'Corte';
+      else if (normCatLower.includes('fij') || normCatLower.includes('tornill') || normCatLower.includes('clav')) finalCat = 'Fijación';
+      else if (normCatLower.includes('gen')) finalCat = 'General';
+      else if (rawCat.trim()) finalCat = rawCat.trim();
+
+      // Normalizar Estado
+      const normEstadoLower = rawEstado.toLowerCase();
+      let finalEstado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE' = 'BUENO';
+      if (normEstadoLower.includes('nuev') || normEstadoLower.includes('new')) finalEstado = 'NUEVO';
+      else if (normEstadoLower.includes('buen') || normEstadoLower.includes('opt') || normEstadoLower.includes('excel')) finalEstado = 'BUENO';
+      else if (normEstadoLower.includes('reg') || normEstadoLower.includes('usad')) finalEstado = 'REGULAR';
+      else if (normEstadoLower.includes('dan') || normEstadoLower.includes('dañ') || normEstadoLower.includes('rot') || normEstadoLower.includes('aver')) finalEstado = 'DANADO';
+      else if (normEstadoLower.includes('repar') || normEstadoLower.includes('tall')) finalEstado = 'EN_REPARACION';
+      else if (normEstadoLower.includes('baj') || normEstadoLower.includes('desech')) finalEstado = 'BAJA';
+      else if (normEstadoLower.includes('falt') || normEstadoLower.includes('perd') || normEstadoLower.includes('extrav')) finalEstado = 'FALTANTE';
+
+      // Normalizar Activo
+      let finalActivo = true;
+      if (typeof rawActivo === 'string') {
+        const aLow = rawActivo.toLowerCase();
+        if (aLow === 'no' || aLow === 'false' || aLow === '0' || aLow === 'inactivo' || aLow === 'desactivado') {
+          finalActivo = false;
+        }
+      } else if (rawActivo === false || rawActivo === 0) {
+        finalActivo = false;
+      }
+
+      // Código
+      let finalCode = rawCode ? rawCode.toUpperCase() : '';
+      let isExisting = false;
+      let existingId = '';
+
+      if (finalCode) {
+        const found = existingByCode.get(finalCode);
+        if (found) {
+          isExisting = true;
+          existingId = found.id;
+        }
+      } else {
+        const foundByName = existingByName.get(rawName.toLowerCase());
+        if (foundByName) {
+          isExisting = true;
+          existingId = foundByName.id;
+          finalCode = foundByName.codigo;
+        } else {
+          nextNum++;
+          finalCode = `H-${nextNum}`;
+        }
+      }
+
+      parsedTools.push({
+        id: existingId || undefined,
+        codigo: finalCode,
+        nombre: rawName,
+        categoria: finalCat,
+        descripcion: rawDesc || null,
+        numero_serie: rawSerie || null,
+        estado: finalEstado,
+        activo: finalActivo,
+        es_existente: isExisting,
+        accion: isExisting ? (overwriteExisting ? 'ACTUALIZAR' : 'OMITIR') : 'CREAR',
+        fila: i + 2,
+      });
+    }
+
+    if (parsedTools.length === 0) {
+      return res.status(400).json({ error: 'No se encontraron herramientas legibles en el archivo Excel.' });
+    }
+
+    if (previewOnly) {
+      return res.json({
+        success: true,
+        previewOnly: true,
+        totalEncontrados: parsedTools.length,
+        totalNuevos: parsedTools.filter(t => !t.es_existente).length,
+        totalExistentes: parsedTools.filter(t => t.es_existente).length,
+        herramientas: parsedTools,
+      });
+    }
+
+    // Guardar en Base de Datos
+    let insertCount = 0;
+    let updateCount = 0;
+
+    for (const tool of parsedTools) {
+      const payload: any = {
+        codigo: tool.codigo,
+        nombre: tool.nombre,
+        categoria: tool.categoria,
+        descripcion: tool.descripcion,
+        numero_serie: tool.numero_serie,
+        estado: tool.estado,
+        activo: tool.activo,
+      };
+
+      if (tool.es_existente && tool.id) {
+        if (overwriteExisting) {
+          const { error: upErr } = await primaryClient
+            .from('herramientas')
+            .update(payload)
+            .eq('id', tool.id);
+          if (!upErr) {
+            updateCount++;
+            try {
+              await secondaryClient.from('herramientas').update(payload).eq('id', tool.id);
+            } catch (_) {}
+          } else {
+            errors.push(`Fila ${tool.fila} (${tool.nombre}): Error al actualizar - ${upErr.message}`);
+          }
+        }
+      } else {
+        const { data: insData, error: insErr } = await primaryClient
+          .from('herramientas')
+          .insert([payload])
+          .select()
+          .single();
+        if (!insErr) {
+          insertCount++;
+          try {
+            if (insData) await secondaryClient.from('herramientas').upsert([insData]);
+          } catch (_) {}
+        } else {
+          errors.push(`Fila ${tool.fila} (${tool.nombre}): Error al insertar - ${insErr.message}`);
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      previewOnly: false,
+      totalProcesados: parsedTools.length,
+      insertCount,
+      updateCount,
+      errores: errors,
+      mensaje: `Se importaron ${insertCount} herramientas nuevas y se actualizaron ${updateCount} existentes con éxito.`,
+    });
+  } catch (error: any) {
+    console.error('[Herramientas] Error in importarHerramientasExcel:', error);
+    return res.status(500).json({ error: error.message || 'Error al procesar el archivo Excel' });
   }
 };

@@ -15,6 +15,7 @@ import {
   createChecklist,
   getUltimoChecklistVehiculo,
   getTrazabilidadHerramienta,
+  importarHerramientasExcel,
 } from './herramientas.controller';
 
 const router = Router();
@@ -23,6 +24,7 @@ const router = Router();
 router.get('/', getHerramientas);
 router.get('/siguiente-codigo', getSiguienteCodigo);
 router.get('/:id/trazabilidad', getTrazabilidadHerramienta);
+router.post('/importar-excel', importarHerramientasExcel);
 router.post('/', createHerramienta);
 router.put('/:id', updateHerramienta);
 router.delete('/:id', deleteHerramienta);

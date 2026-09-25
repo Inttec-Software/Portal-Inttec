@@ -33,6 +33,7 @@ import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
+import * as DocumentPicker from 'expo-document-picker';
 
 const CATEGORIAS_HERRAMIENTAS = [
   'Todas',
@@ -136,6 +137,145 @@ export default function AdminHerramientasScreen() {
       showAlert('Error', err.message || 'No se pudo cargar la trazabilidad de la herramienta.');
     } finally {
       setIsLoadingTrazabilidad(false);
+    }
+  };
+
+  // Modal de Importación Excel
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [isParsingExcel, setIsParsingExcel] = useState(false);
+  const [isImportingExcel, setIsImportingExcel] = useState(false);
+  const [importFileBase64, setImportFileBase64] = useState<string>('');
+  const [importFileName, setImportFileName] = useState<string>('');
+  const [importPreviewData, setImportPreviewData] = useState<any>(null);
+  const [overwriteExisting, setOverwriteExisting] = useState<boolean>(true);
+
+  const handleOpenImportModal = () => {
+    setImportFileBase64('');
+    setImportFileName('');
+    setImportPreviewData(null);
+    setOverwriteExisting(true);
+    setImportModalVisible(true);
+  };
+
+  const handlePickExcel = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'text/csv',
+          'text/comma-separated-values',
+          'application/csv',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const fileAsset = result.assets[0];
+      const uri = fileAsset.uri;
+      const fileName = fileAsset.name || 'archivo.xlsx';
+
+      setIsParsingExcel(true);
+      setImportFileName(fileName);
+      setImportPreviewData(null);
+
+      let base64Data = '';
+      if (Platform.OS === 'web') {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const resultStr = reader.result as string;
+            const data = resultStr.split(',')[1] || resultStr;
+            resolve(data);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const FileSystem = require('expo-file-system/legacy');
+        base64Data = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
+
+      setImportFileBase64(base64Data);
+
+      // Previsualizar datos con el backend
+      const previewRes = await HerramientasService.importarExcel(base64Data, true, overwriteExisting);
+      setImportPreviewData(previewRes);
+    } catch (err: any) {
+      console.error('Error al seleccionar/leer archivo Excel:', err);
+      showAlert('Error', err?.message || 'No se pudo leer el archivo Excel.');
+      setImportFileBase64('');
+      setImportFileName('');
+      setImportPreviewData(null);
+    } finally {
+      setIsParsingExcel(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importFileBase64) {
+      showAlert('Archivo requerido', 'Por favor selecciona un archivo Excel o CSV antes de importar.');
+      return;
+    }
+
+    setIsImportingExcel(true);
+    try {
+      const res = await HerramientasService.importarExcel(importFileBase64, false, overwriteExisting);
+      showAlert('Importación Exitosa', res.mensaje || `Se procesaron ${res.totalProcesados} herramientas correctamente.`);
+      setImportModalVisible(false);
+      await loadData();
+    } catch (err: any) {
+      console.error('Error al importar herramientas:', err);
+      showAlert('Error', err?.message || 'No se pudo completar la importación.');
+    } finally {
+      setIsImportingExcel(false);
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const csvHeader = 'Código,Nombre,Categoría,Descripción,Número de Serie,Estado,Activo\r\n';
+      const sampleRows = [
+        'H-101,Taladro Percutor Inalámbrico 20V,Eléctrica,Incluye 2 baterías y maletín de transporte,SN-88492019,NUEVO,SI',
+        'H-102,Juego de Desarmadores Aislados 1000V,Manual,Set de 6 piezas punta plana y phillips,,BUENO,SI',
+        'H-103,Multímetro Digital True RMS con Puntas,Medición,Multímetro digital con estuche de protección,FLUKE-87V-99,BUENO,SI',
+        'H-104,Rotomartillo SDS Plus 800W,Eléctrica,Rotomartillo con cinceles y brocas,BOSCH-77182,BUENO,SI',
+        'H-105,Arnés de Seguridad de Cuerpo Completo,Seguridad,Arnés con línea de vida y amortiguador,ARN-2024-01,NUEVO,SI',
+        'H-106,Pinzas de Presión 10 Pulgadas,Manual,Pinza de mordaza curva cromada,,BUENO,SI'
+      ].join('\r\n');
+
+      const fullCsv = csvHeader + sampleRows;
+      const filename = 'plantilla_importacion_herramientas.csv';
+
+      if (Platform.OS === 'web') {
+        const blob = new Blob(['\uFEFF' + fullCsv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const FileSystem = require('expo-file-system/legacy');
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const Sharing = require('expo-sharing');
+        const fileUri = FileSystem.cacheDirectory + filename;
+        await FileSystem.writeAsStringAsync(fileUri, '\uFEFF' + fullCsv, { encoding: FileSystem.EncodingType.UTF8 });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Descargar Plantilla' });
+        }
+      }
+    } catch (err: any) {
+      showAlert('Error', err?.message || 'No se pudo descargar la plantilla.');
     }
   };
 
@@ -561,13 +701,32 @@ export default function AdminHerramientasScreen() {
                 ) : null}
               </View>
 
-              <TouchableOpacity
-                style={[styles.btnPrimary, { backgroundColor: themeColors.primary }]}
-                onPress={() => handleOpenToolModal()}
-              >
-                <Ionicons name="add" size={20} color="#fff" style={{ marginRight: 6 }} />
-                <Text style={styles.btnPrimaryText}>Nueva Herramienta</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                <TouchableOpacity
+                  style={{
+                    borderColor: '#10B981',
+                    backgroundColor: '#10B98115',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingHorizontal: Spacing.two,
+                    paddingVertical: 10,
+                    borderRadius: BorderRadius.medium,
+                    borderWidth: 1,
+                  }}
+                  onPress={() => handleOpenImportModal()}
+                >
+                  <Ionicons name="cloud-upload-outline" size={18} color="#10B981" style={{ marginRight: 6 }} />
+                  <Text style={{ color: '#10B981', fontWeight: '700', fontSize: 13 }}>Importar Excel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.btnPrimary, { backgroundColor: themeColors.primary }]}
+                  onPress={() => handleOpenToolModal()}
+                >
+                  <Ionicons name="add" size={20} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={styles.btnPrimaryText}>Nueva Herramienta</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Categorías Pills */}
@@ -1822,6 +1981,336 @@ export default function AdminHerramientasScreen() {
                 variant="primary"
                 onPress={() => setTrazabilidadModalVisible(false)}
                 style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL: IMPORTAR EXCEL / CSV A HERRAMIENTAS */}
+      {/* ========================================================================= */}
+      <Modal visible={importModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalCard,
+              {
+                backgroundColor: themeColors.backgroundElement,
+                borderColor: themeColors.border,
+                maxHeight: '92%',
+                maxWidth: 680,
+                width: '95%',
+              },
+            ]}
+          >
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <View style={{ backgroundColor: '#10B98120', padding: 8, borderRadius: 8 }}>
+                  <Ionicons name="document-text-outline" size={20} color="#10B981" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                    Importar Herramientas desde Excel
+                  </Text>
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                    Formatos soportados: .xlsx, .xls y .csv
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => !isImportingExcel && setImportModalVisible(false)} disabled={isImportingExcel}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 520 }} showsVerticalScrollIndicator={false}>
+              {/* Banner Informativo y Botón de Plantilla */}
+              <View
+                style={{
+                  backgroundColor: themeColors.background,
+                  borderRadius: 10,
+                  padding: 12,
+                  marginBottom: Spacing.two,
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  flexDirection: isMobile ? 'column' : 'row',
+                  justifyContent: 'space-between',
+                  alignItems: isMobile ? 'stretch' : 'center',
+                  gap: 10,
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, marginBottom: 2 }}>
+                    ¿No tienes el formato de Excel?
+                  </Text>
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                    Descarga la plantilla con las columnas oficiales: Código, Nombre, Categoría, Descripción, Número de Serie y Estado.
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  onPress={handleDownloadTemplate}
+                  style={{
+                    backgroundColor: '#10B98115',
+                    borderColor: '#10B981',
+                    borderWidth: 1,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Ionicons name="download-outline" size={16} color="#10B981" />
+                  <Text style={{ color: '#10B981', fontWeight: '700', fontSize: 12 }}>Descargar Plantilla</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Selector de Archivo / Dropzone */}
+              <TouchableOpacity
+                onPress={handlePickExcel}
+                disabled={isParsingExcel || isImportingExcel}
+                style={{
+                  borderWidth: 2,
+                  borderStyle: 'dashed',
+                  borderColor: importFileBase64 ? '#10B981' : themeColors.border,
+                  borderRadius: 12,
+                  padding: 20,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: importFileBase64 ? '#10B98108' : themeColors.background,
+                  marginBottom: Spacing.two,
+                }}
+              >
+                {isParsingExcel ? (
+                  <View style={{ alignItems: 'center', gap: 8 }}>
+                    <ActivityIndicator size="large" color="#10B981" />
+                    <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 13 }}>
+                      Leyendo y analizando archivo Excel...
+                    </Text>
+                  </View>
+                ) : importFileBase64 ? (
+                  <View style={{ alignItems: 'center', gap: 6 }}>
+                    <View style={{ backgroundColor: '#10B98120', padding: 10, borderRadius: 50 }}>
+                      <Ionicons name="checkmark-circle" size={28} color="#10B981" />
+                    </View>
+                    <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 14 }}>
+                      {importFileName}
+                    </Text>
+                    <Text style={{ color: '#10B981', fontSize: 12, fontWeight: '600' }}>
+                      Archivo cargado correctamente. Toca aquí para cambiar de archivo.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="cloud-upload-outline" size={36} color={themeColors.primary} />
+                    <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 14 }}>
+                      Seleccionar archivo Excel (.xlsx, .xls) o CSV
+                    </Text>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 12, textAlign: 'center' }}>
+                      Toca para explorar tus archivos y cargar el catálogo de herramientas.
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* Previsualización de Datos */}
+              {importPreviewData && (
+                <View style={{ marginBottom: Spacing.two }}>
+                  {/* Resumen de Detección */}
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      gap: 8,
+                      marginBottom: 12,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <View
+                      style={{
+                        flex: 1,
+                        minWidth: 100,
+                        backgroundColor: themeColors.background,
+                        padding: 10,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, color: themeColors.textSecondary, fontWeight: '700', textTransform: 'uppercase' }}>
+                        Total Encontradas
+                      </Text>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: themeColors.text, marginTop: 2 }}>
+                        {importPreviewData.totalEncontrados}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={{
+                        flex: 1,
+                        minWidth: 100,
+                        backgroundColor: themeColors.background,
+                        padding: 10,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        borderLeftWidth: 3,
+                        borderLeftColor: '#10B981',
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, color: '#059669', fontWeight: '700', textTransform: 'uppercase' }}>
+                        Nuevas
+                      </Text>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#10B981', marginTop: 2 }}>
+                        {importPreviewData.totalNuevos || 0}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={{
+                        flex: 1,
+                        minWidth: 100,
+                        backgroundColor: themeColors.background,
+                        padding: 10,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        borderLeftWidth: 3,
+                        borderLeftColor: '#3B82F6',
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, color: '#2563EB', fontWeight: '700', textTransform: 'uppercase' }}>
+                        Existentes
+                      </Text>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#3B82F6', marginTop: 2 }}>
+                        {importPreviewData.totalExistentes || 0}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Opciones de Importación */}
+                  <TouchableOpacity
+                    onPress={() => setOverwriteExisting(!overwriteExisting)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                      backgroundColor: themeColors.background,
+                      padding: 10,
+                      borderRadius: 8,
+                      marginBottom: 12,
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                    }}
+                  >
+                    <Ionicons
+                      name={overwriteExisting ? 'checkbox' : 'square-outline'}
+                      size={20}
+                      color={overwriteExisting ? themeColors.primary : themeColors.textSecondary}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                        Actualizar información de herramientas si el código ya existe
+                      </Text>
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                        Si está desmarcado, las herramientas con código existente se omitirán.
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Lista Previa de Filas */}
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, marginBottom: 6 }}>
+                    Vista Previa ({importPreviewData.herramientas.length} registros):
+                  </Text>
+                  <View style={{ gap: 6, maxHeight: 240 }}>
+                    {importPreviewData.herramientas.slice(0, 30).map((tool: any, idx: number) => {
+                      const isNew = !tool.es_existente;
+                      return (
+                        <View
+                          key={idx}
+                          style={{
+                            backgroundColor: themeColors.background,
+                            borderRadius: 8,
+                            padding: 10,
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: themeColors.primary }}>
+                                [{tool.codigo}]
+                              </Text>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }} numberOfLines={1}>
+                                {tool.nombre}
+                              </Text>
+                            </View>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>
+                              {tool.categoria} {tool.numero_serie ? `• N/S: ${tool.numero_serie}` : ''} • Estado: {tool.estado}
+                            </Text>
+                          </View>
+
+                          <View
+                            style={{
+                              backgroundColor: isNew ? '#10B98120' : '#3B82F620',
+                              borderColor: isNew ? '#10B981' : '#3B82F6',
+                              borderWidth: 1,
+                              paddingHorizontal: 8,
+                              paddingVertical: 2,
+                              borderRadius: 4,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 10,
+                                fontWeight: '800',
+                                color: isNew ? '#059669' : '#2563EB',
+                              }}
+                            >
+                              {isNew ? 'CREAR' : 'ACTUALIZAR'}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                    {importPreviewData.herramientas.length > 30 ? (
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary, textAlign: 'center', fontStyle: 'italic', marginTop: 4 }}>
+                        ... y {importPreviewData.herramientas.length - 30} herramientas más.
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Modal Footer */}
+            <View style={styles.modalFooter}>
+              <CustomButton
+                title="Cancelar"
+                variant="secondary"
+                onPress={() => setImportModalVisible(false)}
+                disabled={isImportingExcel}
+                style={{ flex: 1, marginRight: 8 }}
+              />
+              <CustomButton
+                title={
+                  isImportingExcel
+                    ? 'Importando...'
+                    : importPreviewData
+                    ? `Confirmar e Importar (${importPreviewData.totalEncontrados})`
+                    : 'Importar Archivo'
+                }
+                variant="primary"
+                onPress={handleConfirmImport}
+                loading={isImportingExcel}
+                disabled={!importFileBase64 || isParsingExcel}
+                style={{ flex: 1.4 }}
               />
             </View>
           </View>

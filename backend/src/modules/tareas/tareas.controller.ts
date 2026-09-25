@@ -170,12 +170,62 @@ export const createTarea = async (req: Request, res: Response): Promise<void> =>
     const { data: tarea, error } = await supabase.from('tareas').insert(nuevaTarea).select().single();
     if (error) throw error;
 
+    let targetIds: string[] = [];
+    if (tarea.responsable_id) targetIds.push(tarea.responsable_id);
+
     if (corresponsables && corresponsables.length > 0) {
       const corrInserts = corresponsables.map((uid: string) => ({
         tarea_id: tarea.id,
         usuario_id: uid
       }));
       await supabase.from('tarea_corresponsables').insert(corrInserts);
+      targetIds = targetIds.concat(corresponsables);
+    }
+
+    targetIds = [...new Set(targetIds)];
+
+    if (targetIds.length > 0) {
+      try {
+        const { data: targetEmpleados } = await supabase.from('usuarios').select('*').in('id', targetIds);
+        if (targetEmpleados && targetEmpleados.length > 0) {
+          const docTitulo = tarea.titulo || 'Nueva Tarea Asignada';
+          
+          const notificaciones = targetEmpleados.map((emp: any) => ({
+            usuario_id: emp.id,
+            titulo: '📋 Nueva Tarea Asignada',
+            mensaje: `Se te ha asignado la tarea "${docTitulo}".`,
+            tipo: 'TAREA_NUEVA',
+            referencia_id: tarea.id,
+          }));
+          await supabase.from('notificaciones').insert(notificaciones);
+
+          const pushMessages = targetEmpleados
+            .filter((emp: any) => emp.expo_push_token && typeof emp.expo_push_token === 'string' && emp.expo_push_token.trim().length > 0)
+            .map((emp: any) => ({
+              to: emp.expo_push_token.trim(),
+              sound: 'default',
+              title: '📋 Nueva Tarea Asignada',
+              body: `Se te ha asignado la tarea "${docTitulo}".`,
+              data: { screen: '/(empleado)/tareas', tareaId: tarea.id, type: 'TAREA_NUEVA' },
+              priority: 'high',
+              channelId: 'default',
+            }));
+
+          if (pushMessages.length > 0) {
+            const chunkSize = 100;
+            for (let i = 0; i < pushMessages.length; i += chunkSize) {
+              const chunk = pushMessages.slice(i, i + chunkSize);
+              fetch('https://exp.host/--/api/v2/push/send', {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
+                body: JSON.stringify(chunk),
+              }).catch(err => console.warn('[Tareas] Error al enviar lote push notifications:', err));
+            }
+          }
+        }
+      } catch (notifErr) {
+        console.warn('[Tareas] Error al procesar notificaciones:', notifErr);
+      }
     }
 
     res.json(tarea);

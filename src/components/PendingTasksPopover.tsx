@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { TareasService } from '@/services/tareasService';
+import { NotificacionesService, Notificacion } from '@/services/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'expo-router';
 
@@ -21,90 +21,91 @@ interface PendingTasksPopoverProps {
   onClose: () => void;
 }
 
-interface TaskSummary {
-  id: string;
-  titulo: string;
-  fecha_compromiso: string;
-  status: string;
-  color: string;
-}
-
 export default function PendingTasksPopover({ visible, onClose }: PendingTasksPopoverProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { user } = useAuth();
   const router = useRouter();
 
-  const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchPendingTasks = async () => {
+    const fetchNotificaciones = async () => {
+      if (!user?.id) return;
       setLoading(true);
       try {
-        const data = await TareasService.getTareas();
-
-        const getSemaforoColor = (fechaCompromiso: string, status: string) => {
-          if (status === 'Completada') return '#3498db';
-          if (status === 'Cancelada') return '#95a5a6';
-      
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const target = new Date(fechaCompromiso);
-          target.setHours(0, 0, 0, 0);
-      
-          const diffTime = target.getTime() - today.getTime();
-          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-          if (diffDays >= 2) return '#2ecc71';
-          if (diffDays === 1 || diffDays === 0) return '#f39c12';
-          return '#e74c3c';
-        };
-
-        const pending = (data || [])
-          .filter((t: any) => 
-            t.status !== 'Completada' && 
-            t.status !== 'Cancelada' && 
-            (t.responsable_id === user?.id || (t.corresponsables && t.corresponsables.some((c:any) => c.usuario_id === user?.id)))
-          )
-          .slice(0, 5);
-
-        const formattedTasks = pending.map((t: any) => ({
-          id: t.id,
-          titulo: t.titulo,
-          fecha_compromiso: t.fecha_compromiso,
-          status: t.status,
-          color: getSemaforoColor(t.fecha_compromiso, t.status)
-        }));
-
-        setTasks(formattedTasks);
+        const data = await NotificacionesService.getMisNotificaciones(user.id);
+        setNotificaciones(data || []);
       } catch (error) {
-        console.error('Error fetching tasks', error);
+        console.error('Error fetching notificaciones', error);
       } finally {
         setLoading(false);
       }
     };
 
     if (visible && user) {
-      fetchPendingTasks();
+      fetchNotificaciones();
     }
   }, [visible, user?.id]);
 
-  const navigateToTask = (id: string) => {
+  const handleNotificacionClick = async (notificacion: Notificacion) => {
+    try {
+      if (!notificacion.leido) {
+        await NotificacionesService.marcarComoLeida(notificacion.id);
+        setNotificaciones((prev) =>
+          prev.map((n) => (n.id === notificacion.id ? { ...n, leido: true } : n))
+        );
+      }
+    } catch (e) {
+      console.error('Error al marcar como leída:', e);
+    }
+    
     onClose();
-    if (user?.rol === 'EMPLEADO') {
-      router.push(`/(empleado)/tareas/${id}` as any);
-    } else {
-      router.push(`/(admin)/tareas/${id}` as any);
+
+    // Redirección basada en el tipo de notificación
+    const rolePrefix = user?.rol === 'ADMIN' ? '/(admin)' : '/(empleado)';
+    
+    switch (notificacion.tipo) {
+      case 'DOCUMENTO_NUEVO':
+        router.push(`${rolePrefix}/documentos` as any);
+        break;
+      case 'TAREA_NUEVA':
+        if (notificacion.referencia_id) {
+          router.push(`${rolePrefix}/tareas/${notificacion.referencia_id}` as any);
+        } else {
+          router.push(`${rolePrefix}/tareas` as any);
+        }
+        break;
+      case 'GASTO_NUEVO':
+        router.push(`${rolePrefix}/gastos` as any);
+        break;
+      case 'REPORTE_NUEVO':
+        router.push(`${rolePrefix}/reportes` as any);
+        break;
+      default:
+        // Navegación por defecto o no hacer nada
+        break;
     }
   };
 
-  const navigateToAllTasks = () => {
-    onClose();
-    if (user?.rol === 'EMPLEADO') {
-      router.push('/(empleado)/tareas' as any);
-    } else {
-      router.push('/(admin)/tareas' as any);
+  const getIconForType = (tipo: string) => {
+    switch(tipo) {
+      case 'DOCUMENTO_NUEVO': return 'document-text';
+      case 'TAREA_NUEVA': return 'checkbox';
+      case 'GASTO_NUEVO': return 'cash';
+      case 'REPORTE_NUEVO': return 'warning';
+      default: return 'notifications';
+    }
+  };
+
+  const getColorForType = (tipo: string) => {
+    switch(tipo) {
+      case 'DOCUMENTO_NUEVO': return '#3b82f6'; // blue
+      case 'TAREA_NUEVA': return '#10b981'; // green
+      case 'GASTO_NUEVO': return '#f59e0b'; // amber
+      case 'REPORTE_NUEVO': return '#ef4444'; // red
+      default: return '#8b5cf6'; // purple
     }
   };
 
@@ -134,7 +135,7 @@ export default function PendingTasksPopover({ visible, onClose }: PendingTasksPo
         >
           {/* Header */}
           <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-            <Text style={[styles.headerTitle, { color: themeColors.text }]}>Mis Tareas Pendientes</Text>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]}>Notificaciones</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <Ionicons name="close" size={20} color={themeColors.textSecondary} />
             </TouchableOpacity>
@@ -144,43 +145,49 @@ export default function PendingTasksPopover({ visible, onClose }: PendingTasksPo
           <View style={styles.content}>
             {loading ? (
               <ActivityIndicator size="small" color={themeColors.primary} style={{ margin: 20 }} />
-            ) : tasks.length === 0 ? (
+            ) : notificaciones.length === 0 ? (
               <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-                No tienes tareas pendientes. ¡Buen trabajo!
+                No tienes notificaciones recientes.
               </Text>
             ) : (
               <FlatList
-                data={tasks}
+                data={notificaciones}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                   <TouchableOpacity 
-                    style={[styles.taskItem, { borderBottomColor: themeColors.border }]}
-                    onPress={() => navigateToTask(item.id)}
+                    style={[
+                      styles.taskItem, 
+                      { 
+                        borderBottomColor: themeColors.border,
+                        backgroundColor: item.leido ? 'transparent' : (scheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)') 
+                      }
+                    ]}
+                    onPress={() => handleNotificacionClick(item)}
                   >
-                    <View style={[styles.statusIndicator, { backgroundColor: item.color }]} />
+                    <View style={[styles.iconContainer, { backgroundColor: getColorForType(item.tipo) + '20' }]}>
+                      <Ionicons name={getIconForType(item.tipo) as any} size={20} color={getColorForType(item.tipo)} />
+                    </View>
                     <View style={styles.taskInfo}>
-                      <Text style={[styles.taskTitle, { color: themeColors.text }]} numberOfLines={1}>
+                      <Text style={[styles.taskTitle, { color: themeColors.text, fontWeight: item.leido ? '400' : '700' }]} numberOfLines={1}>
                         {item.titulo}
                       </Text>
-                      <Text style={[styles.taskDate, { color: themeColors.textSecondary }]}>
-                        Vence: {new Date(item.fecha_compromiso).toLocaleDateString()}
+                      <Text style={[styles.taskDate, { color: themeColors.textSecondary }]} numberOfLines={2}>
+                        {item.mensaje}
+                      </Text>
+                      <Text style={[styles.timeText, { color: themeColors.textSecondary }]}>
+                        {new Date(item.created_at).toLocaleDateString()} {new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                       </Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={16} color={themeColors.border} />
+                    {!item.leido && (
+                      <View style={[styles.unreadDot, { backgroundColor: themeColors.primary }]} />
+                    )}
                   </TouchableOpacity>
                 )}
-                scrollEnabled={false}
+                scrollEnabled={true}
+                style={{ maxHeight: 400 }}
               />
             )}
           </View>
-
-          {/* Footer */}
-          <TouchableOpacity 
-            style={[styles.footer, { borderTopColor: themeColors.border }]}
-            onPress={navigateToAllTasks}
-          >
-            <Text style={[styles.footerText, { color: themeColors.primary }]}>Ver todas las tareas</Text>
-          </TouchableOpacity>
         </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
@@ -195,7 +202,7 @@ const styles = StyleSheet.create({
     alignItems: Platform.OS === 'web' ? 'flex-end' : 'center',
   },
   popover: {
-    width: 320,
+    width: 350,
     borderRadius: BorderRadius.large,
     borderWidth: 1,
     shadowColor: '#000',
@@ -229,7 +236,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   content: {
-    paddingVertical: Spacing.two,
+    paddingVertical: 0,
   },
   emptyText: {
     textAlign: 'center',
@@ -243,30 +250,33 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
     borderBottomWidth: 1,
   },
-  statusIndicator: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  iconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: Spacing.three,
   },
   taskInfo: {
     flex: 1,
   },
   taskTitle: {
-    fontWeight: '500',
     fontSize: 14,
     marginBottom: 2,
   },
   taskDate: {
     fontSize: 12,
+    marginBottom: 4,
   },
-  footer: {
-    paddingVertical: Spacing.three,
-    alignItems: 'center',
-    borderTopWidth: 1,
+  timeText: {
+    fontSize: 10,
   },
-  footerText: {
-    fontWeight: '600',
-    fontSize: 14,
-  }
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: Spacing.two,
+  },
 });
+

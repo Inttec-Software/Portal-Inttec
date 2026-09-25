@@ -16,6 +16,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { supabase, DocumentoService, Usuario, sortUsuariosByRoleAndName } from '@/services/supabase';
+import { PushNotificationService } from '@/services/pushNotifications';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { useAuth } from '@/context/AuthContext';
@@ -312,6 +313,17 @@ export default function NuevoDocumentoScreen() {
         },
         finalRequiereTodos ? [] : finalEmpleados
       );
+
+      // Disparar notificaciones a los empleados seleccionados
+      const targetUserIds = finalRequiereTodos ? empleados.map((e) => e.id) : finalEmpleados;
+      for (const targetId of targetUserIds) {
+        PushNotificationService.sendPushNotification(
+          targetId,
+          '📝 Nuevo Documento por Firmar',
+          `Se te ha asignado el documento "${titulo.trim()}" para tu firma digital.`,
+          { screen: '/(empleado)/documentos', type: 'DOCUMENTO_NUEVO' }
+        ).catch(() => {});
+      }
 
       showAlert('¡Éxito!', 'El documento ha sido publicado y asignado para su firma.', () => {
         router.replace('/(admin)/documentos' as any);

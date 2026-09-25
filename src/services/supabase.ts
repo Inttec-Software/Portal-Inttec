@@ -1278,6 +1278,36 @@ export const HerramientasService = {
     return res.json();
   },
 
+  async importarExcel(
+    fileBase64: string,
+    previewOnly = false,
+    overwriteExisting = true
+  ): Promise<{
+    success: boolean;
+    previewOnly: boolean;
+    totalEncontrados: number;
+    totalNuevos?: number;
+    totalExistentes?: number;
+    totalProcesados?: number;
+    insertCount?: number;
+    updateCount?: number;
+    herramientas: any[];
+    errores?: string[];
+    mensaje?: string;
+  }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/herramientas/importar-excel`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ fileBase64, previewOnly, overwriteExisting }),
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.error || 'Error al importar archivo Excel');
+    }
+    return res.json();
+  },
+
   async eliminarHerramienta(id: string): Promise<void> {
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/herramientas/${id}`, {
@@ -1442,5 +1472,40 @@ export const HerramientasService = {
   },
 };
 
+export interface Notificacion {
+  id: string;
+  usuario_id: string;
+  titulo: string;
+  mensaje: string;
+  tipo: string;
+  referencia_id?: string;
+  leido: boolean;
+  created_at: string;
+}
 
+export const NotificacionesService = {
+  async getMisNotificaciones(usuario_id: string): Promise<Notificacion[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/notificaciones/${usuario_id}`, { headers });
+    if (!res.ok) {
+      // Fallback a supabase si el backend no tiene endpoint (mientras lo creamos)
+      const { data, error } = await supabase
+        .from('notificaciones')
+        .select('*')
+        .eq('usuario_id', usuario_id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return data || [];
+    }
+    return res.json();
+  },
 
+  async marcarComoLeida(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('notificaciones')
+      .update({ leido: true })
+      .eq('id', id);
+    if (error) throw error;
+  }
+};
