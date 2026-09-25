@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -74,6 +74,210 @@ interface ConsumoItem {
   productoId: string;
   cantidad: number;
 }
+
+interface MovimientoItemProps {
+  m: any;
+  themeColors: any;
+  exportingSingleMovimientoId: string | null;
+  onExportSingleVale: (mov: any) => void;
+}
+
+const MovimientoCardItem = React.memo(({ m, themeColors, exportingSingleMovimientoId, onExportSingleVale }: MovimientoItemProps) => {
+  const isGasto = m.tipo === 'GASTO' || m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO';
+  const isRetiro = m.tipo === 'RETIRO' || m.subtipo === 'RETIRO';
+  const isDevolucion = m.tipo === 'DEVOLUCIÓN' || m.subtipo === 'DEVOLUCIÓN';
+  const isCompra = m.tipo === 'COMPRA/FACTURA' || m.subtipo === 'COMPRA/FACTURA';
+  const isEntrada = m.tipo === 'ENTRADA' || (isDevolucion && !isGasto && !isRetiro);
+
+  const folioStr = m.id ? m.id.substring(0, 8).toUpperCase() : 'MOV';
+  const dateStr = (m.fecha || m.created_at) ? new Date(m.fecha || m.created_at).toLocaleString('es-MX', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }) : 'N/A';
+
+  const isSingleExporting = exportingSingleMovimientoId === m.id;
+  const tieneFirma = m.tiene_firma || Boolean(m.firma_base64);
+
+  return (
+    <View
+      style={{
+        backgroundColor: themeColors.backgroundElement,
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 12,
+        borderColor: isGasto ? '#8B5CF660' : isDevolucion ? '#2563EB50' : isCompra ? '#15803D50' : isEntrada ? '#10B98140' : '#EF444440',
+        borderWidth: 1,
+        borderLeftWidth: 4,
+        borderLeftColor: isGasto ? '#8B5CF6' : isDevolucion ? '#2563EB' : isCompra ? '#15803D' : isEntrada ? '#10B981' : '#EF4444',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+        elevation: 1
+      }}
+    >
+      {/* Fila Superior: Folio + Fecha + Tipo Badge */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: themeColors.primary }}>#{folioStr}</Text>
+          </View>
+          <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>{dateStr}</Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          {isGasto ? (
+            <View style={{ backgroundColor: '#F3E8FF', borderColor: '#8B5CF6', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#8B5CF6' }}>Gasto</Text>
+            </View>
+          ) : isDevolucion ? (
+            <View style={{ backgroundColor: '#DBEAFE', borderColor: '#2563EB', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#2563EB' }}>DEVOLUCIÓN</Text>
+            </View>
+          ) : isCompra ? (
+            <View style={{ backgroundColor: '#DCFCE7', borderColor: '#15803D', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#15803D' }}>COMPRA</Text>
+            </View>
+          ) : isEntrada ? (
+            <View style={{ backgroundColor: '#10B98120', borderColor: '#10B981', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#059669' }}>ENTRADA</Text>
+            </View>
+          ) : (
+            <View style={{ backgroundColor: '#EF444420', borderColor: '#EF4444', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#DC2626' }}>SALIDA</Text>
+            </View>
+          )}
+          {Boolean(m.tipo_gasto) ? (
+            <View style={{ backgroundColor: isGasto ? '#8B5CF618' : themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: isGasto ? '#8B5CF6' : themeColors.primary }}>{m.tipo_gasto}</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      {/* Fila del Producto o Desglose Multi-material */}
+      {Array.isArray(m.materiales) && m.materiales.length > 1 ? (
+        <View style={{ backgroundColor: themeColors.background, borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: themeColors.border }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+              {isDevolucion ? 'Materiales Devueltos' : isGasto ? 'Materiales Utilizados en Gasto' : 'Partidas Retiradas'} ({m.materiales.length}):
+            </Text>
+            <View style={{ backgroundColor: isGasto ? '#8B5CF618' : isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: isGasto ? '#8B5CF6' : isEntrada ? '#059669' : '#DC2626' }}>
+                Total: {isEntrada ? '+' : '-'}{m.cantidad} {m.producto_unidad || 'un.'}
+              </Text>
+            </View>
+          </View>
+          {m.materiales.map((mat: any, mIdx: number) => {
+            const condTags = [];
+            if (mat.devolver_nuevo > 0) condTags.push(`Nuevas: ${mat.devolver_nuevo}`);
+            if (mat.devolver_usado > 0) condTags.push(`Usadas: ${mat.devolver_usado}`);
+            if (mat.devolver_por_revisar > 0) condTags.push(`Dañadas: ${mat.devolver_por_revisar}`);
+            const condStr = condTags.length > 0 ? ` (${condTags.join(', ')})` : '';
+
+            return (
+              <View key={mIdx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomWidth: mIdx === m.materiales.length - 1 ? 0 : 1, borderBottomColor: themeColors.border }}>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }} numberOfLines={1}>
+                    {mat.nombre || 'Material'}{condStr}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>SKU: {mat.sku || '-'}</Text>
+                </View>
+                <View style={{ backgroundColor: isGasto ? '#8B5CF618' : isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: isGasto ? '#8B5CF6' : isEntrada ? '#059669' : '#DC2626' }}>
+                    {isEntrada ? '+' : '-'}{mat.cantidad} {mat.unidad || 'pza'}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, backgroundColor: themeColors.background, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
+          <View style={{ flex: 1, paddingRight: 8 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.text }}>{m.producto_nombre || 'Producto'}</Text>
+            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>SKU: {m.producto_sku || '-'}</Text>
+          </View>
+          <View style={{ backgroundColor: isGasto ? '#8B5CF618' : isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
+            <Text style={{ fontSize: 14, fontWeight: '800', color: isGasto ? '#8B5CF6' : isEntrada ? '#059669' : '#DC2626' }}>
+              {isEntrada ? '+' : '-'}{m.cantidad} {m.producto_unidad || 'pza'}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Detalles: Responsable, Cliente, Concepto */}
+      <View style={{ marginBottom: 10, gap: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Ionicons name="person-circle-outline" size={16} color={(m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO') ? '#8B5CF6' : themeColors.primary} />
+          <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text }}>
+            Responsable: <Text style={{ fontWeight: '400' }}>{m.usuario_nombre || m.empleado_nombre || 'Almacén'}</Text>
+          </Text>
+        </View>
+
+        {m.cliente_nombre ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="location-outline" size={16} color={themeColors.textSecondary} />
+            <Text style={{ fontSize: 12, color: themeColors.text }}>
+              Cliente: <Text style={{ fontWeight: '600' }}>{m.cliente_nombre}</Text>
+            </Text>
+          </View>
+        ) : null}
+
+        {(m.detalle_motivo || m.folio_factura) ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="chatbubble-outline" size={16} color={themeColors.textSecondary} />
+            <Text style={{ fontSize: 12, color: themeColors.text }}>
+              Detalle: <Text style={{ fontStyle: 'italic', color: themeColors.textSecondary }}>{m.detalle_motivo || m.folio_factura}</Text>
+            </Text>
+          </View>
+        ) : null}
+
+        {m.proveedor_nombre ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="business-outline" size={16} color={themeColors.textSecondary} />
+            <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Proveedor: {m.proveedor_nombre}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/* Botón de Vale Individual */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 6, borderTopWidth: 1, borderTopColor: themeColors.border }}>
+        {tieneFirma ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#10B98115', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#10B98130' }}>
+            <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>Responsiva Firmada</Text>
+          </View>
+        ) : <View />}
+
+        <TouchableOpacity
+          onPress={() => onExportSingleVale(m)}
+          disabled={isSingleExporting}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: themeColors.background,
+            borderColor: themeColors.border,
+            borderWidth: 1,
+            paddingHorizontal: 12,
+            paddingVertical: 7,
+            borderRadius: 6
+          }}
+        >
+          {isSingleExporting ? (
+            <ActivityIndicator size="small" color={themeColors.primary} />
+          ) : (
+            <Ionicons name="download-outline" size={15} color={themeColors.primary} />
+          )}
+          <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>Descargar Vale (PDF)</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+});
 
 export default function InventarioDashboard() {
   const router = useRouter();
@@ -478,7 +682,22 @@ export default function InventarioDashboard() {
   const handleExportSingleMovimientoVale = async (mov: any) => {
     setExportingSingleMovimientoId(mov.id);
     try {
-      await ReportGenerator.exportSingleMovimientoValePDF(mov);
+      let fullMov = { ...mov };
+      if ((mov.tiene_firma || !mov.firma_base64) && mov.id) {
+        try {
+          const headers = await getApiHeaders();
+          const res = await fetch(`${getApiUrl()}/api/inventario/firma/${mov.id}`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.firma_base64) {
+              fullMov.firma_base64 = data.firma_base64;
+            }
+          }
+        } catch (e) {
+          console.warn('No se pudo obtener firma bajo demanda:', e);
+        }
+      }
+      await ReportGenerator.exportSingleMovimientoValePDF(fullMov);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo generar el vale.');
     } finally {
@@ -1471,17 +1690,108 @@ export default function InventarioDashboard() {
     }
   };
 
-  // Filtrado de catálogo
-  const filteredProducts = productos.filter(p => {
-    if (!showInactive && !p.activo) return false;
-    if (!showOutOfStock && (p.stock_actual || 0) <= 0) return false;
+  // Filtrado de catálogo memoizado
+  const filteredProducts = useMemo(() => {
     const normSearch = normalizeText(searchTerm);
-    const matchesSearch = !normSearch ||
-      normalizeText(p.nombre_oficial).includes(normSearch) ||
-      normalizeText(p.sku_interno).includes(normSearch);
-    const matchesCat = selectedCategoryFilter ? p.categoria_id === selectedCategoryFilter : true;
-    return matchesSearch && matchesCat;
-  });
+    return productos.filter(p => {
+      if (!showInactive && !p.activo) return false;
+      if (!showOutOfStock && (p.stock_actual || 0) <= 0) return false;
+      const matchesSearch = !normSearch ||
+        normalizeText(p.nombre_oficial).includes(normSearch) ||
+        normalizeText(p.sku_interno).includes(normSearch);
+      const matchesCat = selectedCategoryFilter ? p.categoria_id === selectedCategoryFilter : true;
+      return matchesSearch && matchesCat;
+    });
+  }, [productos, showInactive, showOutOfStock, searchTerm, selectedCategoryFilter]);
+
+  // Filtrado y estadísticas de Movimientos memoizados (0ms en re-renders)
+  const { filteredMovimientos, totalMovimientosCount, totalEntradasCount, totalSalidasCount, totalGastosCount } = useMemo(() => {
+    const normSearch = normalizeText(movimientosSearch);
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    const filtered = movimientos.filter((m) => {
+      // Filtro de Usuario / Empleado
+      if (selectedUsuarioMovimiento && 
+          m.usuario_id !== selectedUsuarioMovimiento && 
+          m.usuario_nombre !== selectedUsuarioMovimiento &&
+          m.empleado_id !== selectedUsuarioMovimiento &&
+          m.empleado_nombre !== selectedUsuarioMovimiento) {
+        return false;
+      }
+
+      // Filtro de Tipo / Subtipo
+      if (selectedTipoMovimiento !== 'TODOS') {
+        const isG = m.tipo === 'GASTO' || m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO';
+        const isDev = m.tipo === 'DEVOLUCIÓN' || m.subtipo === 'DEVOLUCIÓN';
+        const isComp = m.tipo === 'COMPRA/FACTURA' || m.subtipo === 'COMPRA/FACTURA';
+        const isEnt = m.tipo === 'ENTRADA' || (isDev && !isG);
+        const isSal = (m.tipo === 'SALIDA' || m.subtipo === 'SALIDA' || m.subtipo === 'RETIRO') && !isG;
+
+        if (selectedTipoMovimiento === 'ENTRADA' && !isEnt) return false;
+        if (selectedTipoMovimiento === 'SALIDA' && !isSal) return false;
+        if (selectedTipoMovimiento === 'GASTO' && !isG) return false;
+        if (selectedTipoMovimiento === 'DEVOLUCIÓN' && !isDev) return false;
+        if (selectedTipoMovimiento === 'COMPRA/FACTURA' && !isComp) return false;
+      }
+
+      // Filtro de Fecha
+      const dateVal = m.fecha || m.created_at;
+      if (selectedDateFilterMov !== 'TODOS' && dateVal) {
+        const d = new Date(dateVal);
+        if (selectedDateFilterMov === 'HOY') {
+          if (d.toDateString() !== now.toDateString()) return false;
+        } else if (selectedDateFilterMov === 'SEMANA') {
+          if (d < oneWeekAgo) return false;
+        } else if (selectedDateFilterMov === 'MES') {
+          if (d.getMonth() !== currentMonth || d.getFullYear() !== currentYear) return false;
+        }
+      }
+
+      // Buscador por Texto
+      if (normSearch) {
+        const matchProd = normalizeText(m.producto_nombre || '').includes(normSearch);
+        const matchSku = normalizeText(m.producto_sku || '').includes(normSearch);
+        const matchUser = normalizeText(m.usuario_nombre || m.empleado_nombre || '').includes(normSearch);
+        const matchCli = normalizeText(m.cliente_nombre || '').includes(normSearch);
+        const matchDet = normalizeText(m.detalle_motivo || m.folio_factura || '').includes(normSearch);
+        const matchProv = normalizeText(m.proveedor_nombre || '').includes(normSearch);
+        const matchMats = (Array.isArray(m.materiales) ? m.materiales : []).some(
+          (mat: any) => normalizeText(mat.nombre || '').includes(normSearch) || normalizeText(mat.sku || '').includes(normSearch)
+        );
+        if (!matchProd && !matchSku && !matchUser && !matchCli && !matchDet && !matchProv && !matchMats) {
+          return false;
+        }
+      }
+      return true;
+    }).sort((a, b) => {
+      const tA = new Date(a.fecha || a.created_at || 0).getTime();
+      const tB = new Date(b.fecha || b.created_at || 0).getTime();
+      return tB - tA;
+    });
+
+    let totalEntradas = 0;
+    let totalSalidas = 0;
+    let totalGastos = 0;
+
+    filtered.forEach((m) => {
+      const isG = m.tipo === 'GASTO' || m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO';
+      const isEnt = m.tipo === 'ENTRADA' || m.subtipo === 'ENTRADA' || m.subtipo === 'DEVOLUCIÓN' || m.subtipo === 'COMPRA/FACTURA';
+      if (isG) totalGastos++;
+      else if (isEnt) totalEntradas++;
+      else totalSalidas++;
+    });
+
+    return {
+      filteredMovimientos: filtered,
+      totalMovimientosCount: filtered.length,
+      totalEntradasCount: totalEntradas,
+      totalSalidasCount: totalSalidas,
+      totalGastosCount: totalGastos,
+    };
+  }, [movimientos, selectedUsuarioMovimiento, selectedTipoMovimiento, selectedDateFilterMov, movimientosSearch]);
 
   const activeCategoryName = categorias.find(c => c.id === selectedCategoryFilter)?.nombre;
   const activeFormCategoryName = categorias.find(c => c.id === formCategoriaId)?.nombre;
@@ -2506,283 +2816,228 @@ export default function InventarioDashboard() {
       )}
 
       {/* VISTA 6: MOVIMIENTOS DE INVENTARIO (CONTROL TOTAL DE ENTRADAS, SALIDAS Y RETIROS) */}
-      {activeTab === 'movimientos' && (() => {
-        const filteredMovimientos = movimientos.filter((m) => {
-          // Filtro de Usuario / Empleado
-          if (selectedUsuarioMovimiento && 
-              m.usuario_id !== selectedUsuarioMovimiento && 
-              m.usuario_nombre !== selectedUsuarioMovimiento &&
-              m.empleado_id !== selectedUsuarioMovimiento &&
-              m.empleado_nombre !== selectedUsuarioMovimiento) {
-            return false;
-          }
+      {activeTab === 'movimientos' && (
+        <FlatList
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+          data={filteredMovimientos}
+          keyExtractor={(item) => String(item.id)}
+          initialNumToRender={15}
+          maxToRenderPerBatch={15}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS !== 'web'}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <View>
+              {/* Header del Módulo */}
+              <View style={{ backgroundColor: themeColors.backgroundElement, borderRadius: 12, padding: 16, marginBottom: 16, borderColor: themeColors.border, borderWidth: 1 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+                  <View style={{ flex: 1, minWidth: 200 }}>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginBottom: 4 }}>Control y Reportes de Movimientos</Text>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
+                      Auditoría integral de inventario: Entradas, Salidas / Retiros, Gastos de material, Compras y Devoluciones.
+                    </Text>
+                  </View>
+                  
+                  {/* Botones de Exportación */}
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                    <TouchableOpacity
+                      onPress={() => handleExportMovimientosPDF(filteredMovimientos)}
+                      disabled={isExportingMovimientosPDF}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: themeColors.primary,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        opacity: isExportingMovimientosPDF ? 0.7 : 1
+                      }}
+                    >
+                      {isExportingMovimientosPDF ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="document-text-outline" size={16} color="#fff" />
+                      )}
+                      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Exportar PDF</Text>
+                    </TouchableOpacity>
 
-          // Filtro de Tipo / Subtipo
-          if (selectedTipoMovimiento !== 'TODOS') {
-            if (selectedTipoMovimiento === 'ENTRADA' && m.tipo !== 'ENTRADA') return false;
-            if (selectedTipoMovimiento === 'SALIDA' && m.tipo !== 'SALIDA') return false;
-            if (selectedTipoMovimiento === 'RETIRO' && m.subtipo !== 'RETIRO') return false;
-            if (selectedTipoMovimiento === 'DEVOLUCIÓN' && m.subtipo !== 'DEVOLUCIÓN') return false;
-            if (selectedTipoMovimiento === 'COMPRA/FACTURA' && m.subtipo !== 'COMPRA/FACTURA') return false;
-          }
+                    <TouchableOpacity
+                      onPress={() => handleExportMovimientosCSV(filteredMovimientos)}
+                      disabled={isExportingMovimientosCSV}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: '#10B981',
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        opacity: isExportingMovimientosCSV ? 0.7 : 1
+                      }}
+                    >
+                      {isExportingMovimientosCSV ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="grid-outline" size={16} color="#fff" />
+                      )}
+                      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Excel (CSV)</Text>
+                    </TouchableOpacity>
 
-          // Filtro de Fecha
-          const dateVal = m.fecha || m.created_at;
-          if (selectedDateFilterMov !== 'TODOS' && dateVal) {
-            const d = new Date(dateVal);
-            const now = new Date();
-            if (selectedDateFilterMov === 'HOY') {
-              if (d.toDateString() !== now.toDateString()) return false;
-            } else if (selectedDateFilterMov === 'SEMANA') {
-              const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-              if (d < oneWeekAgo) return false;
-            } else if (selectedDateFilterMov === 'MES') {
-              if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false;
-            }
-          }
-
-          // Buscador por Texto
-          if (movimientosSearch.trim()) {
-            const q = normalizeText(movimientosSearch);
-            const matchProd = normalizeText(m.producto_nombre || '').includes(q);
-            const matchSku = normalizeText(m.producto_sku || '').includes(q);
-            const matchUser = normalizeText(m.usuario_nombre || m.empleado_nombre || '').includes(q);
-            const matchCli = normalizeText(m.cliente_nombre || '').includes(q);
-            const matchDet = normalizeText(m.detalle_motivo || m.folio_factura || '').includes(q);
-            const matchProv = normalizeText(m.proveedor_nombre || '').includes(q);
-            const matchMats = (Array.isArray(m.materiales) ? m.materiales : []).some(
-              (mat: any) => normalizeText(mat.nombre || '').includes(q) || normalizeText(mat.sku || '').includes(q)
-            );
-            if (!matchProd && !matchSku && !matchUser && !matchCli && !matchDet && !matchProv && !matchMats) {
-              return false;
-            }
-          }
-          return true;
-        });
-
-        const totalMovimientosCount = filteredMovimientos.length;
-        let totalEntradasUnidades = 0;
-        let totalSalidasUnidades = 0;
-        let totalRetirosCount = 0;
-
-        filteredMovimientos.forEach((m) => {
-          const q = Number(m.cantidad || 0);
-          if (m.tipo === 'ENTRADA') {
-            totalEntradasUnidades += q;
-          } else {
-            totalSalidasUnidades += q;
-          }
-          if (m.subtipo === 'RETIRO') {
-            totalRetirosCount++;
-          }
-        });
-
-        return (
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-            {/* Header del Módulo */}
-            <View style={{ backgroundColor: themeColors.backgroundElement, borderRadius: 12, padding: 16, marginBottom: 16, borderColor: themeColors.border, borderWidth: 1 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
-                <View style={{ flex: 1, minWidth: 200 }}>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginBottom: 4 }}>Control y Reportes de Movimientos</Text>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
-                    Auditoría integral de inventario: Entradas, Salidas, Retiros de empleados, Compras y Devoluciones con generación de vales y reportes.
-                  </Text>
+                    <TouchableOpacity
+                      onPress={loadMovimientos}
+                      disabled={isLoadingMovimientos}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: themeColors.background,
+                        borderColor: themeColors.border,
+                        borderWidth: 1,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        opacity: isLoadingMovimientos ? 0.6 : 1
+                      }}
+                    >
+                      {isLoadingMovimientos ? (
+                        <ActivityIndicator size="small" color={themeColors.text} />
+                      ) : (
+                        <Ionicons name="reload" size={16} color={themeColors.text} />
+                      )}
+                      <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 12 }}>Recargar</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                
-                {/* Botones de Exportación */}
-                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <TouchableOpacity
-                    onPress={() => handleExportMovimientosPDF(filteredMovimientos)}
-                    disabled={isExportingMovimientosPDF}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                      backgroundColor: themeColors.primary,
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                      opacity: isExportingMovimientosPDF ? 0.7 : 1
-                    }}
-                  >
-                    {isExportingMovimientosPDF ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Ionicons name="document-text-outline" size={16} color="#fff" />
-                    )}
-                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Exportar PDF</Text>
-                  </TouchableOpacity>
 
-                  <TouchableOpacity
-                    onPress={() => handleExportMovimientosCSV(filteredMovimientos)}
-                    disabled={isExportingMovimientosCSV}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                      backgroundColor: '#10B981',
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                      opacity: isExportingMovimientosCSV ? 0.7 : 1
-                    }}
-                  >
-                    {isExportingMovimientosCSV ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Ionicons name="grid-outline" size={16} color="#fff" />
-                    )}
-                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Excel (CSV)</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={loadMovimientos}
-                    disabled={isLoadingMovimientos}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                      backgroundColor: themeColors.background,
-                      borderColor: themeColors.border,
-                      borderWidth: 1,
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                      opacity: isLoadingMovimientos ? 0.6 : 1
-                    }}
-                  >
-                    {isLoadingMovimientos ? (
-                      <ActivityIndicator size="small" color={themeColors.text} />
-                    ) : (
-                      <Ionicons name="reload" size={16} color={themeColors.text} />
-                    )}
-                    <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 12 }}>Recargar</Text>
-                  </TouchableOpacity>
+                {/* Tarjetas Métricas */}
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+                  <View style={{ flex: 1, minWidth: 110, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
+                    <Text style={{ fontSize: 11, color: themeColors.textSecondary, textTransform: 'uppercase', fontWeight: '600' }}>Movimientos</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginTop: 2 }}>{totalMovimientosCount}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 110, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#10B981' }}>
+                    <Text style={{ fontSize: 11, color: '#059669', textTransform: 'uppercase', fontWeight: '600' }}>Entradas</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#10B981', marginTop: 2 }}>{totalEntradasCount}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 110, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#EF4444' }}>
+                    <Text style={{ fontSize: 11, color: '#DC2626', textTransform: 'uppercase', fontWeight: '600' }}>Salidas</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#EF4444', marginTop: 2 }}>{totalSalidasCount}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 110, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#8B5CF6' }}>
+                    <Text style={{ fontSize: 11, color: '#8B5CF6', textTransform: 'uppercase', fontWeight: '600' }}>Gastos</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#8B5CF6', marginTop: 2 }}>{totalGastosCount}</Text>
+                  </View>
                 </View>
               </View>
 
-              {/* Tarjetas Métricas */}
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-                <View style={{ flex: 1, minWidth: 120, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
-                  <Text style={{ fontSize: 11, color: themeColors.textSecondary, textTransform: 'uppercase', fontWeight: '600' }}>Movimientos</Text>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginTop: 2 }}>{totalMovimientosCount}</Text>
+              {/* Filtros */}
+              <View style={{ backgroundColor: themeColors.backgroundElement, borderRadius: 12, padding: 14, marginBottom: 16, borderColor: themeColors.border, borderWidth: 1 }}>
+                {/* Buscador de texto */}
+                <CustomInput
+                  placeholder="Buscar por material, SKU, cliente, usuario, concepto..."
+                  value={movimientosSearch}
+                  onChangeText={setMovimientosSearch}
+                  iconName="search-outline"
+                  style={{ marginBottom: 12 }}
+                />
+
+                {/* Filtro por Usuario / Empleado */}
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 4 }}>Filtrar por Responsable / Usuario</Text>
+                  <TouchableOpacity
+                    style={{ backgroundColor: themeColors.background, borderColor: themeColors.border, borderWidth: 1, padding: 10, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+                    onPress={() => {
+                      setSelectorTitle('Filtrar por Usuario');
+                      setSelectorSearch('');
+                      setSelectorOptions([
+                        { id: '', label: 'Todos los Usuarios' },
+                        ...empleados.map(e => ({ id: e.id, label: e.nombre }))
+                      ]);
+                      setOnSelectOption(() => (id: string) => {
+                        setSelectedUsuarioMovimiento(id);
+                      });
+                      setSelectorVisible(true);
+                    }}
+                  >
+                    <Text style={{ color: selectedUsuarioMovimiento ? themeColors.text : themeColors.textSecondary, fontSize: 13 }}>
+                      {empleados.find(e => e.id === selectedUsuarioMovimiento)?.nombre || 'Todos los Usuarios'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={16} color={themeColors.text} />
+                  </TouchableOpacity>
                 </View>
-                <View style={{ flex: 1, minWidth: 120, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#10B981' }}>
-                  <Text style={{ fontSize: 11, color: '#059669', textTransform: 'uppercase', fontWeight: '600' }}>Entradas</Text>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#10B981', marginTop: 2 }}>+{Math.round(totalEntradasUnidades * 100) / 100} un.</Text>
+
+                {/* Filtro por Tipo / Subtipo */}
+                <View style={{ marginBottom: 10 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 6 }}>Tipo de Movimiento</Text>
+                  <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                    {(['TODOS', 'ENTRADA', 'SALIDA', 'GASTO', 'DEVOLUCIÓN', 'COMPRA/FACTURA'] as const).map(tipo => {
+                      const isSelected = selectedTipoMovimiento === tipo;
+                      const isGasto = tipo === 'GASTO';
+                      const isSalida = tipo === 'SALIDA';
+                      const activeColor = isGasto ? '#8B5CF6' : isSalida ? '#DC2626' : themeColors.primary;
+
+                      return (
+                        <TouchableOpacity
+                          key={tipo}
+                          onPress={() => setSelectedTipoMovimiento(tipo)}
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            borderRadius: 6,
+                            borderWidth: 1,
+                            borderColor: isSelected ? activeColor : themeColors.border,
+                            backgroundColor: isSelected ? activeColor + '20' : themeColors.background
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: isSelected ? '700' : '500', color: isSelected ? activeColor : themeColors.textSecondary }}>
+                            {tipo}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 </View>
-                <View style={{ flex: 1, minWidth: 120, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#EF4444' }}>
-                  <Text style={{ fontSize: 11, color: '#DC2626', textTransform: 'uppercase', fontWeight: '600' }}>Salidas</Text>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#EF4444', marginTop: 2 }}>-{Math.round(totalSalidasUnidades * 100) / 100} un.</Text>
-                </View>
-                <View style={{ flex: 1, minWidth: 120, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
-                  <Text style={{ fontSize: 11, color: themeColors.textSecondary, textTransform: 'uppercase', fontWeight: '600' }}>Retiros Emp.</Text>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#7C3AED', marginTop: 2 }}>{totalRetirosCount}</Text>
+
+                {/* Filtro por Rango de Fecha */}
+                <View>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 6 }}>Periodo</Text>
+                  <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                    {(['TODOS', 'HOY', 'SEMANA', 'MES'] as const).map(f => {
+                      const isSelected = selectedDateFilterMov === f;
+                      const labels: Record<string, string> = { TODOS: 'Todo el Historial', HOY: 'Hoy', SEMANA: 'Esta Semana', MES: 'Este Mes' };
+                      return (
+                        <TouchableOpacity
+                          key={f}
+                          onPress={() => setSelectedDateFilterMov(f)}
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            borderRadius: 6,
+                            borderWidth: 1,
+                            borderColor: isSelected ? themeColors.primary : themeColors.border,
+                            backgroundColor: isSelected ? themeColors.primary + '20' : themeColors.background
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: isSelected ? '700' : '500', color: isSelected ? themeColors.primary : themeColors.textSecondary }}>
+                            {labels[f]}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 </View>
               </View>
             </View>
-
-            {/* Filtros */}
-            <View style={{ backgroundColor: themeColors.backgroundElement, borderRadius: 12, padding: 14, marginBottom: 16, borderColor: themeColors.border, borderWidth: 1 }}>
-              {/* Buscador de texto */}
-              <CustomInput
-                placeholder="Buscar por material, SKU, cliente, usuario, concepto..."
-                value={movimientosSearch}
-                onChangeText={setMovimientosSearch}
-                iconName="search-outline"
-                style={{ marginBottom: 12 }}
-              />
-
-              {/* Filtro por Usuario / Empleado */}
-              <View style={{ marginBottom: 12 }}>
-                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 4 }}>Filtrar por Responsable / Usuario</Text>
-                <TouchableOpacity
-                  style={{ backgroundColor: themeColors.background, borderColor: themeColors.border, borderWidth: 1, padding: 10, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
-                  onPress={() => {
-                    setSelectorTitle('Filtrar por Usuario');
-                    setSelectorSearch('');
-                    setSelectorOptions([
-                      { id: '', label: 'Todos los Usuarios' },
-                      ...empleados.map(e => ({ id: e.id, label: e.nombre }))
-                    ]);
-                    setOnSelectOption(() => (id: string) => {
-                      setSelectedUsuarioMovimiento(id);
-                    });
-                    setSelectorVisible(true);
-                  }}
-                >
-                  <Text style={{ color: selectedUsuarioMovimiento ? themeColors.text : themeColors.textSecondary, fontSize: 13 }}>
-                    {empleados.find(e => e.id === selectedUsuarioMovimiento)?.nombre || 'Todos los Usuarios'}
-                  </Text>
-                  <Ionicons name="chevron-down" size={16} color={themeColors.text} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Filtro por Tipo / Subtipo */}
-              <View style={{ marginBottom: 10 }}>
-                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 6 }}>Tipo de Movimiento</Text>
-                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
-                  {(['TODOS', 'ENTRADA', 'SALIDA', 'RETIRO', 'DEVOLUCIÓN', 'COMPRA/FACTURA'] as const).map(tipo => {
-                    const isSelected = selectedTipoMovimiento === tipo;
-                    return (
-                      <TouchableOpacity
-                        key={tipo}
-                        onPress={() => setSelectedTipoMovimiento(tipo)}
-                        style={{
-                          paddingHorizontal: 10,
-                          paddingVertical: 6,
-                          borderRadius: 6,
-                          borderWidth: 1,
-                          borderColor: isSelected ? themeColors.primary : themeColors.border,
-                          backgroundColor: isSelected ? themeColors.primary + '20' : themeColors.background
-                        }}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: isSelected ? '700' : '500', color: isSelected ? themeColors.primary : themeColors.textSecondary }}>
-                          {tipo}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              {/* Filtro por Rango de Fecha */}
-              <View>
-                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 6 }}>Periodo</Text>
-                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
-                  {(['TODOS', 'HOY', 'SEMANA', 'MES'] as const).map(f => {
-                    const isSelected = selectedDateFilterMov === f;
-                    const labels: Record<string, string> = { TODOS: 'Todo el Historial', HOY: 'Hoy', SEMANA: 'Esta Semana', MES: 'Este Mes' };
-                    return (
-                      <TouchableOpacity
-                        key={f}
-                        onPress={() => setSelectedDateFilterMov(f)}
-                        style={{
-                          paddingHorizontal: 10,
-                          paddingVertical: 6,
-                          borderRadius: 6,
-                          borderWidth: 1,
-                          borderColor: isSelected ? themeColors.primary : themeColors.border,
-                          backgroundColor: isSelected ? themeColors.primary + '20' : themeColors.background
-                        }}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: isSelected ? '700' : '500', color: isSelected ? themeColors.primary : themeColors.textSecondary }}>
-                          {labels[f]}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            </View>
-
-            {/* Listado de Movimientos */}
-            {isLoadingMovimientos ? (
+          }
+          ListEmptyComponent={
+            isLoadingMovimientos ? (
               <View style={{ padding: 40, alignItems: 'center' }}>
                 <ActivityIndicator size="large" color={themeColors.primary} />
                 <Text style={{ marginTop: 10, color: themeColors.textSecondary, fontSize: 13 }}>Cargando movimientos...</Text>
               </View>
-            ) : filteredMovimientos.length === 0 ? (
+            ) : (
               <View style={{ padding: 30, backgroundColor: themeColors.backgroundElement, borderRadius: 12, alignItems: 'center', borderColor: themeColors.border, borderWidth: 1 }}>
                 <Ionicons name="cube-outline" size={40} color={themeColors.textSecondary} />
                 <Text style={{ color: themeColors.text, fontWeight: 'bold', fontSize: 15, marginTop: 10 }}>No se encontraron movimientos</Text>
@@ -2790,194 +3045,18 @@ export default function InventarioDashboard() {
                   No hay registros de inventario que coincidan con los filtros aplicados.
                 </Text>
               </View>
-            ) : (
-              <View style={{ gap: 12 }}>
-                {filteredMovimientos.map((m: any) => {
-                  const isEntrada = m.tipo === 'ENTRADA';
-                  const folioStr = m.id ? m.id.substring(0, 8).toUpperCase() : 'MOV';
-                  const dateStr = (m.fecha || m.created_at) ? new Date(m.fecha || m.created_at).toLocaleString('es-MX', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  }) : 'N/A';
-
-                  let subtipoBadgeBg = '#E5E7EB';
-                  let subtipoBadgeText = '#374151';
-                  if (m.subtipo === 'RETIRO') {
-                    subtipoBadgeBg = '#F3E8FF';
-                    subtipoBadgeText = '#7C3AED';
-                  } else if (m.subtipo === 'DEVOLUCIÓN') {
-                    subtipoBadgeBg = '#DBEAFE';
-                    subtipoBadgeText = '#2563EB';
-                  } else if (m.subtipo === 'COMPRA/FACTURA') {
-                    subtipoBadgeBg = '#DCFCE7';
-                    subtipoBadgeText = '#15803D';
-                  }
-
-                  const isSingleExporting = exportingSingleMovimientoId === m.id;
-
-                  return (
-                    <View
-                      key={m.id}
-                      style={{
-                        backgroundColor: themeColors.backgroundElement,
-                        borderRadius: 12,
-                        padding: 16,
-                        borderColor: themeColors.border,
-                        borderWidth: 1,
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 1 },
-                        shadowOpacity: 0.05,
-                        shadowRadius: 2,
-                        elevation: 1
-                      }}
-                    >
-                      {/* Fila Superior: Folio + Fecha + Tipo Badge + Subtipo Badge */}
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '800', color: themeColors.primary }}>#{folioStr}</Text>
-                          </View>
-                          <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>{dateStr}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                          <View style={{ backgroundColor: isEntrada ? '#10B98120' : '#EF444420', borderColor: isEntrada ? '#10B981' : '#EF4444', borderWidth: 1, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: isEntrada ? '#059669' : '#DC2626' }}>{m.tipo}</Text>
-                          </View>
-                          {Boolean(m.subtipo && m.subtipo !== m.tipo) ? (
-                            <View style={{ backgroundColor: subtipoBadgeBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: subtipoBadgeText }}>{m.subtipo}</Text>
-                            </View>
-                          ) : null}
-                          {Boolean(m.tipo_gasto) ? (
-                            <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '600', color: themeColors.primary }}>{m.tipo_gasto}</Text>
-                            </View>
-                          ) : null}
-                        </View>
-                      </View>
-
-                      {/* Fila del Producto o Desglose Multi-material */}
-                      {Array.isArray(m.materiales) && m.materiales.length > 1 ? (
-                        <View style={{ backgroundColor: themeColors.background, borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: themeColors.border }}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
-                              {m.subtipo === 'DEVOLUCIÓN' ? 'Materiales Devueltos' : 'Partidas Retiradas'} ({m.materiales.length}):
-                            </Text>
-                            <View style={{ backgroundColor: isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                              <Text style={{ fontSize: 12, fontWeight: '800', color: isEntrada ? '#059669' : '#DC2626' }}>
-                                Total: {isEntrada ? '+' : '-'}{m.cantidad} {m.producto_unidad || 'un.'}
-                              </Text>
-                            </View>
-                          </View>
-                          {m.materiales.map((mat: any, mIdx: number) => {
-                            const condTags = [];
-                            if (mat.devolver_nuevo > 0) condTags.push(`Nuevas: ${mat.devolver_nuevo}`);
-                            if (mat.devolver_usado > 0) condTags.push(`Usadas: ${mat.devolver_usado}`);
-                            if (mat.devolver_por_revisar > 0) condTags.push(`Dañadas: ${mat.devolver_por_revisar}`);
-                            const condStr = condTags.length > 0 ? ` (${condTags.join(', ')})` : '';
-
-                            return (
-                              <View key={mIdx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomWidth: mIdx === m.materiales.length - 1 ? 0 : 1, borderBottomColor: themeColors.border }}>
-                                <View style={{ flex: 1, paddingRight: 8 }}>
-                                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }} numberOfLines={1}>
-                                    {mat.nombre || 'Material'}{condStr}
-                                  </Text>
-                                  <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>SKU: {mat.sku || '-'}</Text>
-                                </View>
-                                <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                                  <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.primary }}>
-                                    {mat.cantidad} {mat.unidad || 'pza'}
-                                  </Text>
-                                </View>
-                              </View>
-                            );
-                          })}
-                        </View>
-                      ) : (
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, backgroundColor: themeColors.background, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
-                          <View style={{ flex: 1, paddingRight: 8 }}>
-                            <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.text }}>{m.producto_nombre || 'Producto'}</Text>
-                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>SKU: {m.producto_sku || '-'}</Text>
-                          </View>
-                          <View style={{ backgroundColor: isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
-                            <Text style={{ fontSize: 14, fontWeight: '800', color: isEntrada ? '#059669' : '#DC2626' }}>
-                              {isEntrada ? '+' : '-'}{m.cantidad} {m.producto_unidad || 'pza'}
-                            </Text>
-                          </View>
-                        </View>
-                      )}
-
-                      {/* Detalles: Responsable, Cliente, Concepto */}
-                      <View style={{ marginBottom: 10, gap: 4 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Ionicons name="person-circle-outline" size={16} color={themeColors.primary} />
-                          <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text }}>
-                            Responsable: <Text style={{ fontWeight: '400' }}>{m.usuario_nombre || m.empleado_nombre || 'Almacén'}</Text>
-                          </Text>
-                        </View>
-
-                        {m.cliente_nombre ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Ionicons name="location-outline" size={16} color={themeColors.textSecondary} />
-                            <Text style={{ fontSize: 12, color: themeColors.text }}>
-                              Cliente: <Text style={{ fontWeight: '600' }}>{m.cliente_nombre}</Text>
-                            </Text>
-                          </View>
-                        ) : null}
-
-                        {(m.detalle_motivo || m.folio_factura) ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Ionicons name="chatbubble-outline" size={16} color={themeColors.textSecondary} />
-                            <Text style={{ fontSize: 12, color: themeColors.text }}>
-                              Detalle: <Text style={{ fontStyle: 'italic', color: themeColors.textSecondary }}>{m.detalle_motivo || m.folio_factura}</Text>
-                            </Text>
-                          </View>
-                        ) : null}
-
-                        {m.proveedor_nombre ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Ionicons name="business-outline" size={16} color={themeColors.textSecondary} />
-                            <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Proveedor: {m.proveedor_nombre}</Text>
-                          </View>
-                        ) : null}
-                      </View>
-
-                      {/* Botón de Vale Individual */}
-                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 6, borderTopWidth: 1, borderTopColor: themeColors.border }}>
-                        <TouchableOpacity
-                          onPress={() => handleExportSingleMovimientoVale(m)}
-                          disabled={isSingleExporting}
-                          style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 6,
-                            backgroundColor: themeColors.background,
-                            borderColor: themeColors.border,
-                            borderWidth: 1,
-                            paddingHorizontal: 12,
-                            paddingVertical: 7,
-                            borderRadius: 6
-                          }}
-                        >
-                          {isSingleExporting ? (
-                            <ActivityIndicator size="small" color={themeColors.primary} />
-                          ) : (
-                            <Ionicons name="print-outline" size={15} color={themeColors.primary} />
-                          )}
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>Imprimir Vale (PDF)</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-          </ScrollView>
-        );
-      })()}
+            )
+          }
+          renderItem={({ item }) => (
+            <MovimientoCardItem
+              m={item}
+              themeColors={themeColors}
+              exportingSingleMovimientoId={exportingSingleMovimientoId}
+              onExportSingleVale={handleExportSingleMovimientoVale}
+            />
+          )}
+        />
+      )}
 
       {/* ========== MODAL CRUD MANUAL ========== */}
       <Modal statusBarTranslucent={true} animationType="fade"

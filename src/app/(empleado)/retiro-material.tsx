@@ -20,10 +20,12 @@ import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { AuthService, Usuario, CatalogoItem, SucursalCliente } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
+import SignatureCanvasModal from '@/components/SignatureCanvasModal';
 import { normalizeText } from '@/utils/helpers';
 
 interface Producto {
@@ -98,6 +100,8 @@ export default function RetiroMaterialScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cartModalVisible, setCartModalVisible] = useState(false);
   const [motivoRetiro, setMotivoRetiro] = useState('');
+  const [signatureModalVisible, setSignatureModalVisible] = useState(false);
+  const [pendingWithdrawPayload, setPendingWithdrawPayload] = useState<any>(null);
 
   // Catálogos
   const [clientes, setClientes] = useState<CatalogoItem[]>([]);
@@ -118,6 +122,7 @@ export default function RetiroMaterialScreen() {
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
 
   const [stateModalProduct, setStateModalProduct] = useState<Producto | null>(null);
+  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -161,12 +166,119 @@ export default function RetiroMaterialScreen() {
         if (catData.clientes) setClientes(catData.clientes);
         if (catData.sucursales) setSucursalesCliente(catData.sucursales);
       }
+
+      // Restaurar borrador del carrito si existe
+      try {
+        const draftKey = `retiro_material_draft_${user.id}`;
+        const draftRaw = await AsyncStorage.getItem(draftKey);
+        if (draftRaw) {
+          const draft = JSON.parse(draftRaw);
+          if (draft) {
+            if (Array.isArray(draft.cart) && draft.cart.length > 0) {
+              const syncedCart: CartItem[] = [];
+              for (const item of draft.cart) {
+                const freshProd = normalized.find((p: Producto) => p.id === item.producto.id);
+                if (freshProd) {
+                  const totalMax = getTotalStock(freshProd);
+                  if (totalMax > 0) {
+                    const qty = Math.min(Number(item.cantidad) || 0, totalMax);
+                    const sNuevo = getStockNuevo(freshProd);
+                    const sUsado = freshProd.stock_usado || 0;
+                    const sPorRev = freshProd.stock_por_revisar || 0;
+
+                    const qNuevo = typeof item.cantidad_nuevo === 'number' 
+                      ? Math.min(item.cantidad_nuevo, sNuevo) 
+                      : (item.cantidad_usado || item.cantidad_por_revisar ? 0 : qty);
+                    const qUsado = typeof item.cantidad_usado === 'number' 
+                      ? Math.min(item.cantidad_usado, sUsado) 
+                      : 0;
+                    const qPorRev = typeof item.cantidad_por_revisar === 'number' 
+                      ? Math.min(item.cantidad_por_revisar, sPorRev) 
+                      : 0;
+
+                    if (qty > 0) {
+                      syncedCart.push({
+                        producto: freshProd,
+                        cantidad: qty,
+                        cantidad_nuevo: qNuevo,
+                        cantidad_usado: qUsado,
+                        cantidad_por_revisar: qPorRev
+                      });
+                    }
+                  }
+                }
+              }
+              if (syncedCart.length > 0) {
+                setCart(syncedCart);
+              }
+            }
+            if (draft.motivoRetiro) setMotivoRetiro(draft.motivoRetiro);
+            if (draft.tipoGasto) setTipoGasto(draft.tipoGasto);
+            if (draft.detalleServicioProyecto) setDetalleServicioProyecto(draft.detalleServicioProyecto);
+            if (draft.selectedCliente) setSelectedCliente(draft.selectedCliente);
+            if (draft.selectedClienteId) setSelectedClienteId(draft.selectedClienteId);
+            if (draft.sucursal) setSucursal(draft.sucursal);
+            if (draft.selectedSucursalId) setSelectedSucursalId(draft.selectedSucursalId);
+          }
+        }
+      } catch (draftErr) {
+        console.warn('Error al restaurar borrador de carrito:', draftErr);
+      } finally {
+        setIsDraftLoaded(true);
+      }
     } catch (err) {
       console.error('Error loading products & catalogs:', err);
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Guardar borrador automáticamente cuando cambien los materiales o datos del formulario
+  useEffect(() => {
+    if (!isDraftLoaded || !currentUser?.id) return;
+
+    const saveDraft = async () => {
+      try {
+        const draftKey = `retiro_material_draft_${currentUser.id}`;
+        const hasData = cart.length > 0 || 
+          motivoRetiro.trim() !== '' || 
+          detalleServicioProyecto.trim() !== '' || 
+          selectedCliente.trim() !== '';
+
+        if (hasData) {
+          const draft = {
+            cart,
+            motivoRetiro,
+            tipoGasto,
+            detalleServicioProyecto,
+            selectedCliente,
+            selectedClienteId,
+            sucursal,
+            selectedSucursalId,
+            updatedAt: Date.now()
+          };
+          await AsyncStorage.setItem(draftKey, JSON.stringify(draft));
+        } else {
+          await AsyncStorage.removeItem(draftKey);
+        }
+      } catch (err) {
+        console.warn('Error al guardar borrador de carrito:', err);
+      }
+    };
+
+    saveDraft();
+  }, [
+    cart, 
+    motivoRetiro, 
+    tipoGasto, 
+    detalleServicioProyecto, 
+    selectedCliente, 
+    selectedClienteId, 
+    sucursal, 
+    selectedSucursalId, 
+    isDraftLoaded, 
+    currentUser?.id
+  ]);
 
   const normQuery = normalizeText(searchQuery);
   const filteredProductos = productos.filter(p => 
@@ -329,22 +441,41 @@ export default function RetiroMaterialScreen() {
 
     if (!currentUser) return;
 
+    setPendingWithdrawPayload({
+      cart: validCart,
+      motivoRetiro: motivoRetiro.trim(),
+      currentUser,
+      tipoGasto,
+      detalleServicioProyecto: detalleServicioProyecto.trim(),
+      clienteId: selectedClienteId,
+      clienteNombre: selectedCliente,
+      sucursalId: selectedSucursalId,
+      sucursalNombre: sucursal
+    });
+
+    // Cerrar el modal del carrito para permitir que se despliegue el modal de firma
+    setCartModalVisible(false);
+    setTimeout(() => {
+      setSignatureModalVisible(true);
+    }, 150);
+  };
+
+  const handleProcessSignedRetiro = async (signatureBase64: string) => {
+    if (!pendingWithdrawPayload || !currentUser) return;
+
     setIsSubmitting(true);
     try {
       const headers = await getApiHeaders();
+      const deviceInfo = `${Platform.OS} ${Platform.Version ? `v${Platform.Version}` : ''} ${typeof navigator !== 'undefined' ? navigator.userAgent : ''}`.trim();
+
       const res = await fetch(`${getApiUrl()}/api/retiro-material/confirmar`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          cart: validCart,
-          motivoRetiro: motivoRetiro.trim(),
-          currentUser,
-          tipoGasto,
-          detalleServicioProyecto: detalleServicioProyecto.trim(),
-          clienteId: selectedClienteId,
-          clienteNombre: selectedCliente,
-          sucursalId: selectedSucursalId,
-          sucursalNombre: sucursal
+          ...pendingWithdrawPayload,
+          firmaBase64: signatureBase64,
+          dispositivoInfo: deviceInfo,
+          responsivaAceptada: true
         })
       });
 
@@ -353,7 +484,8 @@ export default function RetiroMaterialScreen() {
         throw new Error(errorText || 'Error al procesar el retiro en el servidor');
       }
 
-      Alert.alert('Éxito', 'Material retirado correctamente.');
+      setSignatureModalVisible(false);
+      setPendingWithdrawPayload(null);
       setCart([]);
       setMotivoRetiro('');
       setDetalleServicioProyecto('');
@@ -361,14 +493,47 @@ export default function RetiroMaterialScreen() {
       setSelectedClienteId(null);
       setSucursal('');
       setSelectedSucursalId(null);
+      if (currentUser?.id) {
+        await AsyncStorage.removeItem(`retiro_material_draft_${currentUser.id}`).catch(() => {});
+      }
       setCartModalVisible(false);
-      await loadData(); // recargar para actualizar stock en ui
+      await loadData();
+      Alert.alert(
+        'Retiro y Responsiva Firmada',
+        'El material ha sido retirado con éxito y la carta responsiva quedó formalmente firmada.'
+      );
     } catch (err: any) {
       console.error(err);
       Alert.alert('Error', err.message || 'No se pudo registrar el retiro.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleClearCart = () => {
+    Alert.alert(
+      'Vaciar Carrito',
+      '¿Estás seguro de que deseas eliminar todos los productos seleccionados y reiniciar el formulario?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Vaciar',
+          style: 'destructive',
+          onPress: async () => {
+            setCart([]);
+            setMotivoRetiro('');
+            setDetalleServicioProyecto('');
+            setSelectedCliente('');
+            setSelectedClienteId(null);
+            setSucursal('');
+            setSelectedSucursalId(null);
+            if (currentUser?.id) {
+              await AsyncStorage.removeItem(`retiro_material_draft_${currentUser.id}`).catch(() => {});
+            }
+          }
+        }
+      ]
+    );
   };
 
   const totalItems = cart.reduce((sum, item) => sum + (typeof item.cantidad === 'number' ? item.cantidad : 0), 0);
@@ -622,13 +787,23 @@ export default function RetiroMaterialScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
-              <View>
+              <View style={{ flex: 1, paddingRight: 8 }}>
                 <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text }}>Confirmar Retiro de Material</Text>
                 <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>Verifica materiales y datos de asignación</Text>
               </View>
-              <TouchableOpacity onPress={() => setCartModalVisible(false)} style={{ padding: 4 }}>
-                <Ionicons name="close" size={24} color={themeColors.text} />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                {cart.length > 0 && (
+                  <TouchableOpacity
+                    onPress={handleClearCart}
+                    style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: themeColors.danger + '15' }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.danger }}>Vaciar</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity onPress={() => setCartModalVisible(false)} style={{ padding: 4 }}>
+                  <Ionicons name="close" size={24} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
             </View>
             
             <ScrollView style={{ padding: Spacing.three }} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
@@ -970,7 +1145,8 @@ export default function RetiroMaterialScreen() {
                 style={{ flex: 1, marginRight: Spacing.one }}
               />
               <CustomButton
-                title="Confirmar Retiro"
+                title="Firmar y Retirar Material"
+                icon="create-outline"
                 variant="primary"
                 onPress={handleConfirmarRetiro}
                 loading={isSubmitting}
@@ -1153,6 +1329,18 @@ export default function RetiroMaterialScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* MODAL DE FIRMA DIGITAL Y RESPONSIVA */}
+      <SignatureCanvasModal
+        visible={signatureModalVisible}
+        onClose={() => {
+          setSignatureModalVisible(false);
+          setCartModalVisible(true);
+        }}
+        onConfirm={handleProcessSignedRetiro}
+        titulo="Firma de Carta Responsiva y Retiro"
+        subtitulo="Compromiso de custodia: Al firmar, manifiesto recibir los materiales en buen estado y asumo la responsabilidad de su resguardo, uso debido y devolución conforme a las políticas de la empresa."
+      />
 
     </SafeAreaView>
   );

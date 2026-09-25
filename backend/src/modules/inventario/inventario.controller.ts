@@ -665,18 +665,17 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
     const [movsRes, retirosRes, devsRes, usersRes, provsRes] = await Promise.all([
       client
         .from('movimientos_inventario')
-        .select('id, producto_id, tipo, cantidad, fecha, folio_factura, proveedor_id, creado_por, producto:productos(id, nombre_oficial, sku_interno, unidad, precio_unitario)')
+        .select('id, producto_id, tipo, cantidad, fecha, folio_factura, proveedor_id, creado_por, firma_base64, producto:productos(id, nombre_oficial, sku_interno, unidad, precio_unitario)')
         .order('fecha', { ascending: false })
-        .limit(500),
+        .limit(1000),
       client
         .from('retiros_material')
-        .select('*')
+        .select('id, empleado_id, empleado_nombre, motivo, tipo_gasto, cliente_nombre, sucursal_nombre, is_split, proveedor_id, proveedor, materiales, created_at, responsiva_aceptada, firmado_en, dispositivo_info, firma_base64')
         .order('created_at', { ascending: false })
         .limit(200),
       client
         .from('devoluciones_empleado')
         .select('*')
-        .eq('estado', 'APROBADO')
         .order('created_at', { ascending: false })
         .limit(200),
       client
@@ -697,12 +696,12 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
       const mats = Array.isArray(r.materiales) ? r.materiales : [];
       const totalQty = mats.reduce((s: number, m: any) => s + (Number(m.cantidad) || 0), 0);
       const clientLabel = r.is_split ? 'Varios clientes' : (r.cliente_nombre ? (r.cliente_nombre + (r.sucursal_nombre ? ' - ' + r.sucursal_nombre : '')) : '');
-      const fullFolio = `RETIRO: ${(r.motivo || '').trim()}${r.tipo_gasto ? ` [${r.tipo_gasto}]` : ''}${clientLabel ? ` (${clientLabel})` : ''}`;
+      const fullFolio = `SALIDA: ${(r.motivo || '').trim()}${r.tipo_gasto ? ` [${r.tipo_gasto}]` : ''}${clientLabel ? ` (${clientLabel})` : ''}`;
       
       return {
         id: r.id,
         tipo: 'SALIDA',
-        subtipo: 'RETIRO',
+        subtipo: 'SALIDA',
         cantidad: totalQty,
         fecha: r.created_at,
         folio_factura: fullFolio,
@@ -721,24 +720,33 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
         producto_sku: mats.length === 1 ? (mats[0].sku || '-') : `${mats.length} partidas`,
         producto_unidad: mats.length === 1 ? (mats[0].unidad || 'pza') : 'pzas',
         precio_unitario: 0,
-        materiales: mats
+        materiales: mats,
+        tiene_firma: Boolean(r.firma_base64),
+        firma_base64: null,
+        responsiva_aceptada: r.responsiva_aceptada !== false,
+        firmado_en: r.firmado_en || r.created_at,
+        dispositivo_info: r.dispositivo_info || null
       };
     });
 
     // 2. Mapear devoluciones estructuradas desde devoluciones_empleado (englobando todas sus partidas devueltas)
-    const structuredDevs = (devsRes.data || []).map((d: any) => {
+    const structuredDevs: any[] = [];
+    (devsRes.data || []).forEach((d: any) => {
       let rawMats: any[] = [];
       try {
         rawMats = typeof d.materiales === 'string' ? JSON.parse(d.materiales) : (d.materiales || []);
       } catch (_) {
         rawMats = [];
       }
-      const mats = rawMats.filter((m: any) => (Number(m.devolver) || 0) > 0);
-      const totalQty = mats.reduce((s: number, m: any) => s + (Number(m.devolver) || 0), 0);
-      const shortId = d.id ? d.id.substring(0, 8) : 'DEV';
-      const fullFolio = `DEVOLUCIÓN #${shortId}`;
+      const mats = rawMats.filter((m: any) => (Number(m.devolver) || Number(m.cantidad) || 0) > 0);
+      const totalQty = mats.reduce((s: number, m: any) => s + (Number(m.devolver) || Number(m.cantidad) || 0), 0);
+      if (totalQty <= 0) return;
 
-      return {
+      const shortId = d.id ? d.id.substring(0, 8).toUpperCase() : 'DEV';
+      const cleanObs = (d.observaciones || '').replace(/^DEVOLUCI[OÓ]N:\s*/i, '').trim();
+      const fullFolio = `DEVOLUCIÓN #${shortId}${cleanObs ? ': ' + cleanObs : ''}`;
+
+      structuredDevs.push({
         id: d.id,
         tipo: 'ENTRADA',
         subtipo: 'DEVOLUCIÓN',
@@ -746,7 +754,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
         fecha: d.updated_at || d.created_at,
         folio_factura: fullFolio,
         detalle_motivo: d.observaciones || fullFolio,
-        motivo: d.observaciones || 'Devolución de material',
+        motivo: cleanObs || 'Devolución de material',
         cliente_nombre: '',
         sucursal_nombre: '',
         tipo_gasto: '',
@@ -763,33 +771,39 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
           producto_id: m.productoId || m.producto_id,
           sku: m.sku || '-',
           nombre: m.nombre || 'Material',
-          cantidad: Number(m.devolver) || 0,
+          cantidad: Number(m.devolver) || Number(m.cantidad) || 0,
           unidad: m.unidad || 'pza',
           devolver_nuevo: Number(m.devolver_nuevo) || 0,
           devolver_usado: Number(m.devolver_usado) || 0,
           devolver_por_revisar: Number(m.devolver_por_revisar) || 0
         }))
-      };
+      });
     });
 
     // 3. Mapear movimientos de inventario individuales y agrupar registros legados
     const otherMovs: any[] = [];
     const legacyRetirosMap = new Map<string, any>();
     const legacyDevsMap = new Map<string, any>();
+    const legacyConsumosMap = new Map<string, any>();
 
     (movsRes.data || []).forEach((m: any) => {
       const prod = Array.isArray(m.producto) ? m.producto[0] : (m.producto || {});
-      const folio = m.folio_factura || '';
+      const folio = (m.folio_factura || '').trim();
+      const mTime = new Date(m.fecha).getTime();
 
-      if (folio.startsWith('RETIRO:')) {
-        const mTime = new Date(m.fecha).getTime();
+      const isRetiro = /^RETIRO:/i.test(folio);
+      const isDevolucion = /devoluci[oó]n/i.test(folio);
+      const isGasto = /^(GASTO MATERIAL:|CONSUMO:|GASTO:)/i.test(folio);
+
+      if (isRetiro) {
         const alreadyInStructured = structuredRetiros.some((st: any) => {
           const stTime = new Date(st.fecha).getTime();
-          return (st.usuario_id === m.creado_por || st.usuario_nombre === userMap.get(m.creado_por)) && Math.abs(stTime - mTime) < 60000;
+          return (st.usuario_id === m.creado_por || st.usuario_nombre === userMap.get(m.creado_por)) && Math.abs(stTime - mTime) < 180000;
         });
 
         if (!alreadyInStructured) {
-          const groupKey = `${m.creado_por}_${folio}_${Math.floor(mTime / 60000)}`;
+          const cleanKey = folio.replace(/[^a-zA-Z0-9]/g, '').substring(0, 25);
+          const groupKey = `${m.creado_por}_${cleanKey}_${Math.floor(mTime / 180000)}`;
           if (!legacyRetirosMap.has(groupKey)) {
             let tipoGasto = '';
             const tipoMatch = folio.match(/\[(Servicio|Proyecto|Venta|Operativo)\]/i);
@@ -802,7 +816,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
             legacyRetirosMap.set(groupKey, {
               id: m.id,
               tipo: 'SALIDA',
-              subtipo: 'RETIRO',
+              subtipo: 'SALIDA',
               cantidad: 0,
               fecha: m.fecha,
               folio_factura: folio,
@@ -838,19 +852,21 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
             leg.producto_sku = `${leg.materiales.length} partidas`;
           }
         }
-      } else if (folio.startsWith('DEVOLUCIÓN')) {
-        const mTime = new Date(m.fecha).getTime();
+      } else if (isDevolucion) {
         // Verificar si este movimiento ya está representado en structuredDevs
         const alreadyInStructuredDev = structuredDevs.some((sd: any) => {
           const sdIdShort = sd.id ? sd.id.substring(0, 8).toLowerCase() : '';
-          const matchFolioId = sdIdShort && folio.toLowerCase().includes(sdIdShort);
+          const matchFolioId = Boolean(sdIdShort && folio.toLowerCase().includes(sdIdShort));
           const sdTime = new Date(sd.fecha).getTime();
-          return matchFolioId || ((sd.usuario_id === m.creado_por || sd.usuario_nombre === userMap.get(m.creado_por)) && Math.abs(sdTime - mTime) < 60000);
+          const matchTimeAndUser = (sd.usuario_id === m.creado_por || sd.usuario_nombre === userMap.get(m.creado_por)) && Math.abs(sdTime - mTime) < 300000;
+          return matchFolioId || matchTimeAndUser;
         });
 
         if (!alreadyInStructuredDev) {
-          const groupKey = `${m.creado_por}_${folio.substring(0, 20)}_${Math.floor(mTime / 60000)}`;
+          const cleanKey = folio.replace(/[^a-zA-Z0-9]/g, '').substring(0, 25);
+          const groupKey = `${m.creado_por}_${cleanKey}_${Math.floor(mTime / 300000)}`;
           if (!legacyDevsMap.has(groupKey)) {
+            const cleanObs = folio.replace(/^DEVOLUCI[OÓ]N:\s*/i, '').trim();
             legacyDevsMap.set(groupKey, {
               id: m.id,
               tipo: 'ENTRADA',
@@ -859,7 +875,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
               fecha: m.fecha,
               folio_factura: folio,
               detalle_motivo: folio,
-              motivo: 'Devolución de material',
+              motivo: cleanObs || 'Devolución de material',
               cliente_nombre: '',
               sucursal_nombre: '',
               tipo_gasto: '',
@@ -890,15 +906,71 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
             legDev.producto_sku = `${legDev.materiales.length} partidas`;
           }
         }
+      } else if (isGasto) {
+        const cleanKey = folio.replace(/[^a-zA-Z0-9]/g, '').substring(0, 25);
+        const groupKey = `${m.creado_por}_${cleanKey}_${Math.floor(mTime / 180000)}`;
+        if (!legacyConsumosMap.has(groupKey)) {
+          let tipoGasto = '';
+          const tipoMatch = folio.match(/\[(Servicio|Proyecto|Venta|Operativo)\]/i);
+          if (tipoMatch) tipoGasto = tipoMatch[1];
+          let clienteNombre = '';
+          const clientMatch = folio.match(/\((.*?)\)/);
+          if (clientMatch) clienteNombre = clientMatch[1];
+          const detalle = folio.replace(/^(GASTO MATERIAL:|CONSUMO:|GASTO:)\s*/i, '').replace(/\[(Servicio|Proyecto|Venta|Operativo)\]/gi, '').replace(/\(.*?\)/g, '').trim();
+
+          legacyConsumosMap.set(groupKey, {
+            id: m.id,
+            tipo: 'GASTO',
+            subtipo: 'GASTO',
+            cantidad: 0,
+            fecha: m.fecha,
+            folio_factura: folio,
+            detalle_motivo: detalle || folio,
+            motivo: detalle,
+            cliente_nombre: clienteNombre,
+            sucursal_nombre: '',
+            tipo_gasto: tipoGasto || 'Servicio',
+            proveedor_id: m.proveedor_id,
+            proveedor_nombre: '',
+            usuario_id: m.creado_por,
+            usuario_nombre: userMap.get(m.creado_por) || 'Empleado',
+            producto_id: m.producto_id,
+            producto_nombre: prod.nombre_oficial || 'Producto',
+            producto_sku: prod.sku_interno || '-',
+            producto_unidad: prod.unidad || 'pza',
+            precio_unitario: prod.precio_unitario || 0,
+            materiales: []
+          });
+        }
+
+        const legCon = legacyConsumosMap.get(groupKey);
+        legCon.cantidad = Math.round((legCon.cantidad + (Number(m.cantidad) || 0)) * 100) / 100;
+        legCon.materiales.push({
+          producto_id: m.producto_id,
+          sku: prod.sku_interno || '-',
+          nombre: prod.nombre_oficial || 'Producto',
+          cantidad: Number(m.cantidad) || 0,
+          unidad: prod.unidad || 'pza'
+        });
+        if (legCon.materiales.length > 1) {
+          legCon.producto_nombre = `${legCon.materiales.length} materiales: ${legCon.materiales.map((x: any) => x.nombre).join(', ')}`;
+          legCon.producto_sku = `${legCon.materiales.length} partidas`;
+        }
       } else {
         let subtipo = m.tipo;
-        if (folio.startsWith('IMPORTACIÓN') || folio.startsWith('FACTURA') || m.proveedor_id) subtipo = 'COMPRA/FACTURA';
-        else if (folio.startsWith('CONSUMO')) subtipo = 'CONSUMO';
-        else if (folio.startsWith('ALTA DE PRODUCTO')) subtipo = 'ENTRADA';
+        let tipoDisplay = m.tipo;
+        if (folio.startsWith('IMPORTACIÓN') || folio.startsWith('FACTURA') || m.proveedor_id) {
+          subtipo = 'COMPRA/FACTURA';
+        } else if (folio.startsWith('CONSUMO') || folio.startsWith('GASTO') || /gasto/i.test(folio)) {
+          subtipo = 'GASTO';
+          tipoDisplay = 'GASTO';
+        } else if (folio.startsWith('ALTA DE PRODUCTO')) {
+          subtipo = 'ENTRADA';
+        }
 
         otherMovs.push({
           id: m.id,
-          tipo: m.tipo,
+          tipo: tipoDisplay,
           subtipo,
           cantidad: Number(m.cantidad) || 0,
           fecha: m.fecha,
@@ -915,6 +987,8 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
           producto_sku: prod.sku_interno || '-',
           producto_unidad: prod.unidad || 'pza',
           precio_unitario: prod.precio_unitario || 0,
+          tiene_firma: Boolean(m.firma_base64),
+          firma_base64: null,
           materiales: [{
             producto_id: m.producto_id,
             sku: prod.sku_interno || '-',
@@ -931,9 +1005,16 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
       ...Array.from(legacyRetirosMap.values()), 
       ...structuredDevs, 
       ...Array.from(legacyDevsMap.values()), 
+      ...Array.from(legacyConsumosMap.values()),
       ...otherMovs
     ];
-    allMovs.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+
+    // Ordenar cronológicamente del más reciente al más antiguo
+    allMovs.sort((a, b) => {
+      const timeA = a.fecha ? new Date(a.fecha).getTime() : 0;
+      const timeB = b.fecha ? new Date(b.fecha).getTime() : 0;
+      return timeB - timeA;
+    });
 
     return res.json({ movimientos: allMovs, retiros: allMovs });
   } catch (error: any) {
@@ -941,3 +1022,43 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+export const getFirmaMovimiento = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+    const { id } = req.params;
+
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+
+    // 1. Buscar en retiros_material
+    const { data: retiro } = await client
+      .from('retiros_material')
+      .select('firma_base64')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (retiro?.firma_base64) {
+      return res.json({ firma_base64: retiro.firma_base64 });
+    }
+
+    // 2. Buscar en movimientos_inventario
+    const { data: mov } = await client
+      .from('movimientos_inventario')
+      .select('firma_base64')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (mov?.firma_base64) {
+      return res.json({ firma_base64: mov.firma_base64 });
+    }
+
+    return res.json({ firma_base64: null });
+  } catch (error: any) {
+    console.error('Error en getFirmaMovimiento:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+

@@ -18,6 +18,7 @@ interface SignatureCanvasModalProps {
   onClose: () => void;
   onConfirm: (signatureBase64: string) => void;
   titulo?: string;
+  subtitulo?: string;
 }
 
 interface Point {
@@ -40,6 +41,7 @@ export default function SignatureCanvasModal({
   onClose,
   onConfirm,
   titulo = 'Firma Autógrafa Digital',
+  subtitulo,
 }: SignatureCanvasModalProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
@@ -198,6 +200,14 @@ export default function SignatureCanvasModal({
               <Ionicons name="close-outline" size={24} color={themeColors.textSecondary} />
             </TouchableOpacity>
           </View>
+
+          {subtitulo ? (
+            <View style={{ backgroundColor: themeColors.primary + '15', padding: 10, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: themeColors.primary + '30' }}>
+              <Text style={{ fontSize: 12, color: themeColors.text, lineHeight: 17 }}>
+                {subtitulo}
+              </Text>
+            </View>
+          ) : null}
 
           <Text style={[styles.instructions, { color: themeColors.textSecondary }]}>
             Dibuja tu firma completa con el dedo o mouse sobre el espacio blanco libre:
