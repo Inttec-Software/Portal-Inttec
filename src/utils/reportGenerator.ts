@@ -3337,9 +3337,18 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
     '32690'
   );
 
-  const clientAddressStreet = facturaData?.customer?.address?.street || venta?.cliente_direccion || '';
-  const clientAddressExterior = facturaData?.customer?.address?.exterior || '';
-  const clientAddressCity = facturaData?.customer?.address?.city || '';
+  const clientAddressStreet = (
+    facturaData?.customer?.address?.street || 
+    facturaData?.customer?.address?.calle || 
+    facturaData?.receiver?.address?.street || 
+    facturaData?.receiver?.address?.calle || 
+    facturaData?.address?.street || 
+    venta?.cliente_direccion || 
+    venta?.direccion || 
+    ''
+  ).trim();
+  const clientAddressExterior = (facturaData?.customer?.address?.exterior || '').trim();
+  const clientAddressCity = (facturaData?.customer?.address?.city || '').trim();
   const clientAddressStr = [clientAddressStreet, clientAddressExterior, clientAddressCity].filter(Boolean).join(', ');
 
   // Detalles comerciales
@@ -3420,7 +3429,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           top: 0;
           left: 0;
           right: 0;
-          height: 125px;
+          height: 160px;
           z-index: 1;
           pointer-events: none;
           overflow: hidden;
@@ -3432,12 +3441,15 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          padding: 26px 45px 0 45px;
+          padding: 15px 45px 0 45px;
         }
         .company-logo {
-          max-height: 70px;
-          max-width: 320px;
-          object-fit: contain;
+          max-height: 150px;
+          height: 170px;
+          width: 450px;
+          margin-top: -10px;
+          position: relative;
+          z-index: 10;
         }
         .company-header-info {
           text-align: right;
@@ -3749,18 +3761,18 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
       <div class="page-container">
         <!-- Top wave banner -->
         <div class="top-banner">
-          <svg viewBox="0 0 1000 125" preserveAspectRatio="none" style="width: 100%; height: 125px; display: block;">
-            <path d="M 0,0 L 1000,0 L 1000,105 C 800,128, 480,135, 0,115 Z" fill="#F0EFEA" />
+          <svg viewBox="0 0 1000 160" preserveAspectRatio="none" style="width: 100%; height: 160px; display: block;">
+            <path d="M 0,0 L 1000,0 L 1000,135 C 800,165, 480,170, 0,150 Z" fill="#F0EFEA" />
           </svg>
         </div>
 
         <!-- Header Content -->
         <div class="header-content">
-          <div>
-            <img src="${branding.logo}" alt="Logo" class="company-logo" />
+          <div style="width: 50%;">
+            <img src="${branding.logo}" alt="Logo" class="company-logo" style="max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;" />
           </div>
-          <div class="company-header-info">
-            <div class="brand-title">INTTEC</div>
+          <div class="company-header-info" style="width: 50%;">
+            <div class="brand-title">${branding.name}</div>
             <div>Ozorno 811</div>
             <div>31107 Chihuahua, CHH</div>
             <div>México</div>
@@ -3786,7 +3798,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
                 <div class="client-name">${clientName}</div>
                 <div><strong>RFC:</strong> ${clientRfc}</div>
                 <div><strong>Regimen Fiscal:</strong> ${clientRegimen}</div>
-                <div>${clientAddressStr ? clientAddressStr + ', ' : ', , '}CP: ${clientCp}</div>
+                <div>${clientAddressStr ? `${clientAddressStr}, ` : ''}CP: ${clientCp}</div>
               </div>
             </div>
 

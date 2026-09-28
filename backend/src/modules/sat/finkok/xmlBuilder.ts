@@ -79,7 +79,9 @@ export async function buildUnsignedCFDI(ventaData: any, clienteData: any, partid
       ClaveProdServ: p.clave_sat || p.clave_prod_serv || '01010101',
       ClaveUnidad: p.clave_unidad || p.unidad_sat || 'H87',
       Unidad: p.unidad || 'Pieza',
-      Descripcion: p.descripcion || p.nombre_producto || 'Producto / Servicio',
+      Descripcion: p.descripcion_detallada && String(p.descripcion_detallada).trim()
+        ? `${String(p.descripcion || p.nombre_producto || 'Producto / Servicio').trim()} - ${String(p.descripcion_detallada).trim()}`
+        : (p.descripcion || p.nombre_producto || 'Producto / Servicio'),
       NoIdentificacion: p.sku || p.id ? String(p.sku || p.id) : undefined,
       Cantidad: cantidad,
       ValorUnitario: precio,

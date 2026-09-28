@@ -423,6 +423,8 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
     const ivaFinal = Math.round(subtotalFinal * 0.16 * 100) / 100;
     const totalFinal = Math.round((subtotalFinal + ivaFinal) * 100) / 100;
 
+    const etiquetaVal = effectiveCondiciones.etiqueta || body.etiqueta || existingFactura?.etiqueta || null;
+
     // Guardar en tabla independiente facturas_emitidas
     const facturaPayload: any = {
       serie: serieFinal,
@@ -446,6 +448,7 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       cfdi_xml_url: xmlUrl || xmlFileName,
       fecha_emision: new Date().toISOString(),
       orden_compra: effectiveCondiciones.orden_compra || venta.orden_compra || null,
+      etiqueta: etiquetaVal ? String(etiquetaVal).trim() : null,
       venta_id: actualVentaId || null
     };
 
@@ -474,6 +477,7 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       const factPartidas = partidas.map((p: any) => ({
         factura_id: targetFacturaId,
         descripcion: p.descripcion || 'Concepto',
+        descripcion_detallada: p.descripcion_detallada ? String(p.descripcion_detallada).trim() : null,
         cantidad: parseFloat(p.cantidad) || 1,
         precio_unitario: parseFloat(p.precio_unitario_venta || p.precio_unitario || 0),
         importe: (parseFloat(p.cantidad) || 1) * parseFloat(p.precio_unitario_venta || p.precio_unitario || 0),
@@ -482,7 +486,17 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
         unidad: p.unidad || 'Pieza',
         objeto_imp: p.objeto_imp || '02'
       }));
-      await supabaseClient.from('facturas_emitidas_partidas').insert(factPartidas);
+
+      try {
+        const { error: insErr } = await supabaseClient.from('facturas_emitidas_partidas').insert(factPartidas);
+        if (insErr) {
+          console.warn("Aviso insertando factPartidas con descripcion_detallada, reintentando sin columna:", insErr.message);
+          const fallbackParts = factPartidas.map(({ descripcion_detallada, ...rest }: any) => rest);
+          await supabaseClient.from('facturas_emitidas_partidas').insert(fallbackParts);
+        }
+      } catch (insEx) {
+        console.warn("Excepción insertando factPartidas:", insEx);
+      }
     }
 
     // Si provenía de una venta operativa en ventas.tsx, actualizar la venta para vincularla sin duplicar
@@ -497,6 +511,26 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
           cfdi_folio: folioFinal,
         })
         .eq('id', actualVentaId);
+    }
+
+    // Actualizar datos fiscales (régimen fiscal y dirección) en la tabla clientes
+    const receptorRfc = (cliente.rfc || '').toUpperCase().trim();
+    if (receptorRfc && receptorRfc !== 'XAXX010101000' && receptorRfc !== 'XEXX010101000') {
+      try {
+        const clientUpd: any = {};
+        if (cliente.regimen_fiscal) clientUpd.regimen_fiscal = cliente.regimen_fiscal;
+        if (cliente.direccion) clientUpd.direccion = String(cliente.direccion).trim();
+
+        if (Object.keys(clientUpd).length > 0) {
+          if (cliente.id) {
+            await supabaseClient.from('clientes').update(clientUpd).eq('id', cliente.id);
+          } else {
+            await supabaseClient.from('clientes').update(clientUpd).eq('rfc', receptorRfc);
+          }
+        }
+      } catch (cUpdErr) {
+        console.warn('Aviso al actualizar régimen del cliente en BDD tras timbrado:', cUpdErr);
+      }
     }
 
     try {
@@ -575,7 +609,7 @@ router.get('/clientes-search', async (req: Request, res: Response) => {
 
     let query = supabaseClient
       .from('clientes')
-      .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi');
+      .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi, direccion');
 
     if (q) {
       query = query.or(`razon_social.ilike.%${q}%,nombre.ilike.%${q}%,rfc.ilike.%${q}%`);
@@ -659,6 +693,7 @@ router.post('/borrador', async (req: Request, res: Response) => {
 
         return {
           descripcion: String(p.descripcion || 'Concepto').trim(),
+          descripcion_detallada: p.descripcion_detallada ? String(p.descripcion_detallada).trim() : null,
           cantidad: cant,
           precio_unitario_venta: precioUnit,
           precio_total_venta: importe,
@@ -678,6 +713,9 @@ router.post('/borrador', async (req: Request, res: Response) => {
       const subtotalCalc = Math.round((totalFacturado / 1.16) * 100) / 100;
       const ivaCalc = Math.round((totalFacturado - subtotalCalc) * 100) / 100;
 
+      const receptorDireccion = body.cliente_direccion || receptor.direccion || body.direccion || '';
+      const etiquetaFinal = body.etiqueta ? String(body.etiqueta).trim() : (body.config?.etiqueta ? String(body.config.etiqueta).trim() : null);
+
       const draftMetadata = {
         receptor: {
           nombre: receptor.nombre || clienteNombre,
@@ -685,7 +723,8 @@ router.post('/borrador', async (req: Request, res: Response) => {
           rfc: receptorRfc,
           codigo_postal: receptorCp,
           regimen_fiscal: receptorRegimen,
-          uso_cfdi: receptorUso
+          uso_cfdi: receptorUso,
+          direccion: receptorDireccion
         },
         config: {
           serie: serieFinal,
@@ -694,8 +733,10 @@ router.post('/borrador', async (req: Request, res: Response) => {
           metodo_pago: body.metodo_pago || body.metodo_pago_cfdi || 'PUE',
           moneda: body.moneda || 'MXN',
           tipo_comprobante: body.tipo_comprobante || 'I',
-          orden_compra: body.orden_compra || null
+          orden_compra: body.orden_compra || null,
+          etiqueta: etiquetaFinal
         },
+        partidas: sanitizedPartidas,
         user_notas: body.notas || null
       };
 
@@ -718,6 +759,7 @@ router.post('/borrador', async (req: Request, res: Response) => {
         estado_pago: 'PENDIENTE DE PAGO',
         cfdi_estado: 'BORRADOR',
         orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
+        etiqueta: etiquetaFinal,
         notas: draftMetadata,
         fecha_emision: body.fecha || new Date().toISOString()
       };
@@ -733,12 +775,28 @@ router.post('/borrador', async (req: Request, res: Response) => {
       }
 
       const facturaId = createdFactura.id;
+
+      // Actualizar régimen fiscal (y dirección si viene) en la tabla clientes
+      if (receptorRfc && receptorRfc !== 'XAXX010101000' && receptorRfc !== 'XEXX010101000') {
+        try {
+          const clientUpd: any = { regimen_fiscal: receptorRegimen };
+          if (receptorDireccion) clientUpd.direccion = String(receptorDireccion).trim();
+          if (body.cliente_id) {
+            await supabaseClient.from('clientes').update(clientUpd).eq('id', body.cliente_id);
+          } else {
+            await supabaseClient.from('clientes').update(clientUpd).eq('rfc', receptorRfc);
+          }
+        } catch (cErr) {
+          console.warn("Aviso al actualizar régimen en clientes (borrador):", cErr);
+        }
+      }
       let insertedPartidas: any[] = [];
 
       if (sanitizedPartidas.length > 0) {
         const partidasToInsert = sanitizedPartidas.map((p: any) => ({
           factura_id: facturaId,
           descripcion: p.descripcion,
+          descripcion_detallada: p.descripcion_detallada || null,
           cantidad: p.cantidad,
           precio_unitario: p.precio_unitario_venta,
           importe: p.precio_total_venta,
@@ -755,7 +813,10 @@ router.post('/borrador', async (req: Request, res: Response) => {
             .select();
 
           if (pErr) {
-            console.warn("Aviso insertando partidas de borrador en facturas_emitidas_partidas:", pErr);
+            console.warn("Aviso insertando partidas con descripcion_detallada, reintentando sin columna:", pErr.message);
+            const fallbackParts = partidasToInsert.map(({ descripcion_detallada, ...rest }: any) => rest);
+            const { data: fbData } = await supabaseClient.from('facturas_emitidas_partidas').insert(fallbackParts).select();
+            insertedPartidas = fbData || fallbackParts;
           } else {
             insertedPartidas = pData || partidasToInsert;
           }
@@ -781,6 +842,7 @@ router.post('/borrador', async (req: Request, res: Response) => {
         moneda: draftMetadata.config.moneda,
         tipo_comprobante: draftMetadata.config.tipo_comprobante,
         orden_compra: draftMetadata.config.orden_compra || '',
+        etiqueta: etiquetaFinal,
         precio_total_facturado: totalFacturado,
         cfdi_estado: 'BORRADOR',
         es_borrador: true,
@@ -846,16 +908,20 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
       const cleanFolioVal = cleanFolio(factura.folio);
       const fullFolio = `${serie}${cleanFolioVal}`;
 
-      const formattedPartidas = (partidas || []).map((p: any) => ({
-        id: p.id,
-        descripcion: p.descripcion,
-        cantidad: String(p.cantidad || 1),
-        precio_unitario: String(p.precio_unitario || 0),
-        unidad: p.unidad || 'Pieza',
-        clave_sat: p.clave_sat || '01010101',
-        clave_unidad: p.clave_unidad || 'H87',
-        objeto_imp: p.objeto_imp || '02'
-      }));
+      const formattedPartidas = (partidas || []).map((p: any, idx: number) => {
+        const metadataPart = Array.isArray(draftNotas.partidas) ? draftNotas.partidas[idx] : null;
+        return {
+          id: p.id,
+          descripcion: p.descripcion,
+          descripcion_detallada: p.descripcion_detallada || metadataPart?.descripcion_detallada || '',
+          cantidad: String(p.cantidad || 1),
+          precio_unitario: String(p.precio_unitario || 0),
+          unidad: p.unidad || 'Pieza',
+          clave_sat: p.clave_sat || '01010101',
+          clave_unidad: p.clave_unidad || 'H87',
+          objeto_imp: p.objeto_imp || '02'
+        };
+      });
 
       return res.json({
         success: true,
@@ -870,6 +936,7 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
           metodo_pago: factura.metodo_pago || 'PUE',
           moneda: factura.moneda || 'MXN',
           orden_compra: factura.orden_compra || '',
+          etiqueta: factura.etiqueta || draftNotas.config?.etiqueta || null,
           notas: draftNotas.user_notas || '',
           precio_total_facturado: Number(factura.total || 0),
           cfdi_estado: factura.cfdi_estado,
@@ -950,6 +1017,7 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
         moneda: config?.moneda || 'MXN',
         tipo_comprobante: config?.tipo_comprobante || 'I',
         orden_compra: venta.orden_compra || config?.orden_compra || '',
+        etiqueta: config?.etiqueta || null,
         notas: userNotas,
         precio_total_facturado: venta.precio_total_facturado,
         cfdi_estado: venta.cfdi_estado,
@@ -1023,6 +1091,7 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
 
       return {
         descripcion: String(p.descripcion || 'Concepto').trim(),
+        descripcion_detallada: p.descripcion_detallada ? String(p.descripcion_detallada).trim() : null,
         cantidad: cant,
         precio_unitario_venta: precioUnit,
         precio_total_venta: importe,
@@ -1046,6 +1115,11 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
     const folioFinal = cleanFolio(facturaDB?.folio || '0000');
     const fullFolio = `${serieFinal}${folioFinal}`;
 
+    const receptorDireccion = body.cliente_direccion || receptor.direccion || body.direccion || '';
+    const etiquetaFinal = body.etiqueta !== undefined 
+      ? (body.etiqueta ? String(body.etiqueta).trim() : null)
+      : (body.config?.etiqueta ? String(body.config.etiqueta).trim() : facturaDB?.etiqueta || null);
+
     const draftMetadata = {
       receptor: {
         nombre: receptor.nombre || clienteNombre,
@@ -1053,7 +1127,8 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
         rfc: receptorRfc,
         codigo_postal: receptorCp,
         regimen_fiscal: receptorRegimen,
-        uso_cfdi: receptorUso
+        uso_cfdi: receptorUso,
+        direccion: receptorDireccion
       },
       config: {
         serie: serieFinal,
@@ -1062,8 +1137,10 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
         metodo_pago: body.metodo_pago || body.metodo_pago_cfdi || 'PUE',
         moneda: body.moneda || 'MXN',
         tipo_comprobante: body.tipo_comprobante || 'I',
-        orden_compra: body.orden_compra || null
+        orden_compra: body.orden_compra || null,
+        etiqueta: etiquetaFinal
       },
+      partidas: sanitizedPartidas,
       user_notas: body.notas !== undefined ? body.notas : null
     };
 
@@ -1087,10 +1164,26 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
           total: totalFacturado,
           saldo_pendiente: totalFacturado,
           orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
+          etiqueta: etiquetaFinal,
           notas: draftMetadata,
           updated_at: new Date().toISOString()
         })
         .eq('id', id);
+
+      // Actualizar régimen fiscal (y dirección si viene) en la tabla clientes
+      if (receptorRfc && receptorRfc !== 'XAXX010101000' && receptorRfc !== 'XEXX010101000') {
+        try {
+          const clientUpd: any = { regimen_fiscal: receptorRegimen };
+          if (receptorDireccion) clientUpd.direccion = String(receptorDireccion).trim();
+          if (body.cliente_id) {
+            await supabaseClient.from('clientes').update(clientUpd).eq('id', body.cliente_id);
+          } else {
+            await supabaseClient.from('clientes').update(clientUpd).eq('rfc', receptorRfc);
+          }
+        } catch (cErr) {
+          console.warn("Aviso al actualizar régimen en clientes (PUT borrador):", cErr);
+        }
+      }
 
       if (Array.isArray(body.partidas)) {
         await supabaseClient.from('facturas_emitidas_partidas').delete().eq('factura_id', id);
@@ -1098,6 +1191,7 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
           const partsToInsert = sanitizedPartidas.map((p: any) => ({
             factura_id: id,
             descripcion: p.descripcion,
+            descripcion_detallada: p.descripcion_detallada || null,
             cantidad: p.cantidad,
             precio_unitario: p.precio_unitario_venta,
             importe: p.precio_total_venta,
@@ -1106,7 +1200,17 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
             unidad: p.unidad,
             objeto_imp: p.objeto_imp || '02'
           }));
-          await supabaseClient.from('facturas_emitidas_partidas').insert(partsToInsert);
+
+          try {
+            const { error: insErr } = await supabaseClient.from('facturas_emitidas_partidas').insert(partsToInsert);
+            if (insErr) {
+              console.warn("Aviso insertando partidas (PUT) con descripcion_detallada, reintentando sin columna:", insErr.message);
+              const fallbackParts = partsToInsert.map(({ descripcion_detallada, ...rest }: any) => rest);
+              await supabaseClient.from('facturas_emitidas_partidas').insert(fallbackParts);
+            }
+          } catch (insEx) {
+            console.warn("Excepción insertando partidas (PUT):", insEx);
+          }
         }
       }
     } else {
@@ -1376,6 +1480,7 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
           saldo_pendiente: Number(f.saldo_pendiente || 0),
           estado_pago: f.estado_pago,
           orden_compra: f.orden_compra,
+          etiqueta: f.etiqueta || f.notas?.config?.etiqueta || null,
           venta_id: f.venta_id,
           created_at: f.created_at,
           origen: isBorrador ? 'BORRADOR' : (f.venta_id ? 'VENTA' : 'FACTURA_DIRECTA'),
@@ -1434,6 +1539,7 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
         folio: cleanFolioVal || f.folio,
         es_borrador: isBorrador,
         cfdi_estado: f.cfdi_estado || (isBorrador ? 'BORRADOR' : 'PENDIENTE'),
+        etiqueta: null,
         origen,
         origenLabel
       };

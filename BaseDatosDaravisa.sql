@@ -1019,6 +1019,7 @@ CREATE TABLE IF NOT EXISTS public.facturas_emitidas (
   fecha_emision TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   orden_compra TEXT,
   notas JSONB,
+  etiqueta TEXT,
   venta_id UUID REFERENCES public.ventas(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1035,6 +1036,7 @@ CREATE TABLE IF NOT EXISTS public.facturas_emitidas_partidas (
   clave_unidad VARCHAR(10) NOT NULL DEFAULT 'H87',
   unidad VARCHAR(30) DEFAULT 'Pieza',
   objeto_imp VARCHAR(5) DEFAULT '02',
+  descripcion_detallada TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -1044,6 +1046,7 @@ CREATE INDEX IF NOT EXISTS idx_fact_emit_estado ON public.facturas_emitidas(cfdi
 CREATE INDEX IF NOT EXISTS idx_fact_emit_cliente ON public.facturas_emitidas(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_fact_emit_venta ON public.facturas_emitidas(venta_id);
 CREATE INDEX IF NOT EXISTS idx_fact_partidas_factura ON public.facturas_emitidas_partidas(factura_id);
+CREATE INDEX IF NOT EXISTS idx_facturas_emitidas_etiqueta ON public.facturas_emitidas (etiqueta);
 
 
 
