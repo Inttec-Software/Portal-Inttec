@@ -1057,14 +1057,14 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
 
       // Normalizar Estado
       const normEstadoLower = rawEstado.toLowerCase();
-      let finalEstado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE' = 'BUENO';
+      let finalEstado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO' | 'EN_REPARACION' | 'BAJA' = 'BUENO';
       if (normEstadoLower.includes('nuev') || normEstadoLower.includes('new')) finalEstado = 'NUEVO';
       else if (normEstadoLower.includes('buen') || normEstadoLower.includes('opt') || normEstadoLower.includes('excel')) finalEstado = 'BUENO';
-      else if (normEstadoLower.includes('reg') || normEstadoLower.includes('usad')) finalEstado = 'REGULAR';
-      else if (normEstadoLower.includes('dan') || normEstadoLower.includes('dañ') || normEstadoLower.includes('rot') || normEstadoLower.includes('aver')) finalEstado = 'DANADO';
+      else if (normEstadoLower.includes('reg') || normEstadoLower.includes('usad') || normEstadoLower.includes('med')) finalEstado = 'REGULAR';
+      else if (normEstadoLower.includes('incomple') || normEstadoLower.includes('falt') || normEstadoLower.includes('perd') || normEstadoLower.includes('extrav')) finalEstado = 'INCOMPLETO';
+      else if (normEstadoLower.includes('dan') || normEstadoLower.includes('dañ') || normEstadoLower.includes('rot') || normEstadoLower.includes('aver') || normEstadoLower.includes('mal')) finalEstado = 'DANADO';
       else if (normEstadoLower.includes('repar') || normEstadoLower.includes('tall')) finalEstado = 'EN_REPARACION';
       else if (normEstadoLower.includes('baj') || normEstadoLower.includes('desech')) finalEstado = 'BAJA';
-      else if (normEstadoLower.includes('falt') || normEstadoLower.includes('perd') || normEstadoLower.includes('extrav')) finalEstado = 'FALTANTE';
 
       // Normalizar Activo
       let finalActivo = true;

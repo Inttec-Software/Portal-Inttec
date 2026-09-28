@@ -1108,7 +1108,7 @@ export interface Herramienta {
   descripcion?: string | null;
   numero_serie?: string | null;
   foto_url?: string | null;
-  estado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE';
+  estado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE';
   activo: boolean;
   created_at?: string;
   custodia_actual?: {
@@ -1157,7 +1157,7 @@ export interface HerramientaEmpleado {
   empleado_id: string;
   herramienta_id: string;
   cantidad: number;
-  condicion: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+  condicion: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO';
   notas?: string | null;
   fecha_asignacion?: string;
   updated_at?: string;
@@ -1175,7 +1175,7 @@ export interface HerramientaVehiculo {
   vehiculo_id: string;
   herramienta_id: string;
   cantidad: number;
-  condicion: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+  condicion: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO';
   notas?: string | null;
   fecha_asignacion?: string;
   updated_at?: string;
@@ -1194,7 +1194,7 @@ export interface ChecklistItem {
   nombre: string;
   codigo: string;
   presente: boolean;
-  estado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+  estado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO';
   observaciones?: string;
 }
 
@@ -1337,7 +1337,7 @@ export const HerramientasService = {
     empleado_id: string;
     herramienta_id: string;
     cantidad?: number;
-    condicion?: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+    condicion?: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO';
     notas?: string;
   }): Promise<HerramientaEmpleado> {
     const headers = await getApiHeaders();
@@ -1382,7 +1382,7 @@ export const HerramientasService = {
     vehiculo_id: string;
     herramienta_id: string;
     cantidad?: number;
-    condicion?: 'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO';
+    condicion?: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO';
     notas?: string;
   }): Promise<HerramientaVehiculo> {
     const headers = await getApiHeaders();

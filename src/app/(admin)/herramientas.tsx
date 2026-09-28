@@ -50,6 +50,7 @@ const ESTADOS_HERRAMIENTA = [
   { value: 'NUEVO', label: 'Nuevo', color: '#0984e3' },
   { value: 'BUENO', label: 'Bueno', color: '#10ac84' },
   { value: 'REGULAR', label: 'Regular', color: '#f39c12' },
+  { value: 'INCOMPLETO', label: 'Incompleto', color: '#e67e22' },
   { value: 'DANADO', label: 'Dañado', color: '#e74c3c' },
   { value: 'EN_REPARACION', label: 'En Reparación', color: '#9b59b6' },
   { value: 'BAJA', label: 'Baja', color: '#7f8c8d' },
@@ -89,7 +90,7 @@ export default function AdminHerramientasScreen() {
   const [formCategoria, setFormCategoria] = useState('Manual');
   const [formDescripcion, setFormDescripcion] = useState('');
   const [formNumeroSerie, setFormNumeroSerie] = useState('');
-  const [formEstado, setFormEstado] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE'>('NUEVO');
+  const [formEstado, setFormEstado] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE'>('NUEVO');
   const [isSavingTool, setIsSavingTool] = useState(false);
 
   // Empleados y Kits
@@ -99,7 +100,7 @@ export default function AdminHerramientasScreen() {
   const [assignEmpModalVisible, setAssignEmpModalVisible] = useState(false);
   const [selectedToolToAssignEmp, setSelectedToolToAssignEmp] = useState<string>('');
   const [assignEmpQty, setAssignEmpQty] = useState('1');
-  const [assignEmpCondicion, setAssignEmpCondicion] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO'>('NUEVO');
+  const [assignEmpCondicion, setAssignEmpCondicion] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO'>('NUEVO');
   const [assignEmpNotas, setAssignEmpNotas] = useState('');
   const [isSavingAssignEmp, setIsSavingAssignEmp] = useState(false);
 
@@ -111,7 +112,7 @@ export default function AdminHerramientasScreen() {
   const [selectedToolsToAssignVeh, setSelectedToolsToAssignVeh] = useState<string[]>([]);
   const [searchVehAssignTool, setSearchVehAssignTool] = useState('');
   const [assignVehQty, setAssignVehQty] = useState('1');
-  const [assignVehCondicion, setAssignVehCondicion] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'DANADO'>('NUEVO');
+  const [assignVehCondicion, setAssignVehCondicion] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO'>('NUEVO');
   const [assignVehNotas, setAssignVehNotas] = useState('');
   const [isSavingAssignVeh, setIsSavingAssignVeh] = useState(false);
 
