@@ -485,6 +485,22 @@ CREATE TABLE IF NOT EXISTS public.tarea_corresponsables (
   CONSTRAINT tarea_corresponsables_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE CASCADE
 );
 
+-- =========================================================================
+-- MÓDULO DE NOTIFICACIONES (In-App)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.notificaciones (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  usuario_id uuid NOT NULL,
+  titulo text NOT NULL,
+  mensaje text NOT NULL,
+  tipo text NOT NULL,
+  referencia_id text,
+  leido boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT notificaciones_pkey PRIMARY KEY (id),
+  CONSTRAINT notificaciones_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS public.tarea_notas (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   tarea_id uuid NOT NULL,
