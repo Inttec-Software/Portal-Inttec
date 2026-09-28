@@ -863,7 +863,8 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
         });
 
         if (!alreadyInStructuredDev) {
-          const cleanKey = folio.replace(/[^a-zA-Z0-9]/g, '').substring(0, 25);
+          const baseFolio = folio.split('(')[0].trim();
+          const cleanKey = baseFolio.replace(/[^a-zA-Z0-9]/g, '').substring(0, 25);
           const groupKey = `${m.creado_por}_${cleanKey}_${Math.floor(mTime / 300000)}`;
           if (!legacyDevsMap.has(groupKey)) {
             const cleanObs = folio.replace(/^DEVOLUCI[OÓ]N:\s*/i, '').trim();

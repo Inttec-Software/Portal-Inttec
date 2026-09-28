@@ -911,7 +911,7 @@ CREATE TABLE IF NOT EXISTS public.herramientas (
   descripcion text,
   numero_serie text,
   foto_url text,
-  estado text DEFAULT 'NUEVO' CHECK (estado IN ('NUEVO', 'BUENO', 'REGULAR', 'DANADO', 'EN_REPARACION', 'BAJA')),
+  estado text DEFAULT 'NUEVO' CHECK (estado IN ('NUEVO', 'BUENO', 'REGULAR', 'INCOMPLETO', 'DANADO', 'EN_REPARACION', 'BAJA')),
   activo boolean DEFAULT true,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT herramientas_pkey PRIMARY KEY (id)

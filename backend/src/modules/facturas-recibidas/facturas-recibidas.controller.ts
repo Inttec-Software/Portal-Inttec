@@ -11,8 +11,10 @@ export const getFacturasRecibidas = async (req: Request, res: Response) => {
 
     const { data, error } = await client
       .from('facturas_recibidas')
-      .select('*')
-      .order('fecha_emision', { ascending: false });
+      // Exclude conceptos_json to optimize payload size
+      .select('id, uuid, rfc_emisor, nombre_emisor, rfc_receptor, fecha_emision, subtotal, descuento, iva, retencion_isr, retencion_iva, total, moneda, tipo_comprobante, estado_sat, xml_url, pdf_url, created_at')
+      .order('fecha_emision', { ascending: false })
+      .limit(1000);
 
     if (error) {
       if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
@@ -22,6 +24,27 @@ export const getFacturasRecibidas = async (req: Request, res: Response) => {
     }
 
     return res.json({ facturas: data || [], tableMissing: false });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// === GET /api/facturas-recibidas/:id ===
+export const getFacturaById = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const client = getSupabaseClient(tenant.company, tenant.env);
+
+    const { id } = req.params;
+    const { data, error } = await client
+      .from('facturas_recibidas')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) throw error;
+    return res.json({ factura: data });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
