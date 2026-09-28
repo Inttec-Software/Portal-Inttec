@@ -88,7 +88,7 @@ export const ReportGenerator = {
   /**
    * Genera un reporte PDF completo de movimientos de inventario (Entradas, Salidas, Retiros, Compras)
    */
-  async exportMovimientosToPDF(movimientos: any[], title: string = 'Reporte de Movimientos de Inventario'): Promise<void> {
+  async exportMovimientosToPDF(movimientos: any[], title: string = 'Reporte de Movimientos de Inventario', periodo?: string): Promise<void> {
     if (movimientos.length === 0) {
       throw new Error('No hay movimientos para exportar.');
     }
@@ -180,6 +180,7 @@ export const ReportGenerator = {
         <div class="header">
           <div>
             <h1 class="title">${title}</h1>
+            ${periodo ? `<div style="font-size: 12px; font-weight: bold; color: #0284c7; margin-top: 2px;">Período: ${periodo}</div>` : ''}
             <div class="subtitle">Generado el: ${new Date().toLocaleString('es-MX')} • Empresa: ${branding.name}</div>
           </div>
           ${branding.logo ? `<img class="logo" src="${branding.logo}" />` : `<h2 style="color: #E11D48; margin: 0;">${branding.name}</h2>`}
@@ -445,7 +446,7 @@ export const ReportGenerator = {
   /**
    * Genera un reporte PDF de los gastos y lo comparte mediante la hoja nativa
    */
-  async exportToPDF(gastos: Gasto[], title: string = 'Reporte de Control de Gastos'): Promise<void> {
+  async exportToPDF(gastos: Gasto[], title: string = 'Reporte de Control de Gastos', periodo?: string): Promise<void> {
     if (gastos.length === 0) {
       throw new Error('No hay gastos para exportar.');
     }
@@ -637,6 +638,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
@@ -769,7 +771,8 @@ export const ReportGenerator = {
    */
   async exportGasolinaToPDF(
     registros: any[],
-    title: string = 'Reporte de Consumo de Gasolina'
+    title: string = 'Reporte de Consumo de Gasolina',
+    periodo?: string
   ): Promise<void> {
     if (registros.length === 0) {
       throw new Error('No hay registros de gasolina para exportar.');
@@ -835,6 +838,7 @@ export const ReportGenerator = {
           <img class="logo-img" src="${branding.logo}" />
           <div style="margin-left:auto; text-align:right">
             <h1>${title}</h1>
+            ${periodo ? `<div style="font-size: 12px; font-weight: bold; color: #0284c7; margin-top: 2px;">Período: ${periodo}</div>` : ''}
             <div class="subtitle">Generado: ${new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
           </div>
         </div>
@@ -929,7 +933,8 @@ export const ReportGenerator = {
   async exportAsistenciasToPDF(
     asistencias: Asistencia[],
     personal: Usuario[],
-    title: string = 'Reporte de Asistencia'
+    title: string = 'Reporte de Asistencia',
+    periodo?: string
   ): Promise<void> {
     if (asistencias.length === 0) {
       throw new Error('No hay registros de asistencia para exportar.');
@@ -1080,6 +1085,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
@@ -1197,7 +1203,8 @@ export const ReportGenerator = {
   async exportInventarioToPDF(
     productos: ReportProducto[],
     categorias: ReportCategoria[],
-    title: string = 'Reporte de Inventario'
+    title: string = 'Reporte de Inventario',
+    periodo?: string
   ): Promise<void> {
     if (productos.length === 0) {
       throw new Error('No hay productos en el inventario para exportar.');
@@ -1335,6 +1342,7 @@ export const ReportGenerator = {
           <tr>
             <td style="border: none; padding: 0; vertical-align: top;">
               <h1 class="title">${title}</h1>
+              ${periodo ? `<div style="font-size: 12px; font-weight: bold; color: #0284c7; margin-top: 2px;">Período: ${periodo}</div>` : ''}
               <div class="subtitle">Generado el ${new Date().toLocaleDateString('es-MX')} - ${branding.name}</div>
             </td>
             <td style="border: none; padding: 0; text-align: right; vertical-align: top;">
@@ -1465,7 +1473,8 @@ export const ReportGenerator = {
    */
   async exportConsumosToPDF(
     consumos: any[],
-    title: string = 'Reporte de Consumos de Materiales'
+    title: string = 'Reporte de Consumos de Materiales',
+    periodo?: string
   ): Promise<void> {
     if (consumos.length === 0) {
       throw new Error('No hay registros de consumo para exportar.');
@@ -1649,6 +1658,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
@@ -1762,7 +1772,8 @@ export const ReportGenerator = {
    */
   async exportRetirosToPDF(
     retiros: any[],
-    title: string = 'Reporte de Retiros de Material'
+    title: string = 'Reporte de Retiros de Material',
+    periodo?: string
   ): Promise<void> {
     if (retiros.length === 0) {
       throw new Error('No hay retiros registrados para exportar.');
@@ -1922,6 +1933,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle">Generado el: ${new Date().toLocaleString('es-MX')}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
@@ -2326,7 +2338,8 @@ export const ReportGenerator = {
    */
   async exportVentasToPDF(
     ventas: any[],
-    title: string = 'Reporte de Ventas'
+    title: string = 'Reporte de Ventas',
+    periodo?: string
   ): Promise<void> {
     if (ventas.length === 0) {
       throw new Error('No hay registros de ventas para exportar.');
@@ -2478,6 +2491,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
