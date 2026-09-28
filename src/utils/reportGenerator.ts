@@ -2,6 +2,7 @@ import { logger } from './logger';
 import { cacheDirectory, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 import { Platform, Alert } from 'react-native';
 import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService, supabase, inttecClient, daravisaClient } from '../services/supabase';
 import { Cotizacion } from '@/types/ventas';
@@ -226,68 +227,6 @@ export const ReportGenerator = {
   },
 
   /**
-   * Exporta el listado de movimientos de inventario a formato CSV compatible con Excel
-   */
-  async exportMovimientosToCSV(movimientos: any[], filename: string = 'reporte_movimientos_inventario.csv'): Promise<void> {
-    if (movimientos.length === 0) {
-      throw new Error('No hay movimientos para exportar.');
-    }
-
-    const headers = [
-      'ID',
-      'Fecha',
-      'Tipo',
-      'Subtipo',
-      'SKU',
-      'Producto',
-      'Cantidad',
-      'Unidad',
-      'Responsable / Usuario',
-      'Proveedor',
-      'Cliente',
-      'Tipo de Gasto',
-      'Folio / Concepto / Detalle'
-    ];
-
-    const rows = movimientos.map(m => [
-      escapeCSVCell(m.id),
-      escapeCSVCell(m.fecha ? new Date(m.fecha).toISOString().replace('T', ' ').substring(0, 19) : ''),
-      escapeCSVCell(m.tipo || 'MOVIMIENTO'),
-      escapeCSVCell(m.subtipo || m.tipo || ''),
-      escapeCSVCell(m.producto_sku || '-'),
-      escapeCSVCell(m.producto_nombre || 'Producto'),
-      escapeCSVCell(m.cantidad || 0),
-      escapeCSVCell(m.producto_unidad || 'pza'),
-      escapeCSVCell(m.usuario_nombre || m.empleado_nombre || 'Almacén'),
-      escapeCSVCell(m.proveedor_nombre || ''),
-      escapeCSVCell(m.cliente_nombre || ''),
-      escapeCSVCell(m.tipo_gasto || ''),
-      escapeCSVCell(m.detalle_motivo || m.folio_factura || '')
-    ]);
-
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
-
-    if (Platform.OS === 'web') {
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } else {
-      const fileUri = `${cacheDirectory}${filename}`;
-      await writeAsStringAsync(fileUri, csvContent, { encoding: EncodingType.UTF8 });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Exportar Movimientos CSV' });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    }
-  },
-
-  /**
    * Genera el vale individual de un movimiento o retiro de material en PDF
    */
   async exportSingleMovimientoValePDF(mov: any): Promise<void> {
@@ -457,6 +396,26 @@ export const ReportGenerator = {
   /**
    * Helper unificado para imprimir en Web o compartir en Móvil
    */
+  
+  async _exportArrayToXLSX(sheetName: string, headers: string[], rows: any[][], filename: string): Promise<void> {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    
+    if (Platform.OS === 'web') {
+      XLSX.writeFile(wb, filename);
+    } else {
+      const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+      const fileUri = `${cacheDirectory}${filename}`;
+      await writeAsStringAsync(fileUri, base64, { encoding: EncodingType.Base64 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: `Exportar ${sheetName}` });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    }
+  },
+
   async _printOrDownload(htmlContent: string, defaultFilename: string): Promise<void> {
     if (Platform.OS === 'web') {
       const newWindow = window.open('', '_blank');
@@ -806,88 +765,6 @@ export const ReportGenerator = {
   },
 
   /**
-   * Genera un archivo CSV de los gastos y lo comparte mediante la hoja nativa
-   */
-  async exportToCSV(gastos: Gasto[], fileName: string = 'reporte_gastos.csv'): Promise<void> {
-    if (gastos.length === 0) {
-      throw new Error('No hay gastos para exportar.');
-    }
-
-    // Encabezados
-    let csvContent = '\uFEFF'; // BOM para que Excel abra UTF-8 correctamente
-    csvContent += 'ID,Fecha,Empleado Nombre,Monto,Categoria,Subcategoria,Proveedor,Cliente,Servicio/Proyecto,Detalle,Sucursal,Metodo Pago,Tipo Tarjeta,Estado Factura,Motivo Sin Factura,Status,Comentarios\n';
-
-    // Rellenar filas
-    gastos.forEach((g) => {
-      const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
-      let estadoFactura = 'No Facturado';
-      if (g.facturado === true) {
-        estadoFactura = 'Facturado';
-      } else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) {
-        estadoFactura = 'Pendiente de Entregar';
-      }
-
-      const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
-
-      const row = [
-        g.id,
-        fecha,
-        escapeCSVCell(g.empleado_nombre),
-        g.monto,
-        escapeCSVCell(GastoHelper.getCategoria(g)),
-        escapeCSVCell(GastoHelper.getSubcategoria(g)),
-        escapeCSVCell(GastoHelper.getProveedor(g)),
-        escapeCSVCell(GastoHelper.getCliente(g)),
-        escapeCSVCell(g.tipo_servicio_proyecto),
-        escapeCSVCell(g.detalle_servicio_proyecto),
-        escapeCSVCell(GastoHelper.getSucursal(g)),
-        g.metodo_pago,
-        escapeCSVCell(g.tipo_tarjeta),
-        escapeCSVCell(estadoFactura),
-        escapeCSVCell(g.motivo_sin_factura),
-        g.status,
-        escapeCSVCell(commentText),
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      // Guardar el archivo en el sistema de archivos local de Expo (en cacheDirectory para compartir de forma segura)
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      // Compartir nativamente
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible en este dispositivo.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating CSV report:', error);
-      throw new Error(error.message || 'Error al generar el reporte CSV.');
-    }
-  },
-
-  /**
    * Genera un reporte PDF del consumo de gasolina y lo comparte
    */
   async exportGasolinaToPDF(
@@ -1045,72 +922,6 @@ export const ReportGenerator = {
     } catch (error: any) {
       logger.error('Error generating gasolina PDF:', error);
       throw new Error(error.message || 'Error al generar el reporte PDF de gasolina.');
-    }
-  },
-
-  /**
-   * Genera un CSV del consumo de gasolina y lo comparte/descarga
-   */
-  async exportGasolinaToCSV(
-    registros: any[],
-    fileName: string = 'reporte_gasolina.csv'
-  ): Promise<void> {
-    if (registros.length === 0) {
-      throw new Error('No hay registros de gasolina para exportar.');
-    }
-
-    let csvContent = '\uFEFF'; // BOM para Excel UTF-8
-    csvContent += 'Fecha,Empresa Registradora,Conductor,Vehículo Marca,Vehículo Modelo,Placas,Km Anterior,Km Actual,Distancia Recorrida (km),Litros,Rendimiento (km/L),Costo Total (MXN),Observaciones\n';
-
-    registros.forEach((r) => {
-      const dateParts = (r.fecha || '').split('-');
-      const fecha = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : r.fecha;
-      const row = [
-        fecha,
-        escapeCSVCell(r.empresa_origen || 'N/A'),
-        escapeCSVCell(r.empleado_nombre),
-        escapeCSVCell(r.vehiculo_marca),
-        escapeCSVCell(r.vehiculo_modelo),
-        escapeCSVCell(r.vehiculo_placas),
-        r.kilometraje_anterior ?? 'N/A',
-        r.kilometraje_actual || 0,
-        r.distancia_recorrida ?? 'N/A',
-        Number(r.litros || 0).toFixed(2),
-        r.rendimiento_km_l ? `${r.rendimiento_km_l} km/L` : 'N/A',
-        Number(r.costo_total || 0).toFixed(2),
-        escapeCSVCell(r.observaciones),
-      ].join(',');
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, { encoding: EncodingType.UTF8 });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible en este dispositivo.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating gasolina CSV:', error);
-      throw new Error(error.message || 'Error al generar el reporte CSV de gasolina.');
     }
   },
 
@@ -1381,71 +1192,6 @@ export const ReportGenerator = {
   },
 
   /**
-   * Genera un archivo CSV de asistencia y lo comparte
-   */
-  async exportAsistenciasToCSV(
-    asistencias: Asistencia[],
-    personal: Usuario[],
-    fileName: string = 'reporte_asistencia.csv'
-  ): Promise<void> {
-    if (asistencias.length === 0) {
-      throw new Error('No hay registros de asistencia para exportar.');
-    }
-
-    const empleadosMap = new Map(personal.map((p) => [p.id, p.nombre]));
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Registro,Fecha,Empleado,Hora Entrada,Ubicación Entrada,Hora Salida,Ubicación Salida\n';
-
-    asistencias.forEach((a) => {
-      const empleadoNombre = empleadosMap.get(a.empleado_id) || 'Desconocido';
-      const row = [
-        a.id,
-        a.fecha || '',
-        escapeCSVCell(empleadoNombre),
-        a.hora_entrada || '',
-        escapeCSVCell(a.direccion_entrada),
-        a.hora_salida || '',
-        escapeCSVCell(a.direccion_salida),
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Asistencia CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating attendance CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV.');
-    }
-  },
-
-  /**
    * Genera un reporte PDF de inventario y lo comparte
    */
   async exportInventarioToPDF(
@@ -1711,74 +1457,6 @@ export const ReportGenerator = {
     } catch (error: any) {
       logger.error('Error generating inventory PDF:', error);
       throw new Error(error.message || 'Error al generar el reporte de inventario.');
-    }
-  },
-
-  /**
-   * Genera un archivo CSV de inventario y lo comparte
-   */
-  async exportInventarioToCSV(
-    productos: ReportProducto[],
-    categorias: ReportCategoria[],
-    fileName: string = 'reporte_inventario.csv'
-  ): Promise<void> {
-    if (productos.length === 0) {
-      throw new Error('No hay productos en el inventario para exportar.');
-    }
-
-    const categoriasMap = new Map(categorias.map((c) => [c.id, c.nombre]));
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'SKU Interno,Nombre Oficial,Categoría,Stock Actual,Precio Unitario,Valor Total,Estado (Activo)\n';
-
-    productos.forEach((p) => {
-      const categoriaNombre = categoriasMap.get(p.categoria_id) || 'N/A';
-      const precioUnitario = Number(p.precio_unitario || (p as any).precio || 0);
-      const valorTotal = Number(p.stock_actual || 0) * precioUnitario;
-
-      const row = [
-        escapeCSVCell(p.sku_interno),
-        escapeCSVCell(p.nombre_oficial),
-        escapeCSVCell(categoriaNombre),
-        p.stock_actual,
-        precioUnitario.toFixed(2),
-        valorTotal.toFixed(2),
-        p.activo ? 'Activo' : 'Inactivo',
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Inventario CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating inventory CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV.');
     }
   },
 
@@ -2076,107 +1754,6 @@ export const ReportGenerator = {
     } catch (error: any) {
       logger.error('Error generating consumos PDF:', error);
       throw new Error(error.message || 'Error al generar el reporte de consumos.');
-    }
-  },
-
-  /**
-   * Genera un archivo CSV de consumos y lo comparte
-   */
-  async exportConsumosToCSV(
-    consumos: any[],
-    fileName: string = 'reporte_consumos.csv'
-  ): Promise<void> {
-    if (consumos.length === 0) {
-      throw new Error('No hay registros de consumo para exportar.');
-    }
-
-    // Identificar IDs de usuarios faltantes para buscar sus nombres si no vienen precargados
-    const missingUserIds = new Set<string>();
-    consumos.forEach((c) => {
-      const hasName = c.usuario?.nombre || c.empleado?.nombre || c.empleado_nombre || c.usuario_nombre;
-      if (!hasName) {
-        if (c.creado_por && typeof c.creado_por === 'string' && c.creado_por.length > 10) missingUserIds.add(c.creado_por);
-        if (c.empleado_id && typeof c.empleado_id === 'string' && c.empleado_id.length > 10) missingUserIds.add(c.empleado_id);
-      }
-    });
-
-    const userNamesMap = new Map<string, string>();
-    if (missingUserIds.size > 0) {
-      try {
-        const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
-        const { data: usersData } = await client
-          .from('usuarios')
-          .select('id, nombre')
-          .in('id', Array.from(missingUserIds));
-
-        if (usersData) {
-          usersData.forEach((u: any) => {
-            if (u.id && u.nombre) userNamesMap.set(u.id, u.nombre);
-          });
-        }
-      } catch (err) {
-        console.warn('[reportGenerator] Error resolving user names for consumos CSV:', err);
-      }
-    }
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Movimiento,Fecha,Producto,SKU,Retirado Por (Empleado),Cantidad,Referencia / Motivo\n';
-
-    consumos.forEach((c) => {
-      const fecha = c.fecha ? c.fecha.split('T')[0] : '';
-      const productoNombre = c.producto?.nombre_oficial || 'Producto Eliminado';
-      const sku = c.producto?.sku_interno || '';
-      const userId = c.creado_por || c.empleado_id;
-      const empleadoNombre =
-        c.usuario?.nombre ||
-        c.empleado?.nombre ||
-        c.empleado_nombre ||
-        c.usuario_nombre ||
-        (userId ? userNamesMap.get(userId) : null) ||
-        'No especificado / Almacén';
-      const row = [
-        c.id,
-        fecha,
-        escapeCSVCell(productoNombre),
-        escapeCSVCell(sku),
-        escapeCSVCell(empleadoNombre),
-        c.cantidad,
-        escapeCSVCell(c.folio_factura || c.motivo),
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Consumos CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating consumptions CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV.');
     }
   },
 
@@ -2743,96 +2320,6 @@ export const ReportGenerator = {
     }
   },
 
-  /**
-   * Genera un archivo CSV de retiros de material y lo comparte
-   */
-  async exportRetirosToCSV(
-    retiros: any[],
-    fileName: string = 'reporte_retiros_material.csv'
-  ): Promise<void> {
-    if (retiros.length === 0) {
-      throw new Error('No hay registros de retiro para exportar.');
-    }
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Retiro,Fecha,Empleado,Tipo Destino,Cliente,Sucursal,Proveedor,Detalle,Motivo,SKU,Material,Cantidad,Unidad\n';
-
-    retiros.forEach((r) => {
-      const fecha = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : '';
-      const mats = Array.isArray(r.materiales) ? r.materiales : [];
-
-      if (mats.length === 0) {
-        const row = [
-          escapeCSVCell(r.id),
-          escapeCSVCell(fecha),
-          escapeCSVCell(r.empleado_nombre),
-          escapeCSVCell(r.tipo_gasto || 'Operativo'),
-          escapeCSVCell(r.cliente_nombre || (r.is_split ? 'Dividido' : '')),
-          escapeCSVCell(r.sucursal_nombre || ''),
-          escapeCSVCell(r.proveedor || ''),
-          escapeCSVCell(r.detalle_servicio_proyecto || ''),
-          escapeCSVCell(r.motivo || ''),
-          '""',
-          '""',
-          '0',
-          '""'
-        ].join(',');
-        csvContent += row + '\n';
-      } else {
-        mats.forEach((m: any) => {
-          const row = [
-            escapeCSVCell(r.id),
-            escapeCSVCell(fecha),
-            escapeCSVCell(r.empleado_nombre),
-            escapeCSVCell(r.tipo_gasto || 'Operativo'),
-            escapeCSVCell(r.cliente_nombre || (r.is_split ? 'Dividido' : '')),
-            escapeCSVCell(r.sucursal_nombre || ''),
-            escapeCSVCell(r.proveedor || ''),
-            escapeCSVCell(r.detalle_servicio_proyecto || ''),
-            escapeCSVCell(r.motivo || ''),
-            escapeCSVCell(m.sku || ''),
-            escapeCSVCell(m.nombre || ''),
-            m.cantidad || 0,
-            escapeCSVCell(m.unidad || 'pza')
-          ].join(',');
-          csvContent += row + '\n';
-        });
-      }
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Retiros CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating retiros CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV de retiros.');
-    }
-  },
-
 
   /**
    * Genera un reporte PDF de las ventas registradas y lo comparte
@@ -3094,73 +2581,114 @@ export const ReportGenerator = {
       throw new Error(error.message || 'Error al generar el reporte de ventas.');
     }
   },
+    async exportMovimientosToXLSX(movimientos: any[], filename: string = 'reporte_movimientos_inventario.xlsx'): Promise<void> {
 
-  /**
-   * Genera un archivo CSV de ventas y lo comparte
-   */
-  async exportVentasToCSV(
-    ventas: any[],
-    fileName: string = 'reporte_ventas.csv'
-  ): Promise<void> {
-    if (ventas.length === 0) {
-      throw new Error('No hay registros de ventas para exportar.');
+            if (movimientos.length === 0) {
+              throw new Error('No hay movimientos para exportar.');
+            }
+            const headers = [ 'ID', 'Fecha', 'Tipo', 'Subtipo', 'SKU', 'Producto', 'Cantidad', 'Unidad', 'Responsable / Usuario', 'Proveedor', 'Cliente', 'Tipo de Gasto', 'Folio / Concepto / Detalle' ];
+            const rows = movimientos.map(m => [
+              m.id,
+              m.fecha ? new Date(m.fecha).toISOString().replace('T', ' ').substring(0, 19) : '',
+              m.tipo || 'MOVIMIENTO',
+              m.subtipo || m.tipo || '',
+              m.producto_sku || '-',
+              m.producto_nombre || 'Producto',
+              m.cantidad || 0,
+              m.producto_unidad || 'pza',
+              m.usuario_nombre || m.empleado_nombre || 'Almacén',
+              m.proveedor_nombre || '',
+              m.cliente_nombre || '',
+              m.tipo_gasto || '',
+              m.detalle_motivo || m.folio_factura || ''
+            ]);
+            await ReportGenerator._exportArrayToXLSX('Movimientos', headers, rows, filename);
+    },
+    async exportToXLSX(gastos: Gasto[], fileName: string = 'reporte_gastos.xlsx'): Promise<void> {
+
+            if (gastos.length === 0) {
+              throw new Error('No hay gastos para exportar.');
+            }
+            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Comentarios'];
+            const rows = gastos.map(g => {
+              const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
+              let estadoFactura = 'No Facturado';
+              if (g.facturado === true) estadoFactura = 'Facturado';
+              else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) estadoFactura = 'Pendiente de Entregar';
+              const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
+              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, commentText ];
+            });
+            await ReportGenerator._exportArrayToXLSX('Gastos', headers, rows, fileName);
+    },
+    async exportGasolinaToXLSX(registros: any[], fileName: string = 'reporte_gasolina.xlsx'): Promise<void> {
+
+            if (registros.length === 0) {
+              throw new Error('No hay registros para exportar.');
+            }
+            const headers = ['Fecha','Empresa Registradora','Conductor','Vehículo Marca','Vehículo Modelo','Placas','Km Anterior','Km Actual','Distancia Recorrida (km)','Litros','Rendimiento (km/L)','Costo Total (MXN)','Observaciones'];
+            const rows = registros.map(r => {
+              const fecha = r.fecha_carga || r.created_at?.split('T')[0] || '';
+              const distancia = Number(r.kilometraje) - Number(r.kilometraje_anterior || r.kilometraje);
+              const litros = Number(r.litros_cargados) || 0;
+              const rendimiento = litros > 0 && distancia > 0 ? (distancia / litros).toFixed(2) : '0.00';
+              return [ fecha, r.empresa_origen || 'N/A', r.empleado_nombre || 'Desconocido', r.vehiculo_marca || 'N/A', r.vehiculo_modelo || 'N/A', r.vehiculo_placas || 'N/A', r.kilometraje_anterior || r.kilometraje, r.kilometraje, distancia, litros, rendimiento, Number(r.monto_total || 0).toFixed(2), r.observaciones || '' ];
+            });
+            await ReportGenerator._exportArrayToXLSX('Gasolina', headers, rows, fileName);
+    },
+    async exportAsistenciasToXLSX(asistencias: any[], personal: Usuario[], fileName: string = 'reporte_asistencia.xlsx'): Promise<void> {
+
+            if (asistencias.length === 0) {
+              throw new Error('No hay asistencias para exportar.');
+            }
+            const headers = ['ID','Fecha','Empleado Nombre','Empresa','Hora Entrada','Dirección Entrada','Hora Salida','Dirección Salida'];
+            const rows = asistencias.map(a => {
+              const empleadoNombre = a.empleados ? `${a.empleados.nombre || ''} ${a.empleados.apellidos || ''}`.trim() : (a.empleado_nombre || 'Desconocido');
+              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada || 'Sin registro', a.direccion_entrada || '', a.hora_salida || 'Sin registro', a.direccion_salida || '' ];
+            });
+            await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
+    },
+    async exportInventarioToXLSX(productos: any[], categorias: ReportCategoria[], fileName: string = 'reporte_inventario.xlsx'): Promise<void> {
+
+            if (productos.length === 0) {
+              throw new Error('No hay productos para exportar.');
+            }
+            const headers = ['ID','SKU','Producto','Categoría','Unidad','Stock Actual (Nuevo)','Stock Usado','Stock Por Revisar','Stock Total Sumado','Punto Reorden','Ubicación','Precio Unit.'];
+            const rows = productos.map(p => {
+              const categoriaNombre = categorias.find((c: any) => c.id === p.categoria_id)?.nombre || 'Sin Categoría';
+              const sNuevo = Number(p.stock_nuevo || 0);
+              const sUsado = Number(p.stock_usado || 0);
+              const sRevision = Number(p.stock_por_revisar || 0);
+              return [ p.id, p.sku_interno || '-', p.nombre_oficial || 'Producto', categoriaNombre, p.unidad_medida || 'pza', sNuevo, sUsado, sRevision, (sNuevo+sUsado+sRevision), p.punto_reorden || 0, p.ubicacion_almacen || '', p.precio_unitario || 0 ];
+            });
+            await ReportGenerator._exportArrayToXLSX('Inventario', headers, rows, fileName);
+    },
+    async exportConsumosToXLSX(consumos: any[], fileName: string = 'reporte_consumos.xlsx'): Promise<void> {
+
+            if (consumos.length === 0) {
+              throw new Error('No hay consumos para exportar.');
+            }
+            const headers = ['ID','Fecha','Empleado Nombre','SKU','Producto','Categoría','Cantidad Consumida','Proyecto/Uso','Costo Estimado'];
+            const rows = consumos.map(c => [ c.id, c.fecha ? c.fecha.split('T')[0] : '', c.empleado_nombre || 'Desconocido', c.producto_sku || '-', c.producto_nombre || 'Producto', c.categoria_nombre || '', c.cantidad || 0, c.detalle_motivo || '', c.costo_total || 0 ]);
+            await ReportGenerator._exportArrayToXLSX('Consumos', headers, rows, fileName);
+    },
+    async exportRetirosToXLSX(retiros: any[], fileName: string = 'reporte_retiros_material.xlsx'): Promise<void> {
+
+            if (retiros.length === 0) {
+              throw new Error('No hay retiros para exportar.');
+            }
+            const headers = ['ID','Fecha de Retiro','Empleado','SKU','Herramienta','Estado Entrega','Cantidad Prestada','Proyecto / Motivo'];
+            const rows = retiros.map(r => [ r.id, r.fecha ? r.fecha.split('T')[0] : '', r.empleado_nombre || 'Desconocido', r.producto_sku || '-', r.producto_nombre || 'Herramienta', r.estado_entrega || 'NUEVA', r.cantidad || 0, r.detalle_motivo || '' ]);
+            await ReportGenerator._exportArrayToXLSX('Retiros', headers, rows, fileName);
+    },
+    async exportVentasToXLSX(ventas: any[], fileName: string = 'reporte_ventas.xlsx'): Promise<void> {
+
+            if (ventas.length === 0) {
+              throw new Error('No hay ventas para exportar.');
+            }
+            const headers = ['ID','Folio','Fecha Creación','Cliente','Vendedor','Estatus','Monto Total'];
+            const rows = ventas.map(v => [ v.id, v.folio || 'S/F', v.created_at ? v.created_at.split('T')[0] : '', v.cliente_nombre || 'Desconocido', v.vendedor_nombre || 'Desconocido', v.estatus || '', v.total || 0 ]);
+            await ReportGenerator._exportArrayToXLSX('Ventas', headers, rows, fileName);
     }
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Venta,Fecha,Cliente,Referencia/Factura,Tipo Proyecto,Sucursal,Total Facturado (Venta),Total Costo (Proveedor),Utilidad Bruta,Margen %\n';
-
-    ventas.forEach((v) => {
-      const fecha = v.fecha || '';
-      const margenPercent = ((v.margen_porcentual || 0) * 100).toFixed(2);
-
-      const row = [
-        v.id,
-        fecha,
-        escapeCSVCell(v.cliente),
-        escapeCSVCell(v.factura_referencia),
-        escapeCSVCell(v.tipo_proyecto),
-        escapeCSVCell(v.sucursal),
-        Number(v.precio_total_facturado || 0).toFixed(2),
-        Number(v.costo_total || 0).toFixed(2),
-        Number(v.utilidad_bruta || 0).toFixed(2),
-        margenPercent + '%',
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Ventas CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating sales CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV de ventas.');
-    }
-  },
 };
 
 export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 'view' | 'download' = 'view', tipoDocumento: 'cotizacion' | 'venta' = 'cotizacion') {

@@ -305,7 +305,7 @@ export default function InventarioDashboard() {
   const [selectedTipoMovimiento, setSelectedTipoMovimiento] = useState<string>('TODOS');
   const [selectedDateFilterMov, setSelectedDateFilterMov] = useState<'TODOS' | 'HOY' | 'SEMANA' | 'MES'>('TODOS');
   const [isExportingMovimientosPDF, setIsExportingMovimientosPDF] = useState(false);
-  const [isExportingMovimientosCSV, setIsExportingMovimientosCSV] = useState(false);
+  const [isExportingMovimientosExcel, setIsExportingMovimientosCSV] = useState(false);
   const [exportingSingleMovimientoId, setExportingSingleMovimientoId] = useState<string | null>(null);
   
   // Datos maestros con soporte de caché en memoria (0ms render)
@@ -712,7 +712,7 @@ export default function InventarioDashboard() {
     }
     setIsExportingMovimientosCSV(true);
     try {
-      await ReportGenerator.exportMovimientosToCSV(dataToExport);
+      await ReportGenerator.exportMovimientosToXLSX(dataToExport);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo generar el archivo CSV.');
     } finally {
@@ -2865,7 +2865,7 @@ export default function InventarioDashboard() {
 
                     <TouchableOpacity
                       onPress={() => handleExportMovimientosCSV(filteredMovimientos)}
-                      disabled={isExportingMovimientosCSV}
+                      disabled={isExportingMovimientosExcel}
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',
@@ -2874,10 +2874,10 @@ export default function InventarioDashboard() {
                         paddingHorizontal: 12,
                         paddingVertical: 8,
                         borderRadius: 8,
-                        opacity: isExportingMovimientosCSV ? 0.7 : 1
+                        opacity: isExportingMovimientosExcel ? 0.7 : 1
                       }}
                     >
-                      {isExportingMovimientosCSV ? (
+                      {isExportingMovimientosExcel ? (
                         <ActivityIndicator size="small" color="#fff" />
                       ) : (
                         <Ionicons name="grid-outline" size={16} color="#fff" />
