@@ -80,6 +80,18 @@ export const aprobarDevolucion = async (req: Request, res: Response) => {
     const materiales = typeof dev.materiales === 'string' ? JSON.parse(dev.materiales || '[]') : dev.materiales;
     for (const m of materiales) {
       const totalDevolver = Number(m.devolver) || 0;
+      const totalGastar = Number(m.gastar) || 0;
+
+      if (totalGastar > 0) {
+        await client.from('movimientos_inventario').insert([{
+          producto_id: m.productoId,
+          tipo: 'SALIDA',
+          cantidad: totalGastar,
+          folio_factura: m.folio_gasto || `GASTO MATERIAL (Devolución ${dev.id.substring(0,8)})`,
+          creado_por: user?.id || dev.empleado_id
+        }]);
+      }
+
       if (totalDevolver > 0) {
         const { data: pData } = await client
           .from('productos')

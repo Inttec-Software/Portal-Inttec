@@ -2833,7 +2833,14 @@ export default function InventarioDashboard() {
                               <View key={idx} style={{ borderBottomWidth: idx < mats.length - 1 ? 1 : 0, borderBottomColor: themeColors.border, paddingBottom: 6 }}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                                   <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 13, flex: 1, paddingRight: 8 }}>{m.nombre}</Text>
-                                  <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 13 }}>+ {m.devolver} {m.unidad || 'un.'}</Text>
+                                  <View style={{ alignItems: 'flex-end' }}>
+                                    {Number(m.devolver) > 0 && (
+                                      <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 13 }}>+ {m.devolver} {m.unidad || 'un.'} (Devuelto)</Text>
+                                    )}
+                                    {Number(m.gastar) > 0 && (
+                                      <Text style={{ color: themeColors.error || '#EF4444', fontWeight: 'bold', fontSize: 13 }}>- {m.gastar} {m.unidad || 'un.'} (Gastado)</Text>
+                                    )}
+                                  </View>
                                 </View>
                                 {hasBreakdown && (
                                   <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
