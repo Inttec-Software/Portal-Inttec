@@ -145,7 +145,7 @@ export default function AdminGastosScreen() {
   const [tempTipoProyecto, setTempTipoProyecto] = useState('');
   const [tempDetalleProyecto, setTempDetalleProyecto] = useState('');
   const [tempMetodoPago, setTempMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia'>('efectivo');
-  const [tempTipoTarjeta, setTempTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | null>(null);
+  const [tempTipoTarjeta, setTempTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | 'HILTON' | null>(null);
   const [tempComentarios, setTempComentarios] = useState('');
 
   // Catálogos adicionales para edición rápida
@@ -859,7 +859,7 @@ export default function AdminGastosScreen() {
       } else if (quickEditFieldType === 'pago') {
         const isTarjeta = tempMetodoPago !== 'efectivo' && tempMetodoPago !== 'transferencia';
         if (isTarjeta && !tempTipoTarjeta) {
-          showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, MERCADO PAGO).');
+          showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, MERCADO PAGO, HILTON).');
           setIsSavingQuickField(false);
           return;
         }
@@ -4697,7 +4697,7 @@ export default function AdminGastosScreen() {
                           </View>
                         </View>
 
-                        {/* Selecciona la Tarjeta * (BBVA, AMEX, MARRIOT, BANORTE, INVEX, MERCADO PAGO) */}
+                        {/* Selecciona la Tarjeta * (BBVA, AMEX, MARRIOT, BANORTE, INVEX, MERCADO PAGO, HILTON) */}
                         <View style={{ gap: 6 }}>
                           <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
                             Selecciona la Tarjeta *
@@ -4707,6 +4707,7 @@ export default function AdminGastosScreen() {
                               ['BBVA', 'AMEX'],
                               ['MARRIOT', 'BANORTE'],
                               ['INVEX', 'MERCADO PAGO'],
+                              ['HILTON'],
                             ].map((pair, rowIdx) => (
                               <View key={rowIdx} style={{ flexDirection: 'row', gap: 8 }}>
                                 {pair.map(card => {
@@ -4736,6 +4737,7 @@ export default function AdminGastosScreen() {
                                     </TouchableOpacity>
                                   );
                                 })}
+                                {pair.length === 1 && <View style={{ flex: 1 }} />}
                               </View>
                             ))}
                           </View>
