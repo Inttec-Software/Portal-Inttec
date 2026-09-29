@@ -644,6 +644,17 @@ export default function EmpleadoGastos() {
         </View>
 
         <View style={styles.headerActions}>
+          {/* Checador Shortcut */}
+          <TouchableOpacity
+            onPress={() => router.push('/(empleado)/asistencia')}
+            style={[
+              styles.headerIconBtn,
+              { backgroundColor: scheme === 'dark' ? 'rgba(29, 209, 161, 0.15)' : 'rgba(29, 209, 161, 0.1)', marginRight: 8 }
+            ]}
+          >
+            <Ionicons name="finger-print" size={20} color={themeColors.success || '#1dd1a1'} />
+          </TouchableOpacity>
+
           <TouchableOpacity
             onPress={handleOpenTasksPopover}
             style={[styles.headerIconBtn, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)', position: 'relative' }]}

@@ -38,6 +38,7 @@ interface ClienteCatalogo {
   codigo_postal?: string;
   regimen_fiscal?: string;
   uso_cfdi?: string;
+  direccion?: string;
 }
 
 interface ProductoCatalogo {
@@ -59,6 +60,7 @@ interface ProductoCatalogo {
 interface FacturaPartida {
   id: string;
   descripcion: string;
+  descripcion_detallada?: string;
   cantidad: string;
   precio_unitario: string;
   clave_sat: string;
@@ -68,13 +70,14 @@ interface FacturaPartida {
 }
 
 interface FacturaEmitida {
-  id: string;
+  id: string | number;
   cliente: string;
   fecha: string;
   factura_referencia?: string;
   folio?: string;
   cfdi_uuid?: string;
-  cfdi_estado?: 'TIMBRADA' | 'CANCELADA' | 'PENDIENTE';
+  cfdi_estado?: 'TIMBRADA' | 'CANCELADA' | 'PENDIENTE' | 'BORRADOR';
+  es_borrador?: boolean;
   cfdi_xml_url?: string;
   precio_total_facturado: number;
   created_at?: string;
@@ -83,29 +86,56 @@ interface FacturaEmitida {
   descripcion?: string;
   origen?: string;
   origenLabel?: string;
+  etiqueta?: string;
 }
 
 const REGIMENES_FISCALES = [
   { code: '601', label: '601 - General de Ley Personas Morales' },
-  { code: '612', label: '612 - Personas Físicas con Actividades Empresariales y Profesionales' },
-  { code: '626', label: '626 - Régimen Simplificado de Confianza (RESICO)' },
-  { code: '616', label: '616 - Sin obligaciones fiscales' },
   { code: '603', label: '603 - Personas Morales con Fines no Lucrativos' },
   { code: '605', label: '605 - Sueldos y Salarios e Ingresos Asimilados a Salarios' },
+  { code: '606', label: '606 - Arrendamiento' },
+  { code: '607', label: '607 - Régimen de Enajenación o Adquisición de Bienes' },
+  { code: '608', label: '608 - Demás ingresos' },
+  { code: '610', label: '610 - Residentes en el Extranjero sin Establecimiento Permanente en México' },
+  { code: '611', label: '611 - Ingresos por Dividendos (socios y accionistas)' },
+  { code: '612', label: '612 - Personas Físicas con Actividades Empresariales y Profesionales' },
+  { code: '614', label: '614 - Ingresos por intereses' },
+  { code: '615', label: '615 - Régimen de los ingresos por obtención de premios' },
+  { code: '616', label: '616 - Sin obligaciones fiscales' },
+  { code: '620', label: '620 - Sociedades Cooperativas de Producción que optan por diferir sus ingresos' },
   { code: '621', label: '621 - Incorporación Fiscal' },
+  { code: '622', label: '622 - Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras' },
+  { code: '623', label: '623 - Opcional para Grupos de Sociedades' },
+  { code: '624', label: '624 - Coordinados' },
   { code: '625', label: '625 - Régimen de las Actividades Empresariales con ingresos a través de Plataformas Tecnológicas' },
+  { code: '626', label: '626 - Régimen Simplificado de Confianza (RESICO)' },
 ];
 
 const USOS_CFDI = [
-  { code: 'G03', label: 'G03 - Gastos en general' },
   { code: 'G01', label: 'G01 - Adquisición de mercancías' },
-  { code: 'S01', label: 'S01 - Sin efectos fiscales' },
-  { code: 'CP01', label: 'CP01 - Pagos' },
+  { code: 'G02', label: 'G02 - Devoluciones, descuentos o bonificaciones' },
+  { code: 'G03', label: 'G03 - Gastos en general' },
   { code: 'I01', label: 'I01 - Construcciones' },
-  { code: 'I02', label: 'I02 - Mobilario y equipo de oficina' },
+  { code: 'I02', label: 'I02 - Mobilario y equipo de oficina por inversiones' },
   { code: 'I03', label: 'I03 - Equipo de transporte' },
   { code: 'I04', label: 'I04 - Equipo de computo y accesorios' },
+  { code: 'I05', label: 'I05 - Dados, troqueles, moldes, matrices y herramental' },
+  { code: 'I06', label: 'I06 - Comunicaciones telefónicas' },
+  { code: 'I07', label: 'I07 - Comunicaciones satelitales' },
+  { code: 'I08', label: 'I08 - Otra maquinaria y equipo' },
   { code: 'D01', label: 'D01 - Honorarios médicos, dentales y gastos hospitalarios' },
+  { code: 'D02', label: 'D02 - Gastos médicos por incapacidad o discapacidad' },
+  { code: 'D03', label: 'D03 - Gastos funerales' },
+  { code: 'D04', label: 'D04 - Donativos' },
+  { code: 'D05', label: 'D05 - Intereses reales efectivamente pagados por créditos hipotecarios' },
+  { code: 'D06', label: 'D06 - Aportaciones voluntarias al SAR' },
+  { code: 'D07', label: 'D07 - Primas por seguros de gastos médicos' },
+  { code: 'D08', label: 'D08 - Gastos de transportación escolar obligatoria' },
+  { code: 'D09', label: 'D09 - Depósitos en cuentas personales especiales para el ahorro' },
+  { code: 'D10', label: 'D10 - Pagos por servicios educativos (colegiaturas)' },
+  { code: 'S01', label: 'S01 - Sin efectos fiscales' },
+  { code: 'CP01', label: 'CP01 - Pagos' },
+  { code: 'CN01', label: 'CN01 - Nómina' },
 ];
 
 const FORMAS_PAGO = [
@@ -117,19 +147,94 @@ const FORMAS_PAGO = [
   { code: '99', label: '99 - Por definir' },
 ];
 
+function TableTooltipButton({
+  icon,
+  color,
+  bgColor,
+  borderColor,
+  tooltip,
+  onPress,
+}: {
+  icon: any;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  tooltip: string;
+  onPress: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <View style={{ position: 'relative', alignItems: 'center', zIndex: hovered ? 9999 : 1 }}>
+      <Pressable
+        onPress={(e) => {
+          e.stopPropagation();
+          onPress();
+        }}
+        onHoverIn={() => setHovered(true)}
+        onHoverOut={() => setHovered(false)}
+        style={({ hovered: isHover }: any) => [
+          styles.tableActionIconBtn,
+          {
+            borderColor: isHover || hovered ? color : borderColor,
+            backgroundColor: isHover || hovered ? color + '28' : bgColor,
+            transform: [{ scale: isHover || hovered ? 1.1 : 1 }],
+          },
+        ]}
+        {...(Platform.OS === 'web' ? ({ title: tooltip } as any) : {})}
+        accessibilityLabel={tooltip}
+      >
+        <Ionicons name={icon} size={15} color={color} />
+      </Pressable>
+
+      {/* Tooltip flotante interactivo en web */}
+      {hovered && Platform.OS === 'web' && (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: 34,
+            backgroundColor: '#0f172a',
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: '#334155',
+            zIndex: 99999,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.4,
+            shadowRadius: 4,
+            elevation: 10,
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            alignItems: 'center',
+          } as any}
+        >
+          <Text style={{ color: '#f8fafc', fontSize: 11, fontWeight: '700' }}>
+            {tooltip}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 export default function FacturacionScreen() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
 
-  const [activeTab, setActiveTab] = useState<'emitir' | 'historial' | 'pagos'>('emitir');
+  const [activeTab, setActiveTab] = useState<'emitir' | 'historial' | 'pagos'>('historial');
 
-  // Catálogo de Clientes
+  // Catálogo de Clientes y Autocompletado Reactivo
   const [clientes, setClientes] = useState<ClienteCatalogo[]>([]);
-  const [isClientModalOpen, setIsClientModalOpen] = useState(false);
   const [isLoadingClientes, setIsLoadingClientes] = useState(false);
-  const [clientSearch, setClientSearch] = useState('');
+  const [currentDraftId, setCurrentDraftId] = useState<string | number | null>(null);
+  const [clientSuggestions, setClientSuggestions] = useState<ClienteCatalogo[]>([]);
+  const [isSearchingClients, setIsSearchingClients] = useState(false);
+  const [showClientDropdown, setShowClientDropdown] = useState(false);
+  const searchTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   // Catálogo de Productos / Inventario
   const [productos, setProductos] = useState<ProductoCatalogo[]>([]);
@@ -141,8 +246,32 @@ export default function FacturacionScreen() {
   const [clienteNombre, setClienteNombre] = useState('');
   const [clienteRfc, setClienteRfc] = useState('XAXX010101000');
   const [clienteCp, setClienteCp] = useState('31110');
+  const [clienteDireccion, setClienteDireccion] = useState('');
   const [clienteRegimen, setClienteRegimen] = useState('601');
   const [clienteUso, setClienteUso] = useState('G03');
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+
+  // Modales de selección desplegable con buscador rápido
+  const [modalRegimenVisible, setModalRegimenVisible] = useState(false);
+  const [searchRegimenText, setSearchRegimenText] = useState('');
+  const [modalUsoVisible, setModalUsoVisible] = useState(false);
+  const [searchUsoText, setSearchUsoText] = useState('');
+
+  const filteredRegimenes = useMemo(() => {
+    if (!searchRegimenText.trim()) return REGIMENES_FISCALES;
+    const q = normalizeText(searchRegimenText);
+    return REGIMENES_FISCALES.filter(r =>
+      normalizeText(r.code).includes(q) || normalizeText(r.label).includes(q)
+    );
+  }, [searchRegimenText]);
+
+  const filteredUsos = useMemo(() => {
+    if (!searchUsoText.trim()) return USOS_CFDI;
+    const q = normalizeText(searchUsoText);
+    return USOS_CFDI.filter(u =>
+      normalizeText(u.code).includes(q) || normalizeText(u.label).includes(q)
+    );
+  }, [searchUsoText]);
 
   // 2. Configuración del Comprobante
   const [formaPago, setFormaPago] = useState('03');
@@ -151,14 +280,16 @@ export default function FacturacionScreen() {
   const [folio, setFolio] = useState('0001');
   const [moneda, setMoneda] = useState('MXN');
   const [ordenCompra, setOrdenCompra] = useState('');
+  const [etiqueta, setEtiqueta] = useState('');
 
   // 3. Partidas
   const [partidas, setPartidas] = useState<FacturaPartida[]>([
     {
       id: '1',
       descripcion: '',
-      cantidad: '1',
-      precio_unitario: '0',
+      descripcion_detallada: '',
+      cantidad: '',
+      precio_unitario: '',
       clave_sat: '01010101',
       clave_unidad: 'H87',
       unidad: 'Pieza',
@@ -170,7 +301,10 @@ export default function FacturacionScreen() {
   const [historialFacturas, setHistorialFacturas] = useState<FacturaEmitida[]>([]);
   const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
   const [historialSearch, setHistorialSearch] = useState('');
-  const [filtroEstado, setFiltroEstado] = useState<'TODAS' | 'TIMBRADA' | 'CANCELADA'>('TODAS');
+  const [filtroEstado, setFiltroEstado] = useState<'TODAS' | 'BORRADOR' | 'TIMBRADA' | 'CANCELADA'>('TODAS');
+  const [paginaActual, setPaginaActual] = useState(1);
+  const [registrosPorPagina, setRegistrosPorPagina] = useState(25);
+  const [selectedFacturasIds, setSelectedFacturasIds] = useState<Record<string | number, boolean>>({});
 
   // Complementos de Pago (REP)
   const [complementosList, setComplementosList] = useState<any[]>([]);
@@ -181,6 +315,7 @@ export default function FacturacionScreen() {
   // Modal Nuevo Complemento de Pago
   const [isPagoModalOpen, setIsPagoModalOpen] = useState(false);
   const [pagoCliente, setPagoCliente] = useState<ClienteCatalogo | null>(null);
+  const [pagoClienteRegimen, setPagoClienteRegimen] = useState('601');
   const [isSelectClientePagoOpen, setIsSelectClientePagoOpen] = useState(false);
   const [searchClientePago, setSearchClientePago] = useState('');
   const [facturasPendientesCliente, setFacturasPendientesCliente] = useState<any[]>([]);
@@ -355,7 +490,7 @@ export default function FacturacionScreen() {
       const client = activeComp === 'daravisa' ? daravisaClient : inttecClient;
       const { data, error } = await client
         .from('clientes')
-        .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi')
+        .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi, direccion')
         .order('nombre');
 
       if (!error && data && data.length > 0) {
@@ -396,7 +531,7 @@ export default function FacturacionScreen() {
           const ventasList: any[] = json.ventas || json.data || [];
           if (Array.isArray(ventasList) && ventasList.length > 0) {
             const facturadas = ventasList
-              .filter(v => v.cfdi_uuid || v.cfdi_estado === 'TIMBRADA' || v.cfdi_estado === 'CANCELADA')
+              .filter(v => v.cfdi_uuid || v.cfdi_estado === 'TIMBRADA' || v.cfdi_estado === 'CANCELADA' || v.cfdi_estado === 'BORRADOR' || v.es_borrador)
               .map(f => {
                 const isDirecta = f.tipo_proyecto === 'Factura Directa';
                 const cleanFolioVal = cleanFolio(f.folio);
@@ -417,8 +552,8 @@ export default function FacturacionScreen() {
       // 3. Fallback directo a Supabase
       const { data } = await supabase
         .from('ventas')
-        .select('id, cliente, fecha, factura_referencia, folio, cfdi_uuid, cfdi_estado, cfdi_xml_url, precio_total_facturado, created_at, orden_compra, tipo_proyecto')
-        .or('cfdi_uuid.neq.null,cfdi_estado.eq.TIMBRADA,cfdi_estado.eq.CANCELADA')
+        .select('id, cliente, fecha, factura_referencia, folio, cfdi_uuid, cfdi_estado, cfdi_xml_url, precio_total_facturado, created_at, orden_compra, tipo_proyecto, cliente_direccion, cliente_cp, cliente_rfc, notas')
+        .or('cfdi_uuid.neq.null,cfdi_estado.eq.TIMBRADA,cfdi_estado.eq.CANCELADA,cfdi_estado.eq.BORRADOR')
         .order('created_at', { ascending: false });
 
       if (data) {
@@ -461,13 +596,71 @@ export default function FacturacionScreen() {
     return { subtotal, totalIva, total };
   }, [partidas]);
 
-  const handleSelectClient = (c: ClienteCatalogo) => {
+  const handleClienteNombreChange = (text: string) => {
+    setClienteNombre(text);
+
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    if (!text || text.trim().length === 0) {
+      setClientSuggestions([]);
+      setShowClientDropdown(false);
+      return;
+    }
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        setIsSearchingClients(true);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/clientes-search?q=${encodeURIComponent(text.trim())}`, { headers });
+        if (res.ok) {
+          const json = await res.json();
+          const items: ClienteCatalogo[] = json.clientes || [];
+          setClientSuggestions(items);
+          setShowClientDropdown(items.length > 0);
+        } else {
+          // Fallback a filtrado de catálogo local
+          const q = normalizeText(text);
+          const localFiltered = clientes.filter(c =>
+            normalizeText(c.nombre || '').includes(q) ||
+            normalizeText(c.razon_social || '').includes(q) ||
+            normalizeText(c.rfc || '').includes(q)
+          );
+          setClientSuggestions(localFiltered);
+          setShowClientDropdown(localFiltered.length > 0);
+        }
+      } catch (err) {
+        console.warn('Error en búsqueda reactiva de clientes:', err);
+        const q = normalizeText(text);
+        const localFiltered = clientes.filter(c =>
+          normalizeText(c.nombre || '').includes(q) ||
+          normalizeText(c.razon_social || '').includes(q) ||
+          normalizeText(c.rfc || '').includes(q)
+        );
+        setClientSuggestions(localFiltered);
+        setShowClientDropdown(localFiltered.length > 0);
+      } finally {
+        setIsSearchingClients(false);
+      }
+    }, 280);
+  };
+
+  const handleSelectSearchedClient = (c: ClienteCatalogo) => {
+    setSelectedClientId(c.id || null);
     setClienteNombre(c.razon_social || c.nombre || '');
-    if (c.rfc) setClienteRfc(c.rfc.trim().toUpperCase());
-    if (c.codigo_postal) setClienteCp(c.codigo_postal);
+    setClienteRfc(c.rfc ? c.rfc.trim().toUpperCase() : 'XAXX010101000');
+    setClienteCp(c.codigo_postal ? c.codigo_postal.trim() : '31110');
+    setClienteDireccion(c.direccion ? c.direccion.trim() : '');
     if (c.regimen_fiscal) setClienteRegimen(c.regimen_fiscal);
-    if (c.uso_cfdi) setClienteUso(c.uso_cfdi);
-    setIsClientModalOpen(false);
+    // Uso CFDI: no se guarda en clientes, default en G03
+    setClienteUso('G03');
+    setShowClientDropdown(false);
+    setClientSuggestions([]);
+  };
+
+  const handleSelectClient = (c: ClienteCatalogo) => {
+    handleSelectSearchedClient(c);
   };
 
   const getFilteredProductsForPartida = (searchText: string) => {
@@ -533,8 +726,9 @@ export default function FacturacionScreen() {
       {
         id: String(Date.now()),
         descripcion: '',
-        cantidad: '1',
-        precio_unitario: '0',
+        descripcion_detallada: '',
+        cantidad: '',
+        precio_unitario: '',
         clave_sat: '01010101',
         clave_unidad: 'H87',
         unidad: 'Pieza',
@@ -549,6 +743,7 @@ export default function FacturacionScreen() {
     const duplicated: FacturaPartida = {
       ...item,
       id: String(Date.now()),
+      descripcion_detallada: item.descripcion_detallada || '',
     };
     setPartidas(prev => [...prev.slice(0, index + 1), duplicated, ...prev.slice(index + 1)]);
   };
@@ -571,9 +766,12 @@ export default function FacturacionScreen() {
   };
 
   const handleResetForm = () => {
+    setCurrentDraftId(null);
+    setSelectedClientId(null);
     setClienteNombre('');
     setClienteRfc('XAXX010101000');
     setClienteCp('31110');
+    setClienteDireccion('');
     setClienteRegimen('601');
     setClienteUso('G03');
     setFormaPago('03');
@@ -582,18 +780,456 @@ export default function FacturacionScreen() {
     setFolio('0001');
     fetchSiguienteFolio('A');
     setOrdenCompra('');
+    setEtiqueta('');
     setPartidas([
       {
         id: '1',
         descripcion: '',
-        cantidad: '1',
-        precio_unitario: '0',
+        descripcion_detallada: '',
+        cantidad: '',
+        precio_unitario: '',
         clave_sat: '01010101',
         clave_unidad: 'H87',
         unidad: 'Pieza',
         objeto_imp: '02',
       },
     ]);
+  };
+
+  // Creación de nuevo borrador con reserva de folio auto-incremental
+  const handleNuevaFactura = async () => {
+    try {
+      setIsSubmitting(true);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/sat/borrador`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          serie: serie || 'A',
+          cliente: 'PUBLICO EN GENERAL',
+          cliente_rfc: 'XAXX010101000',
+          cliente_cp: '31110',
+          partidas: [
+            {
+              descripcion: '',
+              descripcion_detallada: '',
+              cantidad: 1,
+              precio_unitario: 0,
+              clave_sat: '01010101',
+              clave_unidad: 'H87',
+              unidad: 'Pieza',
+              objeto_imp: '02'
+            }
+          ]
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Error al reservar folio y crear borrador');
+      }
+
+      const draft = data.borrador;
+      setCurrentDraftId(draft.id);
+      setSerie(draft.serie || 'A');
+      setFolio(draft.folio || '0000');
+      setClienteNombre('');
+      setClienteRfc(draft.receptor?.rfc || 'XAXX010101000');
+      setClienteCp(draft.receptor?.codigo_postal || '31110');
+      setClienteRegimen(draft.receptor?.regimen_fiscal || '601');
+      setClienteUso(draft.receptor?.uso_cfdi || 'G03');
+      setFormaPago('03');
+      setMetodoPago('PUE');
+      setOrdenCompra('');
+      setPartidas([
+        {
+          id: '1',
+          descripcion: '',
+          descripcion_detallada: '',
+          cantidad: '',
+          precio_unitario: '',
+          clave_sat: '01010101',
+          clave_unidad: 'H87',
+          unidad: 'Pieza',
+          objeto_imp: '02',
+        }
+      ]);
+
+      setActiveTab('emitir');
+      fetchHistorialFacturas();
+    } catch (err: any) {
+      console.error('Error al crear borrador:', err);
+      showAlert('Error al Crear Borrador', err.message || 'No se pudo crear el borrador.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Ver detalles de un borrador en FacturaPreviewModal
+  const handleVerBorrador = async (factura: FacturaEmitida) => {
+    try {
+      setIsSubmitting(true);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/sat/borrador/${factura.id}`, { headers });
+      let draftData: any = null;
+      if (res.ok) {
+        const json = await res.json();
+        draftData = json.borrador || json.data;
+      }
+
+      const folioVal = draftData?.folio || cleanFolio(factura.folio) || '0000';
+      const serieVal = draftData?.serie || 'A';
+      const clienteVal = draftData?.cliente || factura.cliente || 'PUBLICO EN GENERAL';
+      const totalVal = Number(draftData?.precio_total_facturado || factura.precio_total_facturado || 0);
+      const subtotalVal = Math.round((totalVal / 1.16) * 100) / 100;
+      const ivaVal = Math.round((totalVal - subtotalVal) * 100) / 100;
+
+      const previewPartidas = draftData?.partidas && draftData.partidas.length > 0
+        ? draftData.partidas.map((p: any) => {
+            const c = parseFloat(p.cantidad) || 1;
+            const pu = parseFloat(p.precio_unitario) || 0;
+            const imp = c * pu;
+            const hasIva = p.objeto_imp === '02';
+            const ivaItem = hasIva ? imp * 0.16 : 0;
+            return {
+              quantity: c,
+              product: {
+                product_key: p.clave_sat || '01010101',
+                unit_key: p.clave_unidad || 'H87',
+                description: p.descripcion_detallada && String(p.descripcion_detallada).trim()
+                  ? `${String(p.descripcion || 'Concepto borrador').trim()} - ${String(p.descripcion_detallada).trim()}`
+                  : (p.descripcion || 'Concepto borrador'),
+                price: pu,
+              },
+              taxes: hasIva ? [{
+                amount: ivaItem,
+                base: imp,
+                rate: 0.16,
+                type: 'IVA',
+              }] : []
+            };
+          })
+        : [{
+            quantity: 1,
+            product: {
+              product_key: '01010101',
+              unit_key: 'H87',
+              description: factura.descripcion || 'Concepto en borrador',
+              price: subtotalVal,
+            },
+            taxes: [{
+              amount: ivaVal,
+              base: subtotalVal,
+              rate: 0.16,
+              type: 'IVA',
+            }]
+          }];
+
+      const fakeDraftData = {
+        uuid: `BORRADOR-${factura.id}`,
+        folio_number: folioVal,
+        series: serieVal,
+        created_at: factura.fecha || factura.created_at || new Date().toISOString(),
+        payment_form: draftData?.forma_pago || '03',
+        payment_method: draftData?.metodo_pago || 'PUE',
+        use: draftData?.receptor?.uso_cfdi || 'G03',
+        subtotal: subtotalVal,
+        total: totalVal,
+        total_impuestos_trasladados: ivaVal,
+        iva: ivaVal,
+        taxes: [{
+          amount: ivaVal,
+          base: subtotalVal,
+          rate: 0.16,
+          type: 'IVA'
+        }],
+        issuer: {
+          tax_id: 'FETR83041461A',
+          legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
+          tax_system: '612',
+          zip: '31110'
+        },
+        customer: {
+          tax_id: draftData?.receptor?.rfc || (factura as any).cliente_rfc || 'XAXX010101000',
+          legal_name: clienteVal,
+          tax_system: draftData?.receptor?.regimen_fiscal || '601',
+          address: { 
+            street: draftData?.receptor?.direccion || draftData?.cliente_direccion || (factura as any).cliente_direccion || '',
+            zip: draftData?.receptor?.codigo_postal || '31110' 
+          }
+        },
+        items: previewPartidas,
+        stamp: {
+          uuid: `BORRADOR-${factura.id}`,
+          date: new Date().toISOString(),
+          sat_cert_number: '30001000000500003416',
+          signature: 'VISTA_PREVIA_BORRADOR',
+          sat_signature: 'SELLO_SAT_BORRADOR',
+          pac_rfc: 'FIN1203015JA',
+          original_chain: `||1.1|BORRADOR-${factura.id}||`
+        }
+      };
+
+      if (factura) {
+        (factura as any).cliente_direccion = draftData?.receptor?.direccion || draftData?.cliente_direccion || (factura as any).cliente_direccion || '';
+      }
+
+      setPreviewVenta(factura);
+      setPreviewFacturaData(fakeDraftData);
+      setPreviewXmlText('');
+      setPreviewIsDraft(true);
+      setPreviewTitle(`Borrador: Factura ${serieVal}${folioVal}`);
+      setPreviewModalVisible(true);
+    } catch (err: any) {
+      showAlert('Error al Ver Borrador', err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Modificar un borrador: carga los datos en el formulario y activa currentDraftId
+  const handleModificarBorrador = async (factura: FacturaEmitida) => {
+    try {
+      setIsSubmitting(true);
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/sat/borrador/${factura.id}`, { headers });
+      if (!res.ok) {
+        throw new Error(`Error al consultar borrador (${res.status})`);
+      }
+      const json = await res.json();
+      const draft = json.borrador;
+      if (!draft) throw new Error('No se recibió la información del borrador');
+
+      setCurrentDraftId(draft.id);
+      setSelectedClientId(draft.cliente_id || draft.receptor?.cliente_id || null);
+      setSerie(draft.serie || 'A');
+      setFolio(draft.folio || '0000');
+      setClienteNombre(draft.cliente || draft.receptor?.nombre || draft.receptor?.razon_social || '');
+      setClienteRfc(draft.receptor?.rfc || 'XAXX010101000');
+      setClienteCp(draft.receptor?.codigo_postal || '31110');
+      setClienteDireccion(draft.receptor?.direccion || draft.cliente_direccion || '');
+      setClienteRegimen(draft.receptor?.regimen_fiscal || '601');
+      setClienteUso(draft.receptor?.uso_cfdi || 'G03');
+      setFormaPago(draft.forma_pago || '03');
+      setMetodoPago(draft.metodo_pago || 'PUE');
+      setOrdenCompra(draft.orden_compra || '');
+      setEtiqueta(draft.etiqueta || draft.notas?.config?.etiqueta || '');
+      setMoneda(draft.moneda || 'MXN');
+
+      if (Array.isArray(draft.partidas) && draft.partidas.length > 0) {
+        setPartidas(draft.partidas.map((p: any, idx: number) => {
+          const isBlankInitialPartida = !p.descripcion && (p.cantidad === 1 || p.cantidad === '1') && (p.precio_unitario === 0 || p.precio_unitario === '0');
+          return {
+            id: String(p.id || idx + 1),
+            descripcion: p.descripcion || '',
+            descripcion_detallada: p.descripcion_detallada || '',
+            cantidad: isBlankInitialPartida ? '' : (p.cantidad !== undefined && p.cantidad !== null ? String(p.cantidad) : ''),
+            precio_unitario: isBlankInitialPartida ? '' : (p.precio_unitario !== undefined && p.precio_unitario !== null ? String(p.precio_unitario) : ''),
+            clave_sat: p.clave_sat || '01010101',
+            clave_unidad: p.clave_unidad || 'H87',
+            unidad: p.unidad || 'Pieza',
+            objeto_imp: p.objeto_imp || '02',
+          };
+        }));
+      } else {
+        setPartidas([
+          {
+            id: '1',
+            descripcion: '',
+            descripcion_detallada: '',
+            cantidad: '',
+            precio_unitario: '',
+            clave_sat: '01010101',
+            clave_unidad: 'H87',
+            unidad: 'Pieza',
+            objeto_imp: '02',
+          }
+        ]);
+      }
+
+      setActiveTab('emitir');
+    } catch (err: any) {
+      console.error('Error cargando borrador para modificar:', err);
+      showAlert('Error al Cargar Borrador', err.message || 'No se pudo cargar el borrador.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Sincroniza y actualiza en la tabla clientes el régimen fiscal (y dirección si aplica)
+  const syncClienteFiscalData = async () => {
+    const rfcClean = (clienteRfc || '').trim().toUpperCase();
+    if (!rfcClean || rfcClean === 'XAXX010101000' || rfcClean === 'XEXX010101000') {
+      return;
+    }
+
+    try {
+      const activeComp = CompanyService.getActiveCompany();
+      const client = activeComp === 'daravisa' ? daravisaClient : inttecClient;
+
+      const updateData: Record<string, any> = {
+        regimen_fiscal: clienteRegimen,
+      };
+      if (clienteDireccion.trim()) {
+        updateData.direccion = clienteDireccion.trim();
+      }
+
+      let q = client.from('clientes').update(updateData);
+      if (selectedClientId) {
+        q = q.eq('id', selectedClientId);
+      } else {
+        q = q.eq('rfc', rfcClean);
+      }
+      const { error: updErr } = await q;
+      if (updErr) {
+        console.warn('Aviso al actualizar régimen fiscal en clientes:', updErr);
+      }
+    } catch (e) {
+      console.warn('Error en syncClienteFiscalData:', e);
+    }
+  };
+
+  // Guardar cambios en el borrador existente preservando el folio reservado
+  const handleGuardarBorrador = async () => {
+    if (!currentDraftId) {
+      showAlert('Aviso', 'No hay un borrador activo seleccionado para guardar.');
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      await syncClienteFiscalData();
+      const headers = await getApiHeaders();
+      const payload = {
+        cliente: clienteNombre.trim() || 'PUBLICO EN GENERAL',
+        cliente_rfc: clienteRfc.trim().toUpperCase() || 'XAXX010101000',
+        cliente_cp: clienteCp.trim() || '31110',
+        cliente_direccion: clienteDireccion.trim(),
+        cliente_id: selectedClientId || undefined,
+        cliente_regimen: clienteRegimen,
+        cliente_uso: clienteUso,
+        forma_pago: formaPago,
+        metodo_pago: metodoPago,
+        orden_compra: ordenCompra.trim(),
+        etiqueta: etiqueta.trim(),
+        partidas: partidas.map(p => ({
+          descripcion: p.descripcion.trim() || 'Concepto sin descripción',
+          descripcion_detallada: p.descripcion_detallada?.trim() || null,
+          cantidad: parseFloat(p.cantidad) || 1,
+          precio_unitario: parseFloat(p.precio_unitario) || 0,
+          clave_sat: p.clave_sat.trim() || '01010101',
+          clave_unidad: p.clave_unidad.trim() || 'H87',
+          unidad: p.unidad || 'Pieza',
+          objeto_imp: p.objeto_imp || '02'
+        }))
+      };
+
+      const res = await fetch(`${getApiUrl()}/api/sat/borrador/${currentDraftId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(payload)
+      });
+      const resJson = await res.json().catch(() => ({}));
+      if (!res.ok || !resJson.success) {
+        throw new Error(resJson.error || 'Error al actualizar borrador');
+      }
+
+      showAlert('Éxito', `Borrador Folio ${serie}${folio} guardado correctamente.`);
+      fetchHistorialFacturas();
+    } catch (err: any) {
+      console.error('Error al guardar borrador:', err);
+      showAlert('Error al Guardar', err.message || 'No se pudo guardar el borrador.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Eliminar borrador físicamente de la base de datos
+  const handleEliminarBorrador = async (factura: FacturaEmitida) => {
+    const doDelete = async () => {
+      try {
+        setIsSubmitting(true);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/borrador/${factura.id}`, {
+          method: 'DELETE',
+          headers
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Error al eliminar borrador');
+        }
+        showAlert('Borrador Eliminado', `El borrador #${factura.id} con folio ${factura.folio || ''} ha sido eliminado.`);
+        if (currentDraftId === factura.id) {
+          setCurrentDraftId(null);
+          handleResetForm();
+        }
+        fetchHistorialFacturas();
+      } catch (err: any) {
+        console.error('Error al eliminar borrador:', err);
+        showAlert('Error al Eliminar', err.message || 'No se pudo eliminar el borrador.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`¿Estás seguro de eliminar el borrador #${factura.id} (${cleanFolio(factura.folio) || 'Folio reservado'})? Esta acción no se puede deshacer.`)) {
+        await doDelete();
+      }
+    } else {
+      Alert.alert(
+        'Eliminar Borrador',
+        `¿Deseas eliminar el borrador #${factura.id} (${cleanFolio(factura.folio) || 'Folio reservado'})?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Eliminar Borrador', style: 'destructive', onPress: doDelete }
+        ]
+      );
+    }
+  };
+
+  // Timbrar factura directamente desde el borrador
+  const handleTimbrarFacturaBorrador = async (factura: FacturaEmitida) => {
+    const doTimbrar = async () => {
+      try {
+        setIsSubmitting(true);
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/timbrar-factura`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ venta_id: factura.id })
+        });
+        const resJson = await res.json().catch(() => ({}));
+        if (!res.ok || !resJson.success) {
+          throw new Error(resJson.error || 'Error al timbrar borrador');
+        }
+        showAlert('Factura Timbrada', `La factura ha sido timbrada exitosamente ante el SAT.\n\nUUID:\n${resJson.cfdi_uuid || resJson.uuid}`);
+        if (currentDraftId === factura.id) {
+          setCurrentDraftId(null);
+          handleResetForm();
+        }
+        fetchHistorialFacturas();
+      } catch (err: any) {
+        console.error('Error al timbrar borrador:', err);
+        showAlert('Error al Timbrar', err.message || 'No se pudo timbrar la factura.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`¿Deseas timbrar ante el SAT el borrador con folio ${cleanFolio(factura.folio)} del cliente ${factura.cliente}?`)) {
+        await doTimbrar();
+      }
+    } else {
+      Alert.alert(
+        'Timbrar Factura',
+        `¿Deseas timbrar ante el SAT el borrador ${cleanFolio(factura.folio)} de ${factura.cliente}?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Timbrar Factura', onPress: doTimbrar }
+        ]
+      );
+    }
   };
 
   // Emisión y Timbrado Oficial CFDI 4.0
@@ -627,12 +1263,15 @@ export default function FacturacionScreen() {
 
     setIsSubmitting(true);
     try {
-      const payload = {
+      await syncClienteFiscalData();
+      const payload: any = {
+        venta_id: currentDraftId || undefined,
         cliente_override: {
           nombre: clienteNombre.trim().toUpperCase(),
           razon_social: clienteNombre.trim().toUpperCase(),
           rfc: clienteRfc.trim().toUpperCase(),
           codigo_postal: clienteCp.trim(),
+          direccion: clienteDireccion.trim(),
           regimen_fiscal: clienteRegimen,
           uso_cfdi: clienteUso,
         },
@@ -642,14 +1281,17 @@ export default function FacturacionScreen() {
           serie: serie.trim().toUpperCase(),
           folio: folio.trim(),
           orden_compra: ordenCompra.trim(),
+          etiqueta: etiqueta.trim(),
         },
         custom_partidas: partidas.map(p => ({
           descripcion: p.descripcion.trim(),
+          descripcion_detallada: p.descripcion_detallada?.trim() || null,
           cantidad: parseFloat(p.cantidad) || 1,
           precio_unitario_venta: parseFloat(p.precio_unitario) || 0,
           clave_sat: p.clave_sat.trim() || '01010101',
           clave_unidad: p.clave_unidad.trim() || 'H87',
           unidad: p.unidad || 'Pieza',
+          objeto_imp: p.objeto_imp || '02',
         })),
       };
 
@@ -700,6 +1342,7 @@ export default function FacturacionScreen() {
         throw new Error('No se pudo obtener el UUID de timbrado.');
       }
 
+      setCurrentDraftId(null);
       showAlert('Éxito', `Factura timbrada exitosamente (CFDI 4.0).\n\nFolio Fiscal (UUID):\n${data.cfdi_uuid}`);
       fetchHistorialFacturas();
       setActiveTab('historial');
@@ -742,6 +1385,9 @@ export default function FacturacionScreen() {
         id: 0,
         folio: `${serie}${folio || '1'}`,
         cliente: clienteNombre || 'PUBLICO EN GENERAL',
+        cliente_rfc: (clienteRfc || 'XAXX010101000').trim().toUpperCase(),
+        cliente_cp: (clienteCp || '31110').trim(),
+        cliente_direccion: clienteDireccion.trim(),
         fecha: new Date().toISOString(),
         precio_total_facturado: financialTotals.total,
         subtotal_venta: financialTotals.subtotal,
@@ -777,7 +1423,10 @@ export default function FacturacionScreen() {
           tax_id: clienteRfc,
           legal_name: clienteNombre || 'PUBLICO EN GENERAL',
           tax_system: clienteRegimen,
-          address: { zip: clienteCp },
+          address: { 
+            street: clienteDireccion.trim(),
+            zip: clienteCp 
+          },
         },
         items: partidas.map(p => {
           const cant = parseFloat(p.cantidad) || 1;
@@ -790,7 +1439,9 @@ export default function FacturacionScreen() {
             product: {
               product_key: p.clave_sat,
               unit_key: p.clave_unidad,
-              description: p.descripcion || 'Concepto a facturar',
+              description: p.descripcion_detallada && String(p.descripcion_detallada).trim()
+                ? `${String(p.descripcion || 'Concepto a facturar').trim()} - ${String(p.descripcion_detallada).trim()}`
+                : (p.descripcion || 'Concepto a facturar'),
               price: pu,
             },
             taxes: itemIva > 0 ? [{
@@ -976,6 +1627,28 @@ export default function FacturacionScreen() {
         };
       }
 
+      const clientDir = ((factura as any)?.cliente_direccion ||
+        (factura as any)?.notas?.receptor?.direccion ||
+        clientes.find(c => 
+          (c.rfc && parsed?.customer?.tax_id && c.rfc.trim().toUpperCase() === parsed.customer.tax_id.trim().toUpperCase()) ||
+          (c.nombre && parsed?.customer?.legal_name && c.nombre.trim().toUpperCase() === parsed.customer.legal_name.trim().toUpperCase())
+        )?.direccion || '').trim();
+
+      if (clientDir && parsed) {
+        if (!parsed.customer) {
+          parsed.customer = {};
+        }
+        if (!parsed.customer.address) {
+          parsed.customer.address = {};
+        }
+        if (!parsed.customer.address.street) {
+          parsed.customer.address.street = clientDir;
+        }
+      }
+      if (clientDir && factura) {
+        (factura as any).cliente_direccion = clientDir;
+      }
+
       setPreviewVenta(factura);
       setPreviewFacturaData(parsed);
       setPreviewXmlText(xmlText);
@@ -1054,6 +1727,7 @@ export default function FacturacionScreen() {
 
   const handleSelectClienteParaPago = async (cli: ClienteCatalogo) => {
     setPagoCliente(cli);
+    setPagoClienteRegimen(cli.regimen_fiscal || '601');
     setIsSelectClientePagoOpen(false);
     setSelectedFacturasMap({});
     setAbonosMap({});
@@ -1103,12 +1777,21 @@ export default function FacturacionScreen() {
     }
     setAbonosMap(newAbonos);
   };
-
   const handleCambiarAbono = (facturaId: number, montoStr: string, maxSaldo: number) => {
-    let num = parseFloat(montoStr);
-    if (isNaN(num) || num < 0) num = 0;
-    if (num > maxSaldo) num = maxSaldo;
-    setAbonosMap(prev => ({ ...prev, [facturaId]: String(num) }));
+    if (montoStr === '') {
+      setAbonosMap(prev => ({ ...prev, [facturaId]: '' }));
+      return;
+    }
+    
+    // Permitir solo dígitos y a lo mucho un punto decimal
+    if (/^\d*\.?\d*$/.test(montoStr)) {
+      let num = parseFloat(montoStr);
+      if (!isNaN(num) && num > maxSaldo) {
+        setAbonosMap(prev => ({ ...prev, [facturaId]: String(maxSaldo) }));
+      } else {
+        setAbonosMap(prev => ({ ...prev, [facturaId]: montoStr }));
+      }
+    }
   };
 
   const handlePagarSaldoCompleto = (facturaId: number, saldoPendiente: number) => {
@@ -1118,8 +1801,8 @@ export default function FacturacionScreen() {
 
   const totalAbonosCalculado = useMemo(() => {
     return Object.keys(selectedFacturasMap)
-      .filter(id => selectedFacturasMap[Number(id)])
-      .reduce((sum, id) => sum + (parseFloat(abonosMap[Number(id)] || '0') || 0), 0);
+      .filter(id => selectedFacturasMap[id as any])
+      .reduce((sum, id) => sum + (parseFloat(abonosMap[id as any] || '0') || 0), 0);
   }, [selectedFacturasMap, abonosMap]);
 
   const handleTimbrarPagoModal = async () => {
@@ -1128,15 +1811,15 @@ export default function FacturacionScreen() {
       return;
     }
 
-    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[Number(id)]);
+    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[id as any]);
     if (selectedIds.length === 0) {
       showAlert('Validación', 'Debes seleccionar al menos una factura con saldo pendiente.');
       return;
     }
 
     const doctosPayload = selectedIds.map(idStr => {
-      const vId = Number(idStr);
-      const monto = parseFloat(abonosMap[vId] || '0');
+      const vId = idStr;
+      const monto = parseFloat(abonosMap[vId as any] || '0');
       return {
         venta_id: vId,
         importe_a_pagar: monto
@@ -1160,7 +1843,7 @@ export default function FacturacionScreen() {
             nombre: pagoCliente.razon_social || pagoCliente.nombre,
             rfc: pagoCliente.rfc || 'XAXX010101000',
             codigo_postal: pagoCliente.codigo_postal || '31110',
-            regimen_fiscal: pagoCliente.regimen_fiscal || '601',
+            regimen_fiscal: pagoClienteRegimen,
           },
           fecha_pago: fechaPagoVal,
           forma_pago: formaPagoPago,
@@ -1218,16 +1901,16 @@ export default function FacturacionScreen() {
       showAlert('Validación', 'Por favor selecciona un cliente para la vista previa.');
       return;
     }
-    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[Number(id)]);
+    const selectedIds = Object.keys(selectedFacturasMap).filter(id => selectedFacturasMap[id as any]);
     if (selectedIds.length === 0) {
       showAlert('Validación', 'Selecciona al menos una factura.');
       return;
     }
 
     const doctosMock = selectedIds.map((idStr, idx) => {
-      const vId = Number(idStr);
-      const f = facturasPendientesCliente.find(fact => fact.id === vId) || {};
-      const monto = parseFloat(abonosMap[vId] || '0');
+      const vId = idStr;
+      const f = facturasPendientesCliente.find(fact => String(fact.id) === vId) || {};
+      const monto = parseFloat(abonosMap[vId as any] || '0');
       const saldoAnt = Number(f.saldo_pendiente || 0);
       return {
         id: idx + 1,
@@ -1402,6 +2085,7 @@ export default function FacturacionScreen() {
     };
 
     setPagoCliente(matchedCli);
+    setPagoClienteRegimen(matchedCli.regimen_fiscal || '601');
     setReferenciaPago(`Pago factura ${cleanFolio(factura.folio || factura.factura_referencia) || '#' + factura.id}`);
     setFormaPagoPago('03');
     setSeriePago('P');
@@ -1474,15 +2158,73 @@ export default function FacturacionScreen() {
     });
   }, [historialFacturas, filtroEstado, historialSearch]);
 
+  // Reiniciar a la página 1 cuando cambia el filtro o la búsqueda
+  useEffect(() => {
+    setPaginaActual(1);
+  }, [historialSearch, filtroEstado]);
+
+  const totalPaginas = Math.ceil(facturasFiltradas.length / registrosPorPagina) || 1;
+  const facturasPaginadas = useMemo(() => {
+    const start = (paginaActual - 1) * registrosPorPagina;
+    return facturasFiltradas.slice(start, start + registrosPorPagina);
+  }, [facturasFiltradas, paginaActual, registrosPorPagina]);
+
+  const inicioRegistro = facturasFiltradas.length === 0 ? 0 : (paginaActual - 1) * registrosPorPagina + 1;
+  const finRegistro = Math.min(paginaActual * registrosPorPagina, facturasFiltradas.length);
+
+  const areAllOnPageSelected = useMemo(() => {
+    if (facturasPaginadas.length === 0) return false;
+    return facturasPaginadas.every(f => selectedFacturasIds[f.id]);
+  }, [facturasPaginadas, selectedFacturasIds]);
+
+  const handleToggleSelectAll = () => {
+    const nextState = !areAllOnPageSelected;
+    const nextMap = { ...selectedFacturasIds };
+    facturasPaginadas.forEach(f => {
+      if (nextState) {
+        nextMap[f.id] = true;
+      } else {
+        delete nextMap[f.id];
+      }
+    });
+    setSelectedFacturasIds(nextMap);
+  };
+
+  const handleToggleSelectOne = (id: string | number) => {
+    setSelectedFacturasIds(prev => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  };
+
+  const formatFechaFactura = (fechaStr?: string) => {
+    if (!fechaStr) return '--';
+    try {
+      const cleanStr = String(fechaStr).slice(0, 10);
+      const parts = cleanStr.split('-');
+      if (parts.length !== 3) return cleanStr;
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const d = parseInt(parts[2], 10);
+      if (!y || !m || !d) return cleanStr;
+      const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
+      return `${d} ${meses[m - 1]} ${y}`;
+    } catch (_) {
+      return String(fechaStr).slice(0, 10);
+    }
+  };
+
   const clientesFiltrados = useMemo(() => {
-    if (!clientSearch.trim()) return clientes;
-    const q = normalizeText(clientSearch);
+    if (!clienteNombre.trim()) return clientes;
+    const q = normalizeText(clienteNombre);
     return clientes.filter(c =>
       normalizeText(c.nombre || '').includes(q) ||
       normalizeText(c.razon_social || '').includes(q) ||
       normalizeText(c.rfc || '').includes(q)
     );
-  }, [clientes, clientSearch]);
+  }, [clientes, clienteNombre]);
 
   const categoriasMap = useMemo(() => {
     return new Map(categorias.map(c => [c.id, c.nombre]));
@@ -1507,35 +2249,10 @@ export default function FacturacionScreen() {
         {/* Pestañas */}
         <View style={styles.tabsContainer}>
           <TouchableOpacity
-            onPress={() => setActiveTab('emitir')}
-            style={[
-              styles.tabBtn,
-              activeTab === 'emitir' && {
-                borderBottomColor: '#0284c7',
-                borderBottomWidth: 2.5,
-              },
-            ]}
-          >
-            <Ionicons
-              name="add-circle-outline"
-              size={18}
-              color={activeTab === 'emitir' ? '#0284c7' : themeColors.textSecondary}
-            />
-            <Text
-              style={[
-                styles.tabBtnText,
-                { color: activeTab === 'emitir' ? '#0284c7' : themeColors.textSecondary, fontWeight: activeTab === 'emitir' ? 'bold' : '500' },
-              ]}
-            >
-              Emitir Factura (CFDI 4.0)
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
             onPress={() => setActiveTab('historial')}
             style={[
               styles.tabBtn,
-              activeTab === 'historial' && {
+              (activeTab === 'historial' || activeTab === 'emitir') && {
                 borderBottomColor: '#0284c7',
                 borderBottomWidth: 2.5,
               },
@@ -1544,15 +2261,15 @@ export default function FacturacionScreen() {
             <Ionicons
               name="list-outline"
               size={18}
-              color={activeTab === 'historial' ? '#0284c7' : themeColors.textSecondary}
+              color={(activeTab === 'historial' || activeTab === 'emitir') ? '#0284c7' : themeColors.textSecondary}
             />
             <Text
               style={[
                 styles.tabBtnText,
-                { color: activeTab === 'historial' ? '#0284c7' : themeColors.textSecondary, fontWeight: activeTab === 'historial' ? 'bold' : '500' },
+                { color: (activeTab === 'historial' || activeTab === 'emitir') ? '#0284c7' : themeColors.textSecondary, fontWeight: (activeTab === 'historial' || activeTab === 'emitir') ? 'bold' : '500' },
               ]}
             >
-              Facturas Emitidas ({historialFacturas.length})
+              Facturas ({historialFacturas.length})
             </Text>
           </TouchableOpacity>
 
@@ -1587,34 +2304,133 @@ export default function FacturacionScreen() {
       {activeTab === 'emitir' ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: Spacing.three, gap: Spacing.three, maxWidth: 1100, alignSelf: 'center', width: '100%' }}>
           
+          {/* Barra Superior del Editor: Volver al Listado */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <TouchableOpacity
+              onPress={() => {
+                setActiveTab('historial');
+                setCurrentDraftId(null);
+                handleResetForm();
+              }}
+              style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', paddingVertical: 8, paddingHorizontal: 12 }]}
+            >
+              <Ionicons name="arrow-back" size={16} color="#0284c7" />
+              <Text style={{ color: '#0284c7', fontWeight: 'bold', fontSize: 13 }}>Volver al Listado</Text>
+            </TouchableOpacity>
+
+            {currentDraftId && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#f59e0b' }}>
+                <Ionicons name="document-text" size={14} color="#d97706" />
+                <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d97706' }}>
+                  Borrador Activo #{currentDraftId} (Folio {serie}{folio})
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Banner de Edición de Borrador si aplica */}
+          {currentDraftId && (
+            <View style={[styles.draftBannerContainer, { backgroundColor: '#fffbeb', borderColor: '#f59e0b' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                <Ionicons name="bookmark" size={24} color="#d97706" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#92400e' }}>
+                    Editando Borrador Folio {serie}{folio}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={handleGuardarBorrador}
+                disabled={isSubmitting}
+                style={[styles.quickSelectBtn, { borderColor: '#d97706', backgroundColor: '#fef3c7', paddingVertical: 8, paddingHorizontal: 12 }]}
+              >
+                <Ionicons name="save-outline" size={16} color="#d97706" />
+                <Text style={{ color: '#d97706', fontSize: 12, fontWeight: 'bold' }}>Guardar Borrador</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* SECCIÓN 1: DATOS FISCALES DEL RECEPTOR */}
-          <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, position: 'relative', zIndex: 1000 }]}>
             <View style={styles.cardHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="person" size={18} color="#0284c7" />
                 <Text style={[styles.cardTitle, { color: themeColors.text }]}>1. Datos Fiscales del Receptor (Cliente)</Text>
               </View>
-              <TouchableOpacity
-                onPress={() => {
-                  setClientSearch('');
-                  setIsClientModalOpen(true);
-                  if (clientes.length === 0) {
-                    fetchClientes();
-                  }
-                }}
-                style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15' }]}
-              >
-                <Ionicons name="search" size={14} color="#0284c7" />
-                <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: '700' }}>Cargar del Catálogo</Text>
-              </TouchableOpacity>
             </View>
 
-            <CustomInput
-              label="Razón Social / Nombre Oficial *"
-              value={clienteNombre}
-              onChangeText={setClienteNombre}
-              placeholder="Ej. RAUL HERNANDEZ PEREZ o TECNOLOGIAS INTTEC"
-            />
+            {/* Campo Razón Social con Autocompletado Reactivo */}
+            <View style={{ position: 'relative', zIndex: 10000, marginBottom: 12 }}>
+              <Text style={[styles.fieldLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>
+                Razón Social / Nombre Oficial *
+              </Text>
+              <View style={[styles.clientAutocompleteInputContainer, { backgroundColor: themeColors.background, borderColor: showClientDropdown ? '#0284c7' : themeColors.border }]}>
+                <Ionicons name="business-outline" size={18} color="#0284c7" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={[styles.clientAutocompleteInput, { color: themeColors.text }]}
+                  value={clienteNombre}
+                  onChangeText={handleClienteNombreChange}
+                  onFocus={() => {
+                    if (clientSuggestions.length > 0) setShowClientDropdown(true);
+                  }}
+                  placeholder="Escribe la razón social o nombre"
+                  placeholderTextColor={themeColors.textSecondary}
+                />
+                {isSearchingClients && (
+                  <ActivityIndicator size="small" color="#0284c7" style={{ marginLeft: 8 }} />
+                )}
+                {!!clienteNombre && !isSearchingClients && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setClienteNombre('');
+                      setShowClientDropdown(false);
+                      setClientSuggestions([]);
+                    }}
+                    style={{ padding: 4 }}
+                  >
+                    <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Lista Desplegable de Autocompletado */}
+              {showClientDropdown && clientSuggestions.length > 0 && (
+                <View style={[styles.clientDropdownMenu, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                  <View style={[styles.clientDropdownHeader, { borderBottomColor: themeColors.border }]}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.textSecondary }}>
+                      COINCIDENCIAS EN EL CATÁLOGO ({clientSuggestions.length})
+                    </Text>
+                    <TouchableOpacity onPress={() => setShowClientDropdown(false)} style={{ padding: 2 }}>
+                      <Ionicons name="close" size={16} color={themeColors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled">
+                    {clientSuggestions.map(c => {
+                      const displayName = c.razon_social && c.razon_social !== c.nombre
+                        ? `${c.razon_social} (${c.nombre})`
+                        : (c.razon_social || c.nombre || 'Cliente');
+                      return (
+                        <TouchableOpacity
+                          key={c.id || c.rfc}
+                          onPress={() => handleSelectSearchedClient(c)}
+                          style={[styles.clientDropdownItem, { borderBottomColor: themeColors.border }]}
+                        >
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <Text style={{ fontSize: 13, fontWeight: 'bold', color: themeColors.text }}>
+                              {displayName}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                              RFC: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{c.rfc || 'Sin RFC'}</Text> | CP: {c.codigo_postal || 'N/D'} | Régimen: {c.regimen_fiscal || '601'}
+                            </Text>
+                          </View>
+                          <Ionicons name="chevron-forward" size={16} color="#0284c7" />
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
 
             <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: 12 }}>
               <View style={{ flex: 1.2 }}>
@@ -1637,68 +2453,89 @@ export default function FacturacionScreen() {
               </View>
             </View>
 
-            {/* Régimen Fiscal Selector */}
-            <View style={{ marginTop: 4 }}>
-              <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Régimen Fiscal del Receptor *</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  {REGIMENES_FISCALES.map(reg => (
-                    <TouchableOpacity
-                      key={reg.code}
-                      onPress={() => setClienteRegimen(reg.code)}
-                      style={[
-                        styles.chipBtn,
-                        {
-                          borderColor: clienteRegimen === reg.code ? '#0284c7' : themeColors.border,
-                          backgroundColor: clienteRegimen === reg.code ? '#0284c7' + '20' : themeColors.background,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: clienteRegimen === reg.code ? '800' : '500',
-                          color: clienteRegimen === reg.code ? '#0284c7' : themeColors.textSecondary,
-                        }}
-                      >
-                        {reg.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
+            {/* Campo Dirección Fiscal */}
+            <View style={{ marginTop: 8 }}>
+              <CustomInput
+                label="Dirección / Domicilio Fiscal"
+                value={clienteDireccion}
+                onChangeText={setClienteDireccion}
+                placeholder="Calle, Número, Colonia, Municipio / Ciudad, Estado"
+              />
             </View>
 
-            {/* Uso CFDI Selector */}
-            <View style={{ marginTop: 8 }}>
-              <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Uso de CFDI *</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  {USOS_CFDI.map(uso => (
-                    <TouchableOpacity
-                      key={uso.code}
-                      onPress={() => setClienteUso(uso.code)}
-                      style={[
-                        styles.chipBtn,
-                        {
-                          borderColor: clienteUso === uso.code ? '#0284c7' : themeColors.border,
-                          backgroundColor: clienteUso === uso.code ? '#0284c7' + '20' : themeColors.background,
-                        },
-                      ]}
+            {/* Régimen Fiscal y Uso CFDI Selectores Desplegables */}
+            <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: 12, marginTop: 8 }}>
+              {/* Régimen Fiscal Selector Desplegable */}
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.fieldLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>
+                  Régimen Fiscal del Receptor *
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setSearchRegimenText('');
+                    setModalRegimenVisible(true);
+                  }}
+                  style={[
+                    styles.dropdownSelectButton,
+                    {
+                      backgroundColor: themeColors.background,
+                      borderColor: themeColors.border,
+                    },
+                  ]}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8, paddingRight: 8 }}>
+                    <Ionicons name="ribbon-outline" size={18} color="#0284c7" />
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        flex: 1,
+                        fontSize: 13,
+                        color: clienteRegimen ? themeColors.text : themeColors.textSecondary,
+                        fontWeight: '500',
+                      }}
                     >
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: clienteUso === uso.code ? '800' : '500',
-                          color: clienteUso === uso.code ? '#0284c7' : themeColors.textSecondary,
-                        }}
-                      >
-                        {uso.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </ScrollView>
+                      {REGIMENES_FISCALES.find(r => r.code === clienteRegimen)?.label || `${clienteRegimen} - Seleccionar Régimen`}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-down" size={16} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Uso CFDI Selector Desplegable */}
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.fieldLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>
+                  Uso de CFDI *
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setSearchUsoText('');
+                    setModalUsoVisible(true);
+                  }}
+                  style={[
+                    styles.dropdownSelectButton,
+                    {
+                      backgroundColor: themeColors.background,
+                      borderColor: themeColors.border,
+                    },
+                  ]}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8, paddingRight: 8 }}>
+                    <Ionicons name="receipt-outline" size={18} color="#0284c7" />
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        flex: 1,
+                        fontSize: 13,
+                        color: clienteUso ? themeColors.text : themeColors.textSecondary,
+                        fontWeight: '500',
+                      }}
+                    >
+                      {USOS_CFDI.find(u => u.code === clienteUso)?.label || `${clienteUso} - Seleccionar Uso`}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-down" size={16} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
 
@@ -1741,8 +2578,8 @@ export default function FacturacionScreen() {
 
             <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: 12 }}>
               {/* Método de Pago */}
-              <View style={{ flex: 1.5 }}>
-                <Text style={[styles.fieldLabel, { color: themeColors.textSecondary, marginBottom: 6 }]}>Método de Pago</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.fieldLabel, { color: themeColors.textSecondary, marginBottom: 6 }]}>Método de Pago *</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   {[
                     { code: 'PUE', label: 'PUE (Contado)' },
@@ -1750,7 +2587,14 @@ export default function FacturacionScreen() {
                   ].map(mp => (
                     <TouchableOpacity
                       key={mp.code}
-                      onPress={() => setMetodoPago(mp.code)}
+                      onPress={() => {
+                        setMetodoPago(mp.code);
+                        if (mp.code === 'PPD') {
+                          setFormaPago('99');
+                        } else if (formaPago === '99') {
+                          setFormaPago('03');
+                        }
+                      }}
                       style={[
                         styles.chipBtn,
                         {
@@ -1776,33 +2620,24 @@ export default function FacturacionScreen() {
                 </View>
               </View>
 
-              <View style={{ flex: 0.8 }}>
+              {/* Orden de Compra */}
+              <View style={{ flex: 1 }}>
                 <CustomInput
-                  label="Serie"
-                  value={serie}
-                  onChangeText={(val) => {
-                    const clean = val.toUpperCase().trim();
-                    setSerie(clean);
-                    fetchSiguienteFolio(clean || 'A');
-                  }}
-                  placeholder="A"
-                  autoCapitalize="characters"
+                  label="Orden de compra *"
+                  value={ordenCompra}
+                  onChangeText={setOrdenCompra}
+                  placeholder="Ej. OC-2023-001"
                 />
               </View>
-              <View style={{ flex: 0.8 }}>
+
+              {/* Etiqueta Interna */}
+              <View style={{ flex: 1 }}>
                 <CustomInput
-                  label="Folio"
-                  value={folio}
-                  onChangeText={setFolio}
-                  placeholder="0001"
-                  keyboardType="numeric"
+                  label="Etiqueta (Referencia Interna)"
+                  value={etiqueta}
+                  onChangeText={setEtiqueta}
+                  placeholder="Ej. Proyecto PEMEX, Mantenimiento..."
                 />
-              </View>
-              <View style={{ flex: 0.8 }}>
-                <CustomInput label="Moneda" value={moneda} onChangeText={setMoneda} placeholder="MXN" autoCapitalize="characters" />
-              </View>
-              <View style={{ flex: 1.5 }}>
-                <CustomInput label="Orden de compra *" value={ordenCompra} onChangeText={setOrdenCompra} placeholder="Ej. OC-2023-001" />
               </View>
             </View>
           </View>
@@ -1816,6 +2651,7 @@ export default function FacturacionScreen() {
                 borderColor: themeColors.border,
                 position: 'relative',
                 zIndex: activeDropdownIndex !== null ? 9999 : 1,
+                overflow: 'visible',
               },
             ]}
           >
@@ -1826,61 +2662,64 @@ export default function FacturacionScreen() {
                   3. Partidas / Conceptos a Facturar ({partidas.length})
                 </Text>
               </View>
-              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                <TouchableOpacity onPress={handleAddPartida} style={[styles.quickSelectBtn, { borderColor: '#10b981', backgroundColor: '#10b98115' }]}>
-                  <Ionicons name="add-circle" size={15} color="#10b981" />
-                  <Text style={{ color: '#10b981', fontSize: 12, fontWeight: '700' }}>Agregar Partida</Text>
-                </TouchableOpacity>
-              </View>
             </View>
 
-            <View style={{ gap: Spacing.two, position: 'relative', zIndex: activeDropdownIndex !== null ? 9999 : 1 }}>
-              {partidas.map((item, index) => {
-                const cant = parseFloat(item.cantidad) || 0;
-                const pu = parseFloat(item.precio_unitario) || 0;
-                const subtotalPartida = cant * pu;
-                const ivaPartida = item.objeto_imp === '02' ? subtotalPartida * 0.16 : 0;
-                const totalPartida = subtotalPartida + ivaPartida;
-
-                return (
+            {(() => {
+              const tableContent = (
+                <View style={{ flex: 1, overflow: 'visible' }}>
+                  {/* Encabezado de la Tabla de Partidas */}
                   <View
-                    key={item.id || index}
                     style={[
-                      styles.partidaBox,
+                      styles.partidasTableHeader,
                       {
-                        borderColor: themeColors.border,
-                        backgroundColor: themeColors.background,
-                        position: 'relative',
-                        zIndex: activeDropdownIndex === index ? 99999 : partidas.length - index,
+                        backgroundColor: themeColors.backgroundElement,
+                        borderBottomColor: themeColors.border,
                       },
                     ]}
                   >
-                    <View style={styles.partidaHeader}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                        <View style={[styles.partidaNumBadge, { backgroundColor: '#0284c7' }]}>
-                          <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>#{index + 1}</Text>
-                        </View>
-                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: themeColors.text, flex: 1 }} numberOfLines={1}>
-                          {item.descripcion || 'Nuevo Concepto'}
-                        </Text>
-                      </View>
+                    <Text style={[styles.partidasColHeader, { width: 32, textAlign: 'center' }]}>#</Text>
+                    <Text style={[styles.partidasColHeader, { flex: 1, minWidth: 200 }]}>Producto / Concepto</Text>
+                    <Text style={[styles.partidasColHeader, { width: 120 }]}>Clave SAT</Text>
+                    <Text style={[styles.partidasColHeader, { width: 110 }]}>Unidad SAT</Text>
+                    <Text style={[styles.partidasColHeader, { width: 70, textAlign: 'right' }]}>Cantidad</Text>
+                    <Text style={[styles.partidasColHeader, { width: 95, textAlign: 'right' }]}>Precio Unit.</Text>
+                    <Text style={[styles.partidasColHeader, { width: 105, textAlign: 'center' }]}>Importe</Text>
+                    <Text style={[styles.partidasColHeader, { width: 65, textAlign: 'center' }]}>Acciones</Text>
+                  </View>
 
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <TouchableOpacity onPress={() => handleDuplicatePartida(index)} style={styles.partidaIconBtn}>
-                          <Ionicons name="copy-outline" size={16} color={themeColors.textSecondary} />
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => handleRemovePartida(index)} style={styles.partidaIconBtn}>
-                          <Ionicons name="trash-outline" size={16} color="#ef4444" />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
+                  {/* Filas de Partidas */}
+                  <View style={{ position: 'relative', zIndex: activeDropdownIndex !== null ? 9999 : 1, overflow: 'visible' }}>
+                    {partidas.map((item, index) => {
+                      const cant = parseFloat(item.cantidad) || 0;
+                      const pu = parseFloat(item.precio_unitario) || 0;
+                      const subtotalPartida = cant * pu;
+                      const ivaPartida = item.objeto_imp === '02' ? subtotalPartida * 0.16 : 0;
+                      const totalPartida = subtotalPartida + ivaPartida;
 
-                    {/* Descripción con Menú en Cascada del Catálogo */}
-                    <View style={{ position: 'relative', zIndex: activeDropdownIndex === index ? 99999 : 1, marginBottom: 8 }}>
-                      <Text style={[styles.fieldLabel, { color: themeColors.textSecondary, marginBottom: 4 }]}>
-                        Descripción del Producto o Servicio *
-                      </Text>
-                      <View style={[styles.cascadeInputContainer, { backgroundColor: themeColors.background, borderColor: activeDropdownIndex === index ? '#0284c7' : themeColors.border }]}>
+                      return (
+                        <View
+                          key={item.id || index}
+                          style={[
+                            styles.partidasTableRow,
+                            {
+                              borderColor: themeColors.border,
+                              backgroundColor: themeColors.background,
+                              position: 'relative',
+                              zIndex: activeDropdownIndex === index ? 99999 : partidas.length - index,
+                              overflow: 'visible',
+                            },
+                          ]}
+                        >
+                          {/* 1. Consecutivo # */}
+                          <View style={{ width: 32, alignItems: 'center', justifyContent: 'center', paddingTop: 6 }}>
+                            <View style={[styles.partidaNumBadge, { backgroundColor: '#0284c7' }]}>
+                              <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>{index + 1}</Text>
+                            </View>
+                          </View>
+
+                          {/* 2. Producto / Concepto (Línea 1: Producto + Dropdown, Línea 2: Descripción adicional opcional) */}
+                          <View style={{ flex: 1, minWidth: 200, paddingRight: 8, position: 'relative', zIndex: activeDropdownIndex === index ? 99999 : 1, overflow: 'visible' }}>
+                          <View style={[styles.cascadeInputContainer, { backgroundColor: themeColors.backgroundElement, borderColor: activeDropdownIndex === index ? '#0284c7' : themeColors.border, height: 36, borderRadius: 6, paddingHorizontal: 8 }]}>
                         <TextInput
                           style={[styles.cascadeTextInput, { color: themeColors.text }]}
                           value={item.descripcion}
@@ -1930,9 +2769,27 @@ export default function FacturacionScreen() {
                             color="#0284c7"
                           />
                         </TouchableOpacity>
-                      </View>
+                        </View>
 
-                      {/* Menú de Cascada Flotante */}
+                        {/* Línea 2: Campo Descripción Opcional justo debajo */}
+                        <View style={{ marginTop: 4 }}>
+                          <TextInput
+                            style={[
+                              styles.partidaDescDetalladaInput,
+                              {
+                                color: themeColors.text,
+                                backgroundColor: themeColors.backgroundElement + '80',
+                                borderColor: themeColors.border + '60',
+                              },
+                            ]}
+                            value={item.descripcion_detallada || ''}
+                            onChangeText={val => handleUpdatePartida(index, 'descripcion_detallada', val)}
+                            placeholder="Escribe una descripción adicional (opcional)..."
+                            placeholderTextColor={themeColors.textSecondary + '70'}
+                          />
+                        </View>
+
+                        {/* Menú de Cascada Flotante */}
                       {activeDropdownIndex === index && (
                         <View style={[styles.cascadeDropdownMenu, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                           <View style={[styles.cascadeDropdownHeader, { borderBottomColor: themeColors.border, backgroundColor: themeColors.background }]}>
@@ -2016,7 +2873,7 @@ export default function FacturacionScreen() {
                             <ScrollView
                               nestedScrollEnabled={true}
                               keyboardShouldPersistTaps="handled"
-                              style={{ maxHeight: 240 }}
+                              style={{ maxHeight: 280 }}
                             >
                               {getFilteredProductsForPartida(item.descripcion).map(prod => {
                                 const stock = Number(prod.stock_actual || 0);
@@ -2089,54 +2946,167 @@ export default function FacturacionScreen() {
                           )}
                         </View>
                       )}
-                    </View>
+                        </View>
 
-                    {/* Buscadores Interactivos del SAT */}
-                    <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: 10, marginTop: 4 }}>
-                      <SatCatalogAutocomplete
-                        tipo="producto"
-                        label="Clave SAT (c_ClaveProdServ) *"
-                        value={item.clave_sat}
-                        onChangeValue={val => handleUpdatePartida(index, 'clave_sat', val)}
-                      />
-                      <SatCatalogAutocomplete
-                        tipo="unidad"
-                        label="Unidad SAT (c_ClaveUnidad) *"
-                        value={item.clave_unidad}
-                        onChangeValue={val => handleUpdatePartida(index, 'clave_unidad', val)}
-                      />
-                    </View>
+                        {/* 3. Clave SAT */}
+                        <View style={{ width: 120, paddingRight: 8, paddingTop: 1 }}>
+                          <SatCatalogAutocomplete
+                            tipo="producto"
+                            value={item.clave_sat}
+                            onChangeValue={val => handleUpdatePartida(index, 'clave_sat', val)}
+                            style={{ flex: 0 }}
+                            hideSearchIcon={true}
+                          />
+                        </View>
 
-                    {/* Valores Numéricos */}
-                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-                      <View style={{ flex: 0.8 }}>
-                        <CustomInput
-                          label="Cantidad *"
-                          value={item.cantidad}
-                          onChangeText={val => handleUpdatePartida(index, 'cantidad', val)}
-                          keyboardType="numeric"
-                        />
+                        {/* 4. Unidad SAT */}
+                        <View style={{ width: 110, paddingRight: 8, paddingTop: 1 }}>
+                          <SatCatalogAutocomplete
+                            tipo="unidad"
+                            value={item.clave_unidad}
+                            onChangeValue={val => handleUpdatePartida(index, 'clave_unidad', val)}
+                            style={{ flex: 0 }}
+                            hideSearchIcon={true}
+                          />
+                        </View>
+
+                        {/* 5. Cantidad */}
+                        <View style={{ width: 70, paddingRight: 8, paddingTop: 1 }}>
+                          <TextInput
+                            style={[
+                              styles.tableFieldInput,
+                              {
+                                color: themeColors.text,
+                                borderColor: themeColors.border,
+                                backgroundColor: themeColors.backgroundElement,
+                                textAlign: 'right',
+                                height: 36,
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: '600',
+                                paddingHorizontal: 6,
+                                minWidth: 0,
+                                ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+                              },
+                            ]}
+                            value={item.cantidad}
+                            onChangeText={val => handleUpdatePartida(index, 'cantidad', val)}
+                            keyboardType="numeric"
+                          />
+                        </View>
+
+                        {/* 6. Precio Unitario */}
+                        <View style={{ width: 95, paddingRight: 8, paddingTop: 1 }}>
+                          <View
+                            style={[
+                              styles.tableCurrencyContainer,
+                              {
+                                borderColor: themeColors.border,
+                                backgroundColor: themeColors.backgroundElement,
+                                height: 36,
+                                borderRadius: 6,
+                                paddingHorizontal: 6,
+                                overflow: 'hidden',
+                              },
+                            ]}
+                          >
+                            <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginRight: 2 }}>$</Text>
+                            <TextInput
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                color: themeColors.text,
+                                fontSize: 12,
+                                fontWeight: '600',
+                                textAlign: 'right',
+                                paddingVertical: 0,
+                                height: '100%',
+                                ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+                              }}
+                              value={item.precio_unitario}
+                              onChangeText={val => handleUpdatePartida(index, 'precio_unitario', val)}
+                              keyboardType="numeric"
+                            />
+                          </View>
+                        </View>
+
+                        {/* 7. Importe */}
+                        <View style={{ width: 105, paddingHorizontal: 4, paddingTop: 4, alignItems: 'center', justifyContent: 'center' }}>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#10b981', textAlign: 'center' }}>
+                            ${totalPartida.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </Text>
+                          <Text style={{ fontSize: 9, color: themeColors.textSecondary, marginTop: 1, textAlign: 'center' }}>
+                            {item.objeto_imp === '02' ? '16% IVA inc.' : 'Sin IVA'}
+                          </Text>
+                        </View>
+
+                        {/* 8. Acciones */}
+                        <View style={{ width: 65, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 4 }}>
+                          <TableTooltipButton
+                            icon="copy-outline"
+                            color="#0284c7"
+                            bgColor="#0284c715"
+                            borderColor="#0284c730"
+                            tooltip="Duplicar partida"
+                            onPress={() => handleDuplicatePartida(index)}
+                          />
+                          <TableTooltipButton
+                            icon="trash-outline"
+                            color="#ef4444"
+                            bgColor="#ef444415"
+                            borderColor="#ef444430"
+                            tooltip="Eliminar partida"
+                            onPress={() => handleRemovePartida(index)}
+                          />
+                        </View>
                       </View>
-                      <View style={{ flex: 1.2 }}>
-                        <CustomInput
-                          label="Precio Unitario ($) *"
-                          value={item.precio_unitario}
-                          onChangeText={val => handleUpdatePartida(index, 'precio_unitario', val)}
-                          keyboardType="numeric"
-                        />
-                      </View>
-                      <View style={{ flex: 1.2, justifyContent: 'center', alignItems: 'flex-end', paddingRight: 8 }}>
-                        <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>Total Partida (IVA inc.)</Text>
-                        <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#0284c7' }}>
-                          ${totalPartida.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
+                    );
+                  })}
+                </View>
+
+                {/* Botón "+ Agregar una línea" estilo Odoo al pie de la tabla */}
+                <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: themeColors.border + '50', paddingTop: 8 }}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={handleAddPartida}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
+                      alignSelf: 'flex-start',
+                      paddingHorizontal: 12,
+                      paddingVertical: 7,
+                      borderRadius: 6,
+                      backgroundColor: '#10b98118',
+                      borderWidth: 1,
+                      borderColor: '#10b98140',
+                    }}
+                  >
+                    <Ionicons name="add" size={15} color="#10b981" />
+                    <Text style={{ color: '#10b981', fontSize: 12, fontWeight: '700' }}>
+                      Agregar una línea
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+
+            return isDesktop ? (
+              <View style={{ width: '100%', overflow: 'visible' }}>
+                {tableContent}
+              </View>
+            ) : (
+              <ScrollView
+                horizontal={true}
+                showsHorizontalScrollIndicator={false}
+                style={{ width: '100%' }}
+                contentContainerStyle={{ minWidth: 750 }}
+              >
+                {tableContent}
+              </ScrollView>
+            );
+          })()}
+        </View>
 
           {/* SECCIÓN 4: RESUMEN FINANCIERO Y ACCIONES */}
           <View
@@ -2187,6 +3157,17 @@ export default function FacturacionScreen() {
                 <Text style={{ color: '#0284c7', fontWeight: '700', fontSize: 13 }}>Vista Previa / Borrador PDF</Text>
               </TouchableOpacity>
 
+              {currentDraftId && (
+                <TouchableOpacity
+                  onPress={handleGuardarBorrador}
+                  disabled={isSubmitting}
+                  style={[styles.actionBtn, { borderColor: '#f59e0b', backgroundColor: '#fef3c7', flex: 1 }]}
+                >
+                  <Ionicons name="save-outline" size={18} color="#d97706" />
+                  <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 13 }}>Guardar Borrador</Text>
+                </TouchableOpacity>
+              )}
+
               <TouchableOpacity
                 onPress={handleTimbrarFactura}
                 disabled={isSubmitting}
@@ -2198,7 +3179,7 @@ export default function FacturacionScreen() {
                   <>
                     <Ionicons name="receipt-outline" size={18} color="#fff" />
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
-                      Emitir y Timbrar Factura Oficial ante SAT
+                      {currentDraftId ? 'Timbrar Factura' : 'Emitir y Timbrar Factura Oficial ante SAT'}
                     </Text>
                   </>
                 )}
@@ -2209,6 +3190,33 @@ export default function FacturacionScreen() {
       ) : activeTab === 'historial' ? (
         /* HISTORIAL DE FACTURAS EMITIDAS */
         <View style={{ flex: 1, padding: Spacing.three, maxWidth: 1200, alignSelf: 'center', width: '100%' }}>
+          {/* Header del Listado con Botón Nueva Factura */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <View>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text }}>Comprobantes y Facturas</Text>
+              <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Facturas timbradas y borradores con folio reservado</Text>
+            </View>
+            {/* Botón Nueva Factura: handleNuevaFactura */}
+            <TouchableOpacity
+              accessibilityLabel="Nueva Factura"
+              onPress={handleNuevaFactura}
+              disabled={isSubmitting}
+              style={[
+                styles.actionBtn,
+                {
+                  backgroundColor: '#0284c7',
+                  borderColor: '#0284c7',
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 8,
+                }
+              ]}
+            >
+              <Ionicons name="add-circle" size={18} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Nueva Factura</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Barra de Búsqueda y Filtros */}
           <View style={{ flexDirection: isDesktop ? 'row' : 'column', gap: 10, marginBottom: 14 }}>
             <View style={[styles.searchBox, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement, flex: 1 }]}>
@@ -2227,8 +3235,8 @@ export default function FacturacionScreen() {
               )}
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              {(['TODAS', 'TIMBRADA', 'CANCELADA'] as const).map(est => (
+            <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              {(['TODAS', 'BORRADOR', 'TIMBRADA', 'CANCELADA'] as const).map(est => (
                 <TouchableOpacity
                   key={est}
                   onPress={() => setFiltroEstado(est)}
@@ -2245,6 +3253,43 @@ export default function FacturacionScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
+
+              {/* Indicador de paginación superior tipo ERP: 1-25 / 190 < > */}
+              {facturasFiltradas.length > 0 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 10 }}>
+                  <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '600' }}>
+                    {inicioRegistro}-{finRegistro} / {facturasFiltradas.length}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setPaginaActual(p => Math.max(1, p - 1))}
+                    disabled={paginaActual <= 1}
+                    style={[
+                      styles.pageBtn,
+                      {
+                        opacity: paginaActual <= 1 ? 0.35 : 1,
+                        borderColor: themeColors.border,
+                        backgroundColor: themeColors.backgroundElement,
+                      }
+                    ]}
+                  >
+                    <Ionicons name="chevron-back" size={15} color={themeColors.text} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))}
+                    disabled={paginaActual >= totalPaginas}
+                    style={[
+                      styles.pageBtn,
+                      {
+                        opacity: paginaActual >= totalPaginas ? 0.35 : 1,
+                        borderColor: themeColors.border,
+                        backgroundColor: themeColors.backgroundElement,
+                      }
+                    ]}
+                  >
+                    <Ionicons name="chevron-forward" size={15} color={themeColors.text} />
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </View>
 
@@ -2256,126 +3301,347 @@ export default function FacturacionScreen() {
           ) : facturasFiltradas.length === 0 ? (
             <View style={[styles.emptyContainer, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}>
               <Ionicons name="receipt-outline" size={48} color={themeColors.textSecondary} />
-              <Text style={[styles.emptyTitle, { color: themeColors.text }]}>No hay facturas emitidas</Text>
+              <Text style={[styles.emptyTitle, { color: themeColors.text }]}>No hay facturas registradas</Text>
               <Text style={{ color: themeColors.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
-                Las facturas timbradas desde este módulo o desde el módulo de Ventas aparecerán aquí.
+                Las facturas timbradas y los borradores guardados aparecerán en este listado.
               </Text>
-              <TouchableOpacity onPress={() => setActiveTab('emitir')} style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', marginTop: 14 }]}>
+              <TouchableOpacity onPress={handleNuevaFactura} style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', marginTop: 14 }]}>
                 <Ionicons name="add-circle" size={16} color="#0284c7" />
-                <Text style={{ color: '#0284c7', fontWeight: 'bold' }}>Emitir Primera Factura</Text>
+                <Text style={{ color: '#0284c7', fontWeight: 'bold' }}>Nueva Factura</Text>
               </TouchableOpacity>
             </View>
           ) : (
             <ScrollView style={{ flex: 1 }}>
-              <View style={{ gap: 8 }}>
-                {facturasFiltradas.map((factura) => {
-                  const isCanceled = factura.cfdi_estado === 'CANCELADA';
-                  return (
-                    <View
-                      key={factura.id}
-                      style={[
-                        styles.facturaRowCard,
-                        {
-                          backgroundColor: themeColors.backgroundElement,
-                          borderColor: isCanceled ? '#ef4444' + '60' : themeColors.border,
-                        },
-                      ]}
+              <ScrollView
+                horizontal={true}
+                showsHorizontalScrollIndicator={true}
+                style={{ width: '100%' }}
+                contentContainerStyle={{ minWidth: isDesktop ? '100%' : 970 }}
+              >
+                <View style={{ flex: 1 }}>
+                  {/* Encabezado de la Tabla */}
+                  <View
+                    style={[
+                      styles.facturasTableHeader,
+                      {
+                        backgroundColor: themeColors.backgroundElement,
+                        borderBottomColor: themeColors.border,
+                        borderColor: themeColors.border,
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      onPress={handleToggleSelectAll}
+                      style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
                     >
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <Text style={{ fontSize: 15, fontWeight: 'bold', color: themeColors.text }}>
-                            {factura.cliente || 'Cliente General'}
-                          </Text>
-                          <View
-                            style={[
-                              styles.statusBadge,
-                              { backgroundColor: isCanceled ? '#ef444420' : '#10b98120' },
-                            ]}
+                      <Ionicons
+                        name={areAllOnPageSelected ? "checkbox" : "square-outline"}
+                        size={18}
+                        color={areAllOnPageSelected ? "#0284c7" : themeColors.textSecondary}
+                      />
+                    </TouchableOpacity>
+                    <Text style={[styles.facturasTableHeaderCell, { width: 110, color: themeColors.textSecondary }]}>Número</Text>
+                    <Text style={[styles.facturasTableHeaderCell, { flex: 1, minWidth: 200, color: themeColors.textSecondary }]}>Cliente</Text>
+                    <Text style={[styles.facturasTableHeaderCell, { width: 130, color: themeColors.textSecondary }]}>Etiqueta</Text>
+                    <Text style={[styles.facturasTableHeaderCell, { width: 125, color: themeColors.textSecondary }]}>Fecha de factura</Text>
+                    <Text style={[styles.facturasTableHeaderCell, { width: 135, textAlign: 'right', paddingRight: 10, color: themeColors.textSecondary }]}>Total</Text>
+                    <Text style={[styles.facturasTableHeaderCell, { width: 110, textAlign: 'center', color: themeColors.textSecondary }]}>Estado</Text>
+                    <Text style={[styles.facturasTableHeaderCell, { width: 140, textAlign: 'center', color: themeColors.textSecondary }]}>Acciones</Text>
+                  </View>
+
+                  {/* Filas de la Tabla */}
+                  <View
+                    style={{
+                      backgroundColor: themeColors.backgroundElement,
+                      borderBottomLeftRadius: 10,
+                      borderBottomRightRadius: 10,
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                      borderTopWidth: 0,
+                    }}
+                  >
+                    {facturasPaginadas.map((factura) => {
+                      const isCanceled = factura.cfdi_estado === 'CANCELADA';
+                      const isDraft = factura.cfdi_estado === 'BORRADOR' || factura.es_borrador;
+                      const isSelected = !!selectedFacturasIds[factura.id];
+                      const folioDisplay = cleanFolio(factura.folio || factura.factura_referencia) || '--';
+
+                      return (
+                        <Pressable
+                          key={factura.id}
+                          onPress={() => (isDraft ? handleVerBorrador(factura) : handleVerPDF(factura))}
+                          style={({ hovered }: any) => [
+                            styles.facturasTableRow,
+                            {
+                              borderBottomColor: themeColors.border,
+                              backgroundColor: isSelected ? '#0284c715' : 'transparent',
+                            },
+                            hovered && { backgroundColor: (themeColors as any).backgroundSelected || '#0284c715' },
+                          ] as any}
+                        >
+                          {/* Selector Checkbox */}
+                          <TouchableOpacity
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleToggleSelectOne(factura.id);
+                            }}
+                            style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
                           >
-                            <Text style={{ fontSize: 10, fontWeight: '800', color: isCanceled ? '#ef4444' : '#10b981' }}>
-                              {factura.cfdi_estado || 'TIMBRADA'}
+                            <Ionicons
+                              name={isSelected ? "checkbox" : "square-outline"}
+                              size={18}
+                              color={isSelected ? "#0284c7" : themeColors.textSecondary}
+                            />
+                          </TouchableOpacity>
+
+                          {/* Número (Folio en azul clickeable) */}
+                          <View style={{ width: 110, justifyContent: 'center' }}>
+                            <TouchableOpacity
+                              onPress={() => (isDraft ? handleVerBorrador(factura) : handleVerPDF(factura))}
+                              style={{ alignSelf: 'flex-start' }}
+                            >
+                              <Text style={{ fontSize: 13, fontWeight: '700', color: '#0284c7' }}>
+                                {folioDisplay}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Cliente */}
+                          <View style={{ flex: 1, minWidth: 220, justifyContent: 'center', paddingRight: 8 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text }} numberOfLines={1}>
+                              {factura.cliente || 'Cliente General'}
+                            </Text>
+                            {factura.cfdi_uuid ? (
+                              <Text
+                                style={{
+                                  fontSize: 10,
+                                  color: themeColors.textSecondary,
+                                  fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                                  marginTop: 1,
+                                }}
+                                numberOfLines={1}
+                              >
+                                {factura.cfdi_uuid}
+                              </Text>
+                            ) : null}
+                          </View>
+
+                          {/* Etiqueta */}
+                          <View style={{ width: 130, justifyContent: 'center', paddingRight: 8 }}>
+                            {factura.etiqueta ? (
+                              <View
+                                style={{
+                                  backgroundColor: themeColors.border + '60',
+                                  paddingHorizontal: 8,
+                                  paddingVertical: 3,
+                                  borderRadius: 6,
+                                  alignSelf: 'flex-start',
+                                  maxWidth: 122,
+                                }}
+                              >
+                                <Text
+                                  numberOfLines={1}
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: '600',
+                                    color: themeColors.text,
+                                  }}
+                                >
+                                  {factura.etiqueta}
+                                </Text>
+                              </View>
+                            ) : (
+                              <Text style={{ fontSize: 11, color: themeColors.textSecondary + '70' }}>--</Text>
+                            )}
+                          </View>
+
+                          {/* Fecha de factura */}
+                          <View style={{ width: 125, justifyContent: 'center' }}>
+                            <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                              {formatFechaFactura(factura.fecha || factura.created_at)}
                             </Text>
                           </View>
-                          <View
-                            style={[
-                              styles.statusBadge,
-                              {
-                                backgroundColor: factura.origen === 'FACTURA_DIRECTA' ? '#6366f118' : '#0284c718',
-                                borderColor: factura.origen === 'FACTURA_DIRECTA' ? '#6366f150' : '#0284c750',
-                                borderWidth: 1,
-                              },
-                            ]}
-                          >
+
+                          {/* Total */}
+                          <View style={{ width: 135, justifyContent: 'center', alignItems: 'flex-end', paddingRight: 10 }}>
                             <Text
                               style={{
-                                fontSize: 9,
-                                fontWeight: '800',
-                                color: factura.origen === 'FACTURA_DIRECTA' ? '#6366f1' : '#0284c7',
+                                fontSize: 13,
+                                fontWeight: 'bold',
+                                color: isDraft ? '#0284c7' : isCanceled ? themeColors.textSecondary : themeColors.text,
                               }}
                             >
-                              {factura.origen === 'FACTURA_DIRECTA' ? 'Directa' : (factura.origenLabel || 'Venta')}
+                              ${(factura.precio_total_facturado || 0).toLocaleString('es-MX', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
                             </Text>
                           </View>
-                        </View>
 
-                        <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
-                          Folio: <Text style={{ fontWeight: 'bold', color: themeColors.text }}>{cleanFolio(factura.folio || factura.factura_referencia) || '--'}</Text> | Fecha: {factura.fecha || factura.created_at?.slice(0, 10) || '--'}
-                        </Text>
-                        {factura.cfdi_uuid && (
-                          <Text style={{ fontSize: 10, color: '#0284c7', marginTop: 2, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
-                            UUID: {factura.cfdi_uuid}
-                          </Text>
-                        )}
-                      </View>
+                          {/* Estado (Pill badge como en view.jpeg) */}
+                          <View style={{ width: 110, alignItems: 'center', justifyContent: 'center' }}>
+                            <View
+                              style={[
+                                styles.statusPill,
+                                {
+                                  backgroundColor: isDraft ? '#0284c718' : isCanceled ? '#ef444418' : '#10b98118',
+                                  borderColor: isDraft ? '#0284c760' : isCanceled ? '#ef444460' : '#10b98160',
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: '800',
+                                  color: isDraft ? '#0284c7' : isCanceled ? '#ef4444' : '#10b981',
+                                }}
+                              >
+                                {isDraft ? 'Borrador' : isCanceled ? 'Cancelada' : 'Timbrada'}
+                              </Text>
+                            </View>
+                          </View>
 
-                      <View style={{ alignItems: 'flex-end', justifyContent: 'center', paddingHorizontal: 8 }}>
-                        <Text style={{ fontSize: 16, fontWeight: 'bold', color: isCanceled ? themeColors.textSecondary : '#10b981' }}>
-                          ${(factura.precio_total_facturado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </Text>
-                      </View>
-
-                      {/* Botones de acción por factura */}
-                      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                        <TouchableOpacity
-                          onPress={() => handleVerPDF(factura)}
-                          style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', paddingHorizontal: 10 }]}
-                        >
-                          <Ionicons name="eye-outline" size={16} color="#0284c7" />
-                          <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Ver Factura</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          onPress={() => handleDescargarXML(factura)}
-                          style={[styles.smallActionBtn, { borderColor: '#10b981', backgroundColor: '#10b98115' }]}
-                        >
-                          <Ionicons name="code-download" size={16} color="#10b981" />
-                          <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>XML</Text>
-                        </TouchableOpacity>
-
-                        {!isCanceled && (
-                          <TouchableOpacity
-                            onPress={() => handleIniciarCobroREP(factura)}
-                            style={[styles.smallActionBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d15', paddingHorizontal: 10 }]}
+                          {/* Acciones */}
+                          <View
+                            style={{
+                              width: 140,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6,
+                            }}
+                            onStartShouldSetResponder={() => true}
                           >
-                            <Ionicons name="cash-outline" size={16} color="#801c1d" />
-                            <Text style={{ color: '#801c1d', fontSize: 11, fontWeight: '700' }}>Cobrar / REP</Text>
-                          </TouchableOpacity>
-                        )}
+                            {isDraft ? (
+                              <>
+                                <TableTooltipButton
+                                  icon="eye-outline"
+                                  color="#0284c7"
+                                  bgColor="#0284c712"
+                                  borderColor="#0284c750"
+                                  tooltip="Ver Borrador"
+                                  onPress={() => handleVerBorrador(factura)}
+                                />
 
-                        {!isCanceled && (
-                          <TouchableOpacity
-                            onPress={() => handleCancelarFacturaSAT(factura)}
-                            style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415' }]}
-                          >
-                            <Ionicons name="close-circle" size={16} color="#ef4444" />
-                            <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700' }}>Cancelar</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
+                                <TableTooltipButton
+                                  icon="create-outline"
+                                  color="#d97706"
+                                  bgColor="#fef3c720"
+                                  borderColor="#f59e0b50"
+                                  tooltip="Modificar Borrador"
+                                  onPress={() => handleModificarBorrador(factura)}
+                                />
+
+                                <TableTooltipButton
+                                  icon="receipt-outline"
+                                  color="#10b981"
+                                  bgColor="#10b98118"
+                                  borderColor="#10b98150"
+                                  tooltip="Timbrar Factura SAT"
+                                  onPress={() => handleTimbrarFacturaBorrador(factura)}
+                                />
+
+                                <TableTooltipButton
+                                  icon="trash-outline"
+                                  color="#ef4444"
+                                  bgColor="#ef444415"
+                                  borderColor="#ef444450"
+                                  tooltip="Eliminar Borrador"
+                                  onPress={() => handleEliminarBorrador(factura)}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <TableTooltipButton
+                                  icon="eye-outline"
+                                  color="#0284c7"
+                                  bgColor="#0284c712"
+                                  borderColor="#0284c750"
+                                  tooltip="Ver Factura PDF"
+                                  onPress={() => handleVerPDF(factura)}
+                                />
+
+                                <TableTooltipButton
+                                  icon="code-download-outline"
+                                  color="#10b981"
+                                  bgColor="#10b98115"
+                                  borderColor="#10b98150"
+                                  tooltip="Descargar XML"
+                                  onPress={() => handleDescargarXML(factura)}
+                                />
+
+                                {!isCanceled && (
+                                  <TableTooltipButton
+                                    icon="cash-outline"
+                                    color="#801c1d"
+                                    bgColor="#801c1d15"
+                                    borderColor="#801c1d50"
+                                    tooltip="Cobrar / Emitir REP"
+                                    onPress={() => handleIniciarCobroREP(factura)}
+                                  />
+                                )}
+
+                                {!isCanceled && (
+                                  <TableTooltipButton
+                                    icon="close-circle-outline"
+                                    color="#ef4444"
+                                    bgColor="#ef444415"
+                                    borderColor="#ef444450"
+                                    tooltip="Cancelar ante el SAT"
+                                    onPress={() => handleCancelarFacturaSAT(factura)}
+                                  />
+                                )}
+                              </>
+                            )}
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              </ScrollView>
+
+              {/* Paginación Inferior */}
+              {facturasFiltradas.length > registrosPorPagina && (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingHorizontal: 4 }}>
+                  <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                    Mostrando {inicioRegistro} a {finRegistro} de {facturasFiltradas.length} facturas
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <TouchableOpacity
+                      onPress={() => setPaginaActual(p => Math.max(1, p - 1))}
+                      disabled={paginaActual <= 1}
+                      style={[
+                        styles.pageBtn,
+                        {
+                          opacity: paginaActual <= 1 ? 0.35 : 1,
+                          borderColor: themeColors.border,
+                          backgroundColor: themeColors.backgroundElement,
+                        }
+                      ]}
+                    >
+                      <Ionicons name="chevron-back" size={15} color={themeColors.text} />
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, paddingHorizontal: 4 }}>
+                      Página {paginaActual} de {totalPaginas}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))}
+                      disabled={paginaActual >= totalPaginas}
+                      style={[
+                        styles.pageBtn,
+                        {
+                          opacity: paginaActual >= totalPaginas ? 0.35 : 1,
+                          borderColor: themeColors.border,
+                          backgroundColor: themeColors.backgroundElement,
+                        }
+                      ]}
+                    >
+                      <Ionicons name="chevron-forward" size={15} color={themeColors.text} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </ScrollView>
           )}
         </View>
@@ -2611,103 +3877,6 @@ export default function FacturacionScreen() {
         </View>
       )}
 
-      {/* MODAL PARA SELECCIONAR CLIENTE DEL CATÁLOGO */}
-      <Modal visible={isClientModalOpen} animationType="slide" transparent onRequestClose={() => setIsClientModalOpen(false)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setIsClientModalOpen(false)}>
-          <Pressable onPress={e => e.stopPropagation()} style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-            <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="people" size={20} color="#0284c7" />
-                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Seleccionar Cliente del Catálogo</Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <TouchableOpacity onPress={fetchClientes} disabled={isLoadingClientes} style={[{ padding: 6 }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}>
-                  <Ionicons name="refresh" size={20} color={isLoadingClientes ? themeColors.textSecondary : "#0284c7"} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setIsClientModalOpen(false)}
-                  hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
-                  style={[{ padding: 6 }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}
-                >
-                  <Ionicons name="close" size={22} color={themeColors.text} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={[styles.searchBox, { borderColor: themeColors.border, backgroundColor: themeColors.background, marginBottom: 12 }]}>
-              <Ionicons name="search" size={18} color={themeColors.textSecondary} />
-              <TextInput
-                style={[styles.searchInput, { color: themeColors.text }]}
-                placeholder="Buscar por nombre, razón social o RFC..."
-                placeholderTextColor={themeColors.textSecondary}
-                value={clientSearch}
-                onChangeText={setClientSearch}
-                autoFocus
-              />
-              {!!clientSearch && (
-                <TouchableOpacity onPress={() => setClientSearch('')}>
-                  <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {isLoadingClientes ? (
-              <View style={{ padding: 32, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <ActivityIndicator size="small" color="#0284c7" />
-                <Text style={{ fontSize: 13, color: themeColors.textSecondary }}>Cargando catálogo de clientes...</Text>
-              </View>
-            ) : clientesFiltrados.length === 0 ? (
-              <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                <Ionicons name="alert-circle-outline" size={36} color={themeColors.textSecondary} style={{ opacity: 0.6 }} />
-                <Text style={{ fontSize: 13, color: themeColors.textSecondary, textAlign: 'center' }}>
-                  {clientSearch.trim()
-                    ? `No se encontraron clientes que coincidan con "${clientSearch}".`
-                    : 'No hay clientes disponibles en el catálogo.'}
-                </Text>
-                <TouchableOpacity
-                  onPress={fetchClientes}
-                  style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#0284c7' + '15', marginTop: 4 }]}
-                >
-                  <Ionicons name="refresh" size={14} color="#0284c7" />
-                  <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: '700' }}>Recargar Clientes</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <ScrollView style={{ maxHeight: 400 }}>
-                <View style={{ gap: 6 }}>
-                  {clientesFiltrados.map(c => {
-                    const displayTitle = c.razon_social && c.razon_social !== c.nombre
-                      ? `${c.razon_social} (${c.nombre})`
-                      : (c.razon_social || c.nombre || 'Cliente');
-                    return (
-                      <TouchableOpacity
-                        key={c.id}
-                        onPress={() => handleSelectClient(c)}
-                        style={[styles.clientOptionItem, { borderColor: themeColors.border, backgroundColor: themeColors.background }, Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined]}
-                      >
-                        <View style={{ flex: 1, paddingRight: 8 }}>
-                          <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.text }}>
-                            {displayTitle}
-                          </Text>
-                          <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
-                            RFC: <Text style={{ fontWeight: '600', color: themeColors.text }}>{c.rfc || 'Sin RFC'}</Text> | CP: {c.codigo_postal || 'N/D'} | Régimen: {c.regimen_fiscal || '601'}
-                          </Text>
-                          {c.uso_cfdi && (
-                            <Text style={{ fontSize: 10, color: '#0284c7', marginTop: 1 }}>
-                              Uso CFDI: {c.uso_cfdi}
-                            </Text>
-                          )}
-                        </View>
-                        <Ionicons name="chevron-forward" size={18} color="#0284c7" />
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {/* MODAL PRINCIPAL: NUEVO COMPLEMENTO DE PAGO MULTI-FACTURA */}
       <Modal visible={isPagoModalOpen} animationType="slide" transparent onRequestClose={() => setIsPagoModalOpen(false)}>
@@ -2754,13 +3923,46 @@ export default function FacturacionScreen() {
                 </View>
 
                 {pagoCliente ? (
-                  <View style={{ backgroundColor: themeColors.backgroundElement, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
-                    <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.text }}>
-                      {pagoCliente.razon_social || pagoCliente.nombre}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 3 }}>
-                      RFC: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{pagoCliente.rfc || 'XAXX010101000'}</Text> | CP: {pagoCliente.codigo_postal || '31110'} | Régimen: {pagoCliente.regimen_fiscal || '601'}
-                    </Text>
+                  <View style={{ gap: 12 }}>
+                    <View style={{ backgroundColor: themeColors.backgroundElement, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
+                      <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.text }}>
+                        {pagoCliente.razon_social || pagoCliente.nombre}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 3 }}>
+                        RFC: <Text style={{ fontWeight: '700', color: '#0284c7' }}>{pagoCliente.rfc || 'XAXX010101000'}</Text> | CP: {pagoCliente.codigo_postal || '31110'}
+                      </Text>
+                    </View>
+
+                    <View>
+                      <Text style={[styles.fieldLabel, { color: themeColors.textSecondary }]}>Régimen Fiscal del Receptor *</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                          {REGIMENES_FISCALES.map(reg => (
+                            <TouchableOpacity
+                              key={reg.code}
+                              onPress={() => setPagoClienteRegimen(reg.code)}
+                              style={[
+                                styles.chipBtn,
+                                {
+                                  borderColor: pagoClienteRegimen === reg.code ? '#801c1d' : themeColors.border,
+                                  backgroundColor: pagoClienteRegimen === reg.code ? '#801c1d20' : themeColors.background,
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: pagoClienteRegimen === reg.code ? '800' : '500',
+                                  color: pagoClienteRegimen === reg.code ? '#801c1d' : themeColors.textSecondary,
+                                }}
+                              >
+                                {reg.code} - {reg.label}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </ScrollView>
+                    </View>
                   </View>
                 ) : (
                   <View style={{ gap: 8 }}>
@@ -3076,6 +4278,200 @@ export default function FacturacionScreen() {
           handleTimbrarFactura();
         } : undefined}
       />
+
+      {/* MODAL SELECTOR: RÉGIMEN FISCAL (19 REGÍMENES SAT) */}
+      <Modal
+        visible={modalRegimenVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalRegimenVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setModalRegimenVisible(false)}
+        >
+          <Pressable
+            style={[
+              styles.pickerModalContent,
+              { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+            ]}
+            onPress={e => e.stopPropagation()}
+          >
+            <View style={[styles.pickerModalHeader, { borderBottomColor: themeColors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="ribbon-outline" size={20} color="#0284c7" />
+                <View>
+                  <Text style={[styles.pickerModalTitle, { color: themeColors.text }]}>
+                    Régimen Fiscal del Receptor
+                  </Text>
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                    Catálogo SAT ({REGIMENES_FISCALES.length} regímenes disponibles)
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setModalRegimenVisible(false)}
+                style={{ padding: 4 }}
+              >
+                <Ionicons name="close" size={20} color={themeColors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.pickerSearchContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+              <Ionicons name="search" size={16} color={themeColors.textSecondary} style={{ marginRight: 6 }} />
+              <TextInput
+                style={[styles.pickerSearchInput, { color: themeColors.text }]}
+                placeholder="Buscar por código o régimen..."
+                placeholderTextColor={themeColors.textSecondary}
+                value={searchRegimenText}
+                onChangeText={setSearchRegimenText}
+              />
+              {!!searchRegimenText && (
+                <TouchableOpacity onPress={() => setSearchRegimenText('')} style={{ padding: 2 }}>
+                  <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
+              {filteredRegimenes.map(item => {
+                const isSelected = clienteRegimen === item.code;
+                return (
+                  <TouchableOpacity
+                    key={item.code}
+                    onPress={() => {
+                      setClienteRegimen(item.code);
+                      setModalRegimenVisible(false);
+                    }}
+                    style={[
+                      styles.pickerItem,
+                      { borderBottomColor: themeColors.border },
+                      isSelected && { backgroundColor: '#0284c715' },
+                    ]}
+                  >
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontWeight: isSelected ? '700' : '400',
+                          color: isSelected ? '#0284c7' : themeColors.text,
+                        }}
+                      >
+                        {item.label}
+                      </Text>
+                    </View>
+                    {isSelected && <Ionicons name="checkmark-circle" size={18} color="#0284c7" />}
+                  </TouchableOpacity>
+                );
+              })}
+              {filteredRegimenes.length === 0 && (
+                <View style={{ padding: 24, alignItems: 'center' }}>
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
+                    No se encontraron regímenes que coincidan con la búsqueda.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* MODAL SELECTOR: USO DE CFDI (24 USOS SAT) */}
+      <Modal
+        visible={modalUsoVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalUsoVisible(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setModalUsoVisible(false)}
+        >
+          <Pressable
+            style={[
+              styles.pickerModalContent,
+              { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+            ]}
+            onPress={e => e.stopPropagation()}
+          >
+            <View style={[styles.pickerModalHeader, { borderBottomColor: themeColors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="receipt-outline" size={20} color="#0284c7" />
+                <View>
+                  <Text style={[styles.pickerModalTitle, { color: themeColors.text }]}>
+                    Uso de CFDI
+                  </Text>
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                    Catálogo SAT ({USOS_CFDI.length} usos disponibles)
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setModalUsoVisible(false)}
+                style={{ padding: 4 }}
+              >
+                <Ionicons name="close" size={20} color={themeColors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.pickerSearchContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+              <Ionicons name="search" size={16} color={themeColors.textSecondary} style={{ marginRight: 6 }} />
+              <TextInput
+                style={[styles.pickerSearchInput, { color: themeColors.text }]}
+                placeholder="Buscar por código o descripción..."
+                placeholderTextColor={themeColors.textSecondary}
+                value={searchUsoText}
+                onChangeText={setSearchUsoText}
+              />
+              {!!searchUsoText && (
+                <TouchableOpacity onPress={() => setSearchUsoText('')} style={{ padding: 2 }}>
+                  <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
+              {filteredUsos.map(item => {
+                const isSelected = clienteUso === item.code;
+                return (
+                  <TouchableOpacity
+                    key={item.code}
+                    onPress={() => {
+                      setClienteUso(item.code);
+                      setModalUsoVisible(false);
+                    }}
+                    style={[
+                      styles.pickerItem,
+                      { borderBottomColor: themeColors.border },
+                      isSelected && { backgroundColor: '#0284c715' },
+                    ]}
+                  >
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontWeight: isSelected ? '700' : '400',
+                          color: isSelected ? '#0284c7' : themeColors.text,
+                        }}
+                      >
+                        {item.label}
+                      </Text>
+                    </View>
+                    {isSelected && <Ionicons name="checkmark-circle" size={18} color="#0284c7" />}
+                  </TouchableOpacity>
+                );
+              })}
+              {filteredUsos.length === 0 && (
+                <View style={{ padding: 24, alignItems: 'center' }}>
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
+                    No se encontraron opciones de uso que coincidan con la búsqueda.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -3156,6 +4552,55 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
   },
+  partidasTableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1.5,
+    marginBottom: 4,
+  },
+  partidasColHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0284c7',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  partidasTableRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderRadius: 6,
+    marginBottom: 4,
+  },
+  partidaDescDetalladaInput: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  tableFieldInput: {
+    borderWidth: 1,
+  },
+  tableCurrencyContainer: {
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  impuestoPill: {
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   partidaBox: {
     borderWidth: 1,
     borderRadius: 10,
@@ -3229,6 +4674,52 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 12,
   },
+  facturasTableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    borderWidth: 1,
+  },
+  facturasTableHeaderCell: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  facturasTableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    minHeight: 48,
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 74,
+  },
+  tableActionIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   statusBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -3299,6 +4790,7 @@ const styles = StyleSheet.create({
     top: 68,
     left: 0,
     right: 0,
+    minWidth: 420,
     borderWidth: 1,
     borderRadius: 12,
     zIndex: 99999,
@@ -3362,5 +4854,118 @@ const styles = StyleSheet.create({
   modalActionText: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  draftBannerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 12,
+  },
+  clientAutocompleteInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    minHeight: 44,
+  },
+  clientAutocompleteInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+  },
+  clientDropdownMenu: {
+    position: 'absolute',
+    top: 68,
+    left: 0,
+    right: 0,
+    borderWidth: 1,
+    borderRadius: 10,
+    zIndex: 99999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 10,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+      },
+    }),
+    overflow: 'hidden',
+  },
+  clientDropdownHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  clientDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  dropdownSelectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 44,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+  },
+  pickerModalContent: {
+    width: '92%',
+    maxWidth: 560,
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 12,
+  },
+  pickerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  pickerModalTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  pickerSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 12,
+    paddingHorizontal: 10,
+    height: 38,
+    borderWidth: 1,
+    borderRadius: 8,
+  },
+  pickerSearchInput: {
+    flex: 1,
+    fontSize: 13,
+    paddingVertical: 0,
+  },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
 });

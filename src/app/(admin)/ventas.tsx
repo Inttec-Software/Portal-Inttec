@@ -751,7 +751,14 @@ export default function VentasScreen() {
 
   // === Filtrar Historial ===
   const ventasFiltradas = useMemo(() => {
-    let filtradas = ventasHistorial;
+    let filtradas = ventasHistorial.filter(v => {
+      if (v.tipo_proyecto === 'Factura Directa') {
+        const ref = (v.factura_referencia || '').trim();
+        const fol = (v.folio || '').trim();
+        if (!ref || ref === fol) return false;
+      }
+      return true;
+    });
 
     if (filterDate) {
       const dd = String(filterDate.getDate()).padStart(2, '0');
@@ -2699,14 +2706,70 @@ export default function VentasScreen() {
                       </View>
 
                       <View style={{ flex: 1 }}>
-                        <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginBottom: 4 }}>Fecha de Pago (AAAA-MM-DD)</Text>
-                        <TextInput
-                          style={{ height: 40, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 10, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 13 }}
-                          value={pagoFecha}
-                          onChangeText={setPagoFecha}
-                          placeholder="YYYY-MM-DD"
-                          placeholderTextColor={themeColors.textSecondary}
-                        />
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginBottom: 4 }}>Fecha de Pago</Text>
+                        {Platform.OS === 'web' ? (
+                          <View style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: themeColors.background,
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                            borderRadius: 8,
+                            height: 40,
+                            paddingHorizontal: 10,
+                          }}>
+                            {createElement('input', {
+                              type: 'date',
+                              value: pagoFecha,
+                              onChange: (e: any) => setPagoFecha(e.target.value),
+                              style: {
+                                flex: 1,
+                                backgroundColor: 'transparent',
+                                color: themeColors.text,
+                                fontSize: '13px',
+                                border: 'none',
+                                outline: 'none',
+                                fontFamily: 'inherit',
+                                cursor: 'pointer'
+                              }
+                            })}
+                          </View>
+                        ) : (
+                          <>
+                            <TouchableOpacity onPress={() => { setPagoDateValue(new Date(pagoFecha + 'T12:00:00')); setShowPagoDatePicker(true); }}>
+                              <View pointerEvents="none">
+                                <TextInput
+                                  style={{ height: 40, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 10, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 13 }}
+                                  value={pagoFecha}
+                                  editable={false}
+                                  placeholder="YYYY-MM-DD"
+                                  placeholderTextColor={themeColors.textSecondary}
+                                />
+                              </View>
+                            </TouchableOpacity>
+                            {showPagoDatePicker && (
+                              <DateTimePicker
+                                value={pagoDateValue}
+                                mode="date"
+                                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                onValueChange={(event: any, selectedDate?: Date) => {
+                                  if (Platform.OS === 'android') {
+                                    setShowPagoDatePicker(false);
+                                  }
+                                  if (event.type === 'set' && selectedDate) {
+                                    setPagoDateValue(selectedDate);
+                                    const yyyy = selectedDate.getFullYear();
+                                    const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                                    const dd = String(selectedDate.getDate()).padStart(2, '0');
+                                    setPagoFecha(`${yyyy}-${mm}-${dd}`);
+                                  } else if (event.type === 'dismissed') {
+                                    setShowPagoDatePicker(false);
+                                  }
+                                }}
+                              />
+                            )}
+                          </>
+                        )}
                       </View>
                     </View>
 
@@ -3061,14 +3124,70 @@ export default function VentasScreen() {
                     </View>
 
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>Fecha de Pago (AAAA-MM-DD)</Text>
-                      <TextInput
-                        style={{ height: 42, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 12, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 13 }}
-                        value={pagoFecha}
-                        onChangeText={setPagoFecha}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={themeColors.textSecondary}
-                      />
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 4 }}>Fecha de Pago</Text>
+                      {Platform.OS === 'web' ? (
+                        <View style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          backgroundColor: themeColors.background,
+                          borderWidth: 1,
+                          borderColor: themeColors.border,
+                          borderRadius: 8,
+                          height: 42,
+                          paddingHorizontal: 12,
+                        }}>
+                          {createElement('input', {
+                            type: 'date',
+                            value: pagoFecha,
+                            onChange: (e: any) => setPagoFecha(e.target.value),
+                            style: {
+                              flex: 1,
+                              backgroundColor: 'transparent',
+                              color: themeColors.text,
+                              fontSize: '13px',
+                              border: 'none',
+                              outline: 'none',
+                              fontFamily: 'inherit',
+                              cursor: 'pointer'
+                            }
+                          })}
+                        </View>
+                      ) : (
+                        <>
+                          <TouchableOpacity onPress={() => { setPagoDateValue(new Date(pagoFecha + 'T12:00:00')); setShowPagoDatePicker(true); }}>
+                            <View pointerEvents="none">
+                              <TextInput
+                                style={{ height: 42, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, paddingHorizontal: 12, color: themeColors.text, backgroundColor: themeColors.background, fontSize: 13 }}
+                                value={pagoFecha}
+                                editable={false}
+                                placeholder="YYYY-MM-DD"
+                                placeholderTextColor={themeColors.textSecondary}
+                              />
+                            </View>
+                          </TouchableOpacity>
+                          {showPagoDatePicker && (
+                            <DateTimePicker
+                              value={pagoDateValue}
+                              mode="date"
+                              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                              onValueChange={(event: any, selectedDate?: Date) => {
+                                if (Platform.OS === 'android') {
+                                  setShowPagoDatePicker(false);
+                                }
+                                if (event.type === 'set' && selectedDate) {
+                                  setPagoDateValue(selectedDate);
+                                  const yyyy = selectedDate.getFullYear();
+                                  const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                                  const dd = String(selectedDate.getDate()).padStart(2, '0');
+                                  setPagoFecha(`${yyyy}-${mm}-${dd}`);
+                                } else if (event.type === 'dismissed') {
+                                  setShowPagoDatePicker(false);
+                                }
+                              }}
+                            />
+                          )}
+                        </>
+                      )}
                     </View>
                   </View>
 

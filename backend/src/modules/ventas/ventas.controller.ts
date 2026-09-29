@@ -61,7 +61,15 @@ export const getVentasHistorial = async (req: Request, res: Response) => {
 
     if (error) throw error;
 
-    const rawVentas = ventasData || [];
+    // Excluir registros generados como Factura Directa que no corresponden a ventas operativas
+    const rawVentas = (ventasData || []).filter((v: any) => {
+      if (v.tipo_proyecto === 'Factura Directa') {
+        const ref = (v.factura_referencia || '').trim();
+        const fol = (v.folio || '').trim();
+        if (!ref || ref === fol) return false;
+      }
+      return true;
+    });
     const ventaIds = rawVentas.map((v: any) => v.id);
 
     let pagosMap: Record<string, any[]> = {};
