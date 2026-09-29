@@ -2,6 +2,38 @@ import { Request, Response } from 'express';
 import { getSupabaseClient } from '../../config/supabase';
 import { PostgrestError } from '@supabase/supabase-js';
 
+const formatGasto = (g: any) => {
+  let cat = 'Sin clasificar';
+  let subcat = 'Sin clasificar';
+  let prov = '';
+  let cli = '';
+  let suc = '';
+  
+  let catRel = null;
+
+  if (g.subcategoria_rel) {
+    subcat = g.subcategoria_rel.nombre;
+    if (g.subcategoria_rel.categorias) {
+      cat = g.subcategoria_rel.categorias.nombre;
+      catRel = g.subcategoria_rel.categorias;
+    }
+  }
+  if (g.proveedor_rel) prov = g.proveedor_rel.nombre;
+  if (g.cliente_rel) cli = g.cliente_rel.nombre;
+  if (g.sucursal_rel) suc = g.sucursal_rel.nombre;
+
+  return {
+    ...g,
+    cat, subcat, prov, cli, suc, // Props legadas
+    categoria_nombre: cat,
+    subcategoria_nombre: subcat,
+    proveedor_nombre: prov,
+    cliente_nombre: cli,
+    sucursal_nombre: suc,
+    categoria_rel: catRel,
+  };
+};
+
 export const getAdminReportes = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -32,38 +64,6 @@ export const getAdminReportes = async (req: Request, res: Response) => {
 
     if (usersRes.error) throw usersRes.error;
 
-    // Enriquecer gastos usando relaciones precargadas
-    const formatGasto = (g: any) => {
-      let cat = 'Sin clasificar';
-      let subcat = 'Sin clasificar';
-      let prov = '';
-      let cli = '';
-      let suc = '';
-      
-      let catRel = null;
-
-      if (g.subcategoria_rel) {
-        subcat = g.subcategoria_rel.nombre;
-        if (g.subcategoria_rel.categorias) {
-          cat = g.subcategoria_rel.categorias.nombre;
-          catRel = g.subcategoria_rel.categorias;
-        }
-      }
-      if (g.proveedor_rel) prov = g.proveedor_rel.nombre;
-      if (g.cliente_rel) cli = g.cliente_rel.nombre;
-      if (g.sucursal_rel) suc = g.sucursal_rel.nombre;
-
-      return {
-        ...g,
-        cat, subcat, prov, cli, suc, // Props legadas
-        categoria_nombre: cat,
-        subcategoria_nombre: subcat,
-        proveedor_nombre: prov,
-        cliente_nombre: cli,
-        sucursal_nombre: suc,
-        categoria_rel: catRel,
-      };
-    };
 
     let rawGastos = gastosRes.data || [];
     if (gastosRes.error) {
@@ -113,36 +113,6 @@ export const getEmpleadoGastos = async (req: Request, res: Response) => {
 
     const rawGastos = gastosRes.data || [];
 
-    const formatGasto = (g: any) => {
-      let cat = 'Sin clasificar';
-      let subcat = 'Sin clasificar';
-      let prov = '';
-      let cli = '';
-      let suc = '';
-      
-      let catRel = null;
-
-      if (g.subcategoria_rel) {
-        subcat = g.subcategoria_rel.nombre;
-        if (g.subcategoria_rel.categorias) {
-          cat = g.subcategoria_rel.categorias.nombre;
-          catRel = g.subcategoria_rel.categorias;
-        }
-      }
-      if (g.proveedor_rel) prov = g.proveedor_rel.nombre;
-      if (g.cliente_rel) cli = g.cliente_rel.nombre;
-      if (g.sucursal_rel) suc = g.sucursal_rel.nombre;
-
-      return {
-        ...g,
-        categoria_nombre: cat,
-        subcategoria_nombre: subcat,
-        proveedor_nombre: prov,
-        cliente_nombre: cli,
-        sucursal_nombre: suc,
-        categoria_rel: catRel,
-      };
-    };
 
     const gastosEnriquecidos = rawGastos.map(formatGasto);
 
@@ -249,9 +219,13 @@ export const getExportData = async (req: Request, res: Response) => {
     const client = getSupabaseClient(company, env);
 
     const { type } = req.params;
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
 
     if (type === 'asistencias') {
-      const { data, error } = await client.from('asistencias').select('*').order('fecha', { ascending: false });
+      let query = client.from('asistencias').select('*').order('fecha', { ascending: false });
+      if (startDate) query = query.gte('fecha', startDate);
+      if (endDate) query = query.lte('fecha', endDate);
+      const { data, error } = await query;
       if (error) throw error;
       return res.json(data || []);
     } else if (type === 'inventario') {
@@ -263,8 +237,14 @@ export const getExportData = async (req: Request, res: Response) => {
       if (catRes.error) throw catRes.error;
       return res.json({ productos: prodRes.data || [], categorias: catRes.data || [] });
     } else if (type === 'consumos') {
+      let query = client.from('movimientos_inventario')
+        .select('*, producto:productos(nombre_oficial, sku_interno, precio_unitario)')
+        .eq('tipo', 'SALIDA')
+        .order('fecha', { ascending: false });
+      if (startDate) query = query.gte('fecha', `${startDate}T00:00:00`);
+      if (endDate) query = query.lte('fecha', `${endDate}T23:59:59.999Z`);
       const [movRes, userRes] = await Promise.all([
-        client.from('movimientos_inventario').select('*, producto:productos(nombre_oficial, sku_interno, precio_unitario)').eq('tipo', 'SALIDA').order('fecha', { ascending: false }),
+        query,
         client.from('usuarios').select('id, nombre, email')
       ]);
       if (movRes.error) throw movRes.error;
@@ -275,9 +255,29 @@ export const getExportData = async (req: Request, res: Response) => {
       }));
       return res.json(dataWithUsers);
     } else if (type === 'ventas') {
-      const { data, error } = await client.from('ventas').select('*').order('fecha', { ascending: false });
+      let query = client.from('ventas').select('*').order('fecha', { ascending: false });
+      if (startDate) query = query.gte('fecha', startDate);
+      if (endDate) query = query.lte('fecha', endDate);
+      const { data, error } = await query;
       if (error) throw error;
       return res.json(data || []);
+    } else if (type === 'gastos') {
+      let query = client.from('gastos').select(`
+        *,
+        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
+        proveedor_rel:proveedores(id, nombre),
+        cliente_rel:clientes(id, nombre),
+        sucursal_rel:sucursales_cliente(id, nombre)
+      `).order('created_at', { ascending: false });
+      if (startDate) {
+        query = query.gte('created_at', `${startDate}T00:00:00`);
+      }
+      if (endDate) {
+        query = query.lte('created_at', `${endDate}T23:59:59.999Z`);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return res.json((data || []).map(formatGasto));
     }
 
     return res.status(400).json({ error: 'Tipo de exportación inválido' });

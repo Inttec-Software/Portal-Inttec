@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -75,6 +75,216 @@ interface ConsumoItem {
   cantidad: number;
 }
 
+interface AsignarItem {
+  id: string;
+  productoId: string;
+  cantidad: number;
+}
+
+interface MovimientoItemProps {
+  m: any;
+  themeColors: any;
+  exportingSingleMovimientoId: string | null;
+  onExportSingleVale: (mov: any) => void;
+}
+
+const MovimientoCardItem = React.memo(({ m, themeColors, exportingSingleMovimientoId, onExportSingleVale }: MovimientoItemProps) => {
+  const isGasto = m.tipo === 'GASTO' || m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO';
+  const isRetiro = m.tipo === 'RETIRO' || m.subtipo === 'RETIRO';
+  const isDevolucion = m.tipo === 'DEVOLUCIÓN' || m.subtipo === 'DEVOLUCIÓN';
+  const isCompra = m.tipo === 'COMPRA/FACTURA' || m.subtipo === 'COMPRA/FACTURA';
+  const isEntrada = m.tipo === 'ENTRADA' || (isDevolucion && !isGasto && !isRetiro);
+
+  const folioStr = m.id ? m.id.substring(0, 8).toUpperCase() : 'MOV';
+  const dateStr = (m.fecha || m.created_at) ? new Date(m.fecha || m.created_at).toLocaleString('es-MX', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }) : 'N/A';
+
+  const isSingleExporting = exportingSingleMovimientoId === m.id;
+  const tieneFirma = m.tiene_firma || Boolean(m.firma_base64);
+
+  return (
+    <View
+      style={{
+        backgroundColor: themeColors.backgroundElement,
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 12,
+        borderColor: isGasto ? '#8B5CF660' : isDevolucion ? '#2563EB50' : isCompra ? '#15803D50' : isEntrada ? '#10B98140' : '#EF444440',
+        borderWidth: 1,
+        borderLeftWidth: 4,
+        borderLeftColor: isGasto ? '#8B5CF6' : isDevolucion ? '#2563EB' : isCompra ? '#15803D' : isEntrada ? '#10B981' : '#EF4444',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+        elevation: 1
+      }}
+    >
+      {/* Fila Superior: Folio + Fecha + Tipo Badge */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: themeColors.primary }}>#{folioStr}</Text>
+          </View>
+          <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>{dateStr}</Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          {isGasto ? (
+            <View style={{ backgroundColor: '#F3E8FF', borderColor: '#8B5CF6', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#8B5CF6' }}>Gasto</Text>
+            </View>
+          ) : isDevolucion ? (
+            <View style={{ backgroundColor: '#DBEAFE', borderColor: '#2563EB', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#2563EB' }}>DEVOLUCIÓN</Text>
+            </View>
+          ) : isCompra ? (
+            <View style={{ backgroundColor: '#DCFCE7', borderColor: '#15803D', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#15803D' }}>COMPRA</Text>
+            </View>
+          ) : isEntrada ? (
+            <View style={{ backgroundColor: '#10B98120', borderColor: '#10B981', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#059669' }}>ENTRADA</Text>
+            </View>
+          ) : (
+            <View style={{ backgroundColor: '#EF444420', borderColor: '#EF4444', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#DC2626' }}>SALIDA</Text>
+            </View>
+          )}
+          {Boolean(m.tipo_gasto) ? (
+            <View style={{ backgroundColor: isGasto ? '#8B5CF618' : themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: isGasto ? '#8B5CF6' : themeColors.primary }}>{m.tipo_gasto}</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      {/* Fila del Producto o Desglose Multi-material */}
+      {Array.isArray(m.materiales) && m.materiales.length > 1 ? (
+        <View style={{ backgroundColor: themeColors.background, borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: themeColors.border }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+              {isDevolucion ? 'Materiales Devueltos' : isGasto ? 'Materiales Utilizados en Gasto' : 'Partidas Retiradas'} ({m.materiales.length}):
+            </Text>
+            <View style={{ backgroundColor: isGasto ? '#8B5CF618' : isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: isGasto ? '#8B5CF6' : isEntrada ? '#059669' : '#DC2626' }}>
+                Total: {isEntrada ? '+' : '-'}{m.cantidad} {m.producto_unidad || 'un.'}
+              </Text>
+            </View>
+          </View>
+          {m.materiales.map((mat: any, mIdx: number) => {
+            const condTags = [];
+            if (mat.devolver_nuevo > 0) condTags.push(`Nuevas: ${mat.devolver_nuevo}`);
+            if (mat.devolver_usado > 0) condTags.push(`Usadas: ${mat.devolver_usado}`);
+            if (mat.devolver_por_revisar > 0) condTags.push(`Dañadas: ${mat.devolver_por_revisar}`);
+            const condStr = condTags.length > 0 ? ` (${condTags.join(', ')})` : '';
+
+            return (
+              <View key={mIdx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomWidth: mIdx === m.materiales.length - 1 ? 0 : 1, borderBottomColor: themeColors.border }}>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }} numberOfLines={1}>
+                    {mat.nombre || 'Material'}{condStr}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>SKU: {mat.sku || '-'}</Text>
+                </View>
+                <View style={{ backgroundColor: isGasto ? '#8B5CF618' : isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: isGasto ? '#8B5CF6' : isEntrada ? '#059669' : '#DC2626' }}>
+                    {isEntrada ? '+' : '-'}{mat.cantidad} {mat.unidad || 'pza'}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      ) : (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, backgroundColor: themeColors.background, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
+          <View style={{ flex: 1, paddingRight: 8 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.text }}>{m.producto_nombre || 'Producto'}</Text>
+            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>SKU: {m.producto_sku || '-'}</Text>
+          </View>
+          <View style={{ backgroundColor: isGasto ? '#8B5CF618' : isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
+            <Text style={{ fontSize: 14, fontWeight: '800', color: isGasto ? '#8B5CF6' : isEntrada ? '#059669' : '#DC2626' }}>
+              {isEntrada ? '+' : '-'}{m.cantidad} {m.producto_unidad || 'pza'}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* Detalles: Responsable, Cliente, Concepto */}
+      <View style={{ marginBottom: 10, gap: 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Ionicons name="person-circle-outline" size={16} color={(m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO') ? '#8B5CF6' : themeColors.primary} />
+          <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text }}>
+            Responsable: <Text style={{ fontWeight: '400' }}>{m.usuario_nombre || m.empleado_nombre || 'Almacén'}</Text>
+          </Text>
+        </View>
+
+        {m.cliente_nombre ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="location-outline" size={16} color={themeColors.textSecondary} />
+            <Text style={{ fontSize: 12, color: themeColors.text }}>
+              Cliente: <Text style={{ fontWeight: '600' }}>{m.cliente_nombre}</Text>
+            </Text>
+          </View>
+        ) : null}
+
+        {(m.detalle_motivo || m.folio_factura) ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="chatbubble-outline" size={16} color={themeColors.textSecondary} />
+            <Text style={{ fontSize: 12, color: themeColors.text }}>
+              Detalle: <Text style={{ fontStyle: 'italic', color: themeColors.textSecondary }}>{m.detalle_motivo || m.folio_factura}</Text>
+            </Text>
+          </View>
+        ) : null}
+
+        {m.proveedor_nombre ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Ionicons name="business-outline" size={16} color={themeColors.textSecondary} />
+            <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Proveedor: {m.proveedor_nombre}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/* Botón de Vale Individual */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 6, borderTopWidth: 1, borderTopColor: themeColors.border }}>
+        {tieneFirma ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#10B98115', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#10B98130' }}>
+            <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>Responsiva Firmada</Text>
+          </View>
+        ) : <View />}
+
+        <TouchableOpacity
+          onPress={() => onExportSingleVale(m)}
+          disabled={isSingleExporting}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: themeColors.background,
+            borderColor: themeColors.border,
+            borderWidth: 1,
+            paddingHorizontal: 12,
+            paddingVertical: 7,
+            borderRadius: 6
+          }}
+        >
+          {isSingleExporting ? (
+            <ActivityIndicator size="small" color={themeColors.primary} />
+          ) : (
+            <Ionicons name="download-outline" size={15} color={themeColors.primary} />
+          )}
+          <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>Descargar Vale (PDF)</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+});
+
 export default function InventarioDashboard() {
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
@@ -101,7 +311,7 @@ export default function InventarioDashboard() {
   const [selectedTipoMovimiento, setSelectedTipoMovimiento] = useState<string>('TODOS');
   const [selectedDateFilterMov, setSelectedDateFilterMov] = useState<'TODOS' | 'HOY' | 'SEMANA' | 'MES'>('TODOS');
   const [isExportingMovimientosPDF, setIsExportingMovimientosPDF] = useState(false);
-  const [isExportingMovimientosCSV, setIsExportingMovimientosCSV] = useState(false);
+  const [isExportingMovimientosExcel, setIsExportingMovimientosCSV] = useState(false);
   const [exportingSingleMovimientoId, setExportingSingleMovimientoId] = useState<string | null>(null);
   
   // Datos maestros con soporte de caché en memoria (0ms render)
@@ -211,6 +421,16 @@ export default function InventarioDashboard() {
   const [isLoadingDevoluciones, setIsLoadingDevoluciones] = useState(false);
   const [isApprovingDevolucion, setIsApprovingDevolucion] = useState(false);
   const [isLoadingRetribuciones, setIsLoadingRetribuciones] = useState(false);
+
+  // Flujo Asignar Material a Empleado / Camioneta
+  const [asignarModalVisible, setAsignarModalVisible] = useState(false);
+  const [asignarEmpleadoId, setAsignarEmpleadoId] = useState('');
+  const [asignarMotivo, setAsignarMotivo] = useState('');
+  const [asignarItems, setAsignarItems] = useState<AsignarItem[]>([]);
+  const [asignarProductSearch, setAsignarProductSearch] = useState('');
+  const [isSubmittingAsignacion, setIsSubmittingAsignacion] = useState(false);
+  const [showAsignarEmpDropdown, setShowAsignarEmpDropdown] = useState(false);
+  const [asignarEmpSearch, setAsignarEmpSearch] = useState('');
 
   useEffect(() => {
     loadAllData();
@@ -478,7 +698,22 @@ export default function InventarioDashboard() {
   const handleExportSingleMovimientoVale = async (mov: any) => {
     setExportingSingleMovimientoId(mov.id);
     try {
-      await ReportGenerator.exportSingleMovimientoValePDF(mov);
+      let fullMov = { ...mov };
+      if ((mov.tiene_firma || !mov.firma_base64) && mov.id) {
+        try {
+          const headers = await getApiHeaders();
+          const res = await fetch(`${getApiUrl()}/api/inventario/firma/${mov.id}`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.firma_base64) {
+              fullMov.firma_base64 = data.firma_base64;
+            }
+          }
+        } catch (e) {
+          console.warn('No se pudo obtener firma bajo demanda:', e);
+        }
+      }
+      await ReportGenerator.exportSingleMovimientoValePDF(fullMov);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo generar el vale.');
     } finally {
@@ -493,7 +728,7 @@ export default function InventarioDashboard() {
     }
     setIsExportingMovimientosCSV(true);
     try {
-      await ReportGenerator.exportMovimientosToCSV(dataToExport);
+      await ReportGenerator.exportMovimientosToXLSX(dataToExport);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo generar el archivo CSV.');
     } finally {
@@ -1246,6 +1481,140 @@ export default function InventarioDashboard() {
     }
   };
 
+  // --- Asignación de Material a Empleado / Camioneta ---
+  const handleOpenAsignarModal = (preselectedEmpId?: string, prefillProductIds?: string[]) => {
+    setAsignarEmpleadoId(preselectedEmpId || selectedEmpleadoRetribucion || '');
+    setAsignarMotivo('');
+    setAsignarProductSearch('');
+    setShowAsignarEmpDropdown(false);
+    setAsignarEmpSearch('');
+
+    if (prefillProductIds && prefillProductIds.length > 0) {
+      const itemsPrefill: AsignarItem[] = prefillProductIds
+        .map(pId => {
+          const prod = productos.find(p => p.id === pId);
+          if (!prod) return null;
+          return {
+            id: `asig-${Date.now()}-${Math.random().toString(36).substring(3, 7)}`,
+            productoId: pId,
+            cantidad: 1
+          };
+        })
+        .filter(Boolean) as AsignarItem[];
+      setAsignarItems(itemsPrefill);
+    } else {
+      setAsignarItems([]);
+    }
+    setAsignarModalVisible(true);
+  };
+
+  const handleAddProductToAsignar = (prodId: string) => {
+    const prod = productos.find(p => p.id === prodId);
+    if (!prod) return;
+    if (prod.stock_actual <= 0) {
+      Alert.alert('Sin Stock', `El producto "${prod.nombre_oficial}" no tiene stock disponible en el inventario general.`);
+      return;
+    }
+
+    setAsignarItems(prev => {
+      const existing = prev.find(item => item.productoId === prodId);
+      if (existing) {
+        if (existing.cantidad + 1 > prod.stock_actual) {
+          Alert.alert('Stock Insuficiente', `Solo hay ${prod.stock_actual} ${prod.unidad || 'unidades'} disponibles de "${prod.nombre_oficial}".`);
+          return prev;
+        }
+        return prev.map(item => item.productoId === prodId ? { ...item, cantidad: item.cantidad + 1 } : item);
+      }
+      return [
+        ...prev,
+        {
+          id: `asig-${Date.now()}-${Math.random().toString(36).substring(3, 7)}`,
+          productoId: prodId,
+          cantidad: 1
+        }
+      ];
+    });
+    setAsignarProductSearch('');
+  };
+
+  const handleRemoveProductFromAsignar = (id: string) => {
+    setAsignarItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleUpdateAsignarItemQty = (id: string, qty: number) => {
+    setAsignarItems(prev => prev.map(item => item.id === id ? { ...item, cantidad: qty } : item));
+  };
+
+  const handleConfirmAsignacion = async () => {
+    if (!asignarEmpleadoId) {
+      Alert.alert('Validación', 'Por favor selecciona al empleado destinatario.');
+      return;
+    }
+
+    if (asignarItems.length === 0) {
+      Alert.alert('Validación', 'Agrega al menos un material para transferir al empleado.');
+      return;
+    }
+
+    for (const item of asignarItems) {
+      const prod = productos.find(p => p.id === item.productoId);
+      if (!prod) continue;
+      if (item.cantidad <= 0) {
+        Alert.alert('Validación', `La cantidad para "${prod.nombre_oficial}" debe ser mayor a 0.`);
+        return;
+      }
+      if (item.cantidad > prod.stock_actual) {
+        Alert.alert(
+          'Stock Insuficiente',
+          `No puedes asignar ${item.cantidad} ${prod.unidad || 'unidades'} de "${prod.nombre_oficial}" porque solo hay ${prod.stock_actual} en el inventario general.`
+        );
+        return;
+      }
+    }
+
+    setIsSubmittingAsignacion(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/asignar-empleado`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          empleadoId: asignarEmpleadoId,
+          motivo: (asignarMotivo || '').trim(),
+          items: asignarItems.map(it => ({
+            productoId: it.productoId,
+            cantidad: it.cantidad
+          }))
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al asignar material al empleado');
+      }
+
+      const empName = empleados.find(e => e.id === asignarEmpleadoId)?.nombre || 'el empleado';
+      Alert.alert('Éxito', data.mensaje || `Material asignado exitosamente a ${empName}.`);
+      setAsignarModalVisible(false);
+      setAsignarItems([]);
+      setAsignarMotivo('');
+
+      // Si estábamos en la pestaña de retribuciones y coincide el empleado, refrescar
+      if (selectedEmpleadoRetribucion === asignarEmpleadoId) {
+        loadRetribuciones(asignarEmpleadoId);
+        loadDevolucionesPendientes(asignarEmpleadoId);
+      }
+
+      // Recargar catálogo general
+      await loadAllData(true);
+      clearSelection();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo completar la transferencia de material.');
+    } finally {
+      setIsSubmittingAsignacion(false);
+    }
+  };
+
 
 
   // --- Carga de Factura PDF/Imagen e IA ---
@@ -1471,17 +1840,108 @@ export default function InventarioDashboard() {
     }
   };
 
-  // Filtrado de catálogo
-  const filteredProducts = productos.filter(p => {
-    if (!showInactive && !p.activo) return false;
-    if (!showOutOfStock && (p.stock_actual || 0) <= 0) return false;
+  // Filtrado de catálogo memoizado
+  const filteredProducts = useMemo(() => {
     const normSearch = normalizeText(searchTerm);
-    const matchesSearch = !normSearch ||
-      normalizeText(p.nombre_oficial).includes(normSearch) ||
-      normalizeText(p.sku_interno).includes(normSearch);
-    const matchesCat = selectedCategoryFilter ? p.categoria_id === selectedCategoryFilter : true;
-    return matchesSearch && matchesCat;
-  });
+    return productos.filter(p => {
+      if (!showInactive && !p.activo) return false;
+      if (!showOutOfStock && (p.stock_actual || 0) <= 0) return false;
+      const matchesSearch = !normSearch ||
+        normalizeText(p.nombre_oficial).includes(normSearch) ||
+        normalizeText(p.sku_interno).includes(normSearch);
+      const matchesCat = selectedCategoryFilter ? p.categoria_id === selectedCategoryFilter : true;
+      return matchesSearch && matchesCat;
+    });
+  }, [productos, showInactive, showOutOfStock, searchTerm, selectedCategoryFilter]);
+
+  // Filtrado y estadísticas de Movimientos memoizados (0ms en re-renders)
+  const { filteredMovimientos, totalMovimientosCount, totalEntradasCount, totalSalidasCount, totalGastosCount } = useMemo(() => {
+    const normSearch = normalizeText(movimientosSearch);
+    const now = new Date();
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    const filtered = movimientos.filter((m) => {
+      // Filtro de Usuario / Empleado
+      if (selectedUsuarioMovimiento && 
+          m.usuario_id !== selectedUsuarioMovimiento && 
+          m.usuario_nombre !== selectedUsuarioMovimiento &&
+          m.empleado_id !== selectedUsuarioMovimiento &&
+          m.empleado_nombre !== selectedUsuarioMovimiento) {
+        return false;
+      }
+
+      // Filtro de Tipo / Subtipo
+      if (selectedTipoMovimiento !== 'TODOS') {
+        const isG = m.tipo === 'GASTO' || m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO';
+        const isDev = m.tipo === 'DEVOLUCIÓN' || m.subtipo === 'DEVOLUCIÓN';
+        const isComp = m.tipo === 'COMPRA/FACTURA' || m.subtipo === 'COMPRA/FACTURA';
+        const isEnt = m.tipo === 'ENTRADA' || (isDev && !isG);
+        const isSal = (m.tipo === 'SALIDA' || m.subtipo === 'SALIDA' || m.subtipo === 'RETIRO') && !isG;
+
+        if (selectedTipoMovimiento === 'ENTRADA' && !isEnt) return false;
+        if (selectedTipoMovimiento === 'SALIDA' && !isSal) return false;
+        if (selectedTipoMovimiento === 'GASTO' && !isG) return false;
+        if (selectedTipoMovimiento === 'DEVOLUCIÓN' && !isDev) return false;
+        if (selectedTipoMovimiento === 'COMPRA/FACTURA' && !isComp) return false;
+      }
+
+      // Filtro de Fecha
+      const dateVal = m.fecha || m.created_at;
+      if (selectedDateFilterMov !== 'TODOS' && dateVal) {
+        const d = new Date(dateVal);
+        if (selectedDateFilterMov === 'HOY') {
+          if (d.toDateString() !== now.toDateString()) return false;
+        } else if (selectedDateFilterMov === 'SEMANA') {
+          if (d < oneWeekAgo) return false;
+        } else if (selectedDateFilterMov === 'MES') {
+          if (d.getMonth() !== currentMonth || d.getFullYear() !== currentYear) return false;
+        }
+      }
+
+      // Buscador por Texto
+      if (normSearch) {
+        const matchProd = normalizeText(m.producto_nombre || '').includes(normSearch);
+        const matchSku = normalizeText(m.producto_sku || '').includes(normSearch);
+        const matchUser = normalizeText(m.usuario_nombre || m.empleado_nombre || '').includes(normSearch);
+        const matchCli = normalizeText(m.cliente_nombre || '').includes(normSearch);
+        const matchDet = normalizeText(m.detalle_motivo || m.folio_factura || '').includes(normSearch);
+        const matchProv = normalizeText(m.proveedor_nombre || '').includes(normSearch);
+        const matchMats = (Array.isArray(m.materiales) ? m.materiales : []).some(
+          (mat: any) => normalizeText(mat.nombre || '').includes(normSearch) || normalizeText(mat.sku || '').includes(normSearch)
+        );
+        if (!matchProd && !matchSku && !matchUser && !matchCli && !matchDet && !matchProv && !matchMats) {
+          return false;
+        }
+      }
+      return true;
+    }).sort((a, b) => {
+      const tA = new Date(a.fecha || a.created_at || 0).getTime();
+      const tB = new Date(b.fecha || b.created_at || 0).getTime();
+      return tB - tA;
+    });
+
+    let totalEntradas = 0;
+    let totalSalidas = 0;
+    let totalGastos = 0;
+
+    filtered.forEach((m) => {
+      const isG = m.tipo === 'GASTO' || m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO';
+      const isEnt = m.tipo === 'ENTRADA' || m.subtipo === 'ENTRADA' || m.subtipo === 'DEVOLUCIÓN' || m.subtipo === 'COMPRA/FACTURA';
+      if (isG) totalGastos++;
+      else if (isEnt) totalEntradas++;
+      else totalSalidas++;
+    });
+
+    return {
+      filteredMovimientos: filtered,
+      totalMovimientosCount: filtered.length,
+      totalEntradasCount: totalEntradas,
+      totalSalidasCount: totalSalidas,
+      totalGastosCount: totalGastos,
+    };
+  }, [movimientos, selectedUsuarioMovimiento, selectedTipoMovimiento, selectedDateFilterMov, movimientosSearch]);
 
   const activeCategoryName = categorias.find(c => c.id === selectedCategoryFilter)?.nombre;
   const activeFormCategoryName = categorias.find(c => c.id === formCategoriaId)?.nombre;
@@ -1844,12 +2304,21 @@ export default function InventarioDashboard() {
               </TouchableOpacity>
             </View>
           </View>
-          <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-            <CustomButton
-              title="➕ Agregar Producto Manualmente"
-              onPress={handleOpenCreateModal}
-              style={{ backgroundColor: themeColors.primary }}
-            />
+          <View style={{ paddingHorizontal: 16, paddingBottom: 12, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+            <View style={{ flex: 1, minWidth: 160 }}>
+              <CustomButton
+                title="➕ Agregar Producto"
+                onPress={handleOpenCreateModal}
+                style={{ backgroundColor: themeColors.primary }}
+              />
+            </View>
+            <View style={{ flex: 1, minWidth: 160 }}>
+              <CustomButton
+                title="🚚 Asignar a Empleado"
+                onPress={() => handleOpenAsignarModal()}
+                style={{ backgroundColor: '#2563EB' }}
+              />
+            </View>
           </View>
 
           {/* Barra de Selección Masiva */}
@@ -2314,9 +2783,23 @@ export default function InventarioDashboard() {
                 <Text style={{ color: selectedEmpleadoRetribucion ? themeColors.text : themeColors.textSecondary }}>{empleados.find(e => e.id === selectedEmpleadoRetribucion)?.nombre || 'Seleccionar un empleado...'}</Text>
               </TouchableOpacity>
               {!!selectedEmpleadoRetribucion && (
-                <TouchableOpacity onPress={() => fetchEmployeeInventory(selectedEmpleadoRetribucion)} style={{ backgroundColor: themeColors.primary, padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }}>
-                  <Ionicons name="cube-outline" size={20} color="#fff" />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                  <TouchableOpacity
+                    onPress={() => fetchEmployeeInventory(selectedEmpleadoRetribucion)}
+                    style={{ backgroundColor: themeColors.primary, padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }}
+                    {...(Platform.OS === 'web' ? { title: "Ver Inventario en Camioneta" } as any : {})}
+                  >
+                    <Ionicons name="cube-outline" size={20} color="#fff" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleOpenAsignarModal(selectedEmpleadoRetribucion)}
+                    style={{ backgroundColor: '#2563EB', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 6 }}
+                    {...(Platform.OS === 'web' ? { title: "Asignar Material a este Empleado" } as any : {})}
+                  >
+                    <Ionicons name="add-circle-outline" size={18} color="#fff" />
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Asignar</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           </View>
@@ -2350,7 +2833,14 @@ export default function InventarioDashboard() {
                               <View key={idx} style={{ borderBottomWidth: idx < mats.length - 1 ? 1 : 0, borderBottomColor: themeColors.border, paddingBottom: 6 }}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                                   <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 13, flex: 1, paddingRight: 8 }}>{m.nombre}</Text>
-                                  <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 13 }}>+ {m.devolver} {m.unidad || 'un.'}</Text>
+                                  <View style={{ alignItems: 'flex-end' }}>
+                                    {Number(m.devolver) > 0 && (
+                                      <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 13 }}>+ {m.devolver} {m.unidad || 'un.'} (Devuelto)</Text>
+                                    )}
+                                    {Number(m.gastar) > 0 && (
+                                      <Text style={{ color: themeColors.danger || '#EF4444', fontWeight: 'bold', fontSize: 13 }}>- {m.gastar} {m.unidad || 'un.'} (Gastado)</Text>
+                                    )}
+                                  </View>
                                 </View>
                                 {hasBreakdown && (
                                   <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
@@ -2496,8 +2986,16 @@ export default function InventarioDashboard() {
                   </ScrollView>
                 )}
                 
-                <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
+                <View style={[styles.modalFooter, { borderTopColor: themeColors.border, gap: 10 }]}>
                   <CustomButton title="Cerrar" variant="secondary" onPress={() => setEmployeeInventoryModalVisible(false)} style={{ flex: 1 }} />
+                  <CustomButton
+                    title="➕ Cargar Más Material"
+                    onPress={() => {
+                      setEmployeeInventoryModalVisible(false);
+                      handleOpenAsignarModal(selectedEmpleadoRetribucion);
+                    }}
+                    style={{ flex: 1.4, backgroundColor: '#2563EB' }}
+                  />
                 </View>
               </View>
             </View>
@@ -2506,283 +3004,228 @@ export default function InventarioDashboard() {
       )}
 
       {/* VISTA 6: MOVIMIENTOS DE INVENTARIO (CONTROL TOTAL DE ENTRADAS, SALIDAS Y RETIROS) */}
-      {activeTab === 'movimientos' && (() => {
-        const filteredMovimientos = movimientos.filter((m) => {
-          // Filtro de Usuario / Empleado
-          if (selectedUsuarioMovimiento && 
-              m.usuario_id !== selectedUsuarioMovimiento && 
-              m.usuario_nombre !== selectedUsuarioMovimiento &&
-              m.empleado_id !== selectedUsuarioMovimiento &&
-              m.empleado_nombre !== selectedUsuarioMovimiento) {
-            return false;
-          }
+      {activeTab === 'movimientos' && (
+        <FlatList
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+          data={filteredMovimientos}
+          keyExtractor={(item) => String(item.id)}
+          initialNumToRender={15}
+          maxToRenderPerBatch={15}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS !== 'web'}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <View>
+              {/* Header del Módulo */}
+              <View style={{ backgroundColor: themeColors.backgroundElement, borderRadius: 12, padding: 16, marginBottom: 16, borderColor: themeColors.border, borderWidth: 1 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+                  <View style={{ flex: 1, minWidth: 200 }}>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginBottom: 4 }}>Control y Reportes de Movimientos</Text>
+                    <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
+                      Auditoría integral de inventario: Entradas, Salidas / Retiros, Gastos de material, Compras y Devoluciones.
+                    </Text>
+                  </View>
+                  
+                  {/* Botones de Exportación */}
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                    <TouchableOpacity
+                      onPress={() => handleExportMovimientosPDF(filteredMovimientos)}
+                      disabled={isExportingMovimientosPDF}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: themeColors.primary,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        opacity: isExportingMovimientosPDF ? 0.7 : 1
+                      }}
+                    >
+                      {isExportingMovimientosPDF ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="document-text-outline" size={16} color="#fff" />
+                      )}
+                      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Exportar PDF</Text>
+                    </TouchableOpacity>
 
-          // Filtro de Tipo / Subtipo
-          if (selectedTipoMovimiento !== 'TODOS') {
-            if (selectedTipoMovimiento === 'ENTRADA' && m.tipo !== 'ENTRADA') return false;
-            if (selectedTipoMovimiento === 'SALIDA' && m.tipo !== 'SALIDA') return false;
-            if (selectedTipoMovimiento === 'RETIRO' && m.subtipo !== 'RETIRO') return false;
-            if (selectedTipoMovimiento === 'DEVOLUCIÓN' && m.subtipo !== 'DEVOLUCIÓN') return false;
-            if (selectedTipoMovimiento === 'COMPRA/FACTURA' && m.subtipo !== 'COMPRA/FACTURA') return false;
-          }
+                    <TouchableOpacity
+                      onPress={() => handleExportMovimientosCSV(filteredMovimientos)}
+                      disabled={isExportingMovimientosExcel}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: '#10B981',
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        opacity: isExportingMovimientosExcel ? 0.7 : 1
+                      }}
+                    >
+                      {isExportingMovimientosExcel ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="grid-outline" size={16} color="#fff" />
+                      )}
+                      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Excel (CSV)</Text>
+                    </TouchableOpacity>
 
-          // Filtro de Fecha
-          const dateVal = m.fecha || m.created_at;
-          if (selectedDateFilterMov !== 'TODOS' && dateVal) {
-            const d = new Date(dateVal);
-            const now = new Date();
-            if (selectedDateFilterMov === 'HOY') {
-              if (d.toDateString() !== now.toDateString()) return false;
-            } else if (selectedDateFilterMov === 'SEMANA') {
-              const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-              if (d < oneWeekAgo) return false;
-            } else if (selectedDateFilterMov === 'MES') {
-              if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false;
-            }
-          }
-
-          // Buscador por Texto
-          if (movimientosSearch.trim()) {
-            const q = normalizeText(movimientosSearch);
-            const matchProd = normalizeText(m.producto_nombre || '').includes(q);
-            const matchSku = normalizeText(m.producto_sku || '').includes(q);
-            const matchUser = normalizeText(m.usuario_nombre || m.empleado_nombre || '').includes(q);
-            const matchCli = normalizeText(m.cliente_nombre || '').includes(q);
-            const matchDet = normalizeText(m.detalle_motivo || m.folio_factura || '').includes(q);
-            const matchProv = normalizeText(m.proveedor_nombre || '').includes(q);
-            const matchMats = (Array.isArray(m.materiales) ? m.materiales : []).some(
-              (mat: any) => normalizeText(mat.nombre || '').includes(q) || normalizeText(mat.sku || '').includes(q)
-            );
-            if (!matchProd && !matchSku && !matchUser && !matchCli && !matchDet && !matchProv && !matchMats) {
-              return false;
-            }
-          }
-          return true;
-        });
-
-        const totalMovimientosCount = filteredMovimientos.length;
-        let totalEntradasUnidades = 0;
-        let totalSalidasUnidades = 0;
-        let totalRetirosCount = 0;
-
-        filteredMovimientos.forEach((m) => {
-          const q = Number(m.cantidad || 0);
-          if (m.tipo === 'ENTRADA') {
-            totalEntradasUnidades += q;
-          } else {
-            totalSalidasUnidades += q;
-          }
-          if (m.subtipo === 'RETIRO') {
-            totalRetirosCount++;
-          }
-        });
-
-        return (
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-            {/* Header del Módulo */}
-            <View style={{ backgroundColor: themeColors.backgroundElement, borderRadius: 12, padding: 16, marginBottom: 16, borderColor: themeColors.border, borderWidth: 1 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
-                <View style={{ flex: 1, minWidth: 200 }}>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginBottom: 4 }}>Control y Reportes de Movimientos</Text>
-                  <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>
-                    Auditoría integral de inventario: Entradas, Salidas, Retiros de empleados, Compras y Devoluciones con generación de vales y reportes.
-                  </Text>
+                    <TouchableOpacity
+                      onPress={loadMovimientos}
+                      disabled={isLoadingMovimientos}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: themeColors.background,
+                        borderColor: themeColors.border,
+                        borderWidth: 1,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        opacity: isLoadingMovimientos ? 0.6 : 1
+                      }}
+                    >
+                      {isLoadingMovimientos ? (
+                        <ActivityIndicator size="small" color={themeColors.text} />
+                      ) : (
+                        <Ionicons name="reload" size={16} color={themeColors.text} />
+                      )}
+                      <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 12 }}>Recargar</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                
-                {/* Botones de Exportación */}
-                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <TouchableOpacity
-                    onPress={() => handleExportMovimientosPDF(filteredMovimientos)}
-                    disabled={isExportingMovimientosPDF}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                      backgroundColor: themeColors.primary,
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                      opacity: isExportingMovimientosPDF ? 0.7 : 1
-                    }}
-                  >
-                    {isExportingMovimientosPDF ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Ionicons name="document-text-outline" size={16} color="#fff" />
-                    )}
-                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Exportar PDF</Text>
-                  </TouchableOpacity>
 
-                  <TouchableOpacity
-                    onPress={() => handleExportMovimientosCSV(filteredMovimientos)}
-                    disabled={isExportingMovimientosCSV}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                      backgroundColor: '#10B981',
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                      opacity: isExportingMovimientosCSV ? 0.7 : 1
-                    }}
-                  >
-                    {isExportingMovimientosCSV ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Ionicons name="grid-outline" size={16} color="#fff" />
-                    )}
-                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Excel (CSV)</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={loadMovimientos}
-                    disabled={isLoadingMovimientos}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                      backgroundColor: themeColors.background,
-                      borderColor: themeColors.border,
-                      borderWidth: 1,
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                      opacity: isLoadingMovimientos ? 0.6 : 1
-                    }}
-                  >
-                    {isLoadingMovimientos ? (
-                      <ActivityIndicator size="small" color={themeColors.text} />
-                    ) : (
-                      <Ionicons name="reload" size={16} color={themeColors.text} />
-                    )}
-                    <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 12 }}>Recargar</Text>
-                  </TouchableOpacity>
+                {/* Tarjetas Métricas */}
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+                  <View style={{ flex: 1, minWidth: 110, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
+                    <Text style={{ fontSize: 11, color: themeColors.textSecondary, textTransform: 'uppercase', fontWeight: '600' }}>Movimientos</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginTop: 2 }}>{totalMovimientosCount}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 110, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#10B981' }}>
+                    <Text style={{ fontSize: 11, color: '#059669', textTransform: 'uppercase', fontWeight: '600' }}>Entradas</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#10B981', marginTop: 2 }}>{totalEntradasCount}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 110, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#EF4444' }}>
+                    <Text style={{ fontSize: 11, color: '#DC2626', textTransform: 'uppercase', fontWeight: '600' }}>Salidas</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#EF4444', marginTop: 2 }}>{totalSalidasCount}</Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 110, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#8B5CF6' }}>
+                    <Text style={{ fontSize: 11, color: '#8B5CF6', textTransform: 'uppercase', fontWeight: '600' }}>Gastos</Text>
+                    <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#8B5CF6', marginTop: 2 }}>{totalGastosCount}</Text>
+                  </View>
                 </View>
               </View>
 
-              {/* Tarjetas Métricas */}
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-                <View style={{ flex: 1, minWidth: 120, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
-                  <Text style={{ fontSize: 11, color: themeColors.textSecondary, textTransform: 'uppercase', fontWeight: '600' }}>Movimientos</Text>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text, marginTop: 2 }}>{totalMovimientosCount}</Text>
+              {/* Filtros */}
+              <View style={{ backgroundColor: themeColors.backgroundElement, borderRadius: 12, padding: 14, marginBottom: 16, borderColor: themeColors.border, borderWidth: 1 }}>
+                {/* Buscador de texto */}
+                <CustomInput
+                  placeholder="Buscar por material, SKU, cliente, usuario, concepto..."
+                  value={movimientosSearch}
+                  onChangeText={setMovimientosSearch}
+                  iconName="search-outline"
+                  style={{ marginBottom: 12 }}
+                />
+
+                {/* Filtro por Usuario / Empleado */}
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 4 }}>Filtrar por Responsable / Usuario</Text>
+                  <TouchableOpacity
+                    style={{ backgroundColor: themeColors.background, borderColor: themeColors.border, borderWidth: 1, padding: 10, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+                    onPress={() => {
+                      setSelectorTitle('Filtrar por Usuario');
+                      setSelectorSearch('');
+                      setSelectorOptions([
+                        { id: '', label: 'Todos los Usuarios' },
+                        ...empleados.map(e => ({ id: e.id, label: e.nombre }))
+                      ]);
+                      setOnSelectOption(() => (id: string) => {
+                        setSelectedUsuarioMovimiento(id);
+                      });
+                      setSelectorVisible(true);
+                    }}
+                  >
+                    <Text style={{ color: selectedUsuarioMovimiento ? themeColors.text : themeColors.textSecondary, fontSize: 13 }}>
+                      {empleados.find(e => e.id === selectedUsuarioMovimiento)?.nombre || 'Todos los Usuarios'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={16} color={themeColors.text} />
+                  </TouchableOpacity>
                 </View>
-                <View style={{ flex: 1, minWidth: 120, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#10B981' }}>
-                  <Text style={{ fontSize: 11, color: '#059669', textTransform: 'uppercase', fontWeight: '600' }}>Entradas</Text>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#10B981', marginTop: 2 }}>+{Math.round(totalEntradasUnidades * 100) / 100} un.</Text>
+
+                {/* Filtro por Tipo / Subtipo */}
+                <View style={{ marginBottom: 10 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 6 }}>Tipo de Movimiento</Text>
+                  <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                    {(['TODOS', 'ENTRADA', 'SALIDA', 'GASTO', 'DEVOLUCIÓN', 'COMPRA/FACTURA'] as const).map(tipo => {
+                      const isSelected = selectedTipoMovimiento === tipo;
+                      const isGasto = tipo === 'GASTO';
+                      const isSalida = tipo === 'SALIDA';
+                      const activeColor = isGasto ? '#8B5CF6' : isSalida ? '#DC2626' : themeColors.primary;
+
+                      return (
+                        <TouchableOpacity
+                          key={tipo}
+                          onPress={() => setSelectedTipoMovimiento(tipo)}
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            borderRadius: 6,
+                            borderWidth: 1,
+                            borderColor: isSelected ? activeColor : themeColors.border,
+                            backgroundColor: isSelected ? activeColor + '20' : themeColors.background
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: isSelected ? '700' : '500', color: isSelected ? activeColor : themeColors.textSecondary }}>
+                            {tipo}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 </View>
-                <View style={{ flex: 1, minWidth: 120, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderLeftWidth: 3, borderLeftColor: '#EF4444' }}>
-                  <Text style={{ fontSize: 11, color: '#DC2626', textTransform: 'uppercase', fontWeight: '600' }}>Salidas</Text>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#EF4444', marginTop: 2 }}>-{Math.round(totalSalidasUnidades * 100) / 100} un.</Text>
-                </View>
-                <View style={{ flex: 1, minWidth: 120, backgroundColor: themeColors.background, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
-                  <Text style={{ fontSize: 11, color: themeColors.textSecondary, textTransform: 'uppercase', fontWeight: '600' }}>Retiros Emp.</Text>
-                  <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#7C3AED', marginTop: 2 }}>{totalRetirosCount}</Text>
+
+                {/* Filtro por Rango de Fecha */}
+                <View>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 6 }}>Periodo</Text>
+                  <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                    {(['TODOS', 'HOY', 'SEMANA', 'MES'] as const).map(f => {
+                      const isSelected = selectedDateFilterMov === f;
+                      const labels: Record<string, string> = { TODOS: 'Todo el Historial', HOY: 'Hoy', SEMANA: 'Esta Semana', MES: 'Este Mes' };
+                      return (
+                        <TouchableOpacity
+                          key={f}
+                          onPress={() => setSelectedDateFilterMov(f)}
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            borderRadius: 6,
+                            borderWidth: 1,
+                            borderColor: isSelected ? themeColors.primary : themeColors.border,
+                            backgroundColor: isSelected ? themeColors.primary + '20' : themeColors.background
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: isSelected ? '700' : '500', color: isSelected ? themeColors.primary : themeColors.textSecondary }}>
+                            {labels[f]}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 </View>
               </View>
             </View>
-
-            {/* Filtros */}
-            <View style={{ backgroundColor: themeColors.backgroundElement, borderRadius: 12, padding: 14, marginBottom: 16, borderColor: themeColors.border, borderWidth: 1 }}>
-              {/* Buscador de texto */}
-              <CustomInput
-                placeholder="Buscar por material, SKU, cliente, usuario, concepto..."
-                value={movimientosSearch}
-                onChangeText={setMovimientosSearch}
-                iconName="search-outline"
-                style={{ marginBottom: 12 }}
-              />
-
-              {/* Filtro por Usuario / Empleado */}
-              <View style={{ marginBottom: 12 }}>
-                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 4 }}>Filtrar por Responsable / Usuario</Text>
-                <TouchableOpacity
-                  style={{ backgroundColor: themeColors.background, borderColor: themeColors.border, borderWidth: 1, padding: 10, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
-                  onPress={() => {
-                    setSelectorTitle('Filtrar por Usuario');
-                    setSelectorSearch('');
-                    setSelectorOptions([
-                      { id: '', label: 'Todos los Usuarios' },
-                      ...empleados.map(e => ({ id: e.id, label: e.nombre }))
-                    ]);
-                    setOnSelectOption(() => (id: string) => {
-                      setSelectedUsuarioMovimiento(id);
-                    });
-                    setSelectorVisible(true);
-                  }}
-                >
-                  <Text style={{ color: selectedUsuarioMovimiento ? themeColors.text : themeColors.textSecondary, fontSize: 13 }}>
-                    {empleados.find(e => e.id === selectedUsuarioMovimiento)?.nombre || 'Todos los Usuarios'}
-                  </Text>
-                  <Ionicons name="chevron-down" size={16} color={themeColors.text} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Filtro por Tipo / Subtipo */}
-              <View style={{ marginBottom: 10 }}>
-                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 6 }}>Tipo de Movimiento</Text>
-                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
-                  {(['TODOS', 'ENTRADA', 'SALIDA', 'RETIRO', 'DEVOLUCIÓN', 'COMPRA/FACTURA'] as const).map(tipo => {
-                    const isSelected = selectedTipoMovimiento === tipo;
-                    return (
-                      <TouchableOpacity
-                        key={tipo}
-                        onPress={() => setSelectedTipoMovimiento(tipo)}
-                        style={{
-                          paddingHorizontal: 10,
-                          paddingVertical: 6,
-                          borderRadius: 6,
-                          borderWidth: 1,
-                          borderColor: isSelected ? themeColors.primary : themeColors.border,
-                          backgroundColor: isSelected ? themeColors.primary + '20' : themeColors.background
-                        }}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: isSelected ? '700' : '500', color: isSelected ? themeColors.primary : themeColors.textSecondary }}>
-                          {tipo}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              {/* Filtro por Rango de Fecha */}
-              <View>
-                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text, marginBottom: 6 }}>Periodo</Text>
-                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
-                  {(['TODOS', 'HOY', 'SEMANA', 'MES'] as const).map(f => {
-                    const isSelected = selectedDateFilterMov === f;
-                    const labels: Record<string, string> = { TODOS: 'Todo el Historial', HOY: 'Hoy', SEMANA: 'Esta Semana', MES: 'Este Mes' };
-                    return (
-                      <TouchableOpacity
-                        key={f}
-                        onPress={() => setSelectedDateFilterMov(f)}
-                        style={{
-                          paddingHorizontal: 10,
-                          paddingVertical: 6,
-                          borderRadius: 6,
-                          borderWidth: 1,
-                          borderColor: isSelected ? themeColors.primary : themeColors.border,
-                          backgroundColor: isSelected ? themeColors.primary + '20' : themeColors.background
-                        }}
-                      >
-                        <Text style={{ fontSize: 12, fontWeight: isSelected ? '700' : '500', color: isSelected ? themeColors.primary : themeColors.textSecondary }}>
-                          {labels[f]}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            </View>
-
-            {/* Listado de Movimientos */}
-            {isLoadingMovimientos ? (
+          }
+          ListEmptyComponent={
+            isLoadingMovimientos ? (
               <View style={{ padding: 40, alignItems: 'center' }}>
                 <ActivityIndicator size="large" color={themeColors.primary} />
                 <Text style={{ marginTop: 10, color: themeColors.textSecondary, fontSize: 13 }}>Cargando movimientos...</Text>
               </View>
-            ) : filteredMovimientos.length === 0 ? (
+            ) : (
               <View style={{ padding: 30, backgroundColor: themeColors.backgroundElement, borderRadius: 12, alignItems: 'center', borderColor: themeColors.border, borderWidth: 1 }}>
                 <Ionicons name="cube-outline" size={40} color={themeColors.textSecondary} />
                 <Text style={{ color: themeColors.text, fontWeight: 'bold', fontSize: 15, marginTop: 10 }}>No se encontraron movimientos</Text>
@@ -2790,194 +3233,18 @@ export default function InventarioDashboard() {
                   No hay registros de inventario que coincidan con los filtros aplicados.
                 </Text>
               </View>
-            ) : (
-              <View style={{ gap: 12 }}>
-                {filteredMovimientos.map((m: any) => {
-                  const isEntrada = m.tipo === 'ENTRADA';
-                  const folioStr = m.id ? m.id.substring(0, 8).toUpperCase() : 'MOV';
-                  const dateStr = (m.fecha || m.created_at) ? new Date(m.fecha || m.created_at).toLocaleString('es-MX', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  }) : 'N/A';
-
-                  let subtipoBadgeBg = '#E5E7EB';
-                  let subtipoBadgeText = '#374151';
-                  if (m.subtipo === 'RETIRO') {
-                    subtipoBadgeBg = '#F3E8FF';
-                    subtipoBadgeText = '#7C3AED';
-                  } else if (m.subtipo === 'DEVOLUCIÓN') {
-                    subtipoBadgeBg = '#DBEAFE';
-                    subtipoBadgeText = '#2563EB';
-                  } else if (m.subtipo === 'COMPRA/FACTURA') {
-                    subtipoBadgeBg = '#DCFCE7';
-                    subtipoBadgeText = '#15803D';
-                  }
-
-                  const isSingleExporting = exportingSingleMovimientoId === m.id;
-
-                  return (
-                    <View
-                      key={m.id}
-                      style={{
-                        backgroundColor: themeColors.backgroundElement,
-                        borderRadius: 12,
-                        padding: 16,
-                        borderColor: themeColors.border,
-                        borderWidth: 1,
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 1 },
-                        shadowOpacity: 0.05,
-                        shadowRadius: 2,
-                        elevation: 1
-                      }}
-                    >
-                      {/* Fila Superior: Folio + Fecha + Tipo Badge + Subtipo Badge */}
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '800', color: themeColors.primary }}>#{folioStr}</Text>
-                          </View>
-                          <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>{dateStr}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                          <View style={{ backgroundColor: isEntrada ? '#10B98120' : '#EF444420', borderColor: isEntrada ? '#10B981' : '#EF4444', borderWidth: 1, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: isEntrada ? '#059669' : '#DC2626' }}>{m.tipo}</Text>
-                          </View>
-                          {Boolean(m.subtipo && m.subtipo !== m.tipo) ? (
-                            <View style={{ backgroundColor: subtipoBadgeBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: subtipoBadgeText }}>{m.subtipo}</Text>
-                            </View>
-                          ) : null}
-                          {Boolean(m.tipo_gasto) ? (
-                            <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '600', color: themeColors.primary }}>{m.tipo_gasto}</Text>
-                            </View>
-                          ) : null}
-                        </View>
-                      </View>
-
-                      {/* Fila del Producto o Desglose Multi-material */}
-                      {Array.isArray(m.materiales) && m.materiales.length > 1 ? (
-                        <View style={{ backgroundColor: themeColors.background, borderRadius: 8, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: themeColors.border }}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
-                              {m.subtipo === 'DEVOLUCIÓN' ? 'Materiales Devueltos' : 'Partidas Retiradas'} ({m.materiales.length}):
-                            </Text>
-                            <View style={{ backgroundColor: isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                              <Text style={{ fontSize: 12, fontWeight: '800', color: isEntrada ? '#059669' : '#DC2626' }}>
-                                Total: {isEntrada ? '+' : '-'}{m.cantidad} {m.producto_unidad || 'un.'}
-                              </Text>
-                            </View>
-                          </View>
-                          {m.materiales.map((mat: any, mIdx: number) => {
-                            const condTags = [];
-                            if (mat.devolver_nuevo > 0) condTags.push(`Nuevas: ${mat.devolver_nuevo}`);
-                            if (mat.devolver_usado > 0) condTags.push(`Usadas: ${mat.devolver_usado}`);
-                            if (mat.devolver_por_revisar > 0) condTags.push(`Dañadas: ${mat.devolver_por_revisar}`);
-                            const condStr = condTags.length > 0 ? ` (${condTags.join(', ')})` : '';
-
-                            return (
-                              <View key={mIdx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, borderBottomWidth: mIdx === m.materiales.length - 1 ? 0 : 1, borderBottomColor: themeColors.border }}>
-                                <View style={{ flex: 1, paddingRight: 8 }}>
-                                  <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }} numberOfLines={1}>
-                                    {mat.nombre || 'Material'}{condStr}
-                                  </Text>
-                                  <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>SKU: {mat.sku || '-'}</Text>
-                                </View>
-                                <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                                  <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.primary }}>
-                                    {mat.cantidad} {mat.unidad || 'pza'}
-                                  </Text>
-                                </View>
-                              </View>
-                            );
-                          })}
-                        </View>
-                      ) : (
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, backgroundColor: themeColors.background, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: themeColors.border }}>
-                          <View style={{ flex: 1, paddingRight: 8 }}>
-                            <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.text }}>{m.producto_nombre || 'Producto'}</Text>
-                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 1 }}>SKU: {m.producto_sku || '-'}</Text>
-                          </View>
-                          <View style={{ backgroundColor: isEntrada ? '#10B98120' : '#EF444420', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
-                            <Text style={{ fontSize: 14, fontWeight: '800', color: isEntrada ? '#059669' : '#DC2626' }}>
-                              {isEntrada ? '+' : '-'}{m.cantidad} {m.producto_unidad || 'pza'}
-                            </Text>
-                          </View>
-                        </View>
-                      )}
-
-                      {/* Detalles: Responsable, Cliente, Concepto */}
-                      <View style={{ marginBottom: 10, gap: 4 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Ionicons name="person-circle-outline" size={16} color={themeColors.primary} />
-                          <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text }}>
-                            Responsable: <Text style={{ fontWeight: '400' }}>{m.usuario_nombre || m.empleado_nombre || 'Almacén'}</Text>
-                          </Text>
-                        </View>
-
-                        {m.cliente_nombre ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Ionicons name="location-outline" size={16} color={themeColors.textSecondary} />
-                            <Text style={{ fontSize: 12, color: themeColors.text }}>
-                              Cliente: <Text style={{ fontWeight: '600' }}>{m.cliente_nombre}</Text>
-                            </Text>
-                          </View>
-                        ) : null}
-
-                        {(m.detalle_motivo || m.folio_factura) ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Ionicons name="chatbubble-outline" size={16} color={themeColors.textSecondary} />
-                            <Text style={{ fontSize: 12, color: themeColors.text }}>
-                              Detalle: <Text style={{ fontStyle: 'italic', color: themeColors.textSecondary }}>{m.detalle_motivo || m.folio_factura}</Text>
-                            </Text>
-                          </View>
-                        ) : null}
-
-                        {m.proveedor_nombre ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Ionicons name="business-outline" size={16} color={themeColors.textSecondary} />
-                            <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Proveedor: {m.proveedor_nombre}</Text>
-                          </View>
-                        ) : null}
-                      </View>
-
-                      {/* Botón de Vale Individual */}
-                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 6, borderTopWidth: 1, borderTopColor: themeColors.border }}>
-                        <TouchableOpacity
-                          onPress={() => handleExportSingleMovimientoVale(m)}
-                          disabled={isSingleExporting}
-                          style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 6,
-                            backgroundColor: themeColors.background,
-                            borderColor: themeColors.border,
-                            borderWidth: 1,
-                            paddingHorizontal: 12,
-                            paddingVertical: 7,
-                            borderRadius: 6
-                          }}
-                        >
-                          {isSingleExporting ? (
-                            <ActivityIndicator size="small" color={themeColors.primary} />
-                          ) : (
-                            <Ionicons name="print-outline" size={15} color={themeColors.primary} />
-                          )}
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>Imprimir Vale (PDF)</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-          </ScrollView>
-        );
-      })()}
+            )
+          }
+          renderItem={({ item }) => (
+            <MovimientoCardItem
+              m={item}
+              themeColors={themeColors}
+              exportingSingleMovimientoId={exportingSingleMovimientoId}
+              onExportSingleVale={handleExportSingleMovimientoVale}
+            />
+          )}
+        />
+      )}
 
       {/* ========== MODAL CRUD MANUAL ========== */}
       <Modal statusBarTranslucent={true} animationType="fade"
@@ -3550,6 +3817,382 @@ export default function InventarioDashboard() {
         </View>
       </Modal>
 
+      {/* ========== MODAL: ASIGNAR MATERIAL A EMPLEADO (CAMIONETA) ========== */}
+      <Modal
+        statusBarTranslucent={true}
+        animationType="fade"
+        transparent={true}
+        visible={asignarModalVisible}
+        onRequestClose={() => setAsignarModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, maxHeight: '92%', width: '92%', maxWidth: 640 }]}>
+            {/* Header */}
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border, borderBottomWidth: 1, paddingBottom: Spacing.two }]}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={{ backgroundColor: '#2563EB20', padding: 6, borderRadius: 8 }}>
+                    <Ionicons name="cube-outline" size={22} color="#2563EB" />
+                  </View>
+                  <Text style={[styles.modalTitle, { color: themeColors.text, fontSize: 18 }]}>
+                    Asignar Material a Empleado
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }}>
+                  Transfiere material del inventario general a la camioneta / inventario personal del técnico.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setAsignarModalVisible(false)} style={{ padding: 4 }}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingVertical: Spacing.two }}>
+              {/* 1. Selector de Empleado */}
+              <View style={[styles.innerCard, { backgroundColor: themeColors.background, borderColor: themeColors.border, marginBottom: Spacing.two, zIndex: 10 }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 13 }]}>
+                  Empleado Destinatario (Técnico / Camioneta) *
+                </Text>
+                
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowAsignarEmpDropdown(!showAsignarEmpDropdown);
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Ionicons name="person-outline" size={18} color={asignarEmpleadoId ? themeColors.primary : themeColors.textSecondary} />
+                    <Text style={{ color: asignarEmpleadoId ? themeColors.text : themeColors.textSecondary, fontWeight: asignarEmpleadoId ? '700' : '400', fontSize: 14 }} numberOfLines={1}>
+                      {empleados.find(e => e.id === asignarEmpleadoId)?.nombre || 'Selecciona un empleado...'}
+                    </Text>
+                  </View>
+                  <Ionicons name={showAsignarEmpDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                </TouchableOpacity>
+
+                {showAsignarEmpDropdown && (
+                  <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, marginTop: 6 }]}>
+                    <CustomInput
+                      placeholder="Buscar empleado..."
+                      value={asignarEmpSearch}
+                      onChangeText={setAsignarEmpSearch}
+                      iconName="search-outline"
+                      style={{ margin: Spacing.one, height: 38 }}
+                    />
+                    <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 180, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      {empleados
+                        .filter(emp => {
+                          const norm = normalizeText(asignarEmpSearch);
+                          return !norm || (emp.nombre && normalizeText(emp.nombre).includes(norm)) || (emp.email && normalizeText(emp.email).includes(norm));
+                        })
+                        .map((emp, index, arr) => (
+                          <TouchableOpacity
+                            key={emp.id}
+                            style={[
+                              styles.dropdownItem,
+                              index === arr.length - 1 && { borderBottomWidth: 0 },
+                              emp.id === asignarEmpleadoId && { backgroundColor: themeColors.primary + '15' },
+                              { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 }
+                            ]}
+                            onPress={() => {
+                              setAsignarEmpleadoId(emp.id);
+                              setShowAsignarEmpDropdown(false);
+                              setAsignarEmpSearch('');
+                            }}
+                          >
+                            <Ionicons name="person-circle-outline" size={22} color={themeColors.primary} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 13 }}>{emp.nombre}</Text>
+                              {emp.email ? <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>{emp.email}</Text> : null}
+                            </View>
+                            {emp.id === asignarEmpleadoId && (
+                              <Ionicons name="checkmark-circle" size={18} color={themeColors.primary} />
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+
+              {/* 2. Motivo o Referencia */}
+              <View style={[styles.innerCard, { backgroundColor: themeColors.background, borderColor: themeColors.border, marginBottom: Spacing.two }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 13 }]}>
+                  Motivo / Observaciones (Opcional)
+                </Text>
+                <CustomInput
+                  placeholder="Ej. Surtido semanal de camioneta, Proyecto X, Servicios..."
+                  value={asignarMotivo}
+                  onChangeText={setAsignarMotivo}
+                  iconName="clipboard-outline"
+                />
+              </View>
+
+              {/* 3. Buscador y Selector de Productos del Inventario General */}
+              <View style={[styles.innerCard, { backgroundColor: themeColors.background, borderColor: themeColors.border, marginBottom: Spacing.two }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 13, marginBottom: 6 }]}>
+                  Buscar y Agregar Material del Almacén General
+                </Text>
+                
+                <CustomInput
+                  placeholder="Escribe el nombre o SKU del producto..."
+                  value={asignarProductSearch}
+                  onChangeText={setAsignarProductSearch}
+                  iconName="search-outline"
+                  style={{ marginBottom: 6 }}
+                />
+
+                {asignarProductSearch.trim().length > 0 && (
+                  <View style={{ maxHeight: 200, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, backgroundColor: themeColors.backgroundElement, overflow: 'hidden' }}>
+                    <ScrollView nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
+                      {productos
+                        .filter(p => {
+                          if (!p.activo) return false;
+                          const norm = normalizeText(asignarProductSearch);
+                          return (
+                            (p.nombre_oficial && normalizeText(p.nombre_oficial).includes(norm)) ||
+                            (p.sku_interno && normalizeText(p.sku_interno).includes(norm))
+                          );
+                        })
+                        .slice(0, 20)
+                        .map((prod, pIdx, arr) => {
+                          const isAlreadyAdded = asignarItems.some(it => it.productoId === prod.id);
+                          const sinStock = prod.stock_actual <= 0;
+                          return (
+                            <TouchableOpacity
+                              key={prod.id}
+                              disabled={sinStock}
+                              onPress={() => handleAddProductToAsignar(prod.id)}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: 10,
+                                borderBottomWidth: pIdx === arr.length - 1 ? 0 : 1,
+                                borderBottomColor: themeColors.border,
+                                opacity: sinStock ? 0.45 : 1,
+                                backgroundColor: isAlreadyAdded ? themeColors.primary + '10' : 'transparent'
+                              }}
+                            >
+                              <View style={{ flex: 1, paddingRight: 8 }}>
+                                <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>
+                                  {prod.nombre_oficial}
+                                </Text>
+                                <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                                  SKU: {prod.sku_interno || '-'} | Disp: {prod.stock_actual} {prod.unidad || 'pzas'}
+                                </Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <View style={{ backgroundColor: sinStock ? themeColors.danger + '20' : themeColors.success + '20', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                                  <Text style={{ fontSize: 11, fontWeight: '800', color: sinStock ? themeColors.danger : themeColors.success }}>
+                                    {sinStock ? 'Agotado' : `${prod.stock_actual} ${prod.unidad || 'pzas'}`}
+                                  </Text>
+                                </View>
+                                {!sinStock && (
+                                  <View style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
+                                      {isAlreadyAdded ? '+1' : 'Agregar'}
+                                    </Text>
+                                  </View>
+                                )}
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      {productos.filter(p => {
+                        if (!p.activo) return false;
+                        const norm = normalizeText(asignarProductSearch);
+                        return (
+                          (p.nombre_oficial && normalizeText(p.nombre_oficial).includes(norm)) ||
+                          (p.sku_interno && normalizeText(p.sku_interno).includes(norm))
+                        );
+                      }).length === 0 && (
+                        <View style={{ padding: 16, alignItems: 'center' }}>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+                            No se encontraron productos coincidentes activos.
+                          </Text>
+                        </View>
+                      )}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+
+              {/* 4. Lista de Productos a Transferir */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text style={[styles.subTitle, { color: themeColors.text, marginVertical: 0 }]}>
+                    Materiales a Transferir ({asignarItems.length})
+                  </Text>
+                  {asignarItems.length > 0 && (
+                    <TouchableOpacity onPress={() => setAsignarItems([])}>
+                      <Text style={{ color: themeColors.danger, fontSize: 12, fontWeight: '700' }}>Vaciar lista</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {asignarItems.length === 0 ? (
+                  <View style={[styles.emptyContainer, { paddingVertical: Spacing.four, backgroundColor: themeColors.background, borderRadius: 12, borderWidth: 1, borderColor: themeColors.border, borderStyle: 'dashed' }]}>
+                    <Ionicons name="cart-outline" size={40} color={themeColors.textSecondary} />
+                    <Text style={[styles.emptyText, { color: themeColors.textSecondary, marginTop: 6 }]}>
+                      Usa el buscador arriba para agregar materiales a la camioneta.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ gap: Spacing.one }}>
+                    {asignarItems.map(item => {
+                      const prod = productos.find(p => p.id === item.productoId);
+                      const maxStock = prod ? prod.stock_actual : 0;
+                      const hasExcess = item.cantidad > maxStock;
+                      const unidad = prod?.unidad || 'pzas';
+
+                      return (
+                        <View
+                          key={item.id}
+                          style={[
+                            styles.stagingItemCard,
+                            {
+                              backgroundColor: themeColors.background,
+                              borderColor: hasExcess ? themeColors.danger : themeColors.border,
+                              borderWidth: hasExcess ? 1.5 : 1,
+                              padding: Spacing.two
+                            }
+                          ]}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <View style={{ flex: 1, paddingRight: 8 }}>
+                              <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
+                                {prod ? prod.nombre_oficial : 'Producto desconocido'}
+                              </Text>
+                              <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                                SKU: {prod ? prod.sku_interno : '-'} | Stock en Almacén: {maxStock} {unidad}
+                              </Text>
+                            </View>
+                            <TouchableOpacity
+                              onPress={() => handleRemoveProductFromAsignar(item.id)}
+                              style={{ padding: 4 }}
+                            >
+                              <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Stepper y Entrada de Cantidad */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: themeColors.border }}>
+                            <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '600' }}>
+                              Cantidad a cargar:
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <TouchableOpacity
+                                onPress={() => handleUpdateAsignarItemQty(item.id, Math.max(1, item.cantidad - 1))}
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: 6,
+                                  backgroundColor: themeColors.backgroundElement,
+                                  borderWidth: 1,
+                                  borderColor: themeColors.border,
+                                  justifyContent: 'center',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <Ionicons name="remove" size={16} color={themeColors.text} />
+                              </TouchableOpacity>
+
+                              <TextInput
+                                style={{
+                                  width: 60,
+                                  height: 32,
+                                  backgroundColor: themeColors.backgroundElement,
+                                  borderWidth: 1,
+                                  borderColor: hasExcess ? themeColors.danger : themeColors.border,
+                                  borderRadius: 6,
+                                  textAlign: 'center',
+                                  fontSize: 13,
+                                  fontWeight: '800',
+                                  color: hasExcess ? themeColors.danger : themeColors.text,
+                                  paddingHorizontal: 4
+                                }}
+                                keyboardType="numeric"
+                                value={item.cantidad > 0 ? String(item.cantidad) : ''}
+                                onChangeText={txt => {
+                                  const num = parseFloat(txt.replace(/[^0-9.]/g, '')) || 0;
+                                  handleUpdateAsignarItemQty(item.id, num);
+                                }}
+                              />
+
+                              <TouchableOpacity
+                                onPress={() => handleUpdateAsignarItemQty(item.id, item.cantidad + 1)}
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: 6,
+                                  backgroundColor: themeColors.backgroundElement,
+                                  borderWidth: 1,
+                                  borderColor: themeColors.border,
+                                  justifyContent: 'center',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <Ionicons name="add" size={16} color={themeColors.text} />
+                              </TouchableOpacity>
+
+                              <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '600', marginLeft: 2 }}>
+                                {unidad}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {hasExcess && (
+                            <Text style={{ fontSize: 11, color: themeColors.danger, fontWeight: '700', marginTop: 4 }}>
+                              ⚠️ La cantidad supera el stock disponible en almacén ({maxStock} {unidad})
+                            </Text>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+
+              {/* 5. Resumen */}
+              {asignarItems.length > 0 && (
+                <View style={{ backgroundColor: '#2563EB15', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#2563EB30', marginBottom: Spacing.two }}>
+                  <Text style={{ color: '#2563EB', fontWeight: '800', fontSize: 13 }}>
+                    Resumen del Traspaso:
+                  </Text>
+                  <Text style={{ color: themeColors.text, fontSize: 12, marginTop: 4 }}>
+                    • Partidas a transferir: <Text style={{ fontWeight: '800' }}>{asignarItems.length}</Text>
+                  </Text>
+                  <Text style={{ color: themeColors.text, fontSize: 12, marginTop: 2 }}>
+                    • Total unidades: <Text style={{ fontWeight: '800' }}>{asignarItems.reduce((acc, it) => acc + (Number(it.cantidad) || 0), 0)}</Text>
+                  </Text>
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 4, fontStyle: 'italic' }}>
+                    * Los materiales se descontarán del stock general y se sumarán al inventario personal del técnico.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Footer */}
+            <View style={[styles.modalFooter, { borderTopColor: themeColors.border, padding: Spacing.two, gap: Spacing.two }]}>
+              <CustomButton
+                title="Cancelar"
+                variant="secondary"
+                onPress={() => setAsignarModalVisible(false)}
+                style={{ flex: 1 }}
+              />
+              <CustomButton
+                title={isSubmittingAsignacion ? "Transfiriendo..." : `Transferir (${asignarItems.length})`}
+                onPress={handleConfirmAsignacion}
+                loading={isSubmittingAsignacion}
+                disabled={isSubmittingAsignacion || asignarItems.length === 0 || !asignarEmpleadoId}
+                style={{ flex: 1.6, backgroundColor: '#2563EB' }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Floating Bulk Action Bar */}
       {selectedProductIds.length > 0 && activeTab === 'importacion' && (
         <View style={[styles.bulkActionBar, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
@@ -3562,6 +4205,14 @@ export default function InventarioDashboard() {
             </Text>
           </View>
           <View style={styles.bulkActionButtons}>
+            <TouchableOpacity
+              style={[styles.bulkBtn, { backgroundColor: '#2563EB' }]}
+              onPress={() => handleOpenAsignarModal(undefined, selectedProductIds)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="cube-outline" size={16} color="#fff" />
+              <Text style={styles.bulkBtnText}>Asignar</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.bulkBtn, { backgroundColor: themeColors.accent }]}
               onPress={handleOpenBulkEdit}

@@ -34,6 +34,7 @@ interface SatCatalogAutocompleteProps {
   disabled?: boolean;
   label?: string;
   style?: any;
+  hideSearchIcon?: boolean;
 }
 
 export default function SatCatalogAutocomplete({
@@ -44,6 +45,7 @@ export default function SatCatalogAutocomplete({
   disabled = false,
   label,
   style,
+  hideSearchIcon = false,
 }: SatCatalogAutocompleteProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
@@ -169,11 +171,19 @@ export default function SatCatalogAutocomplete({
           {
             borderColor: themeColors.border,
             backgroundColor: themeColors.backgroundElement,
+            overflow: 'hidden',
           },
         ]}
       >
         <TextInput
-          style={[styles.textInput, { color: themeColors.text }]}
+          style={[
+            styles.textInput,
+            {
+              color: themeColors.text,
+              minWidth: 0,
+              ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+            },
+          ]}
           value={value}
           onChangeText={onChangeValue}
           placeholder={placeholder || (tipo === 'producto' ? '01010101' : 'H87')}
@@ -181,18 +191,20 @@ export default function SatCatalogAutocomplete({
           editable={!disabled}
           autoCapitalize="characters"
         />
-        <TouchableOpacity
-          onPress={() => {
-            if (!disabled) {
-              setSearchQuery('');
-              setSelectedCategory('TODOS');
-              setModalVisible(true);
-            }
-          }}
-          style={styles.searchIconBtn}
-        >
-          <Ionicons name="search" size={14} color="#0284c7" />
-        </TouchableOpacity>
+        {!hideSearchIcon && (
+          <TouchableOpacity
+            onPress={() => {
+              if (!disabled) {
+                setSearchQuery('');
+                setSelectedCategory('TODOS');
+                setModalVisible(true);
+              }
+            }}
+            style={styles.searchIconBtn}
+          >
+            <Ionicons name="search" size={14} color="#0284c7" />
+          </TouchableOpacity>
+        )}
       </TouchableOpacity>
 
       {/* Mini Tooltip / Descripción amigable del código seleccionado */}

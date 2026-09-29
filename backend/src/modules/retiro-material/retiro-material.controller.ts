@@ -69,7 +69,10 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
       sucursalId,
       sucursalNombre,
       isSplit,
-      splits
+      splits,
+      firmaBase64,
+      dispositivoInfo,
+      responsivaAceptada
     } = req.body;
 
     if (!cart || !Array.isArray(cart) || cart.length === 0 || !currentUser || !currentUser.id) {
@@ -113,6 +116,10 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
           splits_json: splits || [],
           materiales: materialesSnapshot,
           motivo: (motivoRetiro || '').trim(),
+          firma_base64: firmaBase64 || null,
+          responsiva_aceptada: responsivaAceptada !== false,
+          firmado_en: new Date().toISOString(),
+          dispositivo_info: dispositivoInfo || null,
           created_at: new Date().toISOString()
         }]);
 
@@ -202,6 +209,7 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
             cantidad: item.cantidad,
             folio_factura: fullFolio,
             creado_por: currentUser.id,
+            firma_base64: firmaBase64 || null,
           },
         ]);
 

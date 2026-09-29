@@ -9,11 +9,12 @@ import {
   Platform,
   useWindowDimensions,
   ScrollView,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing } from '@/constants/theme';
-import { generarFacturaHTML, exportarFacturaOdooPDF, cleanFolio } from '@/utils/reportGenerator';
+import { generarFacturaHTML, exportarFacturaOdooPDF, exportarReciboPagoPDF, cleanFolio } from '@/utils/reportGenerator';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { cacheDirectory, writeAsStringAsync } from 'expo-file-system/legacy';
@@ -27,6 +28,7 @@ export interface FacturaPreviewModalProps {
   isDraft?: boolean;
   title?: string;
   onConfirmTimbrar?: () => void;
+  customHtml?: string;
 }
 
 export default function FacturaPreviewModal({
@@ -38,6 +40,7 @@ export default function FacturaPreviewModal({
   isDraft = false,
   title,
   onConfirmTimbrar,
+  customHtml,
 }: FacturaPreviewModalProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
@@ -50,16 +53,20 @@ export default function FacturaPreviewModal({
   const iframeRef = useRef<any>(null);
 
   useEffect(() => {
-    if (visible && (venta || facturaData)) {
+    if (visible && (customHtml || venta || facturaData)) {
       loadHTML();
     } else {
       setHtmlContent('');
     }
-  }, [visible, venta, facturaData, isDraft]);
+  }, [visible, venta, facturaData, isDraft, customHtml]);
 
   const loadHTML = async () => {
     try {
       setIsLoading(true);
+      if (customHtml) {
+        setHtmlContent(customHtml);
+        return;
+      }
       const safeVenta = venta || {
         cliente: facturaData?.customer?.legal_name || 'Cliente',
         precio_total_facturado: facturaData?.total || 0,
@@ -79,9 +86,13 @@ export default function FacturaPreviewModal({
   };
 
   const getCleanFileName = (ext: string) => {
-    const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
+    const isPago = isDraft
+      ? (title?.includes('Pago') || title?.includes('Recibo'))
+      : (facturaData?.serie === 'P' || title?.includes('Pago') || title?.includes('Recibo') || Boolean(facturaData?.complementos_pago_doctos));
+    const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || facturaData?.cliente_nombre || 'Cliente';
     const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-    const serie = (facturaData?.series || facturaData?.serie || venta?.cfdi_serie || venta?.factura_serie || 'A').toUpperCase().trim();
+    const defaultSerie = isPago ? 'P' : 'A';
+    const serie = (facturaData?.series || facturaData?.serie || venta?.cfdi_serie || venta?.factura_serie || defaultSerie).toUpperCase().trim();
     let folioNum = cleanFolio(facturaData?.folio_number || facturaData?.folio || venta?.cfdi_folio || venta?.factura_folio || venta?.folio || '');
     if (folioNum.toUpperCase().startsWith(serie)) {
       folioNum = folioNum.slice(serie.length).trim();
@@ -92,7 +103,8 @@ export default function FacturaPreviewModal({
       folioNum = '0001';
     }
     const fullFolio = `${serie}${folioNum}`;
-    return `${clienteSanitized}_${fullFolio}.${ext}`;
+    const prefix = isPago ? `${clienteSanitized}_Pago_${fullFolio}` : `${clienteSanitized}_${fullFolio}`;
+    return `${prefix}.${ext}`;
   };
 
   const handlePrint = async () => {
@@ -135,6 +147,14 @@ export default function FacturaPreviewModal({
   const handleDownloadPDF = async () => {
     try {
       setIsActionLoading(true);
+      if (customHtml) {
+        const isPago = facturaData?.serie === 'P' || facturaData?.folio_completo || title?.includes('Pago') || title?.includes('Recibo') || Boolean(facturaData?.complementos_pago_doctos);
+        if (isPago) {
+          const compData = facturaData || venta || {};
+          await exportarReciboPagoPDF(compData, compData.complementos_pago_doctos || [], 'download');
+          return;
+        }
+      }
       const safeVenta = venta || { cliente: 'Cliente' };
       const safeFacturaData = facturaData || { folio_number: '1' };
       await exportarFacturaOdooPDF(safeVenta, safeFacturaData, 'download');
@@ -189,8 +209,9 @@ export default function FacturaPreviewModal({
       transparent={true}
       onRequestClose={onClose}
     >
-      <View style={styles.modalOverlay}>
-        <View
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <Pressable
+          onPress={(e) => e.stopPropagation()}
           style={[
             styles.modalContainer,
             {
@@ -286,7 +307,12 @@ export default function FacturaPreviewModal({
 
               <TouchableOpacity
                 onPress={onClose}
-                style={[styles.closeBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                style={[
+                  styles.closeBtn,
+                  { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+                  Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined
+                ]}
                 activeOpacity={0.7}
               >
                 <Ionicons name="close" size={20} color={themeColors.text} />
@@ -313,10 +339,10 @@ export default function FacturaPreviewModal({
                     width: '100%',
                     height: '100%',
                     border: 'none',
-                    backgroundColor: '#ffffff',
-                    borderRadius: 4,
+                    borderRadius: 8,
+                    backgroundColor: '#fff',
                   }}
-                  title="Vista Previa de Factura"
+                  title="Factura Preview"
                 />
               </View>
             ) : (
@@ -336,8 +362,8 @@ export default function FacturaPreviewModal({
               </ScrollView>
             )}
           </View>
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
@@ -370,6 +396,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+    zIndex: 10,
+    position: 'relative',
   },
   iconCircle: {
     width: 36,

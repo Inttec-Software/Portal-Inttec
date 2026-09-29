@@ -1367,9 +1367,9 @@ export default function AdminEmpleadosScreen() {
 
   const handleExportCSV = async () => {
     try {
-      await ReportGenerator.exportToCSV(gastos, `historial_gastos_${company === 'daravisa' ? 'daravisa' : 'inttec'}.csv`);
+      await ReportGenerator.exportToXLSX(gastos, `historial_gastos_${company === 'daravisa' ? 'daravisa' : 'inttec'}.xlsx`);
     } catch (err: any) {
-      Alert.alert('Error CSV', err.message);
+      Alert.alert('Error Excel', err.message);
     }
   };
 
@@ -1397,9 +1397,9 @@ export default function AdminEmpleadosScreen() {
         .select('*')
         .order('fecha', { ascending: false });
       if (error) throw error;
-      await ReportGenerator.exportAsistenciasToCSV(data || [], personal, 'reporte_asistencia_general.csv');
+      await ReportGenerator.exportAsistenciasToXLSX(data || [], personal, 'reporte_asistencia_general.xlsx');
     } catch (err: any) {
-      showAlert('Error CSV Asistencia', err.message || 'No se pudo generar el reporte.');
+      showAlert('Error Excel Asistencia', err.message || 'No se pudo generar el reporte.');
     } finally {
       setIsFetchingAsistencias(false);
     }
@@ -1431,9 +1431,9 @@ export default function AdminEmpleadosScreen() {
       ]);
       if (prodRes.error) throw prodRes.error;
       if (catRes.error) throw catRes.error;
-      await ReportGenerator.exportInventarioToCSV(prodRes.data || [], catRes.data || [], 'reporte_inventario_general.csv');
+      await ReportGenerator.exportInventarioToXLSX(prodRes.data || [], catRes.data || [], 'reporte_inventario_general.xlsx');
     } catch (err: any) {
-      showAlert('Error CSV Inventario', err.message || 'No se pudo generar el reporte.');
+      showAlert('Error Excel Inventario', err.message || 'No se pudo generar el reporte.');
     } finally {
       setIsFetchingInventario(false);
     }
@@ -1461,9 +1461,9 @@ export default function AdminEmpleadosScreen() {
       const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportConsumosToCSV(data || [], 'reporte_consumos_general.csv');
+      await ReportGenerator.exportConsumosToXLSX(data || [], 'reporte_consumos_general.xlsx');
     } catch (err: any) {
-      showAlert('Error CSV Consumos', err.message || 'No se pudo generar el reporte.');
+      showAlert('Error Excel Consumos', err.message || 'No se pudo generar el reporte.');
     } finally {
       setIsFetchingConsumos(false);
     }
@@ -1493,9 +1493,9 @@ export default function AdminEmpleadosScreen() {
         .select('*')
         .order('fecha', { ascending: false });
       if (error) throw error;
-      await ReportGenerator.exportVentasToCSV(data || [], 'reporte_ventas_general.csv');
+      await ReportGenerator.exportVentasToXLSX(data || [], 'reporte_ventas_general.xlsx');
     } catch (err: any) {
-      showAlert('Error CSV Ventas', err.message || 'No se pudo generar el reporte de ventas.');
+      showAlert('Error Excel Ventas', err.message || 'No se pudo generar el reporte de ventas.');
     } finally {
       setIsFetchingVentas(false);
     }
@@ -2515,12 +2515,12 @@ export default function AdminEmpleadosScreen() {
                             onPress={async () => {
                               try {
                                 const companyLabel = company === 'daravisa' ? 'daravisa' : 'inttec';
-                                await ReportGenerator.exportGasolinaToCSV(
+                                await ReportGenerator.exportGasolinaToXLSX(
                                   registrosGasolina,
-                                  `reporte_gasolina_${companyLabel}_${new Date().toISOString().split('T')[0]}.csv`
+                                  `reporte_gasolina_${companyLabel}_${new Date().toISOString().split('T')[0]}.xlsx`
                                 );
                               } catch (err: any) {
-                                showAlert('Error CSV', err.message);
+                                showAlert('Error Excel', err.message);
                               }
                             }}
                             style={{
@@ -2531,7 +2531,7 @@ export default function AdminEmpleadosScreen() {
                             }}
                           >
                             <Ionicons name="document-text-outline" size={14} color="#059669" />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#059669' }}>CSV</Text>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#059669' }}>Excel</Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             onPress={async () => {
@@ -2746,7 +2746,7 @@ export default function AdminEmpleadosScreen() {
                 </View>
                 <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
                   <CustomButton title="PDF" onPress={handleExportPDF} style={{ flex: 1, height: 36 }} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportCSV} variant="success" style={{ flex: 1, height: 36 }} />
+                  <CustomButton title="Excel" onPress={handleExportCSV} variant="success" style={{ flex: 1, height: 36 }} />
                 </View>
               </View>
 
@@ -2763,7 +2763,7 @@ export default function AdminEmpleadosScreen() {
                 </View>
                 <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
                   <CustomButton title="PDF" onPress={handleExportAsistenciasPDF} style={{ flex: 1, height: 36 }} loading={isFetchingAsistencias} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportAsistenciasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingAsistencias} />
+                  <CustomButton title="Excel" onPress={handleExportAsistenciasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingAsistencias} />
                 </View>
               </View>
 
@@ -2780,7 +2780,7 @@ export default function AdminEmpleadosScreen() {
                 </View>
                 <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
                   <CustomButton title="PDF" onPress={handleExportInventarioPDF} style={{ flex: 1, height: 36 }} loading={isFetchingInventario} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportInventarioCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingInventario} />
+                  <CustomButton title="Excel" onPress={handleExportInventarioCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingInventario} />
                 </View>
               </View>
 
@@ -2797,7 +2797,7 @@ export default function AdminEmpleadosScreen() {
                 </View>
                 <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
                   <CustomButton title="PDF" onPress={handleExportConsumosPDF} style={{ flex: 1, height: 36 }} loading={isFetchingConsumos} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportConsumosCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingConsumos} />
+                  <CustomButton title="Excel" onPress={handleExportConsumosCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingConsumos} />
                 </View>
               </View>
 
@@ -2814,7 +2814,7 @@ export default function AdminEmpleadosScreen() {
                 </View>
                 <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
                   <CustomButton title="PDF" onPress={handleExportVentasPDF} style={{ flex: 1, height: 36 }} loading={isFetchingVentas} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportVentasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingVentas} />
+                  <CustomButton title="Excel" onPress={handleExportVentasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingVentas} />
                 </View>
               </View>
             </ScrollView>
