@@ -420,6 +420,221 @@ export const guardarConsumo = async (req: Request, res: Response) => {
   }
 };
 
+// 7.1 Asignación Directa de Material a Empleado (POST /api/inventario/asignar-empleado)
+export const asignarMaterialEmpleado = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env, user } = tenant;
+    const client = getSupabaseClient(company, env);
+
+    const { empleadoId, motivo, items } = req.body;
+
+    if (!empleadoId) {
+      return res.status(400).json({ error: 'Debes seleccionar un empleado destinatario' });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Debes agregar al menos un material a asignar' });
+    }
+
+    // 1. Obtener datos del empleado
+    const { data: empleadoData, error: empErr } = await client
+      .from('usuarios')
+      .select('id, nombre, email')
+      .eq('id', empleadoId)
+      .maybeSingle();
+
+    if (empErr || !empleadoData) {
+      return res.status(404).json({ error: 'Empleado no encontrado' });
+    }
+
+    const empleadoNombre = empleadoData.nombre || empleadoData.email || 'Empleado';
+    const motivoTexto = (motivo || '').trim() || 'Asignación de material por Administrador';
+
+    // 2. Validar stock de todos los productos antes de realizar cualquier cambio
+    const productosValidados: any[] = [];
+    for (const item of items) {
+      const qty = Number(item.cantidad);
+      if (isNaN(qty) || qty <= 0) {
+        return res.status(400).json({ error: `La cantidad para cada producto debe ser mayor a 0` });
+      }
+
+      const { data: prodData, error: prodErr } = await client
+        .from('productos')
+        .select('*')
+        .eq('id', item.productoId)
+        .maybeSingle();
+
+      if (prodErr || !prodData) {
+        return res.status(404).json({ error: `Producto no encontrado en inventario` });
+      }
+
+      const stockActual = Number(prodData.stock_actual) || 0;
+      if (qty > stockActual) {
+        return res.status(400).json({
+          error: `Stock insuficiente para "${prodData.nombre_oficial}". Solicitado: ${qty}, Disponible: ${stockActual}`
+        });
+      }
+
+      productosValidados.push({
+        producto: prodData,
+        cantidad: qty
+      });
+    }
+
+    // 3. Preparar snapshot de materiales para retiros_material
+    const materialesSnapshot = productosValidados.map(({ producto, cantidad }) => ({
+      producto_id: producto.id,
+      sku: producto.sku_interno || '',
+      nombre: producto.nombre_oficial || 'Producto',
+      cantidad,
+      cantidad_nuevo: cantidad,
+      cantidad_usado: 0,
+      cantidad_por_revisar: 0,
+      unidad: producto.unidad || 'pza'
+    }));
+
+    // 4. Guardar registro estructurado en retiros_material (para historial de movimientos y reportes)
+    try {
+      await client.from('retiros_material').insert([{
+        empleado_id: empleadoId,
+        empleado_nombre: empleadoNombre,
+        tipo_gasto: 'Asignación de Material',
+        detalle_servicio_proyecto: motivoTexto,
+        materiales: materialesSnapshot,
+        motivo: motivoTexto,
+        responsiva_aceptada: true,
+        firmado_en: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      }]);
+    } catch (rErr: any) {
+      console.warn('Aviso insertando en retiros_material desde asignación admin:', rErr.message);
+    }
+
+    // 5. Descontar inventario general, registrar en movimientos_inventario y actualizar inventario_empleados
+    for (const { producto, cantidad } of productosValidados) {
+      let nuevo = Number(producto.stock_nuevo) || 0;
+      let usado = Number(producto.stock_usado) || 0;
+      let porRevisar = Number(producto.stock_por_revisar) || 0;
+
+      let withdrawNuevo = 0;
+      let withdrawUsado = 0;
+      let withdrawPorRevisar = 0;
+
+      // Descuento FIFO: primero nuevo, luego usado, luego por revisar
+      let toDiscount = cantidad;
+      if (nuevo >= toDiscount) {
+        withdrawNuevo = toDiscount;
+        nuevo -= toDiscount;
+        toDiscount = 0;
+      } else {
+        withdrawNuevo = nuevo;
+        toDiscount -= nuevo;
+        nuevo = 0;
+        if (usado >= toDiscount) {
+          withdrawUsado = toDiscount;
+          usado -= toDiscount;
+          toDiscount = 0;
+        } else {
+          withdrawUsado = usado;
+          toDiscount -= usado;
+          usado = 0;
+          withdrawPorRevisar = Math.min(porRevisar, toDiscount);
+          porRevisar = Math.max(0, porRevisar - toDiscount);
+        }
+      }
+
+      const newStock = Math.round((nuevo + usado + porRevisar) * 100) / 100;
+
+      // 5.1 Descontar del inventario general
+      const { error: stockErr } = await client
+        .from('productos')
+        .update({
+          stock_actual: newStock,
+          stock_nuevo: nuevo,
+          stock_usado: usado,
+          stock_por_revisar: porRevisar
+        })
+        .eq('id', producto.id);
+
+      if (stockErr) throw stockErr;
+
+      // 5.2 Registrar movimiento de inventario (ledger general)
+      const fullFolio = `ASIGNACIÓN: ${motivoTexto} [${empleadoNombre}]`;
+      const { error: moveErr } = await client
+        .from('movimientos_inventario')
+        .insert([{
+          producto_id: producto.id,
+          tipo: 'SALIDA',
+          cantidad,
+          folio_factura: fullFolio,
+          creado_por: user ? user.id : null
+        }]);
+
+      if (moveErr) {
+        console.warn('Aviso insertando movimiento de inventario:', moveErr.message);
+      }
+
+      // 5.3 Actualizar o insertar en inventario_empleados (camioneta del empleado)
+      const { data: invEmp } = await client
+        .from('inventario_empleados')
+        .select('*')
+        .eq('empleado_id', empleadoId)
+        .eq('producto_id', producto.id)
+        .maybeSingle();
+
+      if (invEmp) {
+        const curDisp = Number(invEmp.cantidad_disponible) || 0;
+        const curNuevo = Number(invEmp.cantidad_nuevo) || 0;
+        const curUsado = Number(invEmp.cantidad_usado) || 0;
+        const curPorRev = Number(invEmp.cantidad_por_revisar) || 0;
+
+        const baseNuevo = (curNuevo === 0 && curUsado === 0 && curPorRev === 0 && curDisp > 0)
+          ? curDisp
+          : curNuevo;
+
+        const nextNuevo = baseNuevo + withdrawNuevo;
+        const nextUsado = curUsado + withdrawUsado;
+        const nextPorRev = curPorRev + withdrawPorRevisar;
+        const nextTotal = Math.round((nextNuevo + nextUsado + nextPorRev) * 100) / 100;
+
+        await client
+          .from('inventario_empleados')
+          .update({
+            cantidad_disponible: nextTotal,
+            cantidad_nuevo: nextNuevo,
+            cantidad_usado: nextUsado,
+            cantidad_por_revisar: nextPorRev,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', invEmp.id);
+      } else {
+        await client
+          .from('inventario_empleados')
+          .insert([{
+            empleado_id: empleadoId,
+            producto_id: producto.id,
+            cantidad_disponible: cantidad,
+            cantidad_nuevo: withdrawNuevo,
+            cantidad_usado: withdrawUsado,
+            cantidad_por_revisar: withdrawPorRevisar,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+      }
+    }
+
+    return res.json({
+      success: true,
+      mensaje: `Se asignaron ${productosValidados.length} material(es) al empleado ${empleadoNombre} exitosamente.`
+    });
+  } catch (error: any) {
+    console.error('Error en asignarMaterialEmpleado:', error);
+    return res.status(500).json({ error: error.message || 'Error al asignar material al empleado' });
+  }
+};
+
 // 8. Guardar Importación IA (POST /api/inventario/importar)
 export const guardarImportacion = async (req: Request, res: Response) => {
   try {

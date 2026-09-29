@@ -75,6 +75,12 @@ interface ConsumoItem {
   cantidad: number;
 }
 
+interface AsignarItem {
+  id: string;
+  productoId: string;
+  cantidad: number;
+}
+
 interface MovimientoItemProps {
   m: any;
   themeColors: any;
@@ -415,6 +421,16 @@ export default function InventarioDashboard() {
   const [isLoadingDevoluciones, setIsLoadingDevoluciones] = useState(false);
   const [isApprovingDevolucion, setIsApprovingDevolucion] = useState(false);
   const [isLoadingRetribuciones, setIsLoadingRetribuciones] = useState(false);
+
+  // Flujo Asignar Material a Empleado / Camioneta
+  const [asignarModalVisible, setAsignarModalVisible] = useState(false);
+  const [asignarEmpleadoId, setAsignarEmpleadoId] = useState('');
+  const [asignarMotivo, setAsignarMotivo] = useState('');
+  const [asignarItems, setAsignarItems] = useState<AsignarItem[]>([]);
+  const [asignarProductSearch, setAsignarProductSearch] = useState('');
+  const [isSubmittingAsignacion, setIsSubmittingAsignacion] = useState(false);
+  const [showAsignarEmpDropdown, setShowAsignarEmpDropdown] = useState(false);
+  const [asignarEmpSearch, setAsignarEmpSearch] = useState('');
 
   useEffect(() => {
     loadAllData();
@@ -1465,6 +1481,140 @@ export default function InventarioDashboard() {
     }
   };
 
+  // --- Asignación de Material a Empleado / Camioneta ---
+  const handleOpenAsignarModal = (preselectedEmpId?: string, prefillProductIds?: string[]) => {
+    setAsignarEmpleadoId(preselectedEmpId || selectedEmpleadoRetribucion || '');
+    setAsignarMotivo('');
+    setAsignarProductSearch('');
+    setShowAsignarEmpDropdown(false);
+    setAsignarEmpSearch('');
+
+    if (prefillProductIds && prefillProductIds.length > 0) {
+      const itemsPrefill: AsignarItem[] = prefillProductIds
+        .map(pId => {
+          const prod = productos.find(p => p.id === pId);
+          if (!prod) return null;
+          return {
+            id: `asig-${Date.now()}-${Math.random().toString(36).substring(3, 7)}`,
+            productoId: pId,
+            cantidad: 1
+          };
+        })
+        .filter(Boolean) as AsignarItem[];
+      setAsignarItems(itemsPrefill);
+    } else {
+      setAsignarItems([]);
+    }
+    setAsignarModalVisible(true);
+  };
+
+  const handleAddProductToAsignar = (prodId: string) => {
+    const prod = productos.find(p => p.id === prodId);
+    if (!prod) return;
+    if (prod.stock_actual <= 0) {
+      Alert.alert('Sin Stock', `El producto "${prod.nombre_oficial}" no tiene stock disponible en el inventario general.`);
+      return;
+    }
+
+    setAsignarItems(prev => {
+      const existing = prev.find(item => item.productoId === prodId);
+      if (existing) {
+        if (existing.cantidad + 1 > prod.stock_actual) {
+          Alert.alert('Stock Insuficiente', `Solo hay ${prod.stock_actual} ${prod.unidad || 'unidades'} disponibles de "${prod.nombre_oficial}".`);
+          return prev;
+        }
+        return prev.map(item => item.productoId === prodId ? { ...item, cantidad: item.cantidad + 1 } : item);
+      }
+      return [
+        ...prev,
+        {
+          id: `asig-${Date.now()}-${Math.random().toString(36).substring(3, 7)}`,
+          productoId: prodId,
+          cantidad: 1
+        }
+      ];
+    });
+    setAsignarProductSearch('');
+  };
+
+  const handleRemoveProductFromAsignar = (id: string) => {
+    setAsignarItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleUpdateAsignarItemQty = (id: string, qty: number) => {
+    setAsignarItems(prev => prev.map(item => item.id === id ? { ...item, cantidad: qty } : item));
+  };
+
+  const handleConfirmAsignacion = async () => {
+    if (!asignarEmpleadoId) {
+      Alert.alert('Validación', 'Por favor selecciona al empleado destinatario.');
+      return;
+    }
+
+    if (asignarItems.length === 0) {
+      Alert.alert('Validación', 'Agrega al menos un material para transferir al empleado.');
+      return;
+    }
+
+    for (const item of asignarItems) {
+      const prod = productos.find(p => p.id === item.productoId);
+      if (!prod) continue;
+      if (item.cantidad <= 0) {
+        Alert.alert('Validación', `La cantidad para "${prod.nombre_oficial}" debe ser mayor a 0.`);
+        return;
+      }
+      if (item.cantidad > prod.stock_actual) {
+        Alert.alert(
+          'Stock Insuficiente',
+          `No puedes asignar ${item.cantidad} ${prod.unidad || 'unidades'} de "${prod.nombre_oficial}" porque solo hay ${prod.stock_actual} en el inventario general.`
+        );
+        return;
+      }
+    }
+
+    setIsSubmittingAsignacion(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/asignar-empleado`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          empleadoId: asignarEmpleadoId,
+          motivo: (asignarMotivo || '').trim(),
+          items: asignarItems.map(it => ({
+            productoId: it.productoId,
+            cantidad: it.cantidad
+          }))
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al asignar material al empleado');
+      }
+
+      const empName = empleados.find(e => e.id === asignarEmpleadoId)?.nombre || 'el empleado';
+      Alert.alert('Éxito', data.mensaje || `Material asignado exitosamente a ${empName}.`);
+      setAsignarModalVisible(false);
+      setAsignarItems([]);
+      setAsignarMotivo('');
+
+      // Si estábamos en la pestaña de retribuciones y coincide el empleado, refrescar
+      if (selectedEmpleadoRetribucion === asignarEmpleadoId) {
+        loadRetribuciones(asignarEmpleadoId);
+        loadDevolucionesPendientes(asignarEmpleadoId);
+      }
+
+      // Recargar catálogo general
+      await loadAllData(true);
+      clearSelection();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo completar la transferencia de material.');
+    } finally {
+      setIsSubmittingAsignacion(false);
+    }
+  };
+
 
 
   // --- Carga de Factura PDF/Imagen e IA ---
@@ -2154,12 +2304,21 @@ export default function InventarioDashboard() {
               </TouchableOpacity>
             </View>
           </View>
-          <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-            <CustomButton
-              title="➕ Agregar Producto Manualmente"
-              onPress={handleOpenCreateModal}
-              style={{ backgroundColor: themeColors.primary }}
-            />
+          <View style={{ paddingHorizontal: 16, paddingBottom: 12, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+            <View style={{ flex: 1, minWidth: 160 }}>
+              <CustomButton
+                title="➕ Agregar Producto"
+                onPress={handleOpenCreateModal}
+                style={{ backgroundColor: themeColors.primary }}
+              />
+            </View>
+            <View style={{ flex: 1, minWidth: 160 }}>
+              <CustomButton
+                title="🚚 Asignar a Empleado"
+                onPress={() => handleOpenAsignarModal()}
+                style={{ backgroundColor: '#2563EB' }}
+              />
+            </View>
           </View>
 
           {/* Barra de Selección Masiva */}
@@ -2624,9 +2783,23 @@ export default function InventarioDashboard() {
                 <Text style={{ color: selectedEmpleadoRetribucion ? themeColors.text : themeColors.textSecondary }}>{empleados.find(e => e.id === selectedEmpleadoRetribucion)?.nombre || 'Seleccionar un empleado...'}</Text>
               </TouchableOpacity>
               {!!selectedEmpleadoRetribucion && (
-                <TouchableOpacity onPress={() => fetchEmployeeInventory(selectedEmpleadoRetribucion)} style={{ backgroundColor: themeColors.primary, padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }}>
-                  <Ionicons name="cube-outline" size={20} color="#fff" />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                  <TouchableOpacity
+                    onPress={() => fetchEmployeeInventory(selectedEmpleadoRetribucion)}
+                    style={{ backgroundColor: themeColors.primary, padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }}
+                    {...(Platform.OS === 'web' ? { title: "Ver Inventario en Camioneta" } as any : {})}
+                  >
+                    <Ionicons name="cube-outline" size={20} color="#fff" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleOpenAsignarModal(selectedEmpleadoRetribucion)}
+                    style={{ backgroundColor: '#2563EB', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 6 }}
+                    {...(Platform.OS === 'web' ? { title: "Asignar Material a este Empleado" } as any : {})}
+                  >
+                    <Ionicons name="add-circle-outline" size={18} color="#fff" />
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>Asignar</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           </View>
@@ -2806,8 +2979,16 @@ export default function InventarioDashboard() {
                   </ScrollView>
                 )}
                 
-                <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
+                <View style={[styles.modalFooter, { borderTopColor: themeColors.border, gap: 10 }]}>
                   <CustomButton title="Cerrar" variant="secondary" onPress={() => setEmployeeInventoryModalVisible(false)} style={{ flex: 1 }} />
+                  <CustomButton
+                    title="➕ Cargar Más Material"
+                    onPress={() => {
+                      setEmployeeInventoryModalVisible(false);
+                      handleOpenAsignarModal(selectedEmpleadoRetribucion);
+                    }}
+                    style={{ flex: 1.4, backgroundColor: '#2563EB' }}
+                  />
                 </View>
               </View>
             </View>
@@ -3629,6 +3810,382 @@ export default function InventarioDashboard() {
         </View>
       </Modal>
 
+      {/* ========== MODAL: ASIGNAR MATERIAL A EMPLEADO (CAMIONETA) ========== */}
+      <Modal
+        statusBarTranslucent={true}
+        animationType="fade"
+        transparent={true}
+        visible={asignarModalVisible}
+        onRequestClose={() => setAsignarModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, maxHeight: '92%', width: '92%', maxWidth: 640 }]}>
+            {/* Header */}
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border, borderBottomWidth: 1, paddingBottom: Spacing.two }]}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={{ backgroundColor: '#2563EB20', padding: 6, borderRadius: 8 }}>
+                    <Ionicons name="cube-outline" size={22} color="#2563EB" />
+                  </View>
+                  <Text style={[styles.modalTitle, { color: themeColors.text, fontSize: 18 }]}>
+                    Asignar Material a Empleado
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }}>
+                  Transfiere material del inventario general a la camioneta / inventario personal del técnico.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setAsignarModalVisible(false)} style={{ padding: 4 }}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingVertical: Spacing.two }}>
+              {/* 1. Selector de Empleado */}
+              <View style={[styles.innerCard, { backgroundColor: themeColors.background, borderColor: themeColors.border, marginBottom: Spacing.two, zIndex: 10 }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 13 }]}>
+                  Empleado Destinatario (Técnico / Camioneta) *
+                </Text>
+                
+                <TouchableOpacity
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowAsignarEmpDropdown(!showAsignarEmpDropdown);
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Ionicons name="person-outline" size={18} color={asignarEmpleadoId ? themeColors.primary : themeColors.textSecondary} />
+                    <Text style={{ color: asignarEmpleadoId ? themeColors.text : themeColors.textSecondary, fontWeight: asignarEmpleadoId ? '700' : '400', fontSize: 14 }} numberOfLines={1}>
+                      {empleados.find(e => e.id === asignarEmpleadoId)?.nombre || 'Selecciona un empleado...'}
+                    </Text>
+                  </View>
+                  <Ionicons name={showAsignarEmpDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                </TouchableOpacity>
+
+                {showAsignarEmpDropdown && (
+                  <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, marginTop: 6 }]}>
+                    <CustomInput
+                      placeholder="Buscar empleado..."
+                      value={asignarEmpSearch}
+                      onChangeText={setAsignarEmpSearch}
+                      iconName="search-outline"
+                      style={{ margin: Spacing.one, height: 38 }}
+                    />
+                    <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 180, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                      {empleados
+                        .filter(emp => {
+                          const norm = normalizeText(asignarEmpSearch);
+                          return !norm || (emp.nombre && normalizeText(emp.nombre).includes(norm)) || (emp.email && normalizeText(emp.email).includes(norm));
+                        })
+                        .map((emp, index, arr) => (
+                          <TouchableOpacity
+                            key={emp.id}
+                            style={[
+                              styles.dropdownItem,
+                              index === arr.length - 1 && { borderBottomWidth: 0 },
+                              emp.id === asignarEmpleadoId && { backgroundColor: themeColors.primary + '15' },
+                              { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 }
+                            ]}
+                            onPress={() => {
+                              setAsignarEmpleadoId(emp.id);
+                              setShowAsignarEmpDropdown(false);
+                              setAsignarEmpSearch('');
+                            }}
+                          >
+                            <Ionicons name="person-circle-outline" size={22} color={themeColors.primary} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 13 }}>{emp.nombre}</Text>
+                              {emp.email ? <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>{emp.email}</Text> : null}
+                            </View>
+                            {emp.id === asignarEmpleadoId && (
+                              <Ionicons name="checkmark-circle" size={18} color={themeColors.primary} />
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+
+              {/* 2. Motivo o Referencia */}
+              <View style={[styles.innerCard, { backgroundColor: themeColors.background, borderColor: themeColors.border, marginBottom: Spacing.two }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 13 }]}>
+                  Motivo / Observaciones (Opcional)
+                </Text>
+                <CustomInput
+                  placeholder="Ej. Surtido semanal de camioneta, Proyecto X, Servicios..."
+                  value={asignarMotivo}
+                  onChangeText={setAsignarMotivo}
+                  iconName="clipboard-outline"
+                />
+              </View>
+
+              {/* 3. Buscador y Selector de Productos del Inventario General */}
+              <View style={[styles.innerCard, { backgroundColor: themeColors.background, borderColor: themeColors.border, marginBottom: Spacing.two }]}>
+                <Text style={[styles.dropdownLabel, { color: themeColors.text, fontSize: 13, marginBottom: 6 }]}>
+                  Buscar y Agregar Material del Almacén General
+                </Text>
+                
+                <CustomInput
+                  placeholder="Escribe el nombre o SKU del producto..."
+                  value={asignarProductSearch}
+                  onChangeText={setAsignarProductSearch}
+                  iconName="search-outline"
+                  style={{ marginBottom: 6 }}
+                />
+
+                {asignarProductSearch.trim().length > 0 && (
+                  <View style={{ maxHeight: 200, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, backgroundColor: themeColors.backgroundElement, overflow: 'hidden' }}>
+                    <ScrollView nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
+                      {productos
+                        .filter(p => {
+                          if (!p.activo) return false;
+                          const norm = normalizeText(asignarProductSearch);
+                          return (
+                            (p.nombre_oficial && normalizeText(p.nombre_oficial).includes(norm)) ||
+                            (p.sku_interno && normalizeText(p.sku_interno).includes(norm))
+                          );
+                        })
+                        .slice(0, 20)
+                        .map((prod, pIdx, arr) => {
+                          const isAlreadyAdded = asignarItems.some(it => it.productoId === prod.id);
+                          const sinStock = prod.stock_actual <= 0;
+                          return (
+                            <TouchableOpacity
+                              key={prod.id}
+                              disabled={sinStock}
+                              onPress={() => handleAddProductToAsignar(prod.id)}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: 10,
+                                borderBottomWidth: pIdx === arr.length - 1 ? 0 : 1,
+                                borderBottomColor: themeColors.border,
+                                opacity: sinStock ? 0.45 : 1,
+                                backgroundColor: isAlreadyAdded ? themeColors.primary + '10' : 'transparent'
+                              }}
+                            >
+                              <View style={{ flex: 1, paddingRight: 8 }}>
+                                <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>
+                                  {prod.nombre_oficial}
+                                </Text>
+                                <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                                  SKU: {prod.sku_interno || '-'} | Disp: {prod.stock_actual} {prod.unidad || 'pzas'}
+                                </Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <View style={{ backgroundColor: sinStock ? themeColors.danger + '20' : themeColors.success + '20', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                                  <Text style={{ fontSize: 11, fontWeight: '800', color: sinStock ? themeColors.danger : themeColors.success }}>
+                                    {sinStock ? 'Agotado' : `${prod.stock_actual} ${prod.unidad || 'pzas'}`}
+                                  </Text>
+                                </View>
+                                {!sinStock && (
+                                  <View style={{ backgroundColor: themeColors.primary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
+                                      {isAlreadyAdded ? '+1' : 'Agregar'}
+                                    </Text>
+                                  </View>
+                                )}
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      {productos.filter(p => {
+                        if (!p.activo) return false;
+                        const norm = normalizeText(asignarProductSearch);
+                        return (
+                          (p.nombre_oficial && normalizeText(p.nombre_oficial).includes(norm)) ||
+                          (p.sku_interno && normalizeText(p.sku_interno).includes(norm))
+                        );
+                      }).length === 0 && (
+                        <View style={{ padding: 16, alignItems: 'center' }}>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+                            No se encontraron productos coincidentes activos.
+                          </Text>
+                        </View>
+                      )}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+
+              {/* 4. Lista de Productos a Transferir */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text style={[styles.subTitle, { color: themeColors.text, marginVertical: 0 }]}>
+                    Materiales a Transferir ({asignarItems.length})
+                  </Text>
+                  {asignarItems.length > 0 && (
+                    <TouchableOpacity onPress={() => setAsignarItems([])}>
+                      <Text style={{ color: themeColors.danger, fontSize: 12, fontWeight: '700' }}>Vaciar lista</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {asignarItems.length === 0 ? (
+                  <View style={[styles.emptyContainer, { paddingVertical: Spacing.four, backgroundColor: themeColors.background, borderRadius: 12, borderWidth: 1, borderColor: themeColors.border, borderStyle: 'dashed' }]}>
+                    <Ionicons name="cart-outline" size={40} color={themeColors.textSecondary} />
+                    <Text style={[styles.emptyText, { color: themeColors.textSecondary, marginTop: 6 }]}>
+                      Usa el buscador arriba para agregar materiales a la camioneta.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ gap: Spacing.one }}>
+                    {asignarItems.map(item => {
+                      const prod = productos.find(p => p.id === item.productoId);
+                      const maxStock = prod ? prod.stock_actual : 0;
+                      const hasExcess = item.cantidad > maxStock;
+                      const unidad = prod?.unidad || 'pzas';
+
+                      return (
+                        <View
+                          key={item.id}
+                          style={[
+                            styles.stagingItemCard,
+                            {
+                              backgroundColor: themeColors.background,
+                              borderColor: hasExcess ? themeColors.danger : themeColors.border,
+                              borderWidth: hasExcess ? 1.5 : 1,
+                              padding: Spacing.two
+                            }
+                          ]}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <View style={{ flex: 1, paddingRight: 8 }}>
+                              <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
+                                {prod ? prod.nombre_oficial : 'Producto desconocido'}
+                              </Text>
+                              <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                                SKU: {prod ? prod.sku_interno : '-'} | Stock en Almacén: {maxStock} {unidad}
+                              </Text>
+                            </View>
+                            <TouchableOpacity
+                              onPress={() => handleRemoveProductFromAsignar(item.id)}
+                              style={{ padding: 4 }}
+                            >
+                              <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Stepper y Entrada de Cantidad */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: themeColors.border }}>
+                            <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '600' }}>
+                              Cantidad a cargar:
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <TouchableOpacity
+                                onPress={() => handleUpdateAsignarItemQty(item.id, Math.max(1, item.cantidad - 1))}
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: 6,
+                                  backgroundColor: themeColors.backgroundElement,
+                                  borderWidth: 1,
+                                  borderColor: themeColors.border,
+                                  justifyContent: 'center',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <Ionicons name="remove" size={16} color={themeColors.text} />
+                              </TouchableOpacity>
+
+                              <TextInput
+                                style={{
+                                  width: 60,
+                                  height: 32,
+                                  backgroundColor: themeColors.backgroundElement,
+                                  borderWidth: 1,
+                                  borderColor: hasExcess ? themeColors.danger : themeColors.border,
+                                  borderRadius: 6,
+                                  textAlign: 'center',
+                                  fontSize: 13,
+                                  fontWeight: '800',
+                                  color: hasExcess ? themeColors.danger : themeColors.text,
+                                  paddingHorizontal: 4
+                                }}
+                                keyboardType="numeric"
+                                value={item.cantidad > 0 ? String(item.cantidad) : ''}
+                                onChangeText={txt => {
+                                  const num = parseFloat(txt.replace(/[^0-9.]/g, '')) || 0;
+                                  handleUpdateAsignarItemQty(item.id, num);
+                                }}
+                              />
+
+                              <TouchableOpacity
+                                onPress={() => handleUpdateAsignarItemQty(item.id, item.cantidad + 1)}
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: 6,
+                                  backgroundColor: themeColors.backgroundElement,
+                                  borderWidth: 1,
+                                  borderColor: themeColors.border,
+                                  justifyContent: 'center',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <Ionicons name="add" size={16} color={themeColors.text} />
+                              </TouchableOpacity>
+
+                              <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '600', marginLeft: 2 }}>
+                                {unidad}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {hasExcess && (
+                            <Text style={{ fontSize: 11, color: themeColors.danger, fontWeight: '700', marginTop: 4 }}>
+                              ⚠️ La cantidad supera el stock disponible en almacén ({maxStock} {unidad})
+                            </Text>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+
+              {/* 5. Resumen */}
+              {asignarItems.length > 0 && (
+                <View style={{ backgroundColor: '#2563EB15', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#2563EB30', marginBottom: Spacing.two }}>
+                  <Text style={{ color: '#2563EB', fontWeight: '800', fontSize: 13 }}>
+                    Resumen del Traspaso:
+                  </Text>
+                  <Text style={{ color: themeColors.text, fontSize: 12, marginTop: 4 }}>
+                    • Partidas a transferir: <Text style={{ fontWeight: '800' }}>{asignarItems.length}</Text>
+                  </Text>
+                  <Text style={{ color: themeColors.text, fontSize: 12, marginTop: 2 }}>
+                    • Total unidades: <Text style={{ fontWeight: '800' }}>{asignarItems.reduce((acc, it) => acc + (Number(it.cantidad) || 0), 0)}</Text>
+                  </Text>
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 4, fontStyle: 'italic' }}>
+                    * Los materiales se descontarán del stock general y se sumarán al inventario personal del técnico.
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Footer */}
+            <View style={[styles.modalFooter, { borderTopColor: themeColors.border, padding: Spacing.two, gap: Spacing.two }]}>
+              <CustomButton
+                title="Cancelar"
+                variant="secondary"
+                onPress={() => setAsignarModalVisible(false)}
+                style={{ flex: 1 }}
+              />
+              <CustomButton
+                title={isSubmittingAsignacion ? "Transfiriendo..." : `Transferir (${asignarItems.length})`}
+                onPress={handleConfirmAsignacion}
+                loading={isSubmittingAsignacion}
+                disabled={isSubmittingAsignacion || asignarItems.length === 0 || !asignarEmpleadoId}
+                style={{ flex: 1.6, backgroundColor: '#2563EB' }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Floating Bulk Action Bar */}
       {selectedProductIds.length > 0 && activeTab === 'importacion' && (
         <View style={[styles.bulkActionBar, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
@@ -3641,6 +4198,14 @@ export default function InventarioDashboard() {
             </Text>
           </View>
           <View style={styles.bulkActionButtons}>
+            <TouchableOpacity
+              style={[styles.bulkBtn, { backgroundColor: '#2563EB' }]}
+              onPress={() => handleOpenAsignarModal(undefined, selectedProductIds)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="cube-outline" size={16} color="#fff" />
+              <Text style={styles.bulkBtnText}>Asignar</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.bulkBtn, { backgroundColor: themeColors.accent }]}
               onPress={handleOpenBulkEdit}

@@ -8,6 +8,7 @@ import {
   bulkUpdateProductos,
   addStock, 
   guardarConsumo, 
+  asignarMaterialEmpleado,
   guardarImportacion, 
   crearCatalogo,
   getEmpleadoRetribuciones,
@@ -44,6 +45,7 @@ router.put('/productos/:id', invMutate, upsertProducto);
 router.delete('/productos/:id', invMutate, hardDeleteProducto);
 router.post('/productos/:id/stock', invMutate, addStock);
 router.post('/consumos', invMutate, guardarConsumo);
+router.post('/asignar-empleado', invMutate, asignarMaterialEmpleado);
 router.post('/importar', invMutate, guardarImportacion);
 router.get('/verificar-folio', verificarFolioFactura);
 router.post('/catalogos/:tipo', invMutate, crearCatalogo);
