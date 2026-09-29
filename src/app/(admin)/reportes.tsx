@@ -74,6 +74,10 @@ export default function ReportesScreen() {
   const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
   const [facturaFilter, setFacturaFilter] = useState<'TODOS' | 'FACTURADOS' | 'PENDIENTE_ENTREGA' | 'NO_FACTURADOS'>('TODOS');
 
+  type PresetType = 'todos' | 'este_mes' | 'mes_anterior' | 'ultimos_2_meses' | 'ultimos_3_meses' | 'personalizado';
+  const [activePreset, setActivePreset] = useState<PresetType>('este_mes');
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
+
   // Buscador y Filtro por Calendario (Día Único o Rango de Fechas)
   const [searchQuery, setSearchQuery] = useState('');
   const [startDateFilter, setStartDateFilter] = useState<string | null>(null);
@@ -1391,10 +1395,115 @@ export default function ReportesScreen() {
     });
   };
 
-  // Exportar reportes
+  // Helper to format Date to YYYY-MM-DD local time string
+  const toLocalDateString = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const applyPreset = useCallback((preset: PresetType) => {
+    setActivePreset(preset);
+    const now = new Date();
+    if (preset === 'todos') {
+      setStartDateFilter(null);
+      setEndDateFilter(null);
+      setTempStartDate('');
+      setTempEndDate('');
+      setShowCustomPicker(false);
+    } else if (preset === 'este_mes') {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const s = toLocalDateString(start);
+      const e = toLocalDateString(end);
+      setStartDateFilter(s);
+      setEndDateFilter(e);
+      setTempStartDate(s);
+      setTempEndDate(e);
+      setShowCustomPicker(false);
+    } else if (preset === 'mes_anterior') {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      const s = toLocalDateString(start);
+      const e = toLocalDateString(end);
+      setStartDateFilter(s);
+      setEndDateFilter(e);
+      setTempStartDate(s);
+      setTempEndDate(e);
+      setShowCustomPicker(false);
+    } else if (preset === 'ultimos_2_meses') {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const s = toLocalDateString(start);
+      const e = toLocalDateString(end);
+      setStartDateFilter(s);
+      setEndDateFilter(e);
+      setTempStartDate(s);
+      setTempEndDate(e);
+      setShowCustomPicker(false);
+    } else if (preset === 'ultimos_3_meses') {
+      const start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const s = toLocalDateString(start);
+      const e = toLocalDateString(end);
+      setStartDateFilter(s);
+      setEndDateFilter(e);
+      setTempStartDate(s);
+      setTempEndDate(e);
+      setShowCustomPicker(false);
+    } else if (preset === 'personalizado') {
+      setShowCustomPicker(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    applyPreset('este_mes');
+  }, [applyPreset]);
+
+  const formatDisplayDate = (dStr: string) => {
+    const parts = dStr.split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    return dStr;
+  };
+
+  const getPeriodoLabel = useCallback(() => {
+    if (!startDateFilter && !endDateFilter) return 'Histórico Completo';
+    if (startDateFilter && endDateFilter) {
+      if (startDateFilter === endDateFilter) return formatDisplayDate(startDateFilter);
+      return `${formatDisplayDate(startDateFilter)} al ${formatDisplayDate(endDateFilter)}`;
+    }
+    if (startDateFilter) return `Desde ${formatDisplayDate(startDateFilter)}`;
+    if (endDateFilter) return `Hasta ${formatDisplayDate(endDateFilter)}`;
+    return 'Histórico Completo';
+  }, [startDateFilter, endDateFilter]);
+
+  const getFilePeriodoSuffix = useCallback(() => {
+    if (!startDateFilter && !endDateFilter) return 'historico';
+    if (startDateFilter && endDateFilter) return `${startDateFilter}_al_${endDateFilter}`;
+    if (startDateFilter) return `desde_${startDateFilter}`;
+    if (endDateFilter) return `hasta_${endDateFilter}`;
+    return 'historico';
+  }, [startDateFilter, endDateFilter]);
+
+  const filteredGastosByDate = useMemo(() => {
+    return gastos.filter((g) => {
+      const gastoFecha = g.fecha_comprobante || g.created_at?.split('T')[0];
+      if (startDateFilter && gastoFecha) {
+        if (gastoFecha < startDateFilter) return false;
+      }
+      if (endDateFilter && gastoFecha) {
+        if (gastoFecha > endDateFilter) return false;
+      }
+      return true;
+    });
+  }, [gastos, startDateFilter, endDateFilter]);
+
+  // Exportar reportes con rango de fechas
   const handleExportPDF = async () => {
     try {
-      await ReportGenerator.exportToPDF(gastos, `Historial General de Gastos`);
+      const periodo = getPeriodoLabel();
+      await ReportGenerator.exportToPDF(filteredGastosByDate, `Historial General de Gastos`, periodo);
     } catch (err: any) {
       Alert.alert('Error PDF', err.message);
     }
@@ -1402,9 +1511,10 @@ export default function ReportesScreen() {
 
   const handleExportCSV = async () => {
     try {
-      await ReportGenerator.exportToCSV(gastos, `historial_gastos_${company === 'daravisa' ? 'daravisa' : 'inttec'}.csv`);
+      const suffix = getFilePeriodoSuffix();
+      await ReportGenerator.exportToXLSX(filteredGastosByDate, `historial_gastos_${company === 'daravisa' ? 'daravisa' : 'inttec'}_${suffix}.xlsx`);
     } catch (err: any) {
-      Alert.alert('Error CSV', err.message);
+      Alert.alert('Error Excel', err.message);
     }
   };
 
@@ -1412,10 +1522,15 @@ export default function ReportesScreen() {
     setIsFetchingAsistencias(true);
     try {
       const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/asistencias`, { headers });
+      const params = new URLSearchParams();
+      if (startDateFilter) params.append('startDate', startDateFilter);
+      if (endDateFilter) params.append('endDate', endDateFilter);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/asistencias${qs}`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportAsistenciasToPDF(data || [], personal, 'Reporte de Asistencia General');
+      const periodo = getPeriodoLabel();
+      await ReportGenerator.exportAsistenciasToPDF(data || [], personal, 'Reporte de Asistencia General', periodo);
     } catch (err: any) {
       showAlert('Error PDF Asistencia', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -1427,12 +1542,17 @@ export default function ReportesScreen() {
     setIsFetchingAsistencias(true);
     try {
       const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/asistencias`, { headers });
+      const params = new URLSearchParams();
+      if (startDateFilter) params.append('startDate', startDateFilter);
+      if (endDateFilter) params.append('endDate', endDateFilter);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/asistencias${qs}`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportAsistenciasToCSV(data || [], personal, 'reporte_asistencia_general.csv');
+      const suffix = getFilePeriodoSuffix();
+      await ReportGenerator.exportAsistenciasToXLSX(data || [], personal, `reporte_asistencia_general_${suffix}.xlsx`);
     } catch (err: any) {
-      showAlert('Error CSV Asistencia', err.message || 'No se pudo generar el reporte.');
+      showAlert('Error Excel Asistencia', err.message || 'No se pudo generar el reporte.');
     } finally {
       setIsFetchingAsistencias(false);
     }
@@ -1445,7 +1565,8 @@ export default function ReportesScreen() {
       const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/inventario`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportInventarioToPDF(data.productos || [], data.categorias || [], 'Reporte de Inventario de Materiales');
+      const periodo = getPeriodoLabel();
+      await ReportGenerator.exportInventarioToPDF(data.productos || [], data.categorias || [], 'Reporte de Inventario de Materiales', periodo);
     } catch (err: any) {
       showAlert('Error PDF Inventario', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -1460,9 +1581,10 @@ export default function ReportesScreen() {
       const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/inventario`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportInventarioToCSV(data.productos || [], data.categorias || [], 'reporte_inventario_general.csv');
+      const suffix = getFilePeriodoSuffix();
+      await ReportGenerator.exportInventarioToXLSX(data.productos || [], data.categorias || [], `reporte_inventario_general_${suffix}.xlsx`);
     } catch (err: any) {
-      showAlert('Error CSV Inventario', err.message || 'No se pudo generar el reporte.');
+      showAlert('Error Excel Inventario', err.message || 'No se pudo generar el reporte.');
     } finally {
       setIsFetchingInventario(false);
     }
@@ -1472,10 +1594,15 @@ export default function ReportesScreen() {
     setIsFetchingConsumos(true);
     try {
       const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
+      const params = new URLSearchParams();
+      if (startDateFilter) params.append('startDate', startDateFilter);
+      if (endDateFilter) params.append('endDate', endDateFilter);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos${qs}`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportConsumosToPDF(data || [], 'Reporte de Consumos de Materiales');
+      const periodo = getPeriodoLabel();
+      await ReportGenerator.exportConsumosToPDF(data || [], 'Reporte de Consumos de Materiales', periodo);
     } catch (err: any) {
       showAlert('Error PDF Consumos', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -1487,12 +1614,17 @@ export default function ReportesScreen() {
     setIsFetchingConsumos(true);
     try {
       const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos`, { headers });
+      const params = new URLSearchParams();
+      if (startDateFilter) params.append('startDate', startDateFilter);
+      if (endDateFilter) params.append('endDate', endDateFilter);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/consumos${qs}`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportConsumosToCSV(data || [], 'reporte_consumos_general.csv');
+      const suffix = getFilePeriodoSuffix();
+      await ReportGenerator.exportConsumosToXLSX(data || [], `reporte_consumos_general_${suffix}.xlsx`);
     } catch (err: any) {
-      showAlert('Error CSV Consumos', err.message || 'No se pudo generar el reporte.');
+      showAlert('Error Excel Consumos', err.message || 'No se pudo generar el reporte.');
     } finally {
       setIsFetchingConsumos(false);
     }
@@ -1502,10 +1634,15 @@ export default function ReportesScreen() {
     setIsFetchingVentas(true);
     try {
       const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/ventas`, { headers });
+      const params = new URLSearchParams();
+      if (startDateFilter) params.append('startDate', startDateFilter);
+      if (endDateFilter) params.append('endDate', endDateFilter);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/ventas${qs}`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportVentasToPDF(data || [], 'Reporte de Control de Ventas');
+      const periodo = getPeriodoLabel();
+      await ReportGenerator.exportVentasToPDF(data || [], 'Reporte de Control de Ventas', periodo);
     } catch (err: any) {
       showAlert('Error PDF Ventas', err.message || 'No se pudo generar el reporte de ventas.');
     } finally {
@@ -1517,12 +1654,17 @@ export default function ReportesScreen() {
     setIsFetchingVentas(true);
     try {
       const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/ventas`, { headers });
+      const params = new URLSearchParams();
+      if (startDateFilter) params.append('startDate', startDateFilter);
+      if (endDateFilter) params.append('endDate', endDateFilter);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/ventas${qs}`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      await ReportGenerator.exportVentasToCSV(data || [], 'reporte_ventas_general.csv');
+      const suffix = getFilePeriodoSuffix();
+      await ReportGenerator.exportVentasToXLSX(data || [], `reporte_ventas_general_${suffix}.xlsx`);
     } catch (err: any) {
-      showAlert('Error CSV Ventas', err.message || 'No se pudo generar el reporte de ventas.');
+      showAlert('Error Excel Ventas', err.message || 'No se pudo generar el reporte de ventas.');
     } finally {
       setIsFetchingVentas(false);
     }
@@ -2368,12 +2510,12 @@ export default function ReportesScreen() {
                             onPress={async () => {
                               try {
                                 const companyLabel = company === 'daravisa' ? 'daravisa' : 'inttec';
-                                await ReportGenerator.exportGasolinaToCSV(
+                                await ReportGenerator.exportGasolinaToXLSX(
                                   registrosGasolina,
-                                  `reporte_gasolina_${companyLabel}_${new Date().toISOString().split('T')[0]}.csv`
+                                  `reporte_gasolina_${companyLabel}_${new Date().toISOString().split('T')[0]}.xlsx`
                                 );
                               } catch (err: any) {
-                                showAlert('Error CSV', err.message);
+                                showAlert('Error Excel', err.message);
                               }
                             }}
                             style={{
@@ -2384,7 +2526,7 @@ export default function ReportesScreen() {
                             }}
                           >
                             <Ionicons name="document-text-outline" size={14} color="#059669" />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#059669' }}>CSV</Text>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#059669' }}>Excel</Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             onPress={async () => {
@@ -2583,99 +2725,360 @@ export default function ReportesScreen() {
       </Modal>
 
       </View>}
-      {/* MODAL 2 EXTRA: REPORTES */}
+      {/* SECCIÓN PRINCIPAL: GENERADOR Y EXPORTACIÓN DE REPORTES */}
       <View style={{ flex: 1, backgroundColor: themeColors.background, paddingHorizontal: 16 }}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: themeColors.text }]}>Exportar Reportes</Text>
-
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.reportContent, { paddingBottom: 40 }]}>
+          {/* Header con Switch de Empresa */}
+          <View style={{
+            flexDirection: isMobile ? 'column' : 'row',
+            justifyContent: 'space-between',
+            alignItems: isMobile ? 'flex-start' : 'center',
+            paddingTop: Spacing.two,
+            paddingBottom: Spacing.two,
+            borderBottomWidth: 1,
+            borderBottomColor: themeColors.border,
+            gap: 12,
+          }}>
+            <View>
+              <Text style={[styles.modalTitle, { color: themeColors.text, fontSize: 20 }]}>Reportes del Sistema</Text>
+              <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                Exporta e imprime la información financiera, de personal y operativa.
+              </Text>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.reportContent}>
-              {/* Tarjeta 1: Reporte de Gastos */}
-              <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
-                  <Ionicons name="cash-outline" size={28} color={themeColors.accent} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Gastos</Text>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                      Consolidado de gastos registrados, estados y montos.
-                    </Text>
-                  </View>
-                </View>
-                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-                  <CustomButton title="PDF" onPress={handleExportPDF} style={{ flex: 1, height: 36 }} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportCSV} variant="success" style={{ flex: 1, height: 36 }} />
-                </View>
+            {/* Selector de Empresa */}
+            <View style={{
+              flexDirection: 'row',
+              backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+              borderRadius: 20,
+              padding: 2,
+              alignItems: 'center',
+              width: 230,
+              alignSelf: isMobile ? 'center' : 'auto',
+            }}>
+              <TouchableOpacity
+                onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 6,
+                  borderRadius: 18,
+                  backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{
+                  fontSize: 12,
+                  fontWeight: '700',
+                  color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+                }}>
+                  INTTEC
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 6,
+                  borderRadius: 18,
+                  backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{
+                  fontSize: 12,
+                  fontWeight: '700',
+                  color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+                }}>
+                  DARAVISA
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Panel de Filtro de Período y Rango de Fechas */}
+          <View style={[styles.configCard, {
+            backgroundColor: themeColors.backgroundElement,
+            borderColor: themeColors.border,
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            padding: 14,
+            borderRadius: BorderRadius.large,
+            marginTop: Spacing.two,
+            gap: 12,
+          }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="calendar" size={20} color={themeColors.accent} />
+                <Text style={{ fontSize: 15, fontWeight: '700', color: themeColors.text }}>
+                  Rango de Tiempo para Reportes
+                </Text>
               </View>
 
-              {/* Tarjeta 2: Reporte de Asistencia */}
-              <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
-                  <Ionicons name="time-outline" size={28} color={themeColors.accent} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Asistencia</Text>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                      Entradas, salidas y ubicaciones de checado del personal.
-                    </Text>
-                  </View>
-                </View>
-                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-                  <CustomButton title="PDF" onPress={handleExportAsistenciasPDF} style={{ flex: 1, height: 36 }} loading={isFetchingAsistencias} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportAsistenciasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingAsistencias} />
-                </View>
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 14,
+                backgroundColor: themeColors.accent + '15',
+                borderWidth: 1,
+                borderColor: themeColors.accent + '30',
+              }}>
+                <Ionicons name="time-outline" size={14} color={themeColors.accent} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.accent }}>
+                  {getPeriodoLabel()}
+                </Text>
               </View>
+            </View>
 
-              {/* Tarjeta 3: Reporte de Inventario */}
-              <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
-                  <Ionicons name="cube-outline" size={28} color={themeColors.accent} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Inventario</Text>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                      Catálogo de productos, categorías y existencias en stock.
+            {/* Presets Rápidos */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+              {[
+                { key: 'este_mes', label: 'Este Mes' },
+                { key: 'mes_anterior', label: 'Mes Anterior' },
+                { key: 'ultimos_2_meses', label: 'Últimos 2 Meses' },
+                { key: 'ultimos_3_meses', label: 'Últimos 3 Meses' },
+                { key: 'personalizado', label: '📅 Personalizado' },
+                { key: 'todos', label: 'Todo el Histórico' },
+              ].map((item) => {
+                const isSelected = activePreset === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    onPress={() => applyPreset(item.key as PresetType)}
+                    style={{
+                      paddingHorizontal: 14,
+                      paddingVertical: 7,
+                      borderRadius: 18,
+                      backgroundColor: isSelected ? themeColors.accent : (scheme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'),
+                      borderWidth: 1,
+                      borderColor: isSelected ? themeColors.accent : themeColors.border,
+                    }}
+                  >
+                    <Text style={{
+                      fontSize: 12,
+                      fontWeight: isSelected ? '700' : '500',
+                      color: isSelected ? '#ffffff' : themeColors.text,
+                    }}>
+                      {item.label}
                     </Text>
-                  </View>
-                </View>
-                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-                  <CustomButton title="PDF" onPress={handleExportInventarioPDF} style={{ flex: 1, height: 36 }} loading={isFetchingInventario} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportInventarioCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingInventario} />
-                </View>
-              </View>
-
-              {/* Tarjeta 4: Reporte de Consumos */}
-              <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one, marginTop: Spacing.two }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
-                  <Ionicons name="receipt-outline" size={28} color={themeColors.accent} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Consumos</Text>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                      Historial detallado de salidas y consumos de materiales.
-                    </Text>
-                  </View>
-                </View>
-                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-                  <CustomButton title="PDF" onPress={handleExportConsumosPDF} style={{ flex: 1, height: 36 }} loading={isFetchingConsumos} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportConsumosCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingConsumos} />
-                </View>
-              </View>
-
-              {/* Tarjeta 5: Reporte de Ventas */}
-              <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one, marginTop: Spacing.two }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
-                  <Ionicons name="bar-chart-outline" size={28} color={themeColors.success} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Ventas</Text>
-                    <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                      Resumen financiero de facturación, costos, utilidades y márgenes.
-                    </Text>
-                  </View>
-                </View>
-                <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-                  <CustomButton title="PDF" onPress={handleExportVentasPDF} style={{ flex: 1, height: 36 }} loading={isFetchingVentas} />
-                  <CustomButton title="Excel (CSV)" onPress={handleExportVentasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingVentas} />
-                </View>
-              </View>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
+
+            {/* Selector Personalizado (De tal día a tal día) */}
+            {(showCustomPicker || activePreset === 'personalizado') && (
+              <View style={{
+                marginTop: 4,
+                paddingTop: 12,
+                borderTopWidth: 1,
+                borderTopColor: themeColors.border,
+                gap: 10,
+              }}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.textSecondary }}>
+                  Selecciona el rango de fechas exacto (Desde - Hasta):
+                </Text>
+
+                <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: 10, alignItems: isMobile ? 'stretch' : 'flex-end' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: themeColors.textSecondary, marginBottom: 4 }}>
+                      Fecha Inicio:
+                    </Text>
+                    {Platform.OS === 'web' ? (
+                      /* @ts-ignore */
+                      <input
+                        type="date"
+                        value={tempStartDate}
+                        onChange={(e: any) => setTempStartDate(e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: '38px',
+                          padding: '6px 10px',
+                          borderRadius: '8px',
+                          border: `1px solid ${themeColors.border}`,
+                          backgroundColor: themeColors.background,
+                          color: themeColors.text,
+                          fontSize: '13px',
+                          outline: 'none',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    ) : (
+                      <TextInput
+                        value={tempStartDate}
+                        onChangeText={setTempStartDate}
+                        placeholder="AAAA-MM-DD"
+                        placeholderTextColor={themeColors.textSecondary}
+                        style={{
+                          height: 38,
+                          paddingHorizontal: 10,
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: themeColors.border,
+                          backgroundColor: themeColors.background,
+                          color: themeColors.text,
+                          fontSize: 13,
+                        }}
+                      />
+                    )}
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: themeColors.textSecondary, marginBottom: 4 }}>
+                      Fecha Fin:
+                    </Text>
+                    {Platform.OS === 'web' ? (
+                      /* @ts-ignore */
+                      <input
+                        type="date"
+                        value={tempEndDate}
+                        onChange={(e: any) => setTempEndDate(e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: '38px',
+                          padding: '6px 10px',
+                          borderRadius: '8px',
+                          border: `1px solid ${themeColors.border}`,
+                          backgroundColor: themeColors.background,
+                          color: themeColors.text,
+                          fontSize: '13px',
+                          outline: 'none',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    ) : (
+                      <TextInput
+                        value={tempEndDate}
+                        onChangeText={setTempEndDate}
+                        placeholder="AAAA-MM-DD"
+                        placeholderTextColor={themeColors.textSecondary}
+                        style={{
+                          height: 38,
+                          paddingHorizontal: 10,
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: themeColors.border,
+                          backgroundColor: themeColors.background,
+                          color: themeColors.text,
+                          fontSize: 13,
+                        }}
+                      />
+                    )}
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 6, alignSelf: isMobile ? 'stretch' : 'flex-end' }}>
+                    <CustomButton
+                      title="Aplicar Rango"
+                      onPress={() => {
+                        const s = tempStartDate.trim() || null;
+                        const e = tempEndDate.trim() || s;
+                        setStartDateFilter(s);
+                        setEndDateFilter(e);
+                        setActivePreset('personalizado');
+                      }}
+                      style={{ height: 38, paddingHorizontal: 16 }}
+                    />
+                    {(startDateFilter || endDateFilter) && (
+                      <CustomButton
+                        title="Limpiar"
+                        variant="secondary"
+                        onPress={() => applyPreset('todos')}
+                        style={{ height: 38, paddingHorizontal: 12 }}
+                      />
+                    )}
+                  </View>
+                </View>
+              </View>
+            )}
+          </View>
+
+          {/* Tarjeta 1: Reporte de Gastos */}
+          <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+              <Ionicons name="cash-outline" size={28} color={themeColors.accent} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Gastos</Text>
+                <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                  Gastos registrados en: <Text style={{ color: themeColors.accent, fontWeight: '700' }}>{getPeriodoLabel()}</Text> ({filteredGastosByDate.length} registros)
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
+              <CustomButton title="PDF" onPress={handleExportPDF} style={{ flex: 1, height: 36 }} />
+              <CustomButton title="Excel" onPress={handleExportCSV} variant="success" style={{ flex: 1, height: 36 }} />
+            </View>
+          </View>
+
+          {/* Tarjeta 2: Reporte de Asistencia */}
+          <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+              <Ionicons name="time-outline" size={28} color={themeColors.accent} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Asistencia</Text>
+                <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                  Entradas y salidas de checado en: <Text style={{ color: themeColors.accent, fontWeight: '700' }}>{getPeriodoLabel()}</Text>
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
+              <CustomButton title="PDF" onPress={handleExportAsistenciasPDF} style={{ flex: 1, height: 36 }} loading={isFetchingAsistencias} />
+              <CustomButton title="Excel" onPress={handleExportAsistenciasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingAsistencias} />
+            </View>
+          </View>
+
+          {/* Tarjeta 3: Reporte de Inventario */}
+          <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+              <Ionicons name="cube-outline" size={28} color={themeColors.accent} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Inventario</Text>
+                <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                  Catálogo de productos, existencias actuales y stock de materiales en almacén.
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
+              <CustomButton title="PDF" onPress={handleExportInventarioPDF} style={{ flex: 1, height: 36 }} loading={isFetchingInventario} />
+              <CustomButton title="Excel" onPress={handleExportInventarioCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingInventario} />
+            </View>
+          </View>
+
+          {/* Tarjeta 4: Reporte de Consumos */}
+          <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+              <Ionicons name="receipt-outline" size={28} color={themeColors.accent} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Consumos</Text>
+                <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                  Salidas y consumos de materiales en: <Text style={{ color: themeColors.accent, fontWeight: '700' }}>{getPeriodoLabel()}</Text>
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
+              <CustomButton title="PDF" onPress={handleExportConsumosPDF} style={{ flex: 1, height: 36 }} loading={isFetchingConsumos} />
+              <CustomButton title="Excel" onPress={handleExportConsumosCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingConsumos} />
+            </View>
+          </View>
+
+          {/* Tarjeta 5: Reporte de Ventas */}
+          <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+              <Ionicons name="bar-chart-outline" size={28} color={themeColors.success} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Ventas</Text>
+                <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                  Facturación, costos y margen comercial en: <Text style={{ color: themeColors.accent, fontWeight: '700' }}>{getPeriodoLabel()}</Text>
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
+              <CustomButton title="PDF" onPress={handleExportVentasPDF} style={{ flex: 1, height: 36 }} loading={isFetchingVentas} />
+              <CustomButton title="Excel" onPress={handleExportVentasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingVentas} />
+            </View>
+          </View>
+        </ScrollView>
       </View>
 
       {/* Modal de Detalle/Revisión de Gasto */}

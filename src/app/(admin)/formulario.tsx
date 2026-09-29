@@ -106,7 +106,7 @@ export default function GastoForm() {
   const [detalleServicioProyecto, setDetalleServicioProyecto] = useState('');
   const [sucursal, setSucursal] = useState('');
   const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia'>('efectivo');
-  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | null>(null);
+  const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | 'HILTON' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
   const [alertaPolitica, setAlertaPolitica] = useState<string | null>(null);
@@ -990,7 +990,7 @@ export default function GastoForm() {
       }
 
       if (metodoPago !== 'efectivo' && metodoPago !== 'transferencia' && !tipoTarjeta) {
-        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, Mercado Pago).');
+        showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, Mercado Pago, Hilton).');
         return;
       }
       if (facturado === null) {
@@ -1273,7 +1273,7 @@ export default function GastoForm() {
                           ]}
                         >
                           <Text style={[styles.paymentOptionText, { color: incluyePropina === true ? '#ffffff' : themeColors.text, fontSize: 12 }]}>
-                            Sí
+                            No
                           </Text>
                         </TouchableOpacity>
 
@@ -1293,7 +1293,7 @@ export default function GastoForm() {
                           ]}
                         >
                           <Text style={[styles.paymentOptionText, { color: incluyePropina === false ? '#ffffff' : themeColors.text, fontSize: 12 }]}>
-                            No
+                            Sí
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -2166,7 +2166,7 @@ export default function GastoForm() {
                   <View>
                     <Text style={[styles.selectorLabel, { color: themeColors.text, fontSize: 13, marginBottom: Spacing.one }]}>Selecciona la Tarjeta *</Text>
                     <View style={styles.paymentSelector}>
-                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX', 'MERCADO PAGO'] as const).map((card) => (
+                      {(['BBVA', 'AMEX', 'MARRIOT', 'BANORTE', 'INVEX', 'MERCADO PAGO', 'HILTON'] as const).map((card) => (
                         <TouchableOpacity
                           key={card}
                           onPress={() => setTipoTarjeta(card)}

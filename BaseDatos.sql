@@ -485,6 +485,22 @@ CREATE TABLE IF NOT EXISTS public.tarea_corresponsables (
   CONSTRAINT tarea_corresponsables_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE CASCADE
 );
 
+-- =========================================================================
+-- MÓDULO DE NOTIFICACIONES (In-App)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.notificaciones (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  usuario_id uuid NOT NULL,
+  titulo text NOT NULL,
+  mensaje text NOT NULL,
+  tipo text NOT NULL,
+  referencia_id text,
+  leido boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT notificaciones_pkey PRIMARY KEY (id),
+  CONSTRAINT notificaciones_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS public.tarea_notas (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   tarea_id uuid NOT NULL,
@@ -569,8 +585,19 @@ CREATE TABLE IF NOT EXISTS public.retiros_material (
   splits_json JSONB,
   materiales JSONB NOT NULL, -- [{ producto_id, sku, nombre, cantidad, unidad }]
   motivo TEXT,
+  firma_base64 TEXT, -- Firma digital autógrafa del empleado
+  responsiva_aceptada BOOLEAN DEFAULT true, -- Confirmación de aceptación de términos de responsiva
+  firmado_en TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  dispositivo_info TEXT, -- Información del navegador/dispositivo firmante
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Si las tablas ya existen, agregar columnas faltantes:
+ALTER TABLE public.retiros_material ADD COLUMN IF NOT EXISTS firma_base64 TEXT;
+ALTER TABLE public.retiros_material ADD COLUMN IF NOT EXISTS responsiva_aceptada BOOLEAN DEFAULT true;
+ALTER TABLE public.retiros_material ADD COLUMN IF NOT EXISTS firmado_en TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE public.retiros_material ADD COLUMN IF NOT EXISTS dispositivo_info TEXT;
+ALTER TABLE public.movimientos_inventario ADD COLUMN IF NOT EXISTS firma_base64 TEXT;
 
 
 
@@ -900,7 +927,7 @@ CREATE TABLE IF NOT EXISTS public.herramientas (
   descripcion text,
   numero_serie text,
   foto_url text,
-  estado text DEFAULT 'NUEVO' CHECK (estado IN ('NUEVO', 'BUENO', 'REGULAR', 'DANADO', 'EN_REPARACION', 'BAJA')),
+  estado text DEFAULT 'NUEVO' CHECK (estado IN ('NUEVO', 'BUENO', 'REGULAR', 'INCOMPLETO', 'DANADO', 'EN_REPARACION', 'BAJA')),
   activo boolean DEFAULT true,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT herramientas_pkey PRIMARY KEY (id)
@@ -1019,6 +1046,64 @@ WHERE (cantidad_nuevo IS NULL OR cantidad_nuevo = 0)
   AND (cantidad_usado IS NULL OR cantidad_usado = 0)
   AND (cantidad_por_revisar IS NULL OR cantidad_por_revisar = 0)
   AND COALESCE(cantidad_disponible, 0) > 0;
+
+-- =========================================================================
+-- MÓDULO INDEPENDIENTE DE FACTURACIÓN FISCAL (CFDI 4.0)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.facturas_emitidas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  serie VARCHAR(10) NOT NULL DEFAULT 'A',
+  folio VARCHAR(20) NOT NULL,
+  cliente_id UUID REFERENCES public.clientes(id) ON DELETE SET NULL,
+  cliente_nombre TEXT NOT NULL,
+  cliente_rfc VARCHAR(15) NOT NULL,
+  cliente_cp VARCHAR(10),
+  cliente_regimen VARCHAR(10),
+  cliente_uso_cfdi VARCHAR(10) DEFAULT 'G03',
+  forma_pago VARCHAR(5) DEFAULT '03',
+  metodo_pago VARCHAR(5) DEFAULT 'PUE',
+  moneda VARCHAR(5) DEFAULT 'MXN',
+  subtotal NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  iva NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  total NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  total_pagado NUMERIC(14, 2) DEFAULT 0,
+  saldo_pendiente NUMERIC(14, 2) DEFAULT 0,
+  estado_pago VARCHAR(30) DEFAULT 'PENDIENTE DE PAGO',
+  cfdi_uuid VARCHAR(50) UNIQUE,
+  cfdi_estado VARCHAR(20) NOT NULL DEFAULT 'BORRADOR',
+  cfdi_xml_url TEXT,
+  cfdi_pdf_url TEXT,
+  fecha_emision TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  orden_compra TEXT,
+  notas JSONB,
+  etiqueta TEXT,
+  venta_id UUID REFERENCES public.ventas(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.facturas_emitidas_partidas (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  factura_id UUID NOT NULL REFERENCES public.facturas_emitidas(id) ON DELETE CASCADE,
+  descripcion TEXT NOT NULL,
+  cantidad NUMERIC(12, 4) NOT NULL DEFAULT 1,
+  precio_unitario NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  importe NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  clave_sat VARCHAR(20) NOT NULL DEFAULT '01010101',
+  clave_unidad VARCHAR(10) NOT NULL DEFAULT 'H87',
+  unidad VARCHAR(30) DEFAULT 'Pieza',
+  objeto_imp VARCHAR(5) DEFAULT '02',
+  descripcion_detallada TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_emit_uuid ON public.facturas_emitidas(cfdi_uuid);
+CREATE INDEX IF NOT EXISTS idx_fact_emit_folio ON public.facturas_emitidas(serie, folio);
+CREATE INDEX IF NOT EXISTS idx_fact_emit_estado ON public.facturas_emitidas(cfdi_estado);
+CREATE INDEX IF NOT EXISTS idx_fact_emit_cliente ON public.facturas_emitidas(cliente_id);
+CREATE INDEX IF NOT EXISTS idx_fact_emit_venta ON public.facturas_emitidas(venta_id);
+CREATE INDEX IF NOT EXISTS idx_fact_partidas_factura ON public.facturas_emitidas_partidas(factura_id);
+CREATE INDEX IF NOT EXISTS idx_facturas_emitidas_etiqueta ON public.facturas_emitidas (etiqueta);
 
 
 

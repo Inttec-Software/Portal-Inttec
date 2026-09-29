@@ -388,7 +388,25 @@ export default function FacturasRecibidasScreen() {
   const handleExportPdf = async (factura: FacturaRecibida) => {
     try {
       setExportingPdfId(factura.id);
-      await exportFacturaCfdiToPdf({ factura });
+      
+      // Obtener factura completa (con conceptos_json) si no la tenemos en memoria
+      let facturaCompleta = factura;
+      if (!factura.xml_url && !factura.conceptos_json) {
+        try {
+          const headers = await getApiHeaders();
+          const res = await fetch(`${getApiUrl()}/api/facturas-recibidas/${factura.id}`, { headers });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.factura) {
+              facturaCompleta = data.factura;
+            }
+          }
+        } catch (e) {
+          console.warn('No se pudo obtener el detalle de la factura:', e);
+        }
+      }
+
+      await exportFacturaCfdiToPdf({ factura: facturaCompleta });
     } catch (err: any) {
       console.error('Error exportando PDF:', err);
       showAlert('Error al generar PDF', err.message || 'No se pudo generar el documento PDF de la factura.');

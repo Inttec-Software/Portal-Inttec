@@ -372,12 +372,12 @@ export default function AdminVehiculosScreen() {
                         onPress={async () => {
                           try {
                             const companyLabel = company === 'daravisa' ? 'daravisa' : 'inttec';
-                            await ReportGenerator.exportGasolinaToCSV(
+                            await ReportGenerator.exportGasolinaToXLSX(
                               registrosGasolina,
-                              `reporte_gasolina_${companyLabel}_${new Date().toISOString().split('T')[0]}.csv`
+                              `reporte_gasolina_${companyLabel}_${new Date().toISOString().split('T')[0]}.xlsx`
                             );
                           } catch (err: any) {
-                            showAlert('Error CSV', err.message);
+                            showAlert('Error Excel', err.message);
                           }
                         }}
                         style={{
@@ -388,7 +388,7 @@ export default function AdminVehiculosScreen() {
                         }}
                       >
                         <Ionicons name="document-text-outline" size={14} color="#059669" />
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#059669' }}>CSV</Text>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#059669' }}>Excel</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         onPress={async () => {

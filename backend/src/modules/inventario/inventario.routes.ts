@@ -8,12 +8,14 @@ import {
   bulkUpdateProductos,
   addStock, 
   guardarConsumo, 
+  asignarMaterialEmpleado,
   guardarImportacion, 
   crearCatalogo,
   getEmpleadoRetribuciones,
   verificarFolioFactura,
   hardDeleteProducto,
-  getMovimientosInventario
+  getMovimientosInventario,
+  getFirmaMovimiento
 } from './inventario.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -33,6 +35,7 @@ const invMutate = (req: any, res: any, next: any) => {
 router.get('/dashboard', cacheMiddleware(30), getDashboardData);
 router.get('/movimientos', getMovimientosInventario);
 router.get('/retiros', getMovimientosInventario);
+router.get('/firma/:id', getFirmaMovimiento);
 router.post('/devoluciones/aprobar', invMutate, aprobarDevolucion);
 router.post('/evidencias/verificar', invMutate, verificarEvidencia);
 router.post('/productos/bulk-delete', invMutate, bulkDeleteProductos);
@@ -42,6 +45,7 @@ router.put('/productos/:id', invMutate, upsertProducto);
 router.delete('/productos/:id', invMutate, hardDeleteProducto);
 router.post('/productos/:id/stock', invMutate, addStock);
 router.post('/consumos', invMutate, guardarConsumo);
+router.post('/asignar-empleado', invMutate, asignarMaterialEmpleado);
 router.post('/importar', invMutate, guardarImportacion);
 router.get('/verificar-folio', verificarFolioFactura);
 router.post('/catalogos/:tipo', invMutate, crearCatalogo);

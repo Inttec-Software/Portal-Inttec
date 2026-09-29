@@ -38,6 +38,7 @@ const TARJETAS = [
   { key: 'BANORTE', label: 'Banorte',  color: '#C8102E' },
   { key: 'INVEX',   label: 'Invex',    color: '#F48220' },
   { key: 'MERCADO PAGO', label: 'Mercado Pago', color: '#00B1EA' },
+  { key: 'HILTON',  label: 'Hilton',   color: '#004F71' },
 ];
 
 const TIPOS_PAGO = [
@@ -71,7 +72,7 @@ const AMOUNT_TOLERANCE = 0.05;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TarjetaKey = 'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO';
+type TarjetaKey = 'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | 'HILTON';
 type MetodoPagoKey = 'tarjeta_credito' | 'tarjeta_debito' | 'tarjeta';
 
 interface MatchedTransaction {
@@ -841,13 +842,10 @@ export default function AuditoriaTarjetaScreen() {
   }, [auditoriasHistorial, historialTarjetaFilter]);
 
   const renderCardFilter = () => {
-    const filters = [
+    const filters: { key: 'TODAS' | TarjetaKey; label: string }[] = [
       { key: 'TODAS', label: 'Todas' },
-      { key: 'BBVA', label: 'BBVA' },
-      { key: 'AMEX', label: 'AMEX' },
-      { key: 'MARRIOT', label: 'Marriott' },
-      { key: 'BANORTE', label: 'Banorte' },
-    ] as const;
+      ...TARJETAS.map(t => ({ key: t.key as TarjetaKey, label: t.label })),
+    ];
 
     return (
       <View style={{ marginBottom: Spacing.two }}>

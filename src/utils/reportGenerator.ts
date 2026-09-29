@@ -2,6 +2,7 @@ import { logger } from './logger';
 import { cacheDirectory, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 import { Platform, Alert } from 'react-native';
 import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService, supabase, inttecClient, daravisaClient } from '../services/supabase';
 import { Cotizacion } from '@/types/ventas';
@@ -87,7 +88,7 @@ export const ReportGenerator = {
   /**
    * Genera un reporte PDF completo de movimientos de inventario (Entradas, Salidas, Retiros, Compras)
    */
-  async exportMovimientosToPDF(movimientos: any[], title: string = 'Reporte de Movimientos de Inventario'): Promise<void> {
+  async exportMovimientosToPDF(movimientos: any[], title: string = 'Reporte de Movimientos de Inventario', periodo?: string): Promise<void> {
     if (movimientos.length === 0) {
       throw new Error('No hay movimientos para exportar.');
     }
@@ -107,7 +108,10 @@ export const ReportGenerator = {
       const fecha = m.fecha ? new Date(m.fecha).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }) : '-';
       const isEntrada = m.tipo === 'ENTRADA';
       const typeBadgeColor = isEntrada ? '#10B981' : '#EF4444';
-      const subtipoLabel = m.subtipo || m.tipo;
+      const isGasto = m.tipo === 'GASTO' || m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO';
+      const isSalida = m.tipo === 'SALIDA' || m.subtipo === 'SALIDA' || m.subtipo === 'RETIRO';
+      const subtipoLabel = isGasto ? 'Gasto' : (isSalida ? 'SALIDA' : (m.subtipo || m.tipo));
+      const subtipoColor = isGasto ? '#8B5CF6' : (isSalida ? '#EF4444' : (m.subtipo === 'DEVOLUCIÓN' ? '#2563EB' : '#6b7280'));
 
       const prodName = m.producto_nombre || 'Producto';
       const prodSku = m.producto_sku || '-';
@@ -120,10 +124,20 @@ export const ReportGenerator = {
         <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
           <td style="font-size: 10px; color: #4b5563; white-space: nowrap;">${fecha}</td>
           <td>
-            <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: ${typeBadgeColor};">
-              ${m.tipo}
-            </span>
-            ${subtipoLabel !== m.tipo ? `<br/><small style="font-size: 8px; color: #6b7280; font-weight: 600;">${subtipoLabel}</small>` : ''}
+            ${isGasto ? `
+              <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: #8B5CF6;">
+                GASTO
+              </span>
+            ` : isSalida ? `
+              <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: #EF4444;">
+                SALIDA
+              </span>
+            ` : `
+              <span style="display: inline-block; padding: 2px 6px; font-size: 9px; font-weight: bold; border-radius: 4px; color: #ffffff; background-color: ${typeBadgeColor};">
+                ${m.tipo}
+              </span>
+              ${subtipoLabel !== m.tipo ? `<br/><span style="display: inline-block; margin-top: 2px; padding: 1px 4px; font-size: 8px; color: ${subtipoColor}; font-weight: 700; border: 1px solid ${subtipoColor}40; border-radius: 3px; background: ${subtipoColor}15;">${subtipoLabel}</span>` : ''}
+            `}
           </td>
           <td>
             <strong style="font-size: 11px; color: #111827;">${prodName}</strong><br/>
@@ -166,6 +180,7 @@ export const ReportGenerator = {
         <div class="header">
           <div>
             <h1 class="title">${title}</h1>
+            ${periodo ? `<div style="font-size: 12px; font-weight: bold; color: #0284c7; margin-top: 2px;">Período: ${periodo}</div>` : ''}
             <div class="subtitle">Generado el: ${new Date().toLocaleString('es-MX')} • Empresa: ${branding.name}</div>
           </div>
           ${branding.logo ? `<img class="logo" src="${branding.logo}" />` : `<h2 style="color: #E11D48; margin: 0;">${branding.name}</h2>`}
@@ -213,76 +228,15 @@ export const ReportGenerator = {
   },
 
   /**
-   * Exporta el listado de movimientos de inventario a formato CSV compatible con Excel
-   */
-  async exportMovimientosToCSV(movimientos: any[], filename: string = 'reporte_movimientos_inventario.csv'): Promise<void> {
-    if (movimientos.length === 0) {
-      throw new Error('No hay movimientos para exportar.');
-    }
-
-    const headers = [
-      'ID',
-      'Fecha',
-      'Tipo',
-      'Subtipo',
-      'SKU',
-      'Producto',
-      'Cantidad',
-      'Unidad',
-      'Responsable / Usuario',
-      'Proveedor',
-      'Cliente',
-      'Tipo de Gasto',
-      'Folio / Concepto / Detalle'
-    ];
-
-    const rows = movimientos.map(m => [
-      escapeCSVCell(m.id),
-      escapeCSVCell(m.fecha ? new Date(m.fecha).toISOString().replace('T', ' ').substring(0, 19) : ''),
-      escapeCSVCell(m.tipo || 'MOVIMIENTO'),
-      escapeCSVCell(m.subtipo || m.tipo || ''),
-      escapeCSVCell(m.producto_sku || '-'),
-      escapeCSVCell(m.producto_nombre || 'Producto'),
-      escapeCSVCell(m.cantidad || 0),
-      escapeCSVCell(m.producto_unidad || 'pza'),
-      escapeCSVCell(m.usuario_nombre || m.empleado_nombre || 'Almacén'),
-      escapeCSVCell(m.proveedor_nombre || ''),
-      escapeCSVCell(m.cliente_nombre || ''),
-      escapeCSVCell(m.tipo_gasto || ''),
-      escapeCSVCell(m.detalle_motivo || m.folio_factura || '')
-    ]);
-
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
-
-    if (Platform.OS === 'web') {
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } else {
-      const fileUri = `${cacheDirectory}${filename}`;
-      await writeAsStringAsync(fileUri, csvContent, { encoding: EncodingType.UTF8 });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Exportar Movimientos CSV' });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    }
-  },
-
-  /**
    * Genera el vale individual de un movimiento o retiro de material en PDF
    */
   async exportSingleMovimientoValePDF(mov: any): Promise<void> {
     const branding = await getCompanyBranding();
     const fecha = mov.fecha ? new Date(mov.fecha).toLocaleString('es-MX', { dateStyle: 'long', timeStyle: 'short' }) : new Date().toLocaleDateString('es-MX');
     const isEntrada = mov.tipo === 'ENTRADA';
-    const tipoColor = isEntrada ? '#10B981' : '#E11D48';
-    const tipoTitle = isEntrada ? 'VALE DE ENTRADA / INGRESO DE MATERIAL' : 'VALE DE SALIDA / RETIRO DE MATERIAL';
+    const isGasto = mov.tipo === 'GASTO' || mov.subtipo === 'GASTO' || mov.subtipo === 'CONSUMO';
+    const tipoColor = isEntrada ? '#10B981' : isGasto ? '#8B5CF6' : '#0d1b2a';
+    const tipoTitle = isEntrada ? 'VALE DE ENTRADA / INGRESO DE MATERIAL' : isGasto ? 'VALE DE GASTO DE MATERIAL' : 'VALE DE SALIDA Y CARTA RESPONSIVA DE MATERIAL';
 
     const items = Array.isArray(mov.materiales) && mov.materiales.length > 0 
       ? mov.materiales 
@@ -314,7 +268,7 @@ export const ReportGenerator = {
           body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 30px; color: #1f2937; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid ${tipoColor}; padding-bottom: 15px; }
           .logo { max-height: 50px; }
-          .title { font-size: 20px; font-weight: bold; color: ${tipoColor}; margin: 0; }
+          .title { font-size: 18px; font-weight: bold; color: ${tipoColor}; margin: 0; }
           .folio { font-size: 12px; color: #6b7280; margin-top: 4px; }
           .info-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-top: 20px; display: flex; flex-wrap: wrap; gap: 15px; }
           .info-col { flex: 1; min-width: 200px; }
@@ -323,11 +277,41 @@ export const ReportGenerator = {
           table { width: 100%; border-collapse: collapse; margin-top: 25px; }
           th { background-color: #1f2937; color: #fff; padding: 10px; font-size: 11px; text-transform: uppercase; }
           td { padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 12px; }
-          .signatures { display: flex; justify-content: space-between; margin-top: 70px; }
-          .sig-box { width: 42%; text-align: center; border-top: 1px solid #111827; padding-top: 8px; font-size: 11px; }
+          .signatures { display: flex; justify-content: center; margin-top: 35px; }
+          .sig-box { width: 55%; max-width: 320px; text-align: center; font-size: 11px; }
+          .sig-image-container { height: 60px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
+          .sig-line { border-top: 1.5px solid #111827; width: 100%; margin: 0 0 6px 0; }
+          .no-print { margin-bottom: 20px; display: flex; justify-content: flex-end; gap: 10px; }
+          .btn-download {
+            background-color: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: background-color 0.2s;
+          }
+          .btn-download:hover { background-color: #1d4ed8; }
+          @media print {
+            .no-print { display: none !important; }
+            body { margin: 0; padding: 10mm; }
+          }
         </style>
       </head>
       <body>
+        <div class="no-print">
+          <button class="btn-download" onclick="window.print()">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+            Descargar / Imprimir PDF
+          </button>
+        </div>
+
         <div class="header">
           <div>
             <h1 class="title">${tipoTitle}</h1>
@@ -377,14 +361,30 @@ export const ReportGenerator = {
           </tbody>
         </table>
 
+        ${!isEntrada ? `
+        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; margin-top: 25px; font-size: 10px; color: #334155; line-height: 1.4;">
+          <strong style="color: #0f172a; text-transform: uppercase; font-size: 10px; display: block; margin-bottom: 4px;">
+            Compromiso de Resguardo y Carta Responsiva de Material
+          </strong>
+          Por medio de la presente, el trabajador manifiesta recibir en óptimas condiciones y a entera satisfacción los materiales y equipos especificados, comprometiéndose a destinarlos única y exclusivamente a las actividades laborales asignadas por <strong>${branding.name}</strong>, asumiendo la custodia, conservación y responsabilidad de devolución de sobrantes o herramientas al término de los trabajos.
+        </div>
+        ` : ''}
+
         <div class="signatures">
           <div class="sig-box">
-            <strong>Entregó / Autorizó</strong><br/>
-            <span>Encargado de Almacén</span>
-          </div>
-          <div class="sig-box">
-            <strong>Recibió / Conforme</strong><br/>
+            <div class="sig-image-container">
+              ${mov.firma_base64 || mov.firma_url || mov.firma ? `
+                <img src="${mov.firma_base64 || mov.firma_url || mov.firma}" style="max-height: 58px; max-width: 200px; object-fit: contain;" />
+              ` : '<div style="height: 45px;"></div>'}
+            </div>
+            <div class="sig-line"></div>
+            <strong>${!isEntrada ? 'TRABAJADOR / RESPONSABLE RECEPTOR' : 'RECIBIÓ / CONFORME'}</strong><br/>
             <span>${mov.usuario_nombre || mov.empleado_nombre || 'Empleado Receptor'}</span>
+            ${mov.firmado_en || mov.firma_base64 ? `
+              <div style="font-size: 9px; color: #64748b; margin-top: 4px;">
+                Firmado digitalmente: ${mov.firmado_en ? new Date(mov.firmado_en).toLocaleString('es-MX') : fecha}
+              </div>
+            ` : ''}
           </div>
         </div>
       </body>
@@ -397,12 +397,41 @@ export const ReportGenerator = {
   /**
    * Helper unificado para imprimir en Web o compartir en Móvil
    */
+  
+  async _exportArrayToXLSX(sheetName: string, headers: string[], rows: any[][], filename: string): Promise<void> {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    
+    if (Platform.OS === 'web') {
+      XLSX.writeFile(wb, filename);
+    } else {
+      const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+      const fileUri = `${cacheDirectory}${filename}`;
+      await writeAsStringAsync(fileUri, base64, { encoding: EncodingType.Base64 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: `Exportar ${sheetName}` });
+      } else {
+        throw new Error('La función de compartir no está disponible.');
+      }
+    }
+  },
+
   async _printOrDownload(htmlContent: string, defaultFilename: string): Promise<void> {
     if (Platform.OS === 'web') {
       const newWindow = window.open('', '_blank');
       if (newWindow) {
         newWindow.document.write(htmlContent);
+        newWindow.document.title = defaultFilename.replace('.pdf', '');
         newWindow.document.close();
+        setTimeout(() => {
+          try {
+            newWindow.focus();
+            newWindow.print();
+          } catch (e) {
+            console.error('Error al imprimir documento:', e);
+          }
+        }, 500);
       }
     } else {
       const { uri } = await Print.printToFileAsync({ html: htmlContent });
@@ -417,7 +446,7 @@ export const ReportGenerator = {
   /**
    * Genera un reporte PDF de los gastos y lo comparte mediante la hoja nativa
    */
-  async exportToPDF(gastos: Gasto[], title: string = 'Reporte de Control de Gastos'): Promise<void> {
+  async exportToPDF(gastos: Gasto[], title: string = 'Reporte de Control de Gastos', periodo?: string): Promise<void> {
     if (gastos.length === 0) {
       throw new Error('No hay gastos para exportar.');
     }
@@ -609,6 +638,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
@@ -737,93 +767,12 @@ export const ReportGenerator = {
   },
 
   /**
-   * Genera un archivo CSV de los gastos y lo comparte mediante la hoja nativa
-   */
-  async exportToCSV(gastos: Gasto[], fileName: string = 'reporte_gastos.csv'): Promise<void> {
-    if (gastos.length === 0) {
-      throw new Error('No hay gastos para exportar.');
-    }
-
-    // Encabezados
-    let csvContent = '\uFEFF'; // BOM para que Excel abra UTF-8 correctamente
-    csvContent += 'ID,Fecha,Empleado Nombre,Monto,Categoria,Subcategoria,Proveedor,Cliente,Servicio/Proyecto,Detalle,Sucursal,Metodo Pago,Tipo Tarjeta,Estado Factura,Motivo Sin Factura,Status,Comentarios\n';
-
-    // Rellenar filas
-    gastos.forEach((g) => {
-      const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
-      let estadoFactura = 'No Facturado';
-      if (g.facturado === true) {
-        estadoFactura = 'Facturado';
-      } else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) {
-        estadoFactura = 'Pendiente de Entregar';
-      }
-
-      const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
-
-      const row = [
-        g.id,
-        fecha,
-        escapeCSVCell(g.empleado_nombre),
-        g.monto,
-        escapeCSVCell(GastoHelper.getCategoria(g)),
-        escapeCSVCell(GastoHelper.getSubcategoria(g)),
-        escapeCSVCell(GastoHelper.getProveedor(g)),
-        escapeCSVCell(GastoHelper.getCliente(g)),
-        escapeCSVCell(g.tipo_servicio_proyecto),
-        escapeCSVCell(g.detalle_servicio_proyecto),
-        escapeCSVCell(GastoHelper.getSucursal(g)),
-        g.metodo_pago,
-        escapeCSVCell(g.tipo_tarjeta),
-        escapeCSVCell(estadoFactura),
-        escapeCSVCell(g.motivo_sin_factura),
-        g.status,
-        escapeCSVCell(commentText),
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      // Guardar el archivo en el sistema de archivos local de Expo (en cacheDirectory para compartir de forma segura)
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      // Compartir nativamente
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible en este dispositivo.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating CSV report:', error);
-      throw new Error(error.message || 'Error al generar el reporte CSV.');
-    }
-  },
-
-  /**
    * Genera un reporte PDF del consumo de gasolina y lo comparte
    */
   async exportGasolinaToPDF(
     registros: any[],
-    title: string = 'Reporte de Consumo de Gasolina'
+    title: string = 'Reporte de Consumo de Gasolina',
+    periodo?: string
   ): Promise<void> {
     if (registros.length === 0) {
       throw new Error('No hay registros de gasolina para exportar.');
@@ -889,6 +838,7 @@ export const ReportGenerator = {
           <img class="logo-img" src="${branding.logo}" />
           <div style="margin-left:auto; text-align:right">
             <h1>${title}</h1>
+            ${periodo ? `<div style="font-size: 12px; font-weight: bold; color: #0284c7; margin-top: 2px;">Período: ${periodo}</div>` : ''}
             <div class="subtitle">Generado: ${new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
           </div>
         </div>
@@ -979,77 +929,12 @@ export const ReportGenerator = {
     }
   },
 
-  /**
-   * Genera un CSV del consumo de gasolina y lo comparte/descarga
-   */
-  async exportGasolinaToCSV(
-    registros: any[],
-    fileName: string = 'reporte_gasolina.csv'
-  ): Promise<void> {
-    if (registros.length === 0) {
-      throw new Error('No hay registros de gasolina para exportar.');
-    }
-
-    let csvContent = '\uFEFF'; // BOM para Excel UTF-8
-    csvContent += 'Fecha,Empresa Registradora,Conductor,Vehículo Marca,Vehículo Modelo,Placas,Km Anterior,Km Actual,Distancia Recorrida (km),Litros,Rendimiento (km/L),Costo Total (MXN),Observaciones\n';
-
-    registros.forEach((r) => {
-      const dateParts = (r.fecha || '').split('-');
-      const fecha = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : r.fecha;
-      const row = [
-        fecha,
-        escapeCSVCell(r.empresa_origen || 'N/A'),
-        escapeCSVCell(r.empleado_nombre),
-        escapeCSVCell(r.vehiculo_marca),
-        escapeCSVCell(r.vehiculo_modelo),
-        escapeCSVCell(r.vehiculo_placas),
-        r.kilometraje_anterior ?? 'N/A',
-        r.kilometraje_actual || 0,
-        r.distancia_recorrida ?? 'N/A',
-        Number(r.litros || 0).toFixed(2),
-        r.rendimiento_km_l ? `${r.rendimiento_km_l} km/L` : 'N/A',
-        Number(r.costo_total || 0).toFixed(2),
-        escapeCSVCell(r.observaciones),
-      ].join(',');
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, { encoding: EncodingType.UTF8 });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible en este dispositivo.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating gasolina CSV:', error);
-      throw new Error(error.message || 'Error al generar el reporte CSV de gasolina.');
-    }
-  },
-
 
   async exportAsistenciasToPDF(
     asistencias: Asistencia[],
     personal: Usuario[],
-    title: string = 'Reporte de Asistencia'
+    title: string = 'Reporte de Asistencia',
+    periodo?: string
   ): Promise<void> {
     if (asistencias.length === 0) {
       throw new Error('No hay registros de asistencia para exportar.');
@@ -1200,6 +1085,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
@@ -1312,77 +1198,13 @@ export const ReportGenerator = {
   },
 
   /**
-   * Genera un archivo CSV de asistencia y lo comparte
-   */
-  async exportAsistenciasToCSV(
-    asistencias: Asistencia[],
-    personal: Usuario[],
-    fileName: string = 'reporte_asistencia.csv'
-  ): Promise<void> {
-    if (asistencias.length === 0) {
-      throw new Error('No hay registros de asistencia para exportar.');
-    }
-
-    const empleadosMap = new Map(personal.map((p) => [p.id, p.nombre]));
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Registro,Fecha,Empleado,Hora Entrada,Ubicación Entrada,Hora Salida,Ubicación Salida\n';
-
-    asistencias.forEach((a) => {
-      const empleadoNombre = empleadosMap.get(a.empleado_id) || 'Desconocido';
-      const row = [
-        a.id,
-        a.fecha || '',
-        escapeCSVCell(empleadoNombre),
-        a.hora_entrada || '',
-        escapeCSVCell(a.direccion_entrada),
-        a.hora_salida || '',
-        escapeCSVCell(a.direccion_salida),
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Asistencia CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating attendance CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV.');
-    }
-  },
-
-  /**
    * Genera un reporte PDF de inventario y lo comparte
    */
   async exportInventarioToPDF(
     productos: ReportProducto[],
     categorias: ReportCategoria[],
-    title: string = 'Reporte de Inventario'
+    title: string = 'Reporte de Inventario',
+    periodo?: string
   ): Promise<void> {
     if (productos.length === 0) {
       throw new Error('No hay productos en el inventario para exportar.');
@@ -1520,6 +1342,7 @@ export const ReportGenerator = {
           <tr>
             <td style="border: none; padding: 0; vertical-align: top;">
               <h1 class="title">${title}</h1>
+              ${periodo ? `<div style="font-size: 12px; font-weight: bold; color: #0284c7; margin-top: 2px;">Período: ${periodo}</div>` : ''}
               <div class="subtitle">Generado el ${new Date().toLocaleDateString('es-MX')} - ${branding.name}</div>
             </td>
             <td style="border: none; padding: 0; text-align: right; vertical-align: top;">
@@ -1646,79 +1469,12 @@ export const ReportGenerator = {
   },
 
   /**
-   * Genera un archivo CSV de inventario y lo comparte
-   */
-  async exportInventarioToCSV(
-    productos: ReportProducto[],
-    categorias: ReportCategoria[],
-    fileName: string = 'reporte_inventario.csv'
-  ): Promise<void> {
-    if (productos.length === 0) {
-      throw new Error('No hay productos en el inventario para exportar.');
-    }
-
-    const categoriasMap = new Map(categorias.map((c) => [c.id, c.nombre]));
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'SKU Interno,Nombre Oficial,Categoría,Stock Actual,Precio Unitario,Valor Total,Estado (Activo)\n';
-
-    productos.forEach((p) => {
-      const categoriaNombre = categoriasMap.get(p.categoria_id) || 'N/A';
-      const precioUnitario = Number(p.precio_unitario || (p as any).precio || 0);
-      const valorTotal = Number(p.stock_actual || 0) * precioUnitario;
-
-      const row = [
-        escapeCSVCell(p.sku_interno),
-        escapeCSVCell(p.nombre_oficial),
-        escapeCSVCell(categoriaNombre),
-        p.stock_actual,
-        precioUnitario.toFixed(2),
-        valorTotal.toFixed(2),
-        p.activo ? 'Activo' : 'Inactivo',
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Inventario CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating inventory CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV.');
-    }
-  },
-
-  /**
    * Genera un reporte PDF del historial de consumos y lo comparte
    */
   async exportConsumosToPDF(
     consumos: any[],
-    title: string = 'Reporte de Consumos de Materiales'
+    title: string = 'Reporte de Consumos de Materiales',
+    periodo?: string
   ): Promise<void> {
     if (consumos.length === 0) {
       throw new Error('No hay registros de consumo para exportar.');
@@ -1902,6 +1658,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
@@ -2011,112 +1768,12 @@ export const ReportGenerator = {
   },
 
   /**
-   * Genera un archivo CSV de consumos y lo comparte
-   */
-  async exportConsumosToCSV(
-    consumos: any[],
-    fileName: string = 'reporte_consumos.csv'
-  ): Promise<void> {
-    if (consumos.length === 0) {
-      throw new Error('No hay registros de consumo para exportar.');
-    }
-
-    // Identificar IDs de usuarios faltantes para buscar sus nombres si no vienen precargados
-    const missingUserIds = new Set<string>();
-    consumos.forEach((c) => {
-      const hasName = c.usuario?.nombre || c.empleado?.nombre || c.empleado_nombre || c.usuario_nombre;
-      if (!hasName) {
-        if (c.creado_por && typeof c.creado_por === 'string' && c.creado_por.length > 10) missingUserIds.add(c.creado_por);
-        if (c.empleado_id && typeof c.empleado_id === 'string' && c.empleado_id.length > 10) missingUserIds.add(c.empleado_id);
-      }
-    });
-
-    const userNamesMap = new Map<string, string>();
-    if (missingUserIds.size > 0) {
-      try {
-        const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
-        const { data: usersData } = await client
-          .from('usuarios')
-          .select('id, nombre')
-          .in('id', Array.from(missingUserIds));
-
-        if (usersData) {
-          usersData.forEach((u: any) => {
-            if (u.id && u.nombre) userNamesMap.set(u.id, u.nombre);
-          });
-        }
-      } catch (err) {
-        console.warn('[reportGenerator] Error resolving user names for consumos CSV:', err);
-      }
-    }
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Movimiento,Fecha,Producto,SKU,Retirado Por (Empleado),Cantidad,Referencia / Motivo\n';
-
-    consumos.forEach((c) => {
-      const fecha = c.fecha ? c.fecha.split('T')[0] : '';
-      const productoNombre = c.producto?.nombre_oficial || 'Producto Eliminado';
-      const sku = c.producto?.sku_interno || '';
-      const userId = c.creado_por || c.empleado_id;
-      const empleadoNombre =
-        c.usuario?.nombre ||
-        c.empleado?.nombre ||
-        c.empleado_nombre ||
-        c.usuario_nombre ||
-        (userId ? userNamesMap.get(userId) : null) ||
-        'No especificado / Almacén';
-      const row = [
-        c.id,
-        fecha,
-        escapeCSVCell(productoNombre),
-        escapeCSVCell(sku),
-        escapeCSVCell(empleadoNombre),
-        c.cantidad,
-        escapeCSVCell(c.folio_factura || c.motivo),
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Consumos CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating consumptions CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV.');
-    }
-  },
-
-  /**
    * Genera un reporte PDF consolidado del historial de retiros de material y lo comparte
    */
   async exportRetirosToPDF(
     retiros: any[],
-    title: string = 'Reporte de Retiros de Material'
+    title: string = 'Reporte de Retiros de Material',
+    periodo?: string
   ): Promise<void> {
     if (retiros.length === 0) {
       throw new Error('No hay retiros registrados para exportar.');
@@ -2276,6 +1933,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle">Generado el: ${new Date().toLocaleString('es-MX')}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
@@ -2487,29 +2145,67 @@ export const ReportGenerator = {
           }
           .signatures-table {
             width: 100%;
-            margin-top: 60px;
+            margin-top: 30px;
             border-collapse: collapse;
           }
           .signature-box {
-            width: 45%;
+            width: 60%;
             text-align: center;
-            border-top: 1px solid #333;
-            padding-top: 8px;
             font-size: 11px;
+            margin: 0 auto;
+          }
+          .sig-image-container {
+            height: 60px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            margin-bottom: 2px;
+          }
+          .sig-line {
+            border-top: 1.5px solid #0d1b2a;
+            width: 100%;
+            margin: 0 0 6px 0;
           }
           .logo-img {
             width: 220px;
             height: 60px;
             object-fit: contain;
           }
+          .no-print { margin-bottom: 20px; display: flex; justify-content: flex-end; gap: 10px; }
+          .btn-download {
+            background-color: #0d1b2a;
+            color: #ffffff;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: background-color 0.2s;
+          }
+          .btn-download:hover { background-color: #1e3a5f; }
+          @media print {
+            .no-print { display: none !important; }
+            body { padding: 0 !important; }
+          }
         </style>
       </head>
       <body>
+        <div class="no-print">
+          <button class="btn-download" onclick="window.print()">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+            Descargar / Imprimir PDF
+          </button>
+        </div>
         <div class="vale-box">
           <table style="width: 100%; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 10px; border-collapse: collapse;">
             <tr>
               <td>
-                <div class="title">Vale de Salida de Almacén</div>
+                <div class="title">Vale de Salida y Carta Responsiva de Material</div>
                 <div style="font-size: 12px; font-weight: bold; color: #2563EB; margin-top: 3px;">Folio: #${folioStr}</div>
               </td>
               <td style="text-align: right;">
@@ -2548,21 +2244,36 @@ export const ReportGenerator = {
             </tbody>
           </table>
 
+          <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; margin-top: 25px; font-size: 10px; color: #334155; line-height: 1.4;">
+            <strong style="color: #0d1b2a; text-transform: uppercase; font-size: 10px; display: block; margin-bottom: 4px;">
+              Compromiso de Resguardo y Carta Responsiva de Material
+            </strong>
+            Por medio de la presente, el trabajador manifiesta recibir en óptimas condiciones y a entera satisfacción los materiales y equipos especificados, comprometiéndose a destinarlos única y exclusivamente a las actividades laborales asignadas por <strong>${branding.name}</strong>, asumiendo la custodia, conservación y responsabilidad de devolución de sobrantes o herramientas al término de los trabajos.
+          </div>
+
           <table class="signatures-table">
             <tr>
-              <td class="signature-box">
-                <strong>ENTREGÓ</strong><br/>
-                Encargado de Almacén / Administración
+              <td style="width: 20%;"></td>
+              <td class="signature-box" style="width: 60%;">
+                <div class="sig-image-container">
+                  ${retiro.firma_base64 || retiro.firma_url || retiro.firma ? `
+                    <img src="${retiro.firma_base64 || retiro.firma_url || retiro.firma}" style="max-height: 58px; max-width: 200px; object-fit: contain;" />
+                  ` : '<div style="height: 45px;"></div>'}
+                </div>
+                <div class="sig-line"></div>
+                <strong>TRABAJADOR / RESPONSABLE RECEPTOR</strong><br/>
+                <span>${retiro.empleado_nombre || 'Empleado Responsable'}</span>
+                ${retiro.firmado_en || retiro.firma_base64 ? `
+                  <div style="font-size: 9px; color: #64748b; margin-top: 4px;">
+                    Firmado digitalmente: ${retiro.firmado_en ? new Date(retiro.firmado_en).toLocaleString('es-MX') : fechaStr}
+                  </div>
+                ` : ''}
               </td>
-              <td style="width: 10%;"></td>
-              <td class="signature-box">
-                <strong>RECIBIÓ</strong><br/>
-                ${retiro.empleado_nombre || 'Empleado Responsable'}
-              </td>
+              <td style="width: 20%;"></td>
             </tr>
           </table>
 
-          <div style="text-align: center; font-size: 9px; color: #888; margin-top: 40px;">
+          <div style="text-align: center; font-size: 9px; color: #888; margin-top: 30px;">
             Este documento ampara la entrega y responsabilidad del material especificado perteneciente a ${branding.name}.
           </div>
         </div>
@@ -2621,103 +2332,14 @@ export const ReportGenerator = {
     }
   },
 
-  /**
-   * Genera un archivo CSV de retiros de material y lo comparte
-   */
-  async exportRetirosToCSV(
-    retiros: any[],
-    fileName: string = 'reporte_retiros_material.csv'
-  ): Promise<void> {
-    if (retiros.length === 0) {
-      throw new Error('No hay registros de retiro para exportar.');
-    }
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Retiro,Fecha,Empleado,Tipo Destino,Cliente,Sucursal,Proveedor,Detalle,Motivo,SKU,Material,Cantidad,Unidad\n';
-
-    retiros.forEach((r) => {
-      const fecha = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : '';
-      const mats = Array.isArray(r.materiales) ? r.materiales : [];
-
-      if (mats.length === 0) {
-        const row = [
-          escapeCSVCell(r.id),
-          escapeCSVCell(fecha),
-          escapeCSVCell(r.empleado_nombre),
-          escapeCSVCell(r.tipo_gasto || 'Operativo'),
-          escapeCSVCell(r.cliente_nombre || (r.is_split ? 'Dividido' : '')),
-          escapeCSVCell(r.sucursal_nombre || ''),
-          escapeCSVCell(r.proveedor || ''),
-          escapeCSVCell(r.detalle_servicio_proyecto || ''),
-          escapeCSVCell(r.motivo || ''),
-          '""',
-          '""',
-          '0',
-          '""'
-        ].join(',');
-        csvContent += row + '\n';
-      } else {
-        mats.forEach((m: any) => {
-          const row = [
-            escapeCSVCell(r.id),
-            escapeCSVCell(fecha),
-            escapeCSVCell(r.empleado_nombre),
-            escapeCSVCell(r.tipo_gasto || 'Operativo'),
-            escapeCSVCell(r.cliente_nombre || (r.is_split ? 'Dividido' : '')),
-            escapeCSVCell(r.sucursal_nombre || ''),
-            escapeCSVCell(r.proveedor || ''),
-            escapeCSVCell(r.detalle_servicio_proyecto || ''),
-            escapeCSVCell(r.motivo || ''),
-            escapeCSVCell(m.sku || ''),
-            escapeCSVCell(m.nombre || ''),
-            m.cantidad || 0,
-            escapeCSVCell(m.unidad || 'pza')
-          ].join(',');
-          csvContent += row + '\n';
-        });
-      }
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Retiros CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating retiros CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV de retiros.');
-    }
-  },
-
 
   /**
    * Genera un reporte PDF de las ventas registradas y lo comparte
    */
   async exportVentasToPDF(
     ventas: any[],
-    title: string = 'Reporte de Ventas'
+    title: string = 'Reporte de Ventas',
+    periodo?: string
   ): Promise<void> {
     if (ventas.length === 0) {
       throw new Error('No hay registros de ventas para exportar.');
@@ -2869,6 +2491,7 @@ export const ReportGenerator = {
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
               <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
@@ -2972,73 +2595,114 @@ export const ReportGenerator = {
       throw new Error(error.message || 'Error al generar el reporte de ventas.');
     }
   },
+    async exportMovimientosToXLSX(movimientos: any[], filename: string = 'reporte_movimientos_inventario.xlsx'): Promise<void> {
 
-  /**
-   * Genera un archivo CSV de ventas y lo comparte
-   */
-  async exportVentasToCSV(
-    ventas: any[],
-    fileName: string = 'reporte_ventas.csv'
-  ): Promise<void> {
-    if (ventas.length === 0) {
-      throw new Error('No hay registros de ventas para exportar.');
+            if (movimientos.length === 0) {
+              throw new Error('No hay movimientos para exportar.');
+            }
+            const headers = [ 'ID', 'Fecha', 'Tipo', 'Subtipo', 'SKU', 'Producto', 'Cantidad', 'Unidad', 'Responsable / Usuario', 'Proveedor', 'Cliente', 'Tipo de Gasto', 'Folio / Concepto / Detalle' ];
+            const rows = movimientos.map(m => [
+              m.id,
+              m.fecha ? new Date(m.fecha).toISOString().replace('T', ' ').substring(0, 19) : '',
+              m.tipo || 'MOVIMIENTO',
+              m.subtipo || m.tipo || '',
+              m.producto_sku || '-',
+              m.producto_nombre || 'Producto',
+              m.cantidad || 0,
+              m.producto_unidad || 'pza',
+              m.usuario_nombre || m.empleado_nombre || 'Almacén',
+              m.proveedor_nombre || '',
+              m.cliente_nombre || '',
+              m.tipo_gasto || '',
+              m.detalle_motivo || m.folio_factura || ''
+            ]);
+            await ReportGenerator._exportArrayToXLSX('Movimientos', headers, rows, filename);
+    },
+    async exportToXLSX(gastos: Gasto[], fileName: string = 'reporte_gastos.xlsx'): Promise<void> {
+
+            if (gastos.length === 0) {
+              throw new Error('No hay gastos para exportar.');
+            }
+            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Comentarios'];
+            const rows = gastos.map(g => {
+              const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
+              let estadoFactura = 'No Facturado';
+              if (g.facturado === true) estadoFactura = 'Facturado';
+              else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) estadoFactura = 'Pendiente de Entregar';
+              const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
+              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, commentText ];
+            });
+            await ReportGenerator._exportArrayToXLSX('Gastos', headers, rows, fileName);
+    },
+    async exportGasolinaToXLSX(registros: any[], fileName: string = 'reporte_gasolina.xlsx'): Promise<void> {
+
+            if (registros.length === 0) {
+              throw new Error('No hay registros para exportar.');
+            }
+            const headers = ['Fecha','Empresa Registradora','Conductor','Vehículo Marca','Vehículo Modelo','Placas','Km Anterior','Km Actual','Distancia Recorrida (km)','Litros','Rendimiento (km/L)','Costo Total (MXN)','Observaciones'];
+            const rows = registros.map(r => {
+              const fecha = r.fecha_carga || r.created_at?.split('T')[0] || '';
+              const distancia = Number(r.kilometraje) - Number(r.kilometraje_anterior || r.kilometraje);
+              const litros = Number(r.litros_cargados) || 0;
+              const rendimiento = litros > 0 && distancia > 0 ? (distancia / litros).toFixed(2) : '0.00';
+              return [ fecha, r.empresa_origen || 'N/A', r.empleado_nombre || 'Desconocido', r.vehiculo_marca || 'N/A', r.vehiculo_modelo || 'N/A', r.vehiculo_placas || 'N/A', r.kilometraje_anterior || r.kilometraje, r.kilometraje, distancia, litros, rendimiento, Number(r.monto_total || 0).toFixed(2), r.observaciones || '' ];
+            });
+            await ReportGenerator._exportArrayToXLSX('Gasolina', headers, rows, fileName);
+    },
+    async exportAsistenciasToXLSX(asistencias: any[], personal: Usuario[], fileName: string = 'reporte_asistencia.xlsx'): Promise<void> {
+
+            if (asistencias.length === 0) {
+              throw new Error('No hay asistencias para exportar.');
+            }
+            const headers = ['ID','Fecha','Empleado Nombre','Empresa','Hora Entrada','Dirección Entrada','Hora Salida','Dirección Salida'];
+            const rows = asistencias.map(a => {
+              const empleadoNombre = a.empleados ? `${a.empleados.nombre || ''} ${a.empleados.apellidos || ''}`.trim() : (a.empleado_nombre || 'Desconocido');
+              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada || 'Sin registro', a.direccion_entrada || '', a.hora_salida || 'Sin registro', a.direccion_salida || '' ];
+            });
+            await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
+    },
+    async exportInventarioToXLSX(productos: any[], categorias: ReportCategoria[], fileName: string = 'reporte_inventario.xlsx'): Promise<void> {
+
+            if (productos.length === 0) {
+              throw new Error('No hay productos para exportar.');
+            }
+            const headers = ['ID','SKU','Producto','Categoría','Unidad','Stock Actual (Nuevo)','Stock Usado','Stock Por Revisar','Stock Total Sumado','Punto Reorden','Ubicación','Precio Unit.'];
+            const rows = productos.map(p => {
+              const categoriaNombre = categorias.find((c: any) => c.id === p.categoria_id)?.nombre || 'Sin Categoría';
+              const sNuevo = Number(p.stock_nuevo || 0);
+              const sUsado = Number(p.stock_usado || 0);
+              const sRevision = Number(p.stock_por_revisar || 0);
+              return [ p.id, p.sku_interno || '-', p.nombre_oficial || 'Producto', categoriaNombre, p.unidad_medida || 'pza', sNuevo, sUsado, sRevision, (sNuevo+sUsado+sRevision), p.punto_reorden || 0, p.ubicacion_almacen || '', p.precio_unitario || 0 ];
+            });
+            await ReportGenerator._exportArrayToXLSX('Inventario', headers, rows, fileName);
+    },
+    async exportConsumosToXLSX(consumos: any[], fileName: string = 'reporte_consumos.xlsx'): Promise<void> {
+
+            if (consumos.length === 0) {
+              throw new Error('No hay consumos para exportar.');
+            }
+            const headers = ['ID','Fecha','Empleado Nombre','SKU','Producto','Categoría','Cantidad Consumida','Proyecto/Uso','Costo Estimado'];
+            const rows = consumos.map(c => [ c.id, c.fecha ? c.fecha.split('T')[0] : '', c.empleado_nombre || 'Desconocido', c.producto_sku || '-', c.producto_nombre || 'Producto', c.categoria_nombre || '', c.cantidad || 0, c.detalle_motivo || '', c.costo_total || 0 ]);
+            await ReportGenerator._exportArrayToXLSX('Consumos', headers, rows, fileName);
+    },
+    async exportRetirosToXLSX(retiros: any[], fileName: string = 'reporte_retiros_material.xlsx'): Promise<void> {
+
+            if (retiros.length === 0) {
+              throw new Error('No hay retiros para exportar.');
+            }
+            const headers = ['ID','Fecha de Retiro','Empleado','SKU','Herramienta','Estado Entrega','Cantidad Prestada','Proyecto / Motivo'];
+            const rows = retiros.map(r => [ r.id, r.fecha ? r.fecha.split('T')[0] : '', r.empleado_nombre || 'Desconocido', r.producto_sku || '-', r.producto_nombre || 'Herramienta', r.estado_entrega || 'NUEVA', r.cantidad || 0, r.detalle_motivo || '' ]);
+            await ReportGenerator._exportArrayToXLSX('Retiros', headers, rows, fileName);
+    },
+    async exportVentasToXLSX(ventas: any[], fileName: string = 'reporte_ventas.xlsx'): Promise<void> {
+
+            if (ventas.length === 0) {
+              throw new Error('No hay ventas para exportar.');
+            }
+            const headers = ['ID','Folio','Fecha Creación','Cliente','Vendedor','Estatus','Monto Total'];
+            const rows = ventas.map(v => [ v.id, v.folio || 'S/F', v.created_at ? v.created_at.split('T')[0] : '', v.cliente_nombre || 'Desconocido', v.vendedor_nombre || 'Desconocido', v.estatus || '', v.total || 0 ]);
+            await ReportGenerator._exportArrayToXLSX('Ventas', headers, rows, fileName);
     }
-
-    let csvContent = '\uFEFF'; // BOM
-    csvContent += 'ID Venta,Fecha,Cliente,Referencia/Factura,Tipo Proyecto,Sucursal,Total Facturado (Venta),Total Costo (Proveedor),Utilidad Bruta,Margen %\n';
-
-    ventas.forEach((v) => {
-      const fecha = v.fecha || '';
-      const margenPercent = ((v.margen_porcentual || 0) * 100).toFixed(2);
-
-      const row = [
-        v.id,
-        fecha,
-        escapeCSVCell(v.cliente),
-        escapeCSVCell(v.factura_referencia),
-        escapeCSVCell(v.tipo_proyecto),
-        escapeCSVCell(v.sucursal),
-        Number(v.precio_total_facturado || 0).toFixed(2),
-        Number(v.costo_total || 0).toFixed(2),
-        Number(v.utilidad_bruta || 0).toFixed(2),
-        margenPercent + '%',
-      ].join(',');
-
-      csvContent += row + '\n';
-    });
-
-    try {
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      const fileUri = `${cacheDirectory}${fileName}`;
-      await writeAsStringAsync(fileUri, csvContent, {
-        encoding: EncodingType.UTF8,
-      });
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exportar Reporte Ventas CSV',
-          UTI: 'public.comma-separated-values-text',
-        });
-      } else {
-        throw new Error('La función de compartir no está disponible.');
-      }
-    } catch (error: any) {
-      logger.error('Error generating sales CSV:', error);
-      throw new Error(error.message || 'Error al generar reporte CSV de ventas.');
-    }
-  },
 };
 
 export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 'view' | 'download' = 'view', tipoDocumento: 'cotizacion' | 'venta' = 'cotizacion') {
@@ -3673,9 +3337,18 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
     '32690'
   );
 
-  const clientAddressStreet = facturaData?.customer?.address?.street || venta?.cliente_direccion || '';
-  const clientAddressExterior = facturaData?.customer?.address?.exterior || '';
-  const clientAddressCity = facturaData?.customer?.address?.city || '';
+  const clientAddressStreet = (
+    facturaData?.customer?.address?.street || 
+    facturaData?.customer?.address?.calle || 
+    facturaData?.receiver?.address?.street || 
+    facturaData?.receiver?.address?.calle || 
+    facturaData?.address?.street || 
+    venta?.cliente_direccion || 
+    venta?.direccion || 
+    ''
+  ).trim();
+  const clientAddressExterior = (facturaData?.customer?.address?.exterior || '').trim();
+  const clientAddressCity = (facturaData?.customer?.address?.city || '').trim();
   const clientAddressStr = [clientAddressStreet, clientAddressExterior, clientAddressCity].filter(Boolean).join(', ');
 
   // Detalles comerciales
@@ -3756,7 +3429,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           top: 0;
           left: 0;
           right: 0;
-          height: 125px;
+          height: 160px;
           z-index: 1;
           pointer-events: none;
           overflow: hidden;
@@ -3768,12 +3441,15 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          padding: 26px 45px 0 45px;
+          padding: 15px 45px 0 45px;
         }
         .company-logo {
-          max-height: 70px;
-          max-width: 320px;
-          object-fit: contain;
+          max-height: 150px;
+          height: 170px;
+          width: 450px;
+          margin-top: -10px;
+          position: relative;
+          z-index: 10;
         }
         .company-header-info {
           text-align: right;
@@ -4085,18 +3761,18 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
       <div class="page-container">
         <!-- Top wave banner -->
         <div class="top-banner">
-          <svg viewBox="0 0 1000 125" preserveAspectRatio="none" style="width: 100%; height: 125px; display: block;">
-            <path d="M 0,0 L 1000,0 L 1000,105 C 800,128, 480,135, 0,115 Z" fill="#F0EFEA" />
+          <svg viewBox="0 0 1000 160" preserveAspectRatio="none" style="width: 100%; height: 160px; display: block;">
+            <path d="M 0,0 L 1000,0 L 1000,135 C 800,165, 480,170, 0,150 Z" fill="#F0EFEA" />
           </svg>
         </div>
 
         <!-- Header Content -->
         <div class="header-content">
-          <div>
-            <img src="${branding.logo}" alt="Logo" class="company-logo" />
+          <div style="width: 50%;">
+            <img src="${branding.logo}" alt="Logo" class="company-logo" style="max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;" />
           </div>
-          <div class="company-header-info">
-            <div class="brand-title">INTTEC</div>
+          <div class="company-header-info" style="width: 50%;">
+            <div class="brand-title">${branding.name}</div>
             <div>Ozorno 811</div>
             <div>31107 Chihuahua, CHH</div>
             <div>México</div>
@@ -4122,7 +3798,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
                 <div class="client-name">${clientName}</div>
                 <div><strong>RFC:</strong> ${clientRfc}</div>
                 <div><strong>Regimen Fiscal:</strong> ${clientRegimen}</div>
-                <div>${clientAddressStr ? clientAddressStr + ', ' : ', , '}CP: ${clientCp}</div>
+                <div>${clientAddressStr ? `${clientAddressStr}, ` : ''}CP: ${clientCp}</div>
               </div>
             </div>
 
@@ -4338,3 +4014,404 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
     }
   }
 }
+
+// ==============================================================================
+// GENERADOR DE RECIBOS ELECTRÓNICOS DE PAGO (REP - CFDI 4.0 / PAGOS 2.0)
+// ==============================================================================
+
+export async function generarReciboPagoHTML(complemento: any, doctos: any[] = [], isDraft: boolean = false): Promise<string> {
+  const branding = await getCompanyBranding();
+
+  const formatFormaPago = (val: any) => {
+    if (!val) return '03 - Transferencia electrónica de fondos';
+    const str = String(val).trim();
+    if (str.includes('-')) return str;
+    const map: Record<string, string> = {
+      '01': '01 - Efectivo',
+      '02': '02 - Cheque nominativo',
+      '03': '03 - Transferencia electrónica de fondos',
+      '04': '04 - Tarjeta de crédito',
+      '28': '28 - Tarjeta de débito',
+      '99': '99 - Por definir',
+    };
+    return map[str] || `${str} - Transferencia electrónica de fondos`;
+  };
+
+  const formatDateDMY = (dateStr: any) => {
+    if (!dateStr) return '';
+    const s = String(dateStr).trim();
+    const clean = s.includes('T') ? s.split('T')[0] : s.split(' ')[0];
+    const parts = clean.split(/[-/]/);
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+      return `${parts[0]}/${parts[1]}/${parts[2]}`;
+    }
+    return clean;
+  };
+
+  const formatMoneyOdoo = (val: any) => `$ ${Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  let displayFolioTitle = complemento.folio_completo || '';
+  if (!displayFolioTitle) {
+    const rawFolio = cleanFolio(complemento.folio || '');
+    if (rawFolio.includes('/')) {
+      displayFolioTitle = rawFolio;
+    } else {
+      const serie = (complemento.serie || 'P').toUpperCase().trim();
+      let f = rawFolio || '0001';
+      if (f.toUpperCase().startsWith(serie)) {
+        f = f.slice(serie.length).trim();
+      }
+      if (/^\d+$/.test(f)) {
+        f = String(parseInt(f, 10)).padStart(4, '0');
+      }
+      displayFolioTitle = `${serie}${f}`;
+    }
+  }
+
+  const rawDate = complemento.fecha_pago || complemento.created_at || new Date().toISOString();
+  const fechaPagoFormatted = formatDateDMY(rawDate);
+  const rawEmision = complemento.created_at || new Date().toISOString();
+
+  const uuid = (complemento.cfdi_uuid || 'B750BB00-241C-5CF9-9FE3-8FB9A6539CC9').toUpperCase();
+  const rfcEmisor = 'FETR83041461A';
+  const rfcReceptor = (complemento.cliente_rfc || 'XAXX010101000').toUpperCase();
+  const clienteNombre = (complemento.cliente_nombre || complemento.cliente_razon_social || complemento.receptor_nombre || 'Electronica BRK de Mexico').trim();
+  const montoTotal = Number(complemento.monto_total || 0);
+  const formaPagoText = formatFormaPago(complemento.forma_pago_sat || complemento.forma_pago);
+  const memo = complemento.num_operacion || complemento.referencia || '';
+
+  const fe = (complemento.sello_cfd || '').slice(-8) || '00000000';
+  const qrUrl = complemento.qr_code || `https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${uuid}&re=${rfcEmisor}&rr=${rfcReceptor}&tt=${montoTotal.toFixed(2)}&fe=${fe}`;
+  const qrImageSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrUrl)}`;
+
+  const selloEmisor = complemento.sello_cfd || complemento.sello_digital || 'JmOxAsFjWOnxbIlx76lhfcSGKVT5NQxgPqVGxiuvi3FGG5OULVdM7fTPDQpuaW2+P/W2kwR219y7wIMsoz95laF3XB+pk5xRKTacWFRzkMVNVel7Njq+OYZypUFsm5tn+K30R+jJT2UBCY2QRX0+Zg3VqCjNcqEamL0KzQ+6x4kc7S/yyrfYrmQmfdH1oQ/vPblxICP//PblhtjOqNxsLUxnAXwi0BQ1luf0HGA4xklJVhnVBV/5D7ddmBoooYbneI7GIDw/2/F2bOd4afKv7TWnO8TQrIV8kPGJVfNIMKTwoHDA0AxsBLZUiluexShVYsqExPMauzQ8TMeEaBalg==';
+  const selloSat = complemento.sello_sat || 'm84UzXzwkBpqFsNk3x7Jz7fq1aD0U2x7W0/Mg1BjdtMGdFAUmDvRCyr/EQJWXFav9+up/BrknU1Iz0x/xujVH+H7oqBc4yjUVbIgcaxe/Wpr8eDhrSDUAFXMkj9Tm8rnvIWvCJMJ5Tj0pwd46dKYIPCzqF9x1k3iWKoZfo5Oaw2hjkBh5SOkDQe49BGPN9Y0FO3DFPmhupJi4qL7gJEufeSMt3HmvHUJtzSsWOV2OOluMTdtSghY9X660HDoxWavNKB1y/31c3CKJglX00DTAGbeGP50V3nFQRjXINMU4rnWbKjeOyawnkYdxf3wLMbxKtMBJOoNitotH9WRw==';
+  const noCertificadoSat = complemento.no_certificado_sat || '00001000000707310321';
+  const noCertificadoEmisor = complemento.no_certificado_emisor || complemento.no_certificado || '00001000000518827763';
+  const lugarExpedicion = complemento.lugar_expedicion || '31107';
+  const regimenFiscal = complemento.regimen_fiscal_emisor || complemento.regimen_fiscal || '612';
+  const fechaEmisionFull = rawEmision.replace('T', ' ').slice(0, 19);
+  const fechaCertificacionFull = (complemento.fecha_timbrado || rawEmision).replace('T', ' ').slice(0, 19);
+  const cadenaOriginal = complemento.cadena_original || `||1.1|${uuid}|${fechaEmisionFull}|CVD110412TF6|${selloEmisor.slice(0, 80)}...|${noCertificadoSat}||`;
+
+  const effectiveDoctos = (doctos && doctos.length > 0)
+    ? doctos
+    : (complemento.complementos_pago_doctos || complemento.doctos || complemento.documentos || []);
+
+  const table1Rows = (effectiveDoctos && effectiveDoctos.length > 0) ? effectiveDoctos.map((doc: any, idx: number) => {
+    const docSerie = (doc.serie || 'A').toUpperCase().trim();
+    const docFolio = cleanFolio(doc.folio) || (cleanFolio(doc.factura_referencia) || `308${9 - idx}`);
+    const facturaNum = doc.factura_serie ? `${doc.factura_serie}${cleanFolio(doc.factura_folio)}` : (docFolio.startsWith(docSerie) ? docFolio : `${docSerie}${docFolio}`);
+    const docUuid = (doc.uuid_documento || doc.cfdi_uuid || doc.uuid || 'BB948CD5-0487-5F8A-81D5-56B308AFDBF6').toUpperCase();
+    const parcialidad = doc.num_parcialidad ?? doc.numParcialidad ?? 1;
+    const saldoAnt = Number(doc.saldo_anterior ?? doc.saldoAnterior ?? 0);
+    const impPagado = Number(doc.importe_pagado ?? doc.importePagado ?? 0);
+    const saldo = Number(doc.saldo_insoluto ?? doc.saldoInsoluto ?? 0);
+    const moneda = (doc.moneda || doc.moneda_dr || 'MXN').toUpperCase();
+
+    return `
+      <tr>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: left; font-size: 11px;">${facturaNum}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: left; font-family: monospace; font-size: 10px; word-break: break-all;">${docUuid}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${parcialidad}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(saldoAnt)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(impPagado)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(saldo)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: center; font-size: 11px;">${moneda}</td>
+      </tr>
+    `;
+  }).join('') : `
+    <tr>
+      <td colspan="7" style="border: 1px solid #71717a; padding: 8px; text-align: center; color: #6b7280; font-size: 11px;">No se registraron documentos relacionados</td>
+    </tr>
+  `;
+
+  const table2Rows = (effectiveDoctos && effectiveDoctos.length > 0) ? effectiveDoctos.map((doc: any, idx: number) => {
+    const docSerie = (doc.serie || 'A').toUpperCase().trim();
+    const docFolio = cleanFolio(doc.folio) || (cleanFolio(doc.factura_referencia) || `308${9 - idx}`);
+    const facturaNum = doc.factura_serie ? `${doc.factura_serie}${cleanFolio(doc.factura_folio)}` : (docFolio.startsWith(docSerie) ? docFolio : `${docSerie}${docFolio}`);
+    const fechaFactura = formatDateDMY(doc.fecha_factura || doc.fecha || doc.created_at || rawDate);
+    const montoOriginal = Number(doc.monto_original ?? doc.monto_total ?? doc.total ?? doc.saldo_anterior ?? doc.saldoAnterior ?? doc.importe_pagado ?? 0);
+    const impPagado = Number(doc.importe_pagado ?? doc.importePagado ?? 0);
+    const saldo = Number(doc.saldo_insoluto ?? doc.saldoInsoluto ?? 0);
+
+    return `
+      <tr>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: left; font-size: 11px;">${fechaFactura}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: left; font-size: 11px;">${facturaNum}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(montoOriginal)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(impPagado)}</td>
+        <td style="border: 1px solid #71717a; padding: 4.5px 7px; text-align: right; font-size: 11px;">${formatMoneyOdoo(saldo)}</td>
+      </tr>
+    `;
+  }).join('') : `
+    <tr>
+      <td colspan="5" style="border: 1px solid #71717a; padding: 8px; text-align: center; color: #6b7280; font-size: 11px;">No se registraron facturas vinculadas</td>
+    </tr>
+  `;
+
+  return `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="utf-8">
+      <title>Recibo de pago: ${displayFolioTitle}</title>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          padding: 0;
+          background-color: #ffffff;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          color: #111827;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .page-container {
+          width: 8.5in;
+          min-height: 11in;
+          margin: 0 auto;
+          background: #ffffff;
+          position: relative;
+          display: flex;
+          flex-direction: column;
+        }
+        .top-banner-bg {
+          background-color: #f7f4f0;
+          padding: 24px 38px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 1px solid #eae5de;
+        }
+        .body-content {
+          padding: 24px 38px 24px 38px;
+          flex: 1;
+        }
+        @media print {
+          @page { size: letter; margin: 0; }
+          body { background: #fff !important; }
+          .page-container { width: 100% !important; min-height: auto !important; }
+        }
+      </style>
+    </head>
+    <body>
+      ${isDraft ? `
+        <div style="background-color: #fef3c7; border-bottom: 1px solid #f59e0b; color: #b45309; text-align: center; padding: 5px; font-weight: 700; font-size: 9px; letter-spacing: 0.5px;">
+          VISTA PREVIA / BORRADOR — RECIBO DE PAGO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
+        </div>
+      ` : ''}
+
+      <div class="page-container">
+        <!-- Header Banner -->
+        <div class="top-banner-bg">
+          <div style="flex: 1;">
+            ${branding.logo ? `<img src="${branding.logo}" style="height: 58px; max-width: 290px; object-fit: contain;" alt="INTTEC" />` : `<h2 style="margin: 0; font-size: 26px; font-weight: 900; color: #111;">INTTEC</h2>`}
+          </div>
+          <div style="text-align: right; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; line-height: 1.4; color: #111827;">
+            <div style="font-weight: 700; font-size: 11.5px; margin-bottom: 1px;">INTTEC</div>
+            <div>Ozorno 811</div>
+            <div>31107 Chihuahua, CHH</div>
+            <div>México</div>
+          </div>
+        </div>
+
+        <div class="body-content">
+          <!-- Document Title -->
+          <h1 style="font-size: 23px; font-weight: 800; color: #111827; margin: 0 0 16px 0; font-family: 'Helvetica Neue', Arial, sans-serif; letter-spacing: -0.2px;">
+            Recibo de pago: ${displayFolioTitle}
+          </h1>
+
+          <!-- Metadata List -->
+          <div style="font-size: 11.5px; line-height: 1.6; color: #111827; margin-bottom: 22px; font-family: 'Helvetica Neue', Arial, sans-serif;">
+            <div><strong>Fecha de pago:</strong> ${fechaPagoFormatted}</div>
+            <div><strong>Forma de pago:</strong> ${formaPagoText}</div>
+            <div><strong>Cliente:</strong>${clienteNombre}</div>
+            <div style="display: flex; align-items: baseline;">
+              <div style="width: 50%;"><strong>Importe de pago:</strong> ${formatMoneyOdoo(montoTotal)}</div>
+              ${memo ? `<div><strong>Memo:</strong> ${memo}</div>` : ''}
+            </div>
+          </div>
+
+          <!-- Table 1: Detalle con UUID y Parcialidades -->
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; border: 1px solid #71717a;">
+            <thead>
+              <tr style="background: #ffffff;">
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: left; font-weight: 700; width: 10%;">Factura</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: left; font-weight: 700; width: 44%;">UUID</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 9%;">Parcialidad</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 13%;">Saldo anterior</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 13%;">Monto pagado</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 11%;">Saldo</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: center; font-weight: 700; width: 8%;">Moneda</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${table1Rows}
+            </tbody>
+          </table>
+
+          <!-- Table 2: Resumen de Facturas -->
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 22px; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; border: 1px solid #71717a;">
+            <thead>
+              <tr style="background: #ffffff;">
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: left; font-weight: 700; width: 27%;">Fecha de la factura</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: left; font-weight: 700; width: 23%;">Número de factura</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 18%;">Monto original</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 18%;">Monto pagado</th>
+                <th style="border: 1px solid #71717a; padding: 5px 7px; text-align: right; font-weight: 700; width: 14%;">Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${table2Rows}
+            </tbody>
+          </table>
+
+          <!-- SAT / Sello Digital Block -->
+          <div style="display: flex; gap: 14px; margin-bottom: 10px; align-items: flex-start; page-break-inside: avoid;">
+            <!-- Left: QR Code -->
+            <div style="flex: 0 0 128px; text-align: center;">
+              <img src="${qrImageSrc}" style="width: 128px; height: 128px; display: block;" alt="QR SAT" />
+            </div>
+            <!-- Right: 3 Bars -->
+            <div style="flex: 1; min-width: 0;">
+              <!-- Bar 1 -->
+              <div style="margin-bottom: 5px;">
+                <div style="background-color: #6b7280; color: #ffffff; font-size: 7.5px; font-weight: 700; text-align: center; padding: 2px 4px;">
+                  Sello digital del emisor
+                </div>
+                <div style="font-family: monospace; font-size: 6px; line-height: 1.15; word-break: break-all; color: #111827; padding: 1.5px 0;">
+                  ${selloEmisor}
+                </div>
+              </div>
+
+              <!-- Bar 2 -->
+              <div style="margin-bottom: 5px;">
+                <div style="background-color: #6b7280; color: #ffffff; font-size: 7.5px; font-weight: 700; text-align: center; padding: 2px 4px;">
+                  Sello digital del SAT
+                </div>
+                <div style="font-family: monospace; font-size: 6px; line-height: 1.15; word-break: break-all; color: #111827; padding: 1.5px 0;">
+                  ${selloSat}
+                </div>
+              </div>
+
+              <!-- Bar 3 -->
+              <div style="margin-bottom: 5px;">
+                <div style="background-color: #6b7280; color: #ffffff; font-size: 7.5px; font-weight: 700; text-align: center; padding: 2px 4px;">
+                  Cadena original del complemento de certificado digital del SAT
+                </div>
+                <div style="font-family: monospace; font-size: 6px; line-height: 1.15; word-break: break-all; color: #111827; padding: 1.5px 0;">
+                  ${cadenaOriginal}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Información adicional -->
+          <div style="page-break-inside: avoid;">
+            <div style="background-color: #6b7280; color: #ffffff; font-size: 7.5px; font-weight: 700; text-align: center; padding: 2px 4px;">
+              Información adicional
+            </div>
+            <div style="font-size: 7px; line-height: 1.35; color: #1f2937; text-align: center; padding: 3px 6px;">
+              Certificado del emisor: ${noCertificadoEmisor} | Certificado SAT: ${noCertificadoSat} | Lugar de expedición: ${lugarExpedicion} | Régimen fiscal: ${regimenFiscal} | Fecha de emisión: ${fechaEmisionFull} | Fecha de certificación: ${fechaCertificacionFull} | Folio Fiscal: ${uuid}
+            </div>
+            <div style="text-align: center; font-size: 7.5px; color: #374151; font-weight: 600; margin-top: 4px;">
+              Este documento es una representación impresa de un CFDI
+            </div>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+export async function exportarReciboPagoPDF(complemento: any, doctos: any[] = [], action: 'view' | 'download' = 'view') {
+  try {
+    const htmlContent = await generarReciboPagoHTML(complemento, doctos, false);
+
+    const clienteRaw = complemento.cliente_nombre || 'Cliente';
+    const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+    const serie = (complemento.serie || 'P').toUpperCase().trim();
+    let folioNum = cleanFolio(complemento.folio || '0001');
+    if (folioNum.toUpperCase().startsWith(serie)) {
+      folioNum = folioNum.slice(serie.length).trim();
+    }
+    if (/^\d+$/.test(folioNum)) {
+      folioNum = String(parseInt(folioNum, 10)).padStart(4, '0');
+    }
+
+    const fullFileName = `${clienteSanitized}_Pago_${serie}${folioNum}`;
+
+    if (Platform.OS === 'web') {
+      const prevDocTitle = document.title;
+      document.title = fullFileName;
+
+      if (action === 'download') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = fullFileName;
+          iframeDoc.close();
+
+          iframe.onload = () => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => {
+              try { document.body.removeChild(iframe); } catch (_) {}
+              document.title = prevDocTitle;
+            }, 1500);
+          };
+        }
+      } else {
+        const newWindow = window.open('', '_blank');
+        if (newWindow) {
+          newWindow.document.write(htmlContent);
+          newWindow.document.title = fullFileName;
+          newWindow.document.close();
+        }
+        document.title = prevDocTitle;
+      }
+    } else {
+      if (action === 'view') {
+        await Print.printAsync({ html: htmlContent });
+      } else {
+        const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+        const customNameUri = `${cacheDirectory}${fullFileName}.pdf`;
+        await writeAsStringAsync(customNameUri, base64 || '', {
+          encoding: EncodingType.Base64,
+        });
+
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(customNameUri, {
+            mimeType: 'application/pdf',
+            dialogTitle: `${fullFileName}.pdf`
+          });
+        } else {
+          throw new Error('La función de compartir no está disponible.');
+        }
+      }
+    }
+  } catch (error: any) {
+    logger.error('Error generando PDF de recibo de pago:', error);
+    if (Platform.OS === 'web') {
+      window.alert('Error: No se pudo generar el documento PDF del pago. ' + (error?.message || ''));
+    } else {
+      Alert.alert('Error', 'No se pudo generar el documento PDF del pago. ' + (error?.message || ''));
+    }
+  }
+}
+
