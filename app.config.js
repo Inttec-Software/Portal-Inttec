@@ -10,7 +10,7 @@ module.exports = {
     ios: {
       bundleIdentifier: "com.alexisef23.appmovil",
       appleTeamId: "2345ZRS7HS",
-      icon: "./assets/expo.icon",
+      icon: "./assets/images/icon.png",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false
       }
