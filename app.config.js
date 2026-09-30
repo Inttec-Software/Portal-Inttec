@@ -13,9 +13,6 @@ module.exports = {
       icon: "./assets/expo.icon",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false
-      },
-      config: {
-        googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ""
       }
     },
     android: {
