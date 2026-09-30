@@ -33,6 +33,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import GastoFotosGallery from '@/components/GastoFotosGallery';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { base64ToArrayBuffer } from '@/services/sync';
@@ -107,6 +108,7 @@ export default function AdminGastosScreen() {
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
   const [prevSelectedGastoId, setPrevSelectedGastoId] = useState<string | undefined>(undefined);
@@ -2930,23 +2932,15 @@ export default function AdminGastosScreen() {
 
             {selectedGasto && (
               <ScrollView contentContainerStyle={styles.modalScroll}>
-                {selectedGasto.foto_url ? (
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => {
-                      setActivePreviewUrl(selectedGasto.foto_url!);
-                      setViewerVisible(true);
-                    }}
-                    style={styles.modalImageContainer}
-                  >
-                    <Image source={{ uri: selectedGasto.foto_url }} style={styles.modalImage} resizeMode="contain" />
-                  </TouchableOpacity>
-                ) : (
-                  <View style={[styles.modalNoImage, { backgroundColor: themeColors.backgroundElement }]}>
-                    <Ionicons name="image-outline" size={48} color={themeColors.textSecondary} />
-                    <Text style={{ color: themeColors.textSecondary }}>Sin fotografía de ticket</Text>
-                  </View>
-                )}
+                <GastoFotosGallery
+                  gasto={selectedGasto}
+                  themeColors={themeColors}
+                  onPhotoPress={(url, index) => {
+                    setActivePreviewUrl(url);
+                    setViewerInitialIndex(index);
+                    setViewerVisible(true);
+                  }}
+                />
 
                 <View style={styles.modalDetails}>
                   {/* Monto */}
@@ -5741,6 +5735,8 @@ export default function AdminGastosScreen() {
       <ImageViewerModal
         visible={viewerVisible}
         imageUrl={activePreviewUrl}
+        imageUrls={selectedGasto ? GastoHelper.getFotoUrls(selectedGasto) : (activePreviewUrl ? (activePreviewUrl.includes(',') ? activePreviewUrl.split(',').map(u => u.trim()) : [activePreviewUrl]) : [])}
+        initialIndex={viewerInitialIndex}
         onClose={() => {
           setViewerVisible(false);
           setActivePreviewUrl(null);

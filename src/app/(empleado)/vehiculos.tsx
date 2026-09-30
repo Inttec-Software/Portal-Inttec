@@ -204,6 +204,7 @@ export default function EmpleadoVehiculosScreen() {
       <ImageViewerModal
         visible={viewerVisible}
         imageUrl={activePreviewUrl}
+        imageUrls={activePreviewUrl ? (activePreviewUrl.includes(',') ? activePreviewUrl.split(',').map(u => u.trim()) : [activePreviewUrl]) : []}
         onClose={() => {
           setViewerVisible(false);
           setActivePreviewUrl(null);

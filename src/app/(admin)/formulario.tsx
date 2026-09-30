@@ -70,11 +70,14 @@ export default function GastoForm() {
   const [nuevoProvRfc, setNuevoProvRfc] = useState('');
   const [isSavingProv, setIsSavingProv] = useState(false);
 
-  // Paso 1: Evidencia
+  // Paso 1: Evidencia (Soporte multi-fotos)
+  const [ticketFiles, setTicketFiles] = useState<{ uri: string; base64?: string; ext: string }[]>([]);
+  const [activeTicketIndex, setActiveTicketIndex] = useState<number>(0);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageExt, setImageExt] = useState<string>('jpg');
   const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
 
   // Estados para compartir consumo con otros empleados
   const [allUsers, setAllUsers] = useState<Usuario[]>([]);
@@ -282,14 +285,26 @@ export default function GastoForm() {
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: Platform.OS !== 'web',
-        quality: 0.5,
+        quality: 0.6,
         base64: true,
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        const optimized = await optimizeImage(result.assets[0].uri);
-        setImageUri(optimized.uri);
-        setImageBase64(optimized.base64 || null);
+        const asset = result.assets[0];
+        const optimized = await optimizeImage(asset.uri);
+        const newFile = {
+          uri: optimized.uri,
+          base64: optimized.base64 || asset.base64 || '',
+          ext: 'jpg',
+        };
+        setTicketFiles(prev => {
+          const updated = [...prev, newFile];
+          setActiveTicketIndex(updated.length - 1);
+          return updated;
+        });
+        setImageUri(newFile.uri);
+        setImageBase64(newFile.base64 || null);
+        setImageExt('jpg');
         setAlertaPolitica(null);
       }
     } catch (err) {
@@ -310,22 +325,74 @@ export default function GastoForm() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.5,
+        allowsMultipleSelection: true,
+        quality: 0.6,
         base64: true,
       });
 
-      if (!result.canceled && result.assets?.[0]) {
-        const optimized = await optimizeImage(result.assets[0].uri);
-        setImageUri(optimized.uri);
-        setImageBase64(optimized.base64 || null);
-        setImageExt('jpg');
-        setAlertaPolitica(null);
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const newFiles: { uri: string; base64?: string; ext: string }[] = [];
+        for (const asset of result.assets) {
+          try {
+            const optimized = await optimizeImage(asset.uri);
+            newFiles.push({
+              uri: optimized.uri,
+              base64: optimized.base64 || asset.base64 || '',
+              ext: 'jpg',
+            });
+          } catch (e) {
+            newFiles.push({
+              uri: asset.uri,
+              base64: asset.base64 || '',
+              ext: 'jpg',
+            });
+          }
+        }
+        if (newFiles.length > 0) {
+          setTicketFiles(prev => {
+            const updated = [...prev, ...newFiles];
+            setActiveTicketIndex(updated.length - 1);
+            return updated;
+          });
+          const lastFile = newFiles[newFiles.length - 1];
+          setImageUri(lastFile.uri);
+          setImageBase64(lastFile.base64 || null);
+          setImageExt(lastFile.ext);
+          setAlertaPolitica(null);
+        }
       }
     } catch (err) {
       console.error('Gallery select error:', err);
       showAlert('Error', 'No se pudo abrir la galería.');
     }
+  };
+
+  const handleRemoveTicket = (indexToRemove: number) => {
+    setTicketFiles(prev => {
+      const updated = prev.filter((_, idx) => idx !== indexToRemove);
+      if (updated.length === 0) {
+        setImageUri(null);
+        setImageBase64(null);
+        setActiveTicketIndex(0);
+      } else {
+        const nextIdx = Math.min(activeTicketIndex, updated.length - 1);
+        setActiveTicketIndex(nextIdx);
+        setImageUri(updated[nextIdx].uri);
+        setImageBase64(updated[nextIdx].base64 || null);
+        setImageExt(updated[nextIdx].ext);
+      }
+      return updated;
+    });
+  };
+
+  const handleClearAllTickets = () => {
+    setTicketFiles([]);
+    setImageUri(null);
+    setImageBase64(null);
+    setActiveTicketIndex(0);
+    setAlertaPolitica(null);
+    setIncluyePropina(null);
+    setMontoPropina('');
   };
 
   const _handleSelectDocument = async () => {
@@ -337,9 +404,7 @@ export default function GastoForm() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
-        setImageUri(file.uri);
         const ext = file.name ? file.name.split('.').pop()?.toLowerCase() || 'jpg' : 'jpg';
-        setImageExt(ext === 'pdf' ? 'pdf' : 'jpg');
         
         let base64Str = '';
         if (Platform.OS === 'web') {
@@ -371,6 +436,19 @@ export default function GastoForm() {
              xhr.send(null);
            });
         }
+
+        const newDocFile = {
+          uri: file.uri,
+          base64: base64Str,
+          ext: ext === 'pdf' ? 'pdf' : 'jpg',
+        };
+        setTicketFiles(prev => {
+          const updated = [...prev, newDocFile];
+          setActiveTicketIndex(updated.length - 1);
+          return updated;
+        });
+        setImageUri(file.uri);
+        setImageExt(newDocFile.ext);
         setImageBase64(base64Str);
         setAlertaPolitica(null);
       }
@@ -571,7 +649,7 @@ export default function GastoForm() {
     if (!currentUser) return;
     
     // 1. Validar Foto de comprobante
-    if (!imageUri) {
+    if (ticketFiles.length === 0 && !imageUri) {
       showAlert('Validación', 'Por favor toma o selecciona una foto del comprobante/ticket.');
       setCurrentStep(1);
       return;
@@ -802,30 +880,65 @@ export default function GastoForm() {
       const netState = await NetInfo.fetch();
       
       if (netState.isConnected) {
-        // En línea: Subir foto y guardar en Supabase
-        let publicUrl = imageUri;
-        if (imageBase64) {
-          try {
-            const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
-            const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
-            const arrayBuffer = base64ToArrayBuffer(imageBase64);
+        // En línea: Subir foto(s) y guardar en Supabase
+        let publicTicketUrls: string[] = [];
+        if (ticketFiles.length > 0) {
+          for (let i = 0; i < ticketFiles.length; i++) {
+            const tf = ticketFiles[i];
+            let fileUrl = tf.uri;
+            if (tf.base64) {
+              try {
+                const ext = tf.ext || 'jpg';
+                const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
+                const fileName = `${currentUser.id}/ticket_${Date.now()}_${i}.${ext}`;
+                const arrayBuffer = base64ToArrayBuffer(tf.base64);
 
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('tickets')
-              .upload(fileName, arrayBuffer, { contentType, upsert: true });
+                const { error: uploadError } = await supabase.storage
+                  .from('tickets')
+                  .upload(fileName, arrayBuffer, { contentType, upsert: true });
 
-            if (!uploadError) {
-              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-              publicUrl = urlData.publicUrl;
-            } else {
-              console.warn('Supabase storage upload skipped or failed:', uploadError);
+                if (!uploadError) {
+                  const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+                  if (urlData?.publicUrl) {
+                    fileUrl = urlData.publicUrl;
+                  }
+                } else {
+                  console.warn(`Supabase ticket [${i}] upload failed:`, uploadError);
+                }
+              } catch (stErr) {
+                console.warn(`Storage upload ticket [${i}] exception:`, stErr);
+              }
             }
-          } catch (stErr) {
-            console.warn('Storage upload exception (continuing):', stErr);
+            if (fileUrl) {
+              publicTicketUrls.push(fileUrl);
+            }
+          }
+        } else if (imageUri) {
+          if (imageBase64) {
+            try {
+              const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
+              const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
+              const arrayBuffer = base64ToArrayBuffer(imageBase64);
+
+              const { error: uploadError } = await supabase.storage
+                .from('tickets')
+                .upload(fileName, arrayBuffer, { contentType, upsert: true });
+
+              if (!uploadError) {
+                const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+                if (urlData?.publicUrl) publicTicketUrls.push(urlData.publicUrl);
+              } else {
+                publicTicketUrls.push(imageUri);
+              }
+            } catch (stErr) {
+              publicTicketUrls.push(imageUri);
+            }
+          } else {
+            publicTicketUrls.push(imageUri);
           }
         }
+        const publicUrl = publicTicketUrls.join(',') || null;
 
-        // Subir factura si se seleccionó una
         // Subir factura si se seleccionó una
         let publicInvoiceUrl = '';
         if (facturado && facturasFiles.length > 0) {
@@ -914,6 +1027,10 @@ export default function GastoForm() {
         showAlert('Éxito', 'Gasto registrado correctamente en el servidor.');
       } else {
         // Fuera de línea: Guardar localmente
+        const ticketPhotosToSync = ticketFiles.length > 0
+          ? ticketFiles.filter(f => !!f.base64).map(f => ({ base64: f.base64!, ext: f.ext }))
+          : (imageBase64 ? [{ base64: imageBase64, ext: imageExt }] : []);
+
         const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
         if (isSplit) {
           for (let i = 0; i < splits.length; i++) {
@@ -928,8 +1045,9 @@ export default function GastoForm() {
               sucursal: s.sucursalNombre || null,
               sucursal_id: splitSucObj?.id || null,
               justificacion: `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${i + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`,
-              base64Foto: imageBase64 || undefined,
-              fotoExt: imageExt,
+              base64Foto: ticketPhotosToSync.length > 0 ? ticketPhotosToSync[0].base64 : (imageBase64 || undefined),
+              fotoExt: ticketPhotosToSync.length > 0 ? ticketPhotosToSync[0].ext : imageExt,
+              base64Fotos: ticketPhotosToSync.length > 0 ? ticketPhotosToSync : undefined,
               base64Factura: facturasFiles.length > 0 ? JSON.stringify(facturasFiles) : undefined,
               facturaExt: "json",
               vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
@@ -940,8 +1058,9 @@ export default function GastoForm() {
         } else {
           await SyncService.enqueueGasto({
             ...gastoPayload,
-            base64Foto: imageBase64 || undefined,
-            fotoExt: imageExt,
+            base64Foto: ticketPhotosToSync.length > 0 ? ticketPhotosToSync[0].base64 : (imageBase64 || undefined),
+            fotoExt: ticketPhotosToSync.length > 0 ? ticketPhotosToSync[0].ext : imageExt,
+            base64Fotos: ticketPhotosToSync.length > 0 ? ticketPhotosToSync : undefined,
             base64Factura: facturasFiles.length > 0 ? JSON.stringify(facturasFiles) : undefined,
             facturaExt: "json",
             vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
@@ -1063,41 +1182,55 @@ export default function GastoForm() {
               </Text>
               
               <View style={[styles.imageCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                {imageUri ? (
+                {(ticketFiles.length > 0 || imageUri) ? (
                   <View style={styles.previewContainer}>
                     <TouchableOpacity 
                       style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
                       onPress={() => {
-                        if (imageExt !== 'pdf') {
-                          setActivePreviewUrl(imageUri);
+                        const currentFile = ticketFiles[activeTicketIndex] || ticketFiles[0];
+                        const curExt = currentFile ? currentFile.ext : imageExt;
+                        const curUri = currentFile ? currentFile.uri : imageUri;
+                        if (curExt !== 'pdf' && curUri) {
+                          setActivePreviewUrl(curUri);
+                          setViewerInitialIndex(ticketFiles.length > 0 ? activeTicketIndex : 0);
                           setViewerVisible(true);
                         }
                       }}
-                      activeOpacity={imageExt === 'pdf' ? 1 : 0.7}
+                      activeOpacity={(ticketFiles[activeTicketIndex]?.ext || imageExt) === 'pdf' ? 1 : 0.7}
                     >
-                      {imageExt === 'pdf' ? (
+                      {(ticketFiles[activeTicketIndex]?.ext || imageExt) === 'pdf' ? (
                         <View style={[styles.previewImage, { justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors.backgroundElement }]}>
                           <Ionicons name="document-text" size={64} color={themeColors.danger} />
                           <Text style={{ color: themeColors.text, marginTop: Spacing.one, fontWeight: '500' }}>Documento PDF</Text>
                         </View>
                       ) : (
-                        <Image source={{ uri: imageUri }} style={[styles.previewImage, { width: '100%', height: '100%' }]} resizeMode="contain" />
+                        <Image
+                          source={{ uri: ticketFiles[activeTicketIndex]?.uri || ticketFiles[0]?.uri || imageUri! }}
+                          style={[styles.previewImage, { width: '100%', height: '100%' }]}
+                          resizeMode="contain"
+                        />
                       )}
-                      {imageExt !== 'pdf' && (
+                      {(ticketFiles[activeTicketIndex]?.ext || imageExt) !== 'pdf' && (
                         <View style={styles.zoomBadgeOverlay}>
                           <Ionicons name="scan-outline" size={13} color="#ffffff" />
-                          <Text style={styles.zoomBadgeOverlayText}>Toca para ampliar</Text>
+                          <Text style={styles.zoomBadgeOverlayText}>
+                            {ticketFiles.length > 1 ? `Toca para ampliar (${activeTicketIndex + 1}/${ticketFiles.length})` : 'Toca para ampliar'}
+                          </Text>
                         </View>
                       )}
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.removeImageBtn}
                       onPress={() => {
-                        setImageUri(null);
-                        setImageBase64(null);
-                        setAlertaPolitica(null);
-                        setIncluyePropina(null);
-                        setMontoPropina('');
+                        if (ticketFiles.length > 0) {
+                          handleRemoveTicket(activeTicketIndex);
+                        } else {
+                          setImageUri(null);
+                          setImageBase64(null);
+                          setAlertaPolitica(null);
+                          setIncluyePropina(null);
+                          setMontoPropina('');
+                        }
                       }}
                     >
                       <Ionicons name="trash" size={20} color="#ffffff" />
@@ -1107,30 +1240,112 @@ export default function GastoForm() {
                   <View style={styles.uploadPlaceholder}>
                     <Ionicons name="receipt-outline" size={64} color={themeColors.textSecondary} />
                     <Text style={[styles.placeholderText, { color: themeColors.textSecondary }]}>
-                      Captura el comprobante
+                      Captura el comprobante (1 o varias fotos)
                     </Text>
                   </View>
                 )}
               </View>
 
+              {/* Tira de miniaturas si hay más de 1 foto */}
+              {ticketFiles.length > 1 && (
+                <View style={{ marginTop: Spacing.one }}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+                    {ticketFiles.map((file, idx) => {
+                      const isSelected = idx === activeTicketIndex;
+                      return (
+                        <TouchableOpacity
+                          key={idx}
+                          onPress={() => {
+                            setActiveTicketIndex(idx);
+                            setImageUri(file.uri);
+                            setImageBase64(file.base64 || null);
+                            setImageExt(file.ext);
+                          }}
+                          style={{
+                            width: 62,
+                            height: 62,
+                            borderRadius: 10,
+                            borderWidth: 2,
+                            borderColor: isSelected ? themeColors.accent : themeColors.border,
+                            overflow: 'hidden',
+                            position: 'relative',
+                            backgroundColor: themeColors.backgroundElement,
+                          }}
+                        >
+                          {file.ext === 'pdf' ? (
+                            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                              <Ionicons name="document-text" size={22} color={themeColors.danger} />
+                            </View>
+                          ) : (
+                            <Image source={{ uri: file.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                          )}
+                          <View
+                            style={{
+                              position: 'absolute',
+                              bottom: 2,
+                              left: 2,
+                              backgroundColor: 'rgba(0,0,0,0.65)',
+                              borderRadius: 4,
+                              paddingHorizontal: 4,
+                              paddingVertical: 1,
+                            }}
+                          >
+                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>#{idx + 1}</Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => handleRemoveTicket(idx)}
+                            style={{
+                              position: 'absolute',
+                              top: 2,
+                              right: 2,
+                              backgroundColor: 'rgba(239,68,68,0.85)',
+                              borderRadius: 8,
+                              width: 16,
+                              height: 16,
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Ionicons name="close" size={10} color="#fff" />
+                          </TouchableOpacity>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
               <View style={{ flexDirection: 'column', gap: Spacing.one, marginTop: Spacing.two }}>
                 <View style={{ flexDirection: 'row', gap: Spacing.one }}>
                   <TouchableOpacity
-                    style={[{ flex: 1, backgroundColor: themeColors.primary, borderRadius: 16, height: 90, justifyContent: 'center', alignItems: 'center', shadowColor: themeColors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 }]}
+                    style={[{ flex: 1, backgroundColor: themeColors.primary, borderRadius: 16, height: 75, justifyContent: 'center', alignItems: 'center', shadowColor: themeColors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 }]}
                     onPress={handleCapturePhoto}
                   >
-                    <Ionicons name="camera" size={32} color="#ffffff" />
-                    <Text style={{ color: '#ffffff', marginTop: 8, fontWeight: '700', fontSize: 14 }}>Cámara</Text>
+                    <Ionicons name="camera" size={28} color="#ffffff" />
+                    <Text style={{ color: '#ffffff', marginTop: 4, fontWeight: '700', fontSize: 13 }}>
+                      {ticketFiles.length > 0 ? '+ Otra Foto' : 'Cámara'}
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[{ flex: 1, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, borderWidth: 1, borderRadius: 16, height: 90, justifyContent: 'center', alignItems: 'center' }]}
+                    style={[{ flex: 1, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, borderWidth: 1, borderRadius: 16, height: 75, justifyContent: 'center', alignItems: 'center' }]}
                     onPress={handleSelectGallery}
                   >
-                    <Ionicons name="images" size={32} color={themeColors.text} />
-                    <Text style={{ color: themeColors.text, marginTop: 8, fontWeight: '700', fontSize: 14 }}>Galería</Text>
+                    <Ionicons name="images" size={28} color={themeColors.text} />
+                    <Text style={{ color: themeColors.text, marginTop: 4, fontWeight: '700', fontSize: 13 }}>
+                      {ticketFiles.length > 0 ? '+ De Galería' : 'Galería'}
+                    </Text>
                   </TouchableOpacity>
                 </View>
-
+                {ticketFiles.length > 1 && (
+                  <TouchableOpacity
+                    style={{ alignSelf: 'center', paddingVertical: 4 }}
+                    onPress={handleClearAllTickets}
+                  >
+                    <Text style={{ color: themeColors.danger, fontSize: 12, fontWeight: '600' }}>
+                      Eliminar todas las fotos ({ticketFiles.length})
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               {/* Pregunta si es Comida */}
@@ -1329,27 +1544,35 @@ export default function GastoForm() {
                 2. Detalles de la Compra
               </Text>
 
-              {imageUri && (
+              {(ticketFiles.length > 0 || imageUri) && (
                 <TouchableOpacity
                   onPress={() => {
-                    if (imageExt !== 'pdf') {
-                      setActivePreviewUrl(imageUri);
+                    const currentFile = ticketFiles[activeTicketIndex] || ticketFiles[0];
+                    const curExt = currentFile ? currentFile.ext : imageExt;
+                    const curUri = currentFile ? currentFile.uri : imageUri;
+                    if (curExt !== 'pdf' && curUri) {
+                      setActivePreviewUrl(curUri);
+                      setViewerInitialIndex(ticketFiles.length > 0 ? activeTicketIndex : 0);
                       setViewerVisible(true);
                     }
                   }}
                   activeOpacity={0.8}
                   style={[styles.floatingPreviewBanner, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                 >
-                  {imageExt === 'pdf' ? (
+                  {(ticketFiles[0]?.ext === 'pdf' || (!ticketFiles.length && imageExt === 'pdf')) ? (
                     <View style={styles.floatingPreviewThumb}>
                       <Ionicons name="document-text" size={24} color={themeColors.danger} />
                     </View>
                   ) : (
-                    <Image source={{ uri: imageUri }} style={styles.floatingPreviewThumb} resizeMode="cover" />
+                    <Image source={{ uri: ticketFiles[0]?.uri || imageUri! }} style={styles.floatingPreviewThumb} resizeMode="cover" />
                   )}
                   <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={[styles.floatingPreviewTitle, { color: themeColors.text }]}>Ticket Adjunto (Vista Previa)</Text>
-                    <Text style={[styles.floatingPreviewSub, { color: themeColors.textSecondary }]}>Toca aquí para ampliar y revisar el ticket</Text>
+                    <Text style={[styles.floatingPreviewTitle, { color: themeColors.text }]}>
+                      Ticket{ticketFiles.length > 1 ? `s (${ticketFiles.length} fotos)` : ''} Adjunto
+                    </Text>
+                    <Text style={[styles.floatingPreviewSub, { color: themeColors.textSecondary }]}>
+                      Toca aquí para ampliar y revisar {ticketFiles.length > 1 ? 'las fotos' : 'el ticket'}
+                    </Text>
                   </View>
                   <Ionicons name="eye-outline" size={20} color={themeColors.primary} />
                 </TouchableOpacity>
@@ -2315,27 +2538,35 @@ export default function GastoForm() {
                 3. Categorización e Información de Negocio
               </Text>
 
-              {imageUri && (
+              {(ticketFiles.length > 0 || imageUri) && (
                 <TouchableOpacity
                   onPress={() => {
-                    if (imageExt !== 'pdf') {
-                      setActivePreviewUrl(imageUri);
+                    const currentFile = ticketFiles[activeTicketIndex] || ticketFiles[0];
+                    const curExt = currentFile ? currentFile.ext : imageExt;
+                    const curUri = currentFile ? currentFile.uri : imageUri;
+                    if (curExt !== 'pdf' && curUri) {
+                      setActivePreviewUrl(curUri);
+                      setViewerInitialIndex(ticketFiles.length > 0 ? activeTicketIndex : 0);
                       setViewerVisible(true);
                     }
                   }}
                   activeOpacity={0.8}
                   style={[styles.floatingPreviewBanner, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
                 >
-                  {imageExt === 'pdf' ? (
+                  {(ticketFiles[0]?.ext === 'pdf' || (!ticketFiles.length && imageExt === 'pdf')) ? (
                     <View style={styles.floatingPreviewThumb}>
                       <Ionicons name="document-text" size={24} color={themeColors.danger} />
                     </View>
                   ) : (
-                    <Image source={{ uri: imageUri }} style={styles.floatingPreviewThumb} resizeMode="cover" />
+                    <Image source={{ uri: ticketFiles[0]?.uri || imageUri! }} style={styles.floatingPreviewThumb} resizeMode="cover" />
                   )}
                   <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={[styles.floatingPreviewTitle, { color: themeColors.text }]}>Ticket Adjunto (Vista Previa)</Text>
-                    <Text style={[styles.floatingPreviewSub, { color: themeColors.textSecondary }]}>Toca aquí para ampliar y revisar el ticket</Text>
+                    <Text style={[styles.floatingPreviewTitle, { color: themeColors.text }]}>
+                      Ticket{ticketFiles.length > 1 ? `s (${ticketFiles.length} fotos)` : ''} Adjunto
+                    </Text>
+                    <Text style={[styles.floatingPreviewSub, { color: themeColors.textSecondary }]}>
+                      Toca aquí para ampliar y revisar {ticketFiles.length > 1 ? 'las fotos' : 'el ticket'}
+                    </Text>
                   </View>
                   <Ionicons name="eye-outline" size={20} color={themeColors.primary} />
                 </TouchableOpacity>
@@ -2586,6 +2817,8 @@ export default function GastoForm() {
       <ImageViewerModal
         visible={viewerVisible}
         imageUrl={activePreviewUrl}
+        imageUrls={ticketFiles.length > 0 ? ticketFiles.filter(f => f.ext !== 'pdf').map(f => f.uri) : (activePreviewUrl ? [activePreviewUrl] : [])}
+        initialIndex={viewerInitialIndex}
         onClose={() => {
           setViewerVisible(false);
           setActivePreviewUrl(null);

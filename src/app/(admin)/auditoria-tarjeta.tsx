@@ -27,6 +27,7 @@ import { supabase, Gasto, GastoHelper, AuditoriaService, AuditoriaTarjeta } from
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { GeminiService, CardTransaction, CardStatementResult } from '@/services/gemini';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import GastoFotosGallery from '@/components/GastoFotosGallery';
 import { useAuth } from '@/context/AuthContext';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -123,6 +124,8 @@ export default function AuditoriaTarjetaScreen() {
   const [selectedMatch, setSelectedMatch] = useState<MatchedTransaction | null>(null);
   const [selectedGastosToLink, setSelectedGastosToLink] = useState<Set<string>>(new Set());
   const [photoViewerUrl, setPhotoViewerUrl] = useState<string | null>(null);
+  const [viewerPhotoUrls, setViewerPhotoUrls] = useState<string[]>([]);
+  const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
 
   const selectedTarjetaInfo = TARJETAS.find(t => t.key === selectedTarjeta);
   const selectedMetodoPagoInfo = TIPOS_PAGO.find(m => m.key === selectedMetodoPago);
@@ -1663,27 +1666,15 @@ export default function AuditoriaTarjetaScreen() {
                   {selectedMatch.matchedGastos.map((gasto, index) => (
                     <View key={gasto.id} style={{ marginBottom: index < selectedMatch.matchedGastos.length - 1 ? Spacing.four : 0, paddingBottom: index < selectedMatch.matchedGastos.length - 1 ? Spacing.four : 0, borderBottomWidth: index < selectedMatch.matchedGastos.length - 1 ? 1 : 0, borderBottomColor: themeColors.border }}>
                       {/* Foto del comprobante */}
-                      {gasto.foto_url ? (
-                        <TouchableOpacity
-                          activeOpacity={0.85}
-                          onPress={() => setPhotoViewerUrl(gasto.foto_url!)}
-                        >
-                          <Image
-                            source={{ uri: gasto.foto_url }}
-                            style={styles.modalPhoto}
-                            resizeMode="cover"
-                          />
-                          <View style={[styles.photoTapHint, { backgroundColor: 'rgba(0,0,0,0.35)' }]}>
-                            <Ionicons name="expand-outline" size={16} color="#fff" />
-                            <Text style={styles.photoTapHintText}>Toca para ampliar</Text>
-                          </View>
-                        </TouchableOpacity>
-                      ) : (
-                        <View style={[styles.modalPhotoPlaceholder, { backgroundColor: themeColors.border + '40' }]}>
-                          <Ionicons name="image-outline" size={28} color={themeColors.textSecondary} />
-                          <Text style={[styles.modalPhotoPlaceholderText, { color: themeColors.textSecondary }]}>Sin foto de comprobante</Text>
-                        </View>
-                      )}
+                      <GastoFotosGallery
+                        gasto={gasto}
+                        themeColors={themeColors}
+                        onPhotoPress={(url, index, allUrls) => {
+                          setPhotoViewerUrl(url);
+                          setViewerPhotoUrls(allUrls);
+                          setViewerInitialIndex(index);
+                        }}
+                      />
 
                       <View style={styles.modalFieldList}>
                         <ModalField label="Empleado" value={gasto.empleado_nombre ?? '—'} themeColors={themeColors} />
@@ -1803,7 +1794,12 @@ export default function AuditoriaTarjetaScreen() {
       <ImageViewerModal
         visible={!!photoViewerUrl}
         imageUrl={photoViewerUrl}
-        onClose={() => setPhotoViewerUrl(null)}
+        imageUrls={viewerPhotoUrls.length > 0 ? viewerPhotoUrls : (photoViewerUrl ? [photoViewerUrl] : [])}
+        initialIndex={viewerInitialIndex}
+        onClose={() => {
+          setPhotoViewerUrl(null);
+          setViewerPhotoUrls([]);
+        }}
       />
 
       {/* Modal de Detalle de Auditoría Guardada */}

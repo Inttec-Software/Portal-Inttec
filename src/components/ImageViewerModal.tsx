@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -30,7 +30,9 @@ interface AsistenciaInfo {
 
 interface ImageViewerModalProps {
   visible: boolean;
-  imageUrl: string | null;
+  imageUrl?: string | null;
+  imageUrls?: string[];
+  initialIndex?: number;
   onClose: () => void;
   asistenciaInfo?: AsistenciaInfo | null;
 }
@@ -52,11 +54,35 @@ const formatFecha = (fechaStr: string) => {
 export default function ImageViewerModal({
   visible,
   imageUrl,
+  imageUrls,
+  initialIndex = 0,
   onClose,
   asistenciaInfo,
 }: ImageViewerModalProps) {
   const viewRef = useRef<View>(null);
   const zoomRef = useRef<ZoomableViewRef>(null);
+
+  const allImages = useMemo(() => {
+    if (imageUrls && imageUrls.length > 0) return imageUrls.filter(Boolean);
+    if (imageUrl) return [imageUrl];
+    return [];
+  }, [imageUrls, imageUrl]);
+
+  const [currentIndex, setCurrentIndex] = useState(initialIndex || 0);
+
+  useEffect(() => {
+    if (visible) {
+      if (initialIndex !== undefined && initialIndex >= 0 && initialIndex < allImages.length) {
+        setCurrentIndex(initialIndex);
+      } else if (imageUrl && allImages.includes(imageUrl)) {
+        setCurrentIndex(allImages.indexOf(imageUrl));
+      } else {
+        setCurrentIndex(0);
+      }
+    }
+  }, [visible, initialIndex, imageUrl, allImages]);
+
+  const activeImage = allImages[currentIndex] || imageUrl || null;
 
   const [currentZoomScale, setCurrentZoomScale] = useState(1);
   const [currentRotation, setCurrentRotation] = useState(0);
@@ -71,14 +97,14 @@ export default function ImageViewerModal({
     setMapUrl(asistenciaInfo ? getStaticMapUrl(asistenciaInfo.lat, asistenciaInfo.lng) : '');
   }
 
-  // Reset zoom on open/close
+  // Reset zoom on open/close or active image change
   useEffect(() => {
     if (visible) {
       setCurrentZoomScale(1);
       setCurrentRotation(0);
       zoomRef.current?.reset();
     }
-  }, [visible, imageUrl]);
+  }, [visible, activeImage]);
 
   // Keyboard shortcuts for web
   useEffect(() => {
@@ -93,20 +119,30 @@ export default function ImageViewerModal({
         zoomRef.current?.reset();
       } else if (e.key === 'r' || e.key === 'R') {
         zoomRef.current?.rotate(90);
+      } else if (e.key === 'ArrowLeft') {
+        if (allImages.length > 1) {
+          setCurrentIndex(prev => (prev > 0 ? prev - 1 : allImages.length - 1));
+          zoomRef.current?.reset();
+        }
+      } else if (e.key === 'ArrowRight') {
+        if (allImages.length > 1) {
+          setCurrentIndex(prev => (prev < allImages.length - 1 ? prev + 1 : 0));
+          zoomRef.current?.reset();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [visible, onClose]);
+  }, [visible, onClose, allImages.length]);
 
-  if (!imageUrl) return null;
+  if (!activeImage) return null;
 
   const handleOpenOriginal = () => {
     if (Platform.OS === 'web') {
-      window.open(imageUrl, '_blank');
+      window.open(activeImage, '_blank');
     } else {
-      Linking.openURL(imageUrl).catch(() => {
+      Linking.openURL(activeImage).catch(() => {
         Alert.alert('Error', 'No se pudo abrir el enlace de la imagen.');
       });
     }
@@ -121,11 +157,11 @@ export default function ImageViewerModal({
         if (!ctx) throw new Error('No se pudo crear el contexto del canvas');
 
         const mainImg = new window.Image();
-        if (imageUrl.startsWith('http')) {
+        if (activeImage.startsWith('http')) {
           mainImg.crossOrigin = 'anonymous';
-          mainImg.src = imageUrl + (imageUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+          mainImg.src = activeImage + (activeImage.includes('?') ? '&' : '?') + 't=' + Date.now();
         } else {
-          mainImg.src = imageUrl;
+          mainImg.src = activeImage;
         }
 
         await new Promise((resolve, reject) => {
@@ -269,6 +305,16 @@ export default function ImageViewerModal({
           <Ionicons name="close-circle" size={38} color="#ffffff" />
         </TouchableOpacity>
 
+        {/* Indicador de fotos múltiples en la barra superior */}
+        {allImages.length > 1 && (
+          <View style={styles.multiImageCounterBadge}>
+            <Ionicons name="images-outline" size={14} color="#ffffff" style={{ marginRight: 6 }} />
+            <Text style={styles.multiImageCounterText}>
+              {currentIndex + 1} / {allImages.length}
+            </Text>
+          </View>
+        )}
+
         {/* Botón de compartir con marca de agua (cuando aplica) */}
         {asistenciaInfo && (
           <TouchableOpacity
@@ -279,6 +325,33 @@ export default function ImageViewerModal({
             <Ionicons name="share-social-outline" size={20} color="#000000" />
             <Text style={styles.shareButtonText}>Compartir con Marca</Text>
           </TouchableOpacity>
+        )}
+
+        {/* Flechas de navegación para múltiples imágenes */}
+        {allImages.length > 1 && (
+          <>
+            <TouchableOpacity
+              style={[styles.navArrowBtn, styles.navArrowLeft]}
+              onPress={() => {
+                setCurrentIndex(prev => (prev > 0 ? prev - 1 : allImages.length - 1));
+                zoomRef.current?.reset();
+              }}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="chevron-back" size={28} color="#ffffff" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.navArrowBtn, styles.navArrowRight]}
+              onPress={() => {
+                setCurrentIndex(prev => (prev < allImages.length - 1 ? prev + 1 : 0));
+                zoomRef.current?.reset();
+              }}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="chevron-forward" size={28} color="#ffffff" />
+            </TouchableOpacity>
+          </>
         )}
 
         {/* Imagen a pantalla completa con Zoom & Pan */}
@@ -297,7 +370,7 @@ export default function ImageViewerModal({
                 collapsable={false}
               >
                 <Image
-                  source={{ uri: imageUrl }}
+                  source={{ uri: activeImage }}
                   style={styles.image}
                   contentFit="cover"
                 />
@@ -347,7 +420,7 @@ export default function ImageViewerModal({
               </View>
             ) : (
               <Image
-                source={{ uri: imageUrl }}
+                source={{ uri: activeImage }}
                 style={styles.fullImage}
                 contentFit="contain"
               />
@@ -645,5 +718,45 @@ const styles = StyleSheet.create({
   watermarkMap: {
     width: '100%',
     height: '100%',
+  },
+  multiImageCounterBadge: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 52 : 30,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    zIndex: 999,
+  },
+  multiImageCounterText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  navArrowBtn: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -25,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(20,20,20,0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  navArrowLeft: {
+    left: 14,
+  },
+  navArrowRight: {
+    right: 14,
   },
 });

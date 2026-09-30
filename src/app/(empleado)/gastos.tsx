@@ -27,6 +27,7 @@ import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import GastoFotosGallery from '@/components/GastoFotosGallery';
 import PendingTasksPopover from '@/components/PendingTasksPopover';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
@@ -100,6 +101,7 @@ export default function EmpleadoGastos() {
   const [selectedGasto, setSelectedGasto] = useState<(Gasto & { isOffline?: boolean }) | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   
   // Feedback para Action Required
@@ -1190,29 +1192,15 @@ export default function EmpleadoGastos() {
             {selectedGasto && (
               <ScrollView contentContainerStyle={styles.modalScroll}>
                 {/* Evidencia Imagen */}
-                {selectedGasto.foto_url || (selectedGasto.isOffline && (selectedGasto as any).base64Foto) ? (
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => {
-                      setActivePreviewUrl(selectedGasto.foto_url || `data:image/jpeg;base64,${(selectedGasto as any).base64Foto}`);
-                      setViewerVisible(true);
-                    }}
-                    style={styles.modalImageContainer}
-                  >
-                    <Image
-                      source={{
-                        uri: selectedGasto.foto_url || `data:image/jpeg;base64,${(selectedGasto as any).base64Foto}`,
-                      }}
-                      style={styles.modalImage}
-                      resizeMode="contain"
-                    />
-                  </TouchableOpacity>
-                ) : (
-                  <View style={[styles.modalNoImage, { backgroundColor: themeColors.backgroundElement }]}>
-                    <Ionicons name="image-outline" size={48} color={themeColors.textSecondary} />
-                    <Text style={{ color: themeColors.textSecondary }}>Sin fotografía de ticket</Text>
-                  </View>
-                )}
+                <GastoFotosGallery
+                  gasto={selectedGasto}
+                  themeColors={themeColors}
+                  onPhotoPress={(url, index) => {
+                    setActivePreviewUrl(url);
+                    setViewerInitialIndex(index);
+                    setViewerVisible(true);
+                  }}
+                />
 
                 <View style={styles.modalDetails}>
                   <View style={styles.detailItem}>
@@ -1626,6 +1614,8 @@ export default function EmpleadoGastos() {
       <ImageViewerModal
         visible={viewerVisible}
         imageUrl={activePreviewUrl}
+        imageUrls={selectedGasto ? GastoHelper.getFotoUrls(selectedGasto) : (activePreviewUrl ? (activePreviewUrl.includes(',') ? activePreviewUrl.split(',').map(u => u.trim()) : [activePreviewUrl]) : [])}
+        initialIndex={viewerInitialIndex}
         asistenciaInfo={selectedAsistenciaInfo}
         onClose={() => {
           setViewerVisible(false);

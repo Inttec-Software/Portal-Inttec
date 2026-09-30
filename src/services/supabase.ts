@@ -273,6 +273,39 @@ export const GastoHelper = {
     if (!g || !g.factura_url) return [];
     return g.factura_url.split(',').map(u => u.trim()).filter(Boolean);
   },
+  getFotoUrls: (g: Gasto | null | undefined): string[] => {
+    if (!g) return [];
+    if (Array.isArray((g as any).base64Fotos) && (g as any).base64Fotos.length > 0) {
+      return (g as any).base64Fotos.map((item: any) => {
+        if (typeof item === 'string') {
+          return item.startsWith('data:') || item.startsWith('http') ? item : `data:image/jpeg;base64,${item}`;
+        }
+        const b64 = item.base64 || item.uri || item.url;
+        if (!b64) return '';
+        return b64.startsWith('data:') || b64.startsWith('http') ? b64 : `data:image/jpeg;base64,${b64}`;
+      }).filter(Boolean);
+    }
+    const raw = g.foto_url || ((g as any).isOffline ? (g as any).base64Foto : null);
+    if (!raw) return [];
+    const trimmed = typeof raw === 'string' ? raw.trim() : '';
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map((item: any) => typeof item === 'string' ? item : item?.uri || item?.url).filter(Boolean);
+        }
+      } catch {}
+    }
+    return trimmed.split(',').map(u => {
+      const s = u.trim();
+      if (!s) return '';
+      if (!s.startsWith('http') && !s.startsWith('data:') && !s.startsWith('file:') && !s.startsWith('/') && s.length > 100) {
+        return `data:image/jpeg;base64,${s}`;
+      }
+      return s;
+    }).filter(Boolean);
+  },
   getEstadoReembolsoLabel: (g: Gasto | null | undefined): string => {
     if (!g) return 'Normal';
     if (g.estado_reembolso === 'PENDIENTE_REEMBOLSO') return 'Pendiente de Reembolso';
