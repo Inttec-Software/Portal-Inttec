@@ -86,9 +86,10 @@ interface MovimientoItemProps {
   themeColors: any;
   exportingSingleMovimientoId: string | null;
   onExportSingleVale: (mov: any) => void;
+  onDeleteMovimiento: (mov: any) => void;
 }
 
-const MovimientoCardItem = React.memo(({ m, themeColors, exportingSingleMovimientoId, onExportSingleVale }: MovimientoItemProps) => {
+const MovimientoCardItem = React.memo(({ m, themeColors, exportingSingleMovimientoId, onExportSingleVale, onDeleteMovimiento }: MovimientoItemProps) => {
   const isGasto = m.tipo === 'GASTO' || m.subtipo === 'GASTO' || m.subtipo === 'CONSUMO';
   const isRetiro = m.tipo === 'RETIRO' || m.subtipo === 'RETIRO';
   const isDevolucion = m.tipo === 'DEVOLUCIÓN' || m.subtipo === 'DEVOLUCIÓN';
@@ -258,28 +259,46 @@ const MovimientoCardItem = React.memo(({ m, themeColors, exportingSingleMovimien
           </View>
         ) : <View />}
 
-        <TouchableOpacity
-          onPress={() => onExportSingleVale(m)}
-          disabled={isSingleExporting}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            backgroundColor: themeColors.background,
-            borderColor: themeColors.border,
-            borderWidth: 1,
-            paddingHorizontal: 12,
-            paddingVertical: 7,
-            borderRadius: 6
-          }}
-        >
-          {isSingleExporting ? (
-            <ActivityIndicator size="small" color={themeColors.primary} />
-          ) : (
-            <Ionicons name="download-outline" size={15} color={themeColors.primary} />
-          )}
-          <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>Descargar Vale (PDF)</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          <TouchableOpacity
+            onPress={() => onDeleteMovimiento(m)}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#FEF2F2',
+              borderColor: '#FECACA',
+              borderWidth: 1,
+              width: 34,
+              height: 34,
+              borderRadius: 6
+            }}
+          >
+            <Ionicons name="trash-outline" size={18} color="#DC2626" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => onExportSingleVale(m)}
+            disabled={isSingleExporting}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: themeColors.background,
+              borderColor: themeColors.border,
+              borderWidth: 1,
+              paddingHorizontal: 12,
+              paddingVertical: 7,
+              borderRadius: 6
+            }}
+          >
+            {isSingleExporting ? (
+              <ActivityIndicator size="small" color={themeColors.primary} />
+            ) : (
+              <Ionicons name="download-outline" size={15} color={themeColors.primary} />
+            )}
+            <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>Descargar Vale (PDF)</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -692,6 +711,46 @@ export default function InventarioDashboard() {
       showAlert('Error', err.message || 'No se pudo generar el reporte PDF.');
     } finally {
       setIsExportingMovimientosPDF(false);
+    }
+  };
+
+  const handleEliminarMovimiento = async (mov: any) => {
+    const executeDelete = async () => {
+      try {
+        const headers = await getApiHeaders();
+        const queryParams = new URLSearchParams({
+          source_table: mov.source_table || '',
+          folio_factura: mov.folio_factura || ''
+        });
+        const res = await fetch(`${getApiUrl()}/api/inventario/movimientos/${mov.id}?${queryParams.toString()}`, {
+          method: 'DELETE',
+          headers
+        });
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(errorText || 'Error al eliminar movimiento');
+        }
+        showAlert('Éxito', 'Movimiento eliminado del historial');
+        loadMovimientos();
+      } catch (err: any) {
+        showAlert('Error', err.message || 'No se pudo eliminar el movimiento');
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const isConfirmed = window.confirm('¿Estás seguro de que quieres eliminar este registro de movimiento? Esta acción NO afectará las cantidades actuales del inventario, sólo borrará el historial.');
+      if (isConfirmed) {
+        await executeDelete();
+      }
+    } else {
+      Alert.alert(
+        'Confirmar',
+        '¿Estás seguro de que quieres eliminar este registro de movimiento? Esta acción NO afectará las cantidades actuales del inventario, sólo borrará el historial.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Eliminar', style: 'destructive', onPress: executeDelete }
+        ]
+      );
     }
   };
 
@@ -2837,7 +2896,6 @@ export default function InventarioDashboard() {
                                     {Number(m.devolver) > 0 && (
                                       <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 13 }}>+ {m.devolver} {m.unidad || 'un.'} (Devuelto)</Text>
                                     )}
-                                    {Number(m.gastar) > 0 && (
                                       <Text style={{ color: themeColors.danger || '#EF4444', fontWeight: 'bold', fontSize: 13 }}>- {m.gastar} {m.unidad || 'un.'} (Gastado)</Text>
                                     )}
                                   </View>
@@ -3241,6 +3299,7 @@ export default function InventarioDashboard() {
               themeColors={themeColors}
               exportingSingleMovimientoId={exportingSingleMovimientoId}
               onExportSingleVale={handleExportSingleMovimientoVale}
+              onDeleteMovimiento={handleEliminarMovimiento}
             />
           )}
         />

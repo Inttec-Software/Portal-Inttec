@@ -882,6 +882,54 @@ export const hardDeleteProducto = async (req: Request, res: Response) => {
 };
 
 // 14. Obtener todos los movimientos de inventario (GET /api/inventario/movimientos)
+export const eliminarMovimiento = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+    const { id } = req.params;
+    const { source_table, folio_factura } = req.query;
+
+    if (!source_table) {
+      // Fallback for old clients
+      const { error } = await client.from('movimientos_inventario').delete().eq('id', id);
+      if (error) throw error;
+      return res.json({ success: true });
+    }
+
+    if (source_table === 'retiros_material') {
+      const { error: err1 } = await client.from('retiros_material').delete().eq('id', id);
+      if (err1) throw err1;
+      
+      if (folio_factura) {
+        await client.from('movimientos_inventario').delete().eq('folio_factura', folio_factura);
+      }
+    } else if (source_table === 'devoluciones_empleado') {
+      const { error: err1 } = await client.from('devoluciones_empleado').delete().eq('id', id);
+      if (err1) throw err1;
+
+      const shortId = String(id).substring(0, 8).toUpperCase();
+      await client.from('movimientos_inventario').delete().ilike('folio_factura', `%${shortId}%`);
+    } else if (source_table === 'movimientos_inventario') {
+      if (folio_factura) {
+        const { error: err1 } = await client.from('movimientos_inventario').delete().eq('folio_factura', folio_factura);
+        if (err1) throw err1;
+      } else {
+        const { error: err1 } = await client.from('movimientos_inventario').delete().eq('id', id);
+        if (err1) throw err1;
+      }
+    } else {
+      return res.status(400).json({ error: 'Tabla de origen desconocida' });
+    }
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error('[eliminarMovimiento] Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 export const getMovimientosInventario = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -927,6 +975,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
       
       return {
         id: r.id,
+        source_table: 'retiros_material',
         tipo: 'SALIDA',
         subtipo: 'SALIDA',
         cantidad: totalQty,
@@ -975,6 +1024,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
 
       structuredDevs.push({
         id: d.id,
+        source_table: 'devoluciones_empleado',
         tipo: 'ENTRADA',
         subtipo: 'DEVOLUCIÓN',
         cantidad: totalQty,
@@ -1042,6 +1092,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
 
             legacyRetirosMap.set(groupKey, {
               id: m.id,
+              source_table: 'movimientos_inventario',
               tipo: 'SALIDA',
               subtipo: 'SALIDA',
               cantidad: 0,
@@ -1097,6 +1148,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
             const cleanObs = folio.replace(/^DEVOLUCI[OÓ]N:\s*/i, '').trim();
             legacyDevsMap.set(groupKey, {
               id: m.id,
+              source_table: 'movimientos_inventario',
               tipo: 'ENTRADA',
               subtipo: 'DEVOLUCIÓN',
               cantidad: 0,
@@ -1148,6 +1200,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
 
           legacyConsumosMap.set(groupKey, {
             id: m.id,
+            source_table: 'movimientos_inventario',
             tipo: 'GASTO',
             subtipo: 'GASTO',
             cantidad: 0,
@@ -1198,6 +1251,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
 
         otherMovs.push({
           id: m.id,
+          source_table: 'movimientos_inventario',
           tipo: tipoDisplay,
           subtipo,
           cantidad: Number(m.cantidad) || 0,

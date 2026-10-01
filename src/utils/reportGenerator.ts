@@ -941,11 +941,18 @@ export const ReportGenerator = {
     }
     const branding = await getCompanyBranding();
 
-    const empleadosMap = new Map(personal.map((p) => [p.id, p.nombre]));
+    const empleadosMap = new Map((personal || []).map((p) => [p.id, p.nombre]));
 
     let tableRows = '';
-    asistencias.forEach((a) => {
-      const empleadoNombre = empleadosMap.get(a.empleado_id) || 'Desconocido';
+    asistencias.forEach((a: any) => {
+      const empleadoNombre =
+        empleadosMap.get(a.empleado_id) ||
+        empleadosMap.get(a.usuario_id) ||
+        (a.empleados ? `${a.empleados.nombre || ''} ${a.empleados.apellidos || ''}`.trim() : null) ||
+        (a.empleado ? `${a.empleado.nombre || ''} ${a.empleado.apellidos || ''}`.trim() : null) ||
+        a.empleado_nombre ||
+        a.usuario_nombre ||
+        'Desconocido';
       const fecha = a.fecha || '';
       const horaEntrada = a.hora_entrada || '--:--';
       const dirEntrada = a.direccion_entrada || 'N/A';
@@ -2610,7 +2617,7 @@ export const ReportGenerator = {
               m.producto_nombre || 'Producto',
               m.cantidad || 0,
               m.producto_unidad || 'pza',
-              m.usuario_nombre || m.empleado_nombre || 'Almacén',
+              m.usuario?.nombre || m.empleado?.nombre || m.usuario_nombre || m.empleado_nombre || 'Almacén',
               m.proveedor_nombre || '',
               m.cliente_nombre || '',
               m.tipo_gasto || '',
@@ -2623,14 +2630,15 @@ export const ReportGenerator = {
             if (gastos.length === 0) {
               throw new Error('No hay gastos para exportar.');
             }
-            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Comentarios'];
+            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Estado Reembolso','Comentarios'];
             const rows = gastos.map(g => {
               const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
               let estadoFactura = 'No Facturado';
               if (g.facturado === true) estadoFactura = 'Facturado';
               else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) estadoFactura = 'Pendiente de Entregar';
               const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
-              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, commentText ];
+              const estadoReembolso = g.estado_reembolso === 'REEMBOLSADO' ? 'Reembolsado' : 'No';
+              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, estadoReembolso, commentText ];
             });
             await ReportGenerator._exportArrayToXLSX('Gastos', headers, rows, fileName);
     },
@@ -2649,14 +2657,22 @@ export const ReportGenerator = {
             });
             await ReportGenerator._exportArrayToXLSX('Gasolina', headers, rows, fileName);
     },
-    async exportAsistenciasToXLSX(asistencias: any[], personal: Usuario[], fileName: string = 'reporte_asistencia.xlsx'): Promise<void> {
+    async exportAsistenciasToXLSX(asistencias: any[], personal: Usuario[] = [], fileName: string = 'reporte_asistencia.xlsx'): Promise<void> {
 
             if (asistencias.length === 0) {
               throw new Error('No hay asistencias para exportar.');
             }
+            const empleadosMap = new Map((personal || []).map((p) => [p.id, p.nombre]));
             const headers = ['ID','Fecha','Empleado Nombre','Empresa','Hora Entrada','Dirección Entrada','Hora Salida','Dirección Salida'];
             const rows = asistencias.map(a => {
-              const empleadoNombre = a.empleados ? `${a.empleados.nombre || ''} ${a.empleados.apellidos || ''}`.trim() : (a.empleado_nombre || 'Desconocido');
+              const empleadoNombre =
+                empleadosMap.get(a.empleado_id) ||
+                empleadosMap.get(a.usuario_id) ||
+                (a.empleados ? `${a.empleados.nombre || ''} ${a.empleados.apellidos || ''}`.trim() : null) ||
+                (a.empleado ? `${a.empleado.nombre || ''} ${a.empleado.apellidos || ''}`.trim() : null) ||
+                a.empleado_nombre ||
+                a.usuario_nombre ||
+                'Desconocido';
               return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada || 'Sin registro', a.direccion_entrada || '', a.hora_salida || 'Sin registro', a.direccion_salida || '' ];
             });
             await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
@@ -2666,13 +2682,17 @@ export const ReportGenerator = {
             if (productos.length === 0) {
               throw new Error('No hay productos para exportar.');
             }
-            const headers = ['ID','SKU','Producto','Categoría','Unidad','Stock Actual (Nuevo)','Stock Usado','Stock Por Revisar','Stock Total Sumado','Punto Reorden','Ubicación','Precio Unit.'];
+            const headers = ['ID','SKU','Producto','Categoría','Unidad','Stock Actual (Nuevo)','Stock Usado','Stock Por Revisar','Stock Total Sumado','Punto Reorden','Ubicación','Precio Unit.', 'Valor Total', 'Estado (Activo)'];
             const rows = productos.map(p => {
               const categoriaNombre = categorias.find((c: any) => c.id === p.categoria_id)?.nombre || 'Sin Categoría';
               const sNuevo = Number(p.stock_nuevo || 0);
               const sUsado = Number(p.stock_usado || 0);
               const sRevision = Number(p.stock_por_revisar || 0);
-              return [ p.id, p.sku_interno || '-', p.nombre_oficial || 'Producto', categoriaNombre, p.unidad_medida || 'pza', sNuevo, sUsado, sRevision, (sNuevo+sUsado+sRevision), p.punto_reorden || 0, p.ubicacion_almacen || '', p.precio_unitario || 0 ];
+              const totalStock = sNuevo + sUsado + sRevision;
+              const precioUnitario = Number(p.precio_unitario || 0);
+              const valorTotal = totalStock * precioUnitario;
+              const estado = p.activo !== false ? 'Activo' : 'Inactivo';
+              return [ p.id, p.sku_interno || '-', p.nombre_oficial || 'Producto', categoriaNombre, p.unidad_medida || 'pza', sNuevo, sUsado, sRevision, totalStock, p.punto_reorden || 0, p.ubicacion_almacen || '', precioUnitario, valorTotal, estado ];
             });
             await ReportGenerator._exportArrayToXLSX('Inventario', headers, rows, fileName);
     },
@@ -2681,8 +2701,65 @@ export const ReportGenerator = {
             if (consumos.length === 0) {
               throw new Error('No hay consumos para exportar.');
             }
+
+            // Identificar IDs de usuarios faltantes para buscar sus nombres si no vienen precargados
+            const missingUserIds = new Set<string>();
+            consumos.forEach((c) => {
+              const hasName = c.usuario?.nombre || c.empleado?.nombre || c.empleado_nombre || c.usuario_nombre;
+              if (!hasName) {
+                if (c.creado_por && typeof c.creado_por === 'string' && c.creado_por.length > 10) missingUserIds.add(c.creado_por);
+                if (c.empleado_id && typeof c.empleado_id === 'string' && c.empleado_id.length > 10) missingUserIds.add(c.empleado_id);
+                if (c.usuario_id && typeof c.usuario_id === 'string' && c.usuario_id.length > 10) missingUserIds.add(c.usuario_id);
+              }
+            });
+
+            const userNamesMap = new Map<string, string>();
+            if (missingUserIds.size > 0) {
+              try {
+                const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
+                const { data: usersData } = await client
+                  .from('usuarios')
+                  .select('id, nombre')
+                  .in('id', Array.from(missingUserIds));
+
+                if (usersData) {
+                  usersData.forEach((u: any) => {
+                    if (u.id && u.nombre) userNamesMap.set(u.id, u.nombre);
+                  });
+                }
+              } catch (err) {
+                console.warn('[reportGenerator] Error resolving user names for consumos XLSX:', err);
+              }
+            }
+
             const headers = ['ID','Fecha','Empleado Nombre','SKU','Producto','Categoría','Cantidad Consumida','Proyecto/Uso','Costo Estimado'];
-            const rows = consumos.map(c => [ c.id, c.fecha ? c.fecha.split('T')[0] : '', c.empleado_nombre || 'Desconocido', c.producto_sku || '-', c.producto_nombre || 'Producto', c.categoria_nombre || '', c.cantidad || 0, c.detalle_motivo || '', c.costo_total || 0 ]);
+            const rows = consumos.map(c => {
+              const userId = c.creado_por || c.empleado_id || c.usuario_id;
+              const empleadoNombre =
+                c.usuario?.nombre ||
+                c.empleado?.nombre ||
+                c.empleado_nombre ||
+                c.usuario_nombre ||
+                (userId ? userNamesMap.get(userId) : null) ||
+                'No especificado / Almacén';
+              const sku = c.producto?.sku_interno || c.producto_sku || '-';
+              const producto = c.producto?.nombre_oficial || c.producto_nombre || 'Producto';
+              const categoria = c.categoria_nombre || c.producto?.categoria?.nombre || c.categoria || '';
+              const detalle = c.detalle_motivo || c.folio_factura || c.motivo || '';
+              const costo = c.costo_total !== undefined ? c.costo_total : ((Number(c.cantidad || 0) * Number(c.producto?.precio_unitario || 0)) || 0);
+
+              return [
+                c.id,
+                c.fecha ? c.fecha.split('T')[0] : '',
+                empleadoNombre,
+                sku,
+                producto,
+                categoria,
+                c.cantidad || 0,
+                detalle,
+                costo
+              ];
+            });
             await ReportGenerator._exportArrayToXLSX('Consumos', headers, rows, fileName);
     },
     async exportRetirosToXLSX(retiros: any[], fileName: string = 'reporte_retiros_material.xlsx'): Promise<void> {
@@ -2690,8 +2767,11 @@ export const ReportGenerator = {
             if (retiros.length === 0) {
               throw new Error('No hay retiros para exportar.');
             }
-            const headers = ['ID','Fecha de Retiro','Empleado','SKU','Herramienta','Estado Entrega','Cantidad Prestada','Proyecto / Motivo'];
-            const rows = retiros.map(r => [ r.id, r.fecha ? r.fecha.split('T')[0] : '', r.empleado_nombre || 'Desconocido', r.producto_sku || '-', r.producto_nombre || 'Herramienta', r.estado_entrega || 'NUEVA', r.cantidad || 0, r.detalle_motivo || '' ]);
+            const headers = ['ID','Fecha de Retiro','Empleado','Tipo Destino','Cliente','Sucursal','Proveedor','Detalle','Motivo','SKU','Herramienta','Estado Entrega','Cantidad Prestada','Unidad'];
+            const rows = retiros.map(r => {
+              const empleadoNombre = r.usuario?.nombre || r.empleado?.nombre || r.empleado_nombre || r.usuario_nombre || (typeof r.empleado === 'string' ? r.empleado : '') || 'Desconocido';
+              return [ r.id, r.fecha ? r.fecha.split('T')[0] : '', empleadoNombre, r.tipo_gasto || 'Operativo', r.cliente_nombre || (r.is_split ? 'Dividido' : ''), r.sucursal_nombre || '', r.proveedor || '', r.detalle_servicio_proyecto || '', r.motivo || '', r.producto_sku || '-', r.producto_nombre || 'Herramienta', r.estado_entrega || 'NUEVA', r.cantidad || 0, r.producto_unidad || 'pza' ];
+            });
             await ReportGenerator._exportArrayToXLSX('Retiros', headers, rows, fileName);
     },
     async exportVentasToXLSX(ventas: any[], fileName: string = 'reporte_ventas.xlsx'): Promise<void> {
@@ -2699,8 +2779,22 @@ export const ReportGenerator = {
             if (ventas.length === 0) {
               throw new Error('No hay ventas para exportar.');
             }
-            const headers = ['ID','Folio','Fecha Creación','Cliente','Vendedor','Estatus','Monto Total'];
-            const rows = ventas.map(v => [ v.id, v.folio || 'S/F', v.created_at ? v.created_at.split('T')[0] : '', v.cliente_nombre || 'Desconocido', v.vendedor_nombre || 'Desconocido', v.estatus || '', v.total || 0 ]);
+            const headers = ['ID','Folio','Fecha Creación','Cliente','Vendedor','Estatus','Referencia/Factura','Tipo Proyecto','Sucursal','Monto Total (Venta)','Total Costo (Proveedor)','Utilidad Bruta','Margen %'];
+            const rows = ventas.map(v => [ 
+              v.id, 
+              v.folio || 'S/F', 
+              v.created_at ? v.created_at.split('T')[0] : '', 
+              v.cliente_nombre || v.cliente || 'Desconocido', 
+              v.vendedor_nombre || v.vendedor || 'Desconocido', 
+              v.estatus || v.estado_pago || v.cfdi_estado || '', 
+              v.factura_referencia || '', 
+              v.tipo_proyecto || '', 
+              v.sucursal || '', 
+              v.total || v.precio_total_facturado || 0, 
+              v.costo_total || 0, 
+              v.utilidad_bruta || 0, 
+              ((v.margen_porcentual || 0) * 100).toFixed(2) + '%' 
+            ]);
             await ReportGenerator._exportArrayToXLSX('Ventas', headers, rows, fileName);
     }
 };

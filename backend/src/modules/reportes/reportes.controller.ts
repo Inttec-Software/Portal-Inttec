@@ -249,18 +249,46 @@ export const getExportData = async (req: Request, res: Response) => {
       ]);
       if (movRes.error) throw movRes.error;
       const userMap = new Map((userRes.data || []).map((u: any) => [u.id, u]));
-      const dataWithUsers = (movRes.data || []).map((m: any) => ({
-        ...m,
-        usuario: userMap.get(m.creado_por || m.empleado_id) || null
-      }));
+      const dataWithUsers = (movRes.data || []).map((m: any) => {
+        const u = userMap.get(m.creado_por || m.empleado_id);
+        const uName = u?.nombre || m.empleado_nombre || m.usuario_nombre || 'No especificado / Almacén';
+        return {
+          ...m,
+          usuario: u || null,
+          usuario_nombre: uName,
+          empleado_nombre: uName,
+          producto_sku: m.producto?.sku_interno || m.producto_sku || '-',
+          producto_nombre: m.producto?.nombre_oficial || m.producto_nombre || 'Producto',
+          costo_total: m.costo_total !== undefined ? m.costo_total : ((Number(m.cantidad || 0) * Number(m.producto?.precio_unitario || 0)) || 0)
+        };
+      });
       return res.json(dataWithUsers);
     } else if (type === 'ventas') {
       let query = client.from('ventas').select('*').order('fecha', { ascending: false });
       if (startDate) query = query.gte('fecha', startDate);
       if (endDate) query = query.lte('fecha', endDate);
-      const { data, error } = await query;
-      if (error) throw error;
-      return res.json(data || []);
+      
+      const [ventasRes, usersRes] = await Promise.all([
+        query,
+        client.from('usuarios').select('id, nombre, email')
+      ]);
+      
+      if (ventasRes.error) throw ventasRes.error;
+      
+      const userMap = new Map((usersRes.data || []).map((u: any) => [u.id, u]));
+      
+      const mappedData = (ventasRes.data || []).map((v: any) => {
+        const usuario = userMap.get(v.registrado_por);
+        return {
+          ...v,
+          cliente_nombre: v.cliente,
+          vendedor_nombre: usuario?.nombre || usuario?.email || 'Desconocido',
+          estatus: v.estado_pago || v.cfdi_estado || 'PENDIENTE',
+          total: v.precio_total_facturado || v.costo_total || 0
+        };
+      });
+      
+      return res.json(mappedData);
     } else if (type === 'gastos') {
       let query = client.from('gastos').select(`
         *,
