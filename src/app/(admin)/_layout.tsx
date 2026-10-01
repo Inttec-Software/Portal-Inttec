@@ -89,7 +89,10 @@ export default function AdminLayout() {
   ];
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: themeColors.background }} edges={['top', 'bottom', 'left', 'right']}>
+    <SafeAreaView
+      style={{ flex: 1, backgroundColor: isDashboard ? (scheme === 'dark' ? '#0f172a' : '#f8fafc') : themeColors.background }}
+      edges={isDashboard ? ['bottom', 'left', 'right'] : ['top', 'bottom', 'left', 'right']}
+    >
       {/* Header estilo Odoo (Solo fuera del inicio) */}
       {!isDashboard && (
         <View style={[styles.header, { borderBottomColor: themeColors.border }]}>

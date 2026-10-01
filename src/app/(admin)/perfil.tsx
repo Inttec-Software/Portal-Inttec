@@ -91,7 +91,7 @@ export default function PerfilScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['bottom', 'left', 'right']}>
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}
