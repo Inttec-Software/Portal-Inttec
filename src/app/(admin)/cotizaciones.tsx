@@ -12,6 +12,7 @@ import { Cotizacion } from '@/types/ventas';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleCache } from '@/services/moduleCache';
+import ConfirmarFacturaModal from '@/components/ConfirmarFacturaModal';
 
 const getStatusConfig = (estado: string, isDark: boolean) => {
   switch(estado) {
@@ -48,7 +49,7 @@ const getStatusConfig = (estado: string, isDark: boolean) => {
   }
 };
 
-const getActionBtnStyle = (action: 'view' | 'download' | 'email' | 'edit' | 'delete', isDark: boolean) => {
+const getActionBtnStyle = (action: 'view' | 'download' | 'email' | 'edit' | 'delete' | 'facturar', isDark: boolean) => {
   switch (action) {
     case 'view':
       return {
@@ -74,6 +75,11 @@ const getActionBtnStyle = (action: 'view' | 'download' | 'email' | 'edit' | 'del
       return {
         bg: isDark ? '#3b1219' : '#ffebee',
         color: isDark ? '#f87171' : '#e53935',
+      };
+    case 'facturar':
+      return {
+        bg: isDark ? '#083344' : '#cffafe',
+        color: isDark ? '#06b6d4' : '#0891b2',
       };
   }
 };
@@ -161,6 +167,10 @@ export default function CotizacionesListScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+
+  // Modal de confirmación para facturar cotización
+  const [facturarModalVisible, setFacturarModalVisible] = useState(false);
+  const [cotizacionAFacturar, setCotizacionAFacturar] = useState<any | null>(null);
 
   // Al volver a esta pantalla, cerrar automáticamente cualquier fila expandida
   useFocusEffect(
@@ -311,6 +321,17 @@ export default function CotizacionesListScreen() {
     router.push(`/(admin)/ventas?fromCotizacion=true&cotizacionData=${cotizacionData}`);
   };
 
+  const handleOpenFacturarModal = (cot: any) => {
+    setCotizacionAFacturar(cot);
+    setFacturarModalVisible(true);
+  };
+
+  const handleConfirmFactura = (facturaData: any) => {
+    setFacturarModalVisible(false);
+    const cotizacionData = encodeURIComponent(JSON.stringify(facturaData));
+    router.push(`/(admin)/facturacion?fromCotizacion=true&cotizacionData=${cotizacionData}`);
+  };
+
   const handleDuplicate = async (cot: any) => {
     try {
       setIsLoading(true);
@@ -390,49 +411,31 @@ export default function CotizacionesListScreen() {
     }
   };
 
-  // HEADER CORPORATIVO (EXCLUSIVO ESCRITORIO WEB)
-  const renderDesktopHeader = () => (
-    <View style={styles.desktopNavBar}>
-      <View style={styles.desktopNavBarLeft}>
-        <Image 
-          source={
-            company === 'daravisa'
-              ? require('@/assets/images/logo_daravisa.png')
-              : require('@/assets/images/logo.jpeg')
-          } 
-          style={styles.desktopLogo} 
-          resizeMode="contain"
-        />
-        <View style={styles.desktopLogoTexts}>
-          <Text style={styles.desktopLogoTitle}>
-            {company === 'daravisa' ? 'DARAVISA' : 'INTTEC'}
-          </Text>
-          <Text style={styles.desktopLogoSubtitle}>
-            {company === 'daravisa' ? 'PORTAL DE GESTIÓN' : 'INTEGRACIÓN DE TECNOLOGÍAS'}
-          </Text>
-        </View>
-      </View>
-      <View style={styles.desktopNavBarRight}>
-      </View>
-    </View>
-  );
-
   // SUB-HEADER BAR (EXCLUSIVO ESCRITORIO WEB)
   const renderDesktopToolbar = () => (
     <View style={styles.desktopToolbar}>
       <View style={styles.desktopToolbarLeft}>
         <View style={styles.calculatorCircle}>
-          <Ionicons name="calculator" size={20} color="#fff" />
+          <Ionicons name="calculator" size={16} color="#fff" />
         </View>
         <Text style={styles.desktopModuleTitle}>Cotizaciones</Text>
+        <View style={styles.countBadge}>
+          <Text style={styles.countBadgeText}>{filteredCotizaciones.length}</Text>
+        </View>
         <View style={styles.desktopSearchContainer}>
+          <Ionicons name="search" size={15} color={themeColors.textSecondary} style={styles.searchIconInside} />
           <TextInput
             style={styles.desktopSearchInput}
-            placeholder="Buscar"
+            placeholder="Buscar por folio, cliente o vendedor..."
+            placeholderTextColor={themeColors.textSecondary + '80'}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
-          <Ionicons name="search" size={18} color="#00C3F3" style={styles.searchIconInside} />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={{ padding: 2 }}>
+              <Ionicons name="close-circle" size={14} color={themeColors.textSecondary} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
       <View style={styles.desktopToolbarRight}>
@@ -440,7 +443,8 @@ export default function CotizacionesListScreen() {
           onPress={() => router.push('/(admin)/nueva-cotizacion')}
           style={styles.addCotizacionButton}
         >
-          <Text style={styles.addCotizacionButtonText}>+ Agregar Cotización</Text>
+          <Ionicons name="add" size={16} color="#fff" />
+          <Text style={styles.addCotizacionButtonText}>Nueva Cotización</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -462,7 +466,7 @@ export default function CotizacionesListScreen() {
           <Text style={[styles.tableHeaderCell, { width: '10%', minWidth: 105, fontWeight: 'bold', textAlign: 'right', paddingRight: 12, flexShrink: 0 }]}>Total</Text>
           
           {/* Acciones Header con iconos pequeños */}
-          <View style={[styles.tableHeaderCell, styles.headerActionsContainer, { width: '24%', minWidth: 250, paddingRight: 2, flexShrink: 0 }]}>
+          <View style={[styles.tableHeaderCell, styles.headerActionsContainer, { width: '25%', minWidth: 280, paddingRight: 2, flexShrink: 0 }]}>
             <Ionicons name="eye-outline" size={12} color={themeColors.accent} />
             <Ionicons name="pencil-outline" size={12} color={themeColors.accent} />
             <Ionicons name="copy-outline" size={12} color={themeColors.accent} />
@@ -471,6 +475,7 @@ export default function CotizacionesListScreen() {
             <Ionicons name="chatbubble-ellipses-outline" size={12} color={themeColors.accent} />
             <Ionicons name="chevron-down" size={12} color={themeColors.accent} />
             <Ionicons name="cash-outline" size={12} color={themeColors.accent} />
+            <Ionicons name="receipt-outline" size={12} color={themeColors.accent} />
             <Ionicons name="trash-outline" size={12} color={themeColors.danger} />
           </View>
         </View>
@@ -522,8 +527,8 @@ export default function CotizacionesListScreen() {
                   </View>
                   <Text style={[styles.tableCell, { width: '10%', minWidth: 105, fontWeight: 'bold', textAlign: 'right', paddingRight: 12, flexShrink: 0 }]}>{formatearMoneda(cot.total)}</Text>
                   
-                  {/* 9 Iconos de acción con Tooltips en Hover */}
-                  <View style={[styles.tableCell, styles.rowActionsContainer, { width: '24%', minWidth: 250, paddingRight: 2, flexShrink: 0 }]}>
+                  {/* 10 Iconos de acción con Tooltips en Hover */}
+                  <View style={[styles.tableCell, styles.rowActionsContainer, { width: '25%', minWidth: 280, paddingRight: 2, flexShrink: 0 }]}>
                     <ActionButtonWithTooltip icon="eye-outline" color={themeColors.textSecondary} tooltip="Ver PDF" onPress={() => handleDownloadPDF(cot, 'view')} />
                     <ActionButtonWithTooltip icon="pencil-outline" color={themeColors.textSecondary} tooltip="Editar Cotización" onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} />
                     <ActionButtonWithTooltip icon="copy-outline" color={themeColors.textSecondary} tooltip="Duplicar Cotización" onPress={() => handleDuplicate(cot)} />
@@ -532,6 +537,7 @@ export default function CotizacionesListScreen() {
                     <ActionButtonWithTooltip icon="chatbubble-ellipses-outline" color={themeColors.textSecondary} tooltip="Notas y Comentarios" onPress={() => handleComments(cot)} />
                     <ActionButtonWithTooltip icon={expandedRowId === cot.id ? "chevron-up" : "chevron-down"} color={themeColors.textSecondary} tooltip={expandedRowId === cot.id ? "Ocultar Partidas" : "Ver Partidas"} onPress={() => toggleRowExpansion(cot.id)} />
                     <ActionButtonWithTooltip icon="cash-outline" color={themeColors.primary} tooltip="Convertir a Venta" onPress={() => handleConvertirVenta(cot)} />
+                    <ActionButtonWithTooltip icon="receipt-outline" color="#00C3F3" tooltip="Facturar Cotización (CFDI)" onPress={() => handleOpenFacturarModal(cot)} />
                     <ActionButtonWithTooltip icon="trash-outline" color={themeColors.danger} tooltip="Eliminar Cotización" onPress={() => handleDelete(cot.id)} />
                   </View>
                 </Pressable>
@@ -574,17 +580,16 @@ export default function CotizacionesListScreen() {
       {isDesktop ? (
         // --- DISEÑO DESCRITORIO WEB (ALTA FIDELIDAD) ---
         <View style={{ flex: 1 }}>
-          {renderDesktopHeader()}
           {renderDesktopToolbar()}
           <ScrollView style={styles.desktopScrollView}>
-            <View style={{ paddingHorizontal: 24, paddingVertical: 12 }}>
+            <View style={{ paddingHorizontal: 20, paddingVertical: 8 }}>
               {renderDesktopTable()}
             </View>
           </ScrollView>
         </View>
       ) : (
-        // --- DISEÑO MÓVIL/TABLETA ORIGINAL RESPETADO ---
-        <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+        // --- DISEÑO MÓVIL/TABLETA ---
+        <View style={{ flex: 1 }}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
           {/* HEADER MÓVIL */}
           <View style={styles.header}>
@@ -721,6 +726,7 @@ export default function CotizacionesListScreen() {
                         <ActionButtonWithTooltip icon="copy-outline" iconSize={16} color={getActionBtnStyle('view', scheme === 'dark').color} bgColor={getActionBtnStyle('view', scheme === 'dark').bg} tooltip="Duplicar Cotización" isCircular onPress={() => handleDuplicate(cot)} />
                         <ActionButtonWithTooltip icon="pencil-outline" iconSize={16} color={getActionBtnStyle('edit', scheme === 'dark').color} bgColor={getActionBtnStyle('edit', scheme === 'dark').bg} tooltip="Editar Cotización" isCircular onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} />
                         <ActionButtonWithTooltip icon="cash-outline" iconSize={16} color={getActionBtnStyle('download', scheme === 'dark').color} bgColor={getActionBtnStyle('download', scheme === 'dark').bg} tooltip="Convertir a Venta" isCircular onPress={() => handleConvertirVenta(cot)} />
+                        <ActionButtonWithTooltip icon="receipt-outline" iconSize={16} color={getActionBtnStyle('facturar', scheme === 'dark').color} bgColor={getActionBtnStyle('facturar', scheme === 'dark').bg} tooltip="Facturar Cotización" isCircular onPress={() => handleOpenFacturarModal(cot)} />
                         <ActionButtonWithTooltip icon="trash-outline" iconSize={16} color={getActionBtnStyle('delete', scheme === 'dark').color} bgColor={getActionBtnStyle('delete', scheme === 'dark').bg} tooltip="Eliminar Cotización" isCircular onPress={() => handleDelete(cot.id)} />
                       </View>
                     </View>
@@ -740,8 +746,19 @@ export default function CotizacionesListScreen() {
             </TouchableOpacity>
           )}
         </ScrollView>
-    </SafeAreaView>
+    </View>
       )}
+
+      {/* Modal de Confirmación para Facturar Cotización */}
+      <ConfirmarFacturaModal
+        visible={facturarModalVisible}
+        cotizacion={cotizacionAFacturar}
+        onClose={() => {
+          setFacturarModalVisible(false);
+          setCotizacionAFacturar(null);
+        }}
+        onConfirm={handleConfirmFactura}
+      />
     </View>
   );
 }
@@ -825,111 +842,12 @@ const getStyles = (themeColors: any) => StyleSheet.create({
   },
 
   // --- ESTILOS DESKTOP/WEB DE ALTA FIDELIDAD ---
-  desktopNavBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: themeColors.backgroundElement,
-    borderBottomWidth: 1,
-    borderBottomColor: themeColors.border,
-  },
-  desktopNavBarLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  desktopLogo: {
-    width: 60,
-    height: 40,
-    marginRight: 10,
-  },
-  desktopLogoTexts: {
-    flexDirection: 'column',
-  },
-  desktopLogoTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 1,
-    color: themeColors.text,
-  },
-  desktopLogoSubtitle: {
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    color: themeColors.textSecondary,
-    marginTop: -2,
-  },
-  desktopNavBarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 15,
-  },
-  helpButton: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: themeColors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  helpButtonText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: themeColors.accent,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    gap: 6,
-  },
-  backButtonText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  adminText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: themeColors.text,
-  },
-  matrizText: {
-    fontSize: 11,
-    color: themeColors.textSecondary,
-    marginLeft: -5,
-    marginRight: 5,
-  },
-  avatarImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: themeColors.border,
-  },
-  menuNavButton: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 10,
-  },
-  menuNavText: {
-    fontSize: 8,
-    fontWeight: 'bold',
-    color: themeColors.accent,
-    marginTop: -2,
-  },
-
-  // Toolbar
   desktopToolbar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
     backgroundColor: themeColors.backgroundElement,
     borderBottomWidth: 1,
     borderBottomColor: themeColors.border,
@@ -937,40 +855,54 @@ const getStyles = (themeColors: any) => StyleSheet.create({
   desktopToolbarLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
   calculatorCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: themeColors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   desktopModuleTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '700',
     color: themeColors.text,
+  },
+  countBadge: {
+    backgroundColor: themeColors.accent + '20',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  countBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: themeColors.accent,
   },
   desktopSearchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: themeColors.background,
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    width: 250,
-    marginLeft: 15,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: themeColors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    width: 280,
+    marginLeft: 6,
+    gap: 6,
   },
   desktopSearchInput: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 12,
     color: themeColors.text,
     padding: 0,
     outlineStyle: 'none',
   } as any,
   searchIconInside: {
-    marginLeft: 8,
+    marginRight: 2,
   },
   desktopToolbarRight: {
     flexDirection: 'row',
@@ -978,15 +910,18 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     gap: 10,
   },
   addCotizacionButton: {
-    backgroundColor: themeColors.accent,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: themeColors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 6,
   },
   addCotizacionButtonText: {
     color: '#ffffff',
-    fontSize: 13,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontWeight: '700',
   },
   menuRightButton: {
     flexDirection: 'column',

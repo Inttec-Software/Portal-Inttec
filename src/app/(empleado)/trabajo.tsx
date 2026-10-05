@@ -194,7 +194,7 @@ export default function MiTrabajoScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -670,7 +670,7 @@ export default function MiTrabajoScreen() {
         imageUrl={selectedPhoto}
         onClose={() => setViewerVisible(false)}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

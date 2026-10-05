@@ -2035,7 +2035,7 @@ export default function InventarioDashboard() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={{ flex: 1 }}>
         {renderScreenHeader()}
       {/* VISTA 1 & 2 COMBINED: IMPORTACIÓN Y CATÁLOGO */}
@@ -4308,7 +4308,7 @@ export default function InventarioDashboard() {
       )}
 
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

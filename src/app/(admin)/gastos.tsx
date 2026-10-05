@@ -2192,7 +2192,7 @@ export default function AdminGastosScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={{ flex: 1 }}>
 
       {/* Contents based on tab */}
@@ -6075,7 +6075,7 @@ export default function AdminGastosScreen() {
       />
       
     </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -793,13 +793,15 @@ export interface VentaPago {
   created_at?: string;
 }
 
-export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO';
+export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO' | 'SIN PRECIO';
 
 export function calcularEstadoPago(precioTotalFacturado: number, totalPagado: number): EstadoPagoVenta {
-  if (totalPagado >= precioTotalFacturado && precioTotalFacturado > 0) {
+  if (precioTotalFacturado > 0 && totalPagado >= precioTotalFacturado - 0.01) {
     return 'PAGADO';
-  } else if (totalPagado > 0) {
+  } else if (totalPagado > 0 && totalPagado < precioTotalFacturado - 0.01) {
     return 'PAGO PARCIAL';
+  } else if (precioTotalFacturado <= 0 && totalPagado <= 0) {
+    return 'SIN PRECIO';
   } else {
     return 'PENDIENTE DE PAGO';
   }

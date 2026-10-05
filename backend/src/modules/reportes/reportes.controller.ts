@@ -284,23 +284,48 @@ export const getExportData = async (req: Request, res: Response) => {
       if (startDate) query = query.gte('fecha', startDate);
       if (endDate) query = query.lte('fecha', endDate);
       
-      const [ventasRes, usersRes] = await Promise.all([
+      const [ventasRes, usersRes, gastosRes] = await Promise.all([
         query,
-        client.from('usuarios').select('id, nombre, email')
+        client.from('usuarios').select('id, nombre, email'),
+        client.from('gastos').select('id, venta_id, monto, status')
       ]);
       
       if (ventasRes.error) throw ventasRes.error;
       
       const userMap = new Map((usersRes.data || []).map((u: any) => [u.id, u]));
+
+      // Mapear sumatoria de gastos vinculados por cada venta
+      const gastosMap = new Map<string, { total: number; count: number }>();
+      (gastosRes.data || []).forEach((g: any) => {
+        const st = String(g.status || '').toUpperCase();
+        if (!g.venta_id || st === 'RECHAZADO' || st === 'REJECTED') return;
+        const current = gastosMap.get(g.venta_id) || { total: 0, count: 0 };
+        current.total += Number(g.monto) || 0;
+        current.count += 1;
+        gastosMap.set(g.venta_id, current);
+      });
       
       const mappedData = (ventasRes.data || []).map((v: any) => {
         const usuario = userMap.get(v.registrado_por);
+        const gastoInfo = gastosMap.get(v.id) || { total: 0, count: 0 };
+        const precioFacturado = Number(v.precio_total_facturado) || Number(v.total) || 0;
+        const costoPartidas = Number(v.costo_total) || 0;
+        const gastosVinculados = gastoInfo.total;
+        const costoTotalReal = costoPartidas + gastosVinculados;
+        const utilidadReal = precioFacturado - costoTotalReal;
+        const margenRealPorcentual = precioFacturado > 0 ? (utilidadReal / precioFacturado) : 0;
+
         return {
           ...v,
           cliente_nombre: v.cliente,
           vendedor_nombre: usuario?.nombre || usuario?.email || 'Desconocido',
           estatus: v.estado_pago || v.cfdi_estado || 'PENDIENTE',
-          total: v.precio_total_facturado || v.costo_total || 0
+          total: precioFacturado,
+          gastos_vinculados_total: gastosVinculados,
+          gastos_vinculados_count: gastoInfo.count,
+          costo_total_real: costoTotalReal,
+          utilidad_real: utilidadReal,
+          margen_real_porcentual: margenRealPorcentual,
         };
       });
       

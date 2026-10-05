@@ -17,6 +17,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase, CompanyService, inttecClient, daravisaClient } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
@@ -220,6 +221,8 @@ function TableTooltipButton({
 }
 
 export default function FacturacionScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
@@ -350,6 +353,93 @@ export default function FacturacionScreen() {
     fetchComplementosList();
     fetchSiguienteFolioPago('P');
   }, []);
+
+  // === Recibir parámetros de Cotización para Facturación ===
+  useEffect(() => {
+    if (params.fromCotizacion === 'true' && params.cotizacionData) {
+      setTimeout(() => {
+        try {
+          const data = typeof params.cotizacionData === 'string'
+            ? JSON.parse(params.cotizacionData)
+            : params.cotizacionData;
+
+          if (data.clienteNombre || data.cliente_nombre) {
+            setClienteNombre(data.clienteNombre || data.cliente_nombre);
+          }
+          if (data.clienteRfc || data.cliente_rfc) {
+            setClienteRfc(data.clienteRfc || data.cliente_rfc);
+          }
+          if (data.clienteCp || data.cliente_cp) {
+            setClienteCp(data.clienteCp || data.cliente_cp);
+          }
+          if (data.clienteDireccion || data.cliente_direccion) {
+            setClienteDireccion(data.clienteDireccion || data.cliente_direccion);
+          }
+          if (data.clienteRegimen || data.cliente_regimen) {
+            setClienteRegimen(data.clienteRegimen || data.cliente_regimen);
+          }
+          if (data.clienteUso || data.cliente_uso) {
+            setClienteUso(data.clienteUso || data.cliente_uso);
+          }
+          if (data.clienteId || data.cliente_id) {
+            setSelectedClientId(data.clienteId || data.cliente_id);
+          }
+          if (data.formaPago) {
+            setFormaPago(data.formaPago);
+          }
+          if (data.metodoPago) {
+            setMetodoPago(data.metodoPago);
+          }
+          if (data.moneda) {
+            setMoneda(data.moneda);
+          }
+          if (data.ordenCompra) {
+            setOrdenCompra(data.ordenCompra);
+          } else if (data.cotizacionFolio) {
+            setOrdenCompra(`Cotización ${data.cotizacionFolio}`);
+          }
+          if (data.etiqueta) {
+            setEtiqueta(data.etiqueta);
+          } else if (data.cotizacionFolio) {
+            setEtiqueta(`Cotización ${data.cotizacionFolio}`);
+          }
+
+          const rawPartidas = data.partidas || data.lineas || [];
+          if (Array.isArray(rawPartidas) && rawPartidas.length > 0) {
+            const mappedPartidas: FacturaPartida[] = rawPartidas.map((l: any, idx: number) => {
+              const uStr = (l.unidad || 'Pieza').trim();
+              const isServ = uStr.toLowerCase().includes('serv') || uStr.toLowerCase().includes('obra');
+              return {
+                id: String(l.id || Date.now() + idx),
+                descripcion: l.descripcion || l.productoNombre || 'Concepto sin descripción',
+                descripcion_detallada: l.descripcion_detallada || l.productoDescripcion || '',
+                cantidad: String(l.cantidad !== undefined && l.cantidad !== null ? l.cantidad : 1),
+                precio_unitario: String(
+                  l.precio_unitario !== undefined && l.precio_unitario !== null
+                    ? l.precio_unitario
+                    : (l.precioUnitario || 0)
+                ),
+                clave_sat: l.clave_sat || l.claveFacturacion || '01010101',
+                clave_unidad: l.clave_unidad || (isServ ? 'E48' : 'H87'),
+                unidad: uStr,
+                objeto_imp: l.objeto_imp || (l.impuestoPorcentaje === 0 ? '01' : '02'),
+              };
+            });
+            setPartidas(mappedPartidas);
+          }
+
+          setCurrentDraftId(null);
+          setActiveTab('emitir');
+          fetchSiguienteFolio('A');
+
+          // Limpiar parámetros para evitar re-ejecución involuntaria
+          router.setParams({ fromCotizacion: 'false', cotizacionData: '' });
+        } catch (e) {
+          console.error('Error al cargar cotización en facturación:', e);
+        }
+      }, 50);
+    }
+  }, [params.fromCotizacion, params.cotizacionData]);
 
   const fetchSiguienteFolio = async (serieTarget = 'A') => {
     try {
@@ -2231,7 +2321,7 @@ export default function FacturacionScreen() {
   }, [categorias]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: themeColors.background }} edges={['bottom', 'left', 'right']}>
+    <View style={{ flex: 1, backgroundColor: themeColors.background }}>
       {/* Header y Selector de Pestañas */}
       <View style={[styles.headerContainer, { borderBottomColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}>
         <View style={styles.titleRow}>
@@ -4472,7 +4562,7 @@ export default function FacturacionScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

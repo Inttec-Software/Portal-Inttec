@@ -2837,52 +2837,55 @@ export const ReportGenerator = {
 
     const branding = await getCompanyBranding();
 
-    const totalFacturado = ventas.reduce((sum, v) => sum + Number(v.precio_total_facturado || 0), 0);
-    const totalCosto = ventas.reduce((sum, v) => sum + Number(v.costo_total || 0), 0);
-    const totalUtilidad = totalFacturado - totalCosto;
-    const margenConsolidado = totalFacturado > 0 ? (totalUtilidad / totalFacturado) * 100 : 0;
+    const formatCurr = (val: number) =>
+      new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val);
+
+    const totalFacturado = ventas.reduce((sum, v) => sum + Number(v.precio_total_facturado || v.total || 0), 0);
+    const totalCostoPartidas = ventas.reduce((sum, v) => sum + Number(v.costo_total || 0), 0);
+    const totalGastosVinculados = ventas.reduce((sum, v) => sum + Number(v.gastos_vinculados_total || 0), 0);
+    const totalCostoReal = totalCostoPartidas + totalGastosVinculados;
+    const totalUtilidadReal = totalFacturado - totalCostoReal;
+    const margenRealConsolidado = totalFacturado > 0 ? (totalUtilidadReal / totalFacturado) * 100 : 0;
 
     let tableRows = '';
     ventas.forEach((v) => {
-      const fecha = v.fecha || '';
-      const facturadoFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(v.precio_total_facturado || 0));
+      const fecha = v.fecha || (v.created_at ? v.created_at.split('T')[0] : '');
+      const precioFacturado = Number(v.precio_total_facturado || v.total || 0);
+      const costoPartidas = Number(v.costo_total || 0);
+      const gastosVinc = Number(v.gastos_vinculados_total || 0);
+      const costoTotalReal = v.costo_total_real !== undefined ? Number(v.costo_total_real) : (costoPartidas + gastosVinc);
+      const utilidadReal = v.utilidad_real !== undefined ? Number(v.utilidad_real) : (precioFacturado - costoTotalReal);
+      const margenReal = v.margen_real_porcentual !== undefined 
+        ? Number(v.margen_real_porcentual) 
+        : (precioFacturado > 0 ? (utilidadReal / precioFacturado) : 0);
 
-      const costoFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(v.costo_total || 0));
-
-      const utilidadFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(v.utilidad_bruta || 0));
-
-      const margenPercent = ((v.margen_porcentual || 0) * 100).toFixed(1) + '%';
-      const isProfit = Number(v.utilidad_bruta || 0) >= 0;
+      const facturadoFormatted = formatCurr(precioFacturado);
+      const costoPartidasFormatted = formatCurr(costoPartidas);
+      const gastosVincFormatted = formatCurr(gastosVinc);
+      const costoTotalRealFormatted = formatCurr(costoTotalReal);
+      const utilidadRealFormatted = formatCurr(utilidadReal);
+      const margenPercent = (margenReal * 100).toFixed(1) + '%';
+      const isProfit = utilidadReal >= 0;
 
       tableRows += `
         <tr>
           <td>${fecha}</td>
           <td>
-            <div style="font-weight: bold;">${v.cliente || 'N/A'}</div>
+            <div style="font-weight: bold;">${v.cliente_nombre || v.cliente || 'N/A'}</div>
             ${v.factura_referencia ? `<span style="font-size: 9px; color: #777;">Ref: ${v.factura_referencia}</span>` : ''}
           </td>
           <td>${v.tipo_proyecto || 'N/A'}</td>
           <td>${v.sucursal || 'N/A'}</td>
           <td>${v.proveedor || 'N/A'}</td>
           <td style="text-align: right; color: #0d1b2a; font-weight: bold;">${facturadoFormatted}</td>
-          <td style="text-align: right; color: #f44336;">${costoFormatted}</td>
-          <td style="text-align: right; color: ${isProfit ? '#4CAF50' : '#F44336'}; font-weight: bold;">${utilidadFormatted}</td>
-          <td style="text-align: right; color: ${isProfit ? '#4CAF50' : '#F44336'}; font-weight: bold;">${margenPercent}</td>
+          <td style="text-align: right; color: #64748b;">${costoPartidasFormatted}</td>
+          <td style="text-align: right; color: ${gastosVinc > 0 ? '#d97706' : '#94a3b8'}; font-weight: ${gastosVinc > 0 ? 'bold' : 'normal'};">${gastosVincFormatted}</td>
+          <td style="text-align: right; color: #ef4444; font-weight: 600;">${costoTotalRealFormatted}</td>
+          <td style="text-align: right; color: ${isProfit ? '#10b981' : '#ef4444'}; font-weight: bold;">${utilidadRealFormatted}</td>
+          <td style="text-align: right; color: ${isProfit ? '#10b981' : '#ef4444'}; font-weight: bold;">${margenPercent}</td>
         </tr>
       `;
     });
-
-    const formatCurr = (val: number) =>
-      new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val);
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -2905,8 +2908,8 @@ export const ReportGenerator = {
               print-color-adjust: exact;
             }
             @page {
-              size: letter;
-              margin: 15mm;
+              size: letter landscape;
+              margin: 10mm;
             }
           }
           .title {
@@ -2924,21 +2927,21 @@ export const ReportGenerator = {
             display: flex;
             justify-content: space-between;
             margin-bottom: 25px;
-            gap: 15px;
+            gap: 12px;
           }
           .summary-card {
             flex: 1;
             background-color: #f8f9fa;
             border: 1px solid #e9ecef;
             border-radius: 8px;
-            padding: 12px;
+            padding: 10px;
             text-align: center;
           }
           .summary-card .value {
-            font-size: 16px;
+            font-size: 15px;
             font-weight: bold;
             color: #0d1b2a;
-            margin-top: 5px;
+            margin-top: 4px;
           }
           .summary-card .label {
             font-size: 9px;
@@ -2950,17 +2953,17 @@ export const ReportGenerator = {
             width: 100%;
             border-collapse: collapse;
             margin-top: 10px;
-            font-size: 11px;
+            font-size: 10.5px;
           }
           th {
             background-color: #0d1b2a;
             color: white;
             text-align: left;
-            padding: 10px 8px;
+            padding: 8px 6px;
             font-weight: 600;
           }
           td {
-            padding: 10px 8px;
+            padding: 8px 6px;
             border-bottom: 1px solid #e9ecef;
           }
           tr:nth-child(even) {
@@ -2996,31 +2999,41 @@ export const ReportGenerator = {
             <div class="value" style="color: #0d1b2a;">${formatCurr(totalFacturado)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Costo Proveedores</div>
-            <div class="value" style="color: #f44336;">${formatCurr(totalCosto)}</div>
+            <div class="label">Costo Insumos</div>
+            <div class="value" style="color: #64748b;">${formatCurr(totalCostoPartidas)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Utilidad Consolidada</div>
-            <div class="value" style="color: ${totalUtilidad >= 0 ? '#4CAF50' : '#f44336'};">${formatCurr(totalUtilidad)}</div>
+            <div class="label">Gastos Vinculados</div>
+            <div class="value" style="color: #d97706;">${formatCurr(totalGastosVinculados)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Margen Consolidado</div>
-            <div class="value" style="color: ${totalUtilidad >= 0 ? '#4CAF50' : '#f44336'};">${margenConsolidado.toFixed(1)}%</div>
+            <div class="label">Costo Total Real</div>
+            <div class="value" style="color: #ef4444;">${formatCurr(totalCostoReal)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Utilidad Real</div>
+            <div class="value" style="color: ${totalUtilidadReal >= 0 ? '#10b981' : '#ef4444'};">${formatCurr(totalUtilidadReal)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Margen Real</div>
+            <div class="value" style="color: ${totalUtilidadReal >= 0 ? '#10b981' : '#ef4444'};">${margenRealConsolidado.toFixed(1)}%</div>
           </div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th style="width: 10%">Fecha</th>
-              <th style="width: 18%">Cliente / Ref</th>
-              <th style="width: 12%">Tipo</th>
-              <th style="width: 12%">Sucursal</th>
-              <th style="width: 13%">Proveedor</th>
-              <th style="width: 10%; text-align: right;">Venta</th>
-              <th style="width: 9%; text-align: right;">Costo</th>
-              <th style="width: 9%; text-align: right;">Utilidad</th>
-              <th style="width: 7%; text-align: right;">Margen</th>
+              <th style="width: 8%">Fecha</th>
+              <th style="width: 15%">Cliente / Ref</th>
+              <th style="width: 8%">Tipo</th>
+              <th style="width: 8%">Sucursal</th>
+              <th style="width: 9%">Proveedor</th>
+              <th style="width: 9%; text-align: right;">Venta</th>
+              <th style="width: 8%; text-align: right;">Insumos</th>
+              <th style="width: 9%; text-align: right;">Gastos Vinc.</th>
+              <th style="width: 9%; text-align: right;">Costo Real</th>
+              <th style="width: 9%; text-align: right;">Util. Real</th>
+              <th style="width: 8%; text-align: right;">Margen</th>
             </tr>
           </thead>
           <tbody>
@@ -3113,7 +3126,7 @@ export const ReportGenerator = {
             if (gastos.length === 0) {
               throw new Error('No hay gastos para exportar.');
             }
-            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Estado Reembolso','Comentarios'];
+            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Venta Vinculada','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Estado Reembolso','Comentarios'];
             const rows = gastos.map(g => {
               const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
               let estadoFactura = 'No Facturado';
@@ -3121,7 +3134,8 @@ export const ReportGenerator = {
               else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) estadoFactura = 'Pendiente de Entregar';
               const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
               const estadoReembolso = g.estado_reembolso === 'REEMBOLSADO' ? 'Reembolsado' : 'No';
-              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, estadoReembolso, commentText ];
+              const ventaVinc = g.venta_id ? `Venta #${String(g.venta_id).slice(0, 8)}` : 'Sin Venta';
+              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), ventaVinc, g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, estadoReembolso, commentText ];
             });
             await ReportGenerator._exportArrayToXLSX('Gastos', headers, rows, fileName);
     },
@@ -3424,26 +3438,61 @@ export const ReportGenerator = {
             await ReportGenerator._exportArrayToXLSX('Retiros', headers, rows, fileName);
     },
     async exportVentasToXLSX(ventas: any[], fileName: string = 'reporte_ventas.xlsx'): Promise<void> {
-
             if (ventas.length === 0) {
               throw new Error('No hay ventas para exportar.');
             }
-            const headers = ['ID','Folio','Fecha Creación','Cliente','Vendedor','Estatus','Referencia/Factura','Tipo Proyecto','Sucursal','Monto Total (Venta)','Total Costo (Proveedor)','Utilidad Bruta','Margen %'];
-            const rows = ventas.map(v => [ 
-              v.id, 
-              v.folio || 'S/F', 
-              v.created_at ? v.created_at.split('T')[0] : '', 
-              v.cliente_nombre || v.cliente || 'Desconocido', 
-              v.vendedor_nombre || v.vendedor || 'Desconocido', 
-              v.estatus || v.estado_pago || v.cfdi_estado || '', 
-              v.factura_referencia || '', 
-              v.tipo_proyecto || '', 
-              v.sucursal || '', 
-              v.total || v.precio_total_facturado || 0, 
-              v.costo_total || 0, 
-              v.utilidad_bruta || 0, 
-              ((v.margen_porcentual || 0) * 100).toFixed(2) + '%' 
-            ]);
+            const headers = [
+              'ID',
+              'Folio',
+              'Fecha Creación',
+              'Cliente',
+              'Vendedor',
+              'Estatus',
+              'Referencia/Factura',
+              'Tipo Proyecto',
+              'Sucursal',
+              'Monto Total (Venta)',
+              'Costo Partidas (Proveedor)',
+              'Utilidad Bruta (Inicial)',
+              'Margen Inicial %',
+              'Gastos Vinculados',
+              'Costo Total Real',
+              'Utilidad Real',
+              'Margen Real %'
+            ];
+            const rows = ventas.map(v => {
+              const precioTotal = Number(v.total) || Number(v.precio_total_facturado) || 0;
+              const costoPartidas = Number(v.costo_total) || 0;
+              const utilidadInicial = precioTotal - costoPartidas;
+              const margenInicial = precioTotal > 0 ? (utilidadInicial / precioTotal) : 0;
+
+              const gastosVinculados = Number(v.gastos_vinculados_total) || 0;
+              const costoTotalReal = v.costo_total_real !== undefined ? Number(v.costo_total_real) : (costoPartidas + gastosVinculados);
+              const utilidadReal = v.utilidad_real !== undefined ? Number(v.utilidad_real) : (precioTotal - costoTotalReal);
+              const margenReal = v.margen_real_porcentual !== undefined 
+                ? Number(v.margen_real_porcentual) 
+                : (precioTotal > 0 ? (utilidadReal / precioTotal) : 0);
+
+              return [
+                v.id, 
+                v.folio || 'S/F', 
+                v.created_at ? v.created_at.split('T')[0] : (v.fecha || ''), 
+                v.cliente_nombre || v.cliente || 'Desconocido', 
+                v.vendedor_nombre || v.vendedor || 'Desconocido', 
+                v.estatus || v.estado_pago || v.cfdi_estado || '', 
+                v.factura_referencia || '', 
+                v.tipo_proyecto || '', 
+                v.sucursal || '', 
+                precioTotal, 
+                costoPartidas, 
+                utilidadInicial,
+                (margenInicial * 100).toFixed(2) + '%',
+                gastosVinculados,
+                costoTotalReal,
+                utilidadReal, 
+                (margenReal * 100).toFixed(2) + '%' 
+              ];
+            });
             await ReportGenerator._exportArrayToXLSX('Ventas', headers, rows, fileName);
     }
 };

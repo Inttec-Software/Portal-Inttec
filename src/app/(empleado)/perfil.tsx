@@ -86,7 +86,7 @@ export default function EmpleadoPerfilScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={styles.header}>
         <View style={{ marginRight: Spacing.three, padding: Spacing.one, width: 32 }} />
         <View style={{ flex: 1 }}>
@@ -146,7 +146,7 @@ export default function EmpleadoPerfilScreen() {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

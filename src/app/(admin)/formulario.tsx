@@ -1137,7 +1137,7 @@ export default function GastoForm() {
   const isAnyDropdownOpen = !!(showEmpList || showCatDropdown || showSubDropdown || showCliDropdown);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Registrar Gasto</Text>
@@ -3191,7 +3191,7 @@ export default function GastoForm() {
           </KeyboardAvoidingView>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -605,19 +605,19 @@ export default function AdminHerramientasScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]}>
+      <View style={[styles.container, { backgroundColor: themeColors.background }]}>
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color={themeColors.primary} />
           <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.two }}>
             Cargando módulo de herramientas...
           </Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'bottom']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header */}
       <View style={[styles.headerContainer, { borderBottomColor: themeColors.border }]}>
         <View style={{ flex: 1 }}>
@@ -2317,7 +2317,7 @@ export default function AdminHerramientasScreen() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -178,7 +178,7 @@ export default function AdminEvidenciasScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={{ flex: 1 }}>
 
       {/* Listado de Reportes */}
@@ -668,7 +668,7 @@ export default function AdminEvidenciasScreen() {
         onClose={() => setViewerVisible(false)}
       />
     </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -188,7 +188,7 @@ export default function TaskDetailScreen() {
                       (task.corresponsables && task.corresponsables.some((c: any) => c.usuario_id === user?.id));
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['bottom', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={themeColors.text} />
@@ -453,7 +453,7 @@ export default function TaskDetailScreen() {
         onSuccess={fetchTaskDetails}
         task={task}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

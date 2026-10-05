@@ -182,7 +182,7 @@ export default function ProductosScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
-      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+      <View style={{ flex: 1 }}>
         {/* HEADER */}
         <View style={[styles.header, { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -354,7 +354,7 @@ export default function ProductosScreen() {
           </KeyboardAvoidingView>
         </Modal>
 
-      </SafeAreaView>
+      </View>
     </View>
   );
 }

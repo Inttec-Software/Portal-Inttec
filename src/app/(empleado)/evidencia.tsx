@@ -169,7 +169,7 @@ export default function MisEvidenciasHistorial() {
   }, [themeColors]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: themeColors.background }} edges={['bottom', 'left', 'right']}>
+    <View style={{ flex: 1, backgroundColor: themeColors.background }}>
       {!isLoading && (
         <View style={styles.topHeader}>
           <Text style={[styles.pageTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
@@ -429,7 +429,7 @@ export default function MisEvidenciasHistorial() {
       >
         <Ionicons name="add" size={32} color="#FFFFFF" />
       </TouchableOpacity>
-    </SafeAreaView>
+    </View>
   );
 }
 

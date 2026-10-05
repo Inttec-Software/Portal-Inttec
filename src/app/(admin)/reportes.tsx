@@ -1854,7 +1854,7 @@ export default function ReportesScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
       {false && <View>
       {/* Switch de Empresa - Fila Dedicada */}
@@ -5237,7 +5237,7 @@ export default function ReportesScreen() {
       />
       
     </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

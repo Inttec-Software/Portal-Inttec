@@ -604,7 +604,7 @@ export default function CatalogosManager() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={{ flex: 1 }}>
       <View style={isDesktop ? { maxWidth: 800, width: '100%', alignSelf: 'center', flex: 1, paddingHorizontal: Spacing.two } : { flex: 1 }}>
       {/* List */}
@@ -1206,7 +1206,7 @@ export default function CatalogosManager() {
       </Modal>
 
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
