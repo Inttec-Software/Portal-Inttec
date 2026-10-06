@@ -1,54 +1,84 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
-// GET /api/tareas
 export const getTareas = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
-    const user = req.user;
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
+    const user = (req as any).user;
 
-    let query = supabase
-      .from('tareas')
-      .select(`
-        *,
-        creador:usuarios!tareas_creado_por_fkey(nombre),
-        responsable:usuarios!tareas_responsable_id_fkey(nombre),
-        corresponsables:tarea_corresponsables(usuario_id, usuarios(nombre))
-      `)
-      .order('fecha_compromiso', { ascending: true });
+    let query = `
+      SELECT t.*, 
+             c.nombre AS creador_nombre,
+             r.nombre AS responsable_nombre
+      FROM tareas t
+      LEFT JOIN usuarios c ON t.creado_por = c.id
+      LEFT JOIN usuarios r ON t.responsable_id = r.id
+      WHERE 1=1
+    `;
+    const values: any[] = [];
 
     if (user?.rol === 'EMPLEADO') {
-      const { data: corrData } = await supabase.from('tarea_corresponsables').select('tarea_id').eq('usuario_id', user.id);
-      const corrIds = corrData?.map(c => c.tarea_id) || [];
+      const { rows: corrData } = await pool.query(`SELECT tarea_id FROM tarea_corresponsables WHERE usuario_id = $1`, [user.id]);
+      const corrIds = corrData.map((c: any) => c.tarea_id);
       
-      let orCondition = `responsable_id.eq.${user.id},creado_por.eq.${user.id}`;
+      const conditions = [];
+      conditions.push(`t.responsable_id = $${values.length + 1}`);
+      values.push(user.id);
+      
+      conditions.push(`t.creado_por = $${values.length + 1}`);
+      values.push(user.id);
+      
       if (corrIds.length > 0) {
-        orCondition += `,id.in.(${corrIds.join(',')})`;
+        const placeholders = corrIds.map((_: any, i: number) => `$${values.length + i + 1}`).join(',');
+        conditions.push(`t.id IN (${placeholders})`);
+        values.push(...corrIds);
       }
-      query = query.or(orCondition);
+      
+      query += ` AND (${conditions.join(' OR ')})`;
     }
 
-    const { data, error } = await query;
-    if (error) throw error;
+    query += ` ORDER BY t.fecha_compromiso ASC`;
 
-    const clientIds = (data || []).filter(t => t.vinculo_tipo === 'Cliente' && t.vinculo_id).map(t => t.vinculo_id);
-    const ventaIds = (data || []).filter(t => t.vinculo_tipo === 'Venta' && t.vinculo_id).map(t => t.vinculo_id);
+    const { rows: data } = await pool.query(query, values);
+
+    // Obtener corresponsables para estas tareas
+    const taskIds = data.map((t: any) => t.id);
+    let corresponsablesMap: any = {};
+    if (taskIds.length > 0) {
+      const placeholders = taskIds.map((_: any, i: number) => `$${i + 1}`).join(',');
+      const corrQuery = `
+        SELECT tc.tarea_id, tc.usuario_id, u.nombre
+        FROM tarea_corresponsables tc
+        JOIN usuarios u ON tc.usuario_id = u.id
+        WHERE tc.tarea_id IN (${placeholders})
+      `;
+      const { rows: corrRows } = await pool.query(corrQuery, taskIds);
+      corrRows.forEach((row: any) => {
+        if (!corresponsablesMap[row.tarea_id]) corresponsablesMap[row.tarea_id] = [];
+        corresponsablesMap[row.tarea_id].push({ usuario_id: row.usuario_id, usuario_nombre: row.nombre });
+      });
+    }
+
+    const clientIds = data.filter((t: any) => t.vinculo_tipo === 'Cliente' && t.vinculo_id).map((t: any) => t.vinculo_id);
+    const ventaIds = data.filter((t: any) => t.vinculo_tipo === 'Venta' && t.vinculo_id).map((t: any) => t.vinculo_id);
 
     let clientsMap: any = {};
     let ventasMap: any = {};
 
     if (clientIds.length > 0) {
-      const { data: clientsData } = await supabase.from('clientes').select('id, nombre').in('id', clientIds);
-      (clientsData || []).forEach(c => clientsMap[c.id] = c.nombre);
+      const placeholders = clientIds.map((_: any, i: number) => `$${i + 1}`).join(',');
+      const { rows: clientsData } = await pool.query(`SELECT id, nombre FROM clientes WHERE id IN (${placeholders})`, clientIds);
+      clientsData.forEach((c: any) => clientsMap[c.id] = c.nombre);
     }
     
     if (ventaIds.length > 0) {
-      const { data: ventasData } = await supabase.from('ventas').select('id, cliente, factura_referencia').in('id', ventaIds);
-      (ventasData || []).forEach(v => ventasMap[v.id] = { cliente: v.cliente, referencia: v.factura_referencia });
+      const placeholders = ventaIds.map((_: any, i: number) => `$${i + 1}`).join(',');
+      const { rows: ventasData } = await pool.query(`SELECT id, cliente, factura_referencia FROM ventas WHERE id IN (${placeholders})`, ventaIds);
+      ventasData.forEach((v: any) => ventasMap[v.id] = { cliente: v.cliente, referencia: v.factura_referencia });
     }
 
-    const formattedTasks = (data || []).map(t => {
+    const formattedTasks = data.map((t: any) => {
       let vinculo_nombre = '';
       if (t.vinculo_tipo === 'Cliente' && clientsMap[t.vinculo_id]) {
         vinculo_nombre = clientsMap[t.vinculo_id];
@@ -58,13 +88,10 @@ export const getTareas = async (req: Request, res: Response): Promise<void> => {
 
       return {
         ...t,
-        creado_por_nombre: Array.isArray(t.creador) ? t.creador[0]?.nombre : (t.creador as any)?.nombre,
-        responsable_nombre: Array.isArray(t.responsable) ? t.responsable[0]?.nombre : (t.responsable as any)?.nombre,
+        creado_por_nombre: t.creador_nombre,
+        responsable_nombre: t.responsable_nombre,
         vinculo_nombre,
-        corresponsables: (t.corresponsables as any[])?.map((c: any) => ({
-          usuario_id: c.usuario_id,
-          usuario_nombre: Array.isArray(c.usuarios) ? c.usuarios[0]?.nombre : c.usuarios?.nombre
-        })) || []
+        corresponsables: corresponsablesMap[t.id] || []
       };
     });
 
@@ -74,111 +101,123 @@ export const getTareas = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// GET /api/tareas/:id
 export const getTareaById = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
 
-    const { data: taskData, error: taskError } = await supabase
-      .from('tareas')
-      .select(`
-        *,
-        creador:usuarios!tareas_creado_por_fkey(nombre),
-        responsable:usuarios!tareas_responsable_id_fkey(nombre),
-        corresponsables:tarea_corresponsables(usuario_id, usuarios(nombre))
-      `)
-      .eq('id', id)
-      .single();
+    const { rows } = await pool.query(`
+      SELECT t.*, 
+             c.nombre AS creador_nombre,
+             r.nombre AS responsable_nombre
+      FROM tareas t
+      LEFT JOIN usuarios c ON t.creado_por = c.id
+      LEFT JOIN usuarios r ON t.responsable_id = r.id
+      WHERE t.id = $1
+    `, [id]);
 
-    if (taskError) throw taskError;
+    if (rows.length === 0) {
+      res.status(404).json({ message: 'Tarea no encontrada' });
+      return;
+    }
+    const taskData = rows[0];
+
+    const { rows: corrRows } = await pool.query(`
+      SELECT tc.usuario_id, u.nombre
+      FROM tarea_corresponsables tc
+      JOIN usuarios u ON tc.usuario_id = u.id
+      WHERE tc.tarea_id = $1
+    `, [id]);
 
     let vinculo_nombre = '';
     if (taskData.vinculo_tipo === 'Cliente' && taskData.vinculo_id) {
-      const { data: clientData } = await supabase.from('clientes').select('nombre').eq('id', taskData.vinculo_id).single();
-      if (clientData) vinculo_nombre = clientData.nombre;
+      const { rows: clientData } = await pool.query(`SELECT nombre FROM clientes WHERE id = $1`, [taskData.vinculo_id]);
+      if (clientData.length > 0) vinculo_nombre = clientData[0].nombre;
     } else if (taskData.vinculo_tipo === 'Venta' && taskData.vinculo_id) {
-      const { data: ventaData } = await supabase.from('ventas').select('cliente, factura_referencia').eq('id', taskData.vinculo_id).single();
-      if (ventaData) vinculo_nombre = `${ventaData.cliente} - ${ventaData.factura_referencia}`;
+      const { rows: ventaData } = await pool.query(`SELECT cliente, factura_referencia FROM ventas WHERE id = $1`, [taskData.vinculo_id]);
+      if (ventaData.length > 0) vinculo_nombre = `${ventaData[0].cliente} - ${ventaData[0].factura_referencia}`;
     }
 
-    const { data: notesData, error: notesError } = await supabase
-      .from('tarea_notas')
-      .select('*, usuario:usuarios!tarea_notas_usuario_id_fkey(nombre)')
-      .eq('tarea_id', id)
-      .order('created_at', { ascending: false });
-
-    if (notesError) {
-      console.error('[getTareaById] Error fetching tarea_notas:', notesError);
-    }
-
-    const formattedNotes = (notesData || []).map((n: any) => ({
-      ...n,
-      usuario_nombre: Array.isArray(n.usuario) ? n.usuario[0]?.nombre : (n.usuario?.nombre || 'Usuario')
-    }));
+    const { rows: notesData } = await pool.query(`
+      SELECT tn.*, u.nombre AS usuario_nombre
+      FROM tarea_notas tn
+      LEFT JOIN usuarios u ON tn.usuario_id = u.id
+      WHERE tn.tarea_id = $1
+      ORDER BY tn.created_at DESC
+    `, [id]);
 
     res.json({
       ...taskData,
-      creado_por_nombre: Array.isArray(taskData.creador) ? taskData.creador[0]?.nombre : (taskData.creador as any)?.nombre,
-      responsable_nombre: Array.isArray(taskData.responsable) ? taskData.responsable[0]?.nombre : (taskData.responsable as any)?.nombre,
+      creado_por_nombre: taskData.creador_nombre,
+      responsable_nombre: taskData.responsable_nombre,
       vinculo_nombre,
-      corresponsables: (taskData.corresponsables as any[])?.map((c: any) => ({
+      corresponsables: corrRows.map((c: any) => ({
         usuario_id: c.usuario_id,
-        usuario_nombre: Array.isArray(c.usuarios) ? c.usuarios[0]?.nombre : c.usuarios?.nombre
-      })) || [],
-      notas: formattedNotes
+        usuario_nombre: c.nombre
+      })),
+      notas: notesData
     });
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// GET /api/tareas/form/lookups
 export const getFormLookups = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
-    const user = req.user;
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
+    const user = (req as any).user;
 
-    let userQuery = supabase.from('usuarios').select('id, nombre');
+    let userQuery = `SELECT id, nombre, rol FROM usuarios`;
+    let userParams: any[] = [];
+
     if (user?.rol === 'EMPLEADO') {
-      userQuery = userQuery.in('id', [user.id, '634289dd-c4fb-4b50-ac4e-9d2aab11f114']); // Hack that was in frontend for admin id
+      userQuery += ` WHERE rol = $1`;
+      userParams = ['EMPLEADO'];
     }
-    const { data: usersData } = await userQuery;
 
-    const { data: clientsData } = await supabase.from('clientes').select('id, nombre');
-    const { data: ventasData } = await supabase.from('ventas').select('id, cliente, factura_referencia, fecha, sucursal');
+    userQuery += ` ORDER BY nombre ASC`;
+
+    const { rows: usersData } = await pool.query(userQuery, userParams);
+    const { rows: clientsData } = await pool.query(`SELECT id, nombre FROM clientes ORDER BY nombre ASC`);
+    const { rows: ventasData } = await pool.query(`SELECT id, cliente, factura_referencia, fecha, sucursal FROM ventas ORDER BY fecha DESC`);
 
     res.json({
-      usuarios: usersData || [],
-      clientes: clientsData || [],
-      ventas: ventasData || []
+      usuarios: usersData,
+      clientes: clientsData,
+      ventas: ventasData
     });
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// POST /api/tareas
 export const createTarea = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
     const { corresponsables, ...nuevaTarea } = req.body;
 
-    const { data: tarea, error } = await supabase.from('tareas').insert(nuevaTarea).select().single();
-    if (error) throw error;
+    const keys = Object.keys(nuevaTarea);
+    const values = Object.values(nuevaTarea);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+    const { rows: insertedTasks } = await pool.query(
+      `INSERT INTO tareas (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+      values
+    );
+    const tarea = insertedTasks[0];
 
     let targetIds: string[] = [];
     if (tarea.responsable_id) targetIds.push(tarea.responsable_id);
 
     if (corresponsables && corresponsables.length > 0) {
-      const corrInserts = corresponsables.map((uid: string) => ({
-        tarea_id: tarea.id,
-        usuario_id: uid
-      }));
-      await supabase.from('tarea_corresponsables').insert(corrInserts);
+      for (const uid of corresponsables) {
+        await pool.query(
+          `INSERT INTO tarea_corresponsables (tarea_id, usuario_id) VALUES ($1, $2)`,
+          [tarea.id, uid]
+        );
+      }
       targetIds = targetIds.concat(corresponsables);
     }
 
@@ -186,18 +225,18 @@ export const createTarea = async (req: Request, res: Response): Promise<void> =>
 
     if (targetIds.length > 0) {
       try {
-        const { data: targetEmpleados } = await supabase.from('usuarios').select('*').in('id', targetIds);
+        const p = targetIds.map((_: any, i: number) => `$${i + 1}`).join(',');
+        const { rows: targetEmpleados } = await pool.query(`SELECT * FROM usuarios WHERE id IN (${p})`, targetIds);
+        
         if (targetEmpleados && targetEmpleados.length > 0) {
           const docTitulo = tarea.titulo || 'Nueva Tarea Asignada';
           
-          const notificaciones = targetEmpleados.map((emp: any) => ({
-            usuario_id: emp.id,
-            titulo: '📋 Nueva Tarea Asignada',
-            mensaje: `Se te ha asignado la tarea "${docTitulo}".`,
-            tipo: 'TAREA_NUEVA',
-            referencia_id: tarea.id,
-          }));
-          await supabase.from('notificaciones').insert(notificaciones);
+          for (const emp of targetEmpleados) {
+            await pool.query(
+              `INSERT INTO notificaciones (usuario_id, titulo, mensaje, tipo, referencia_id) VALUES ($1, $2, $3, $4, $5)`,
+              [emp.id, '📋 Nueva Tarea Asignada', `Se te ha asignado la tarea "${docTitulo}".`, 'TAREA_NUEVA', tarea.id]
+            );
+          }
 
           const pushMessages = targetEmpleados
             .filter((emp: any) => emp.expo_push_token && typeof emp.expo_push_token === 'string' && emp.expo_push_token.trim().length > 0)
@@ -234,38 +273,39 @@ export const createTarea = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
-// PUT /api/tareas/:id
 export const updateTarea = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
     
-    // Extracted note info and corresponsables from frontend
     const { nota_texto, corresponsables, ...updates } = req.body;
 
-    if (Object.keys(updates).length > 0) {
-      const { error } = await supabase.from('tareas').update(updates).eq('id', id);
-      if (error) throw error;
+    const keys = Object.keys(updates);
+    if (keys.length > 0) {
+      const values = Object.values(updates);
+      const setString = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+      values.push(id);
+      await pool.query(`UPDATE tareas SET ${setString} WHERE id = $${values.length}`, values);
     }
 
     if (corresponsables !== undefined) {
-      await supabase.from('tarea_corresponsables').delete().eq('tarea_id', id);
+      await pool.query(`DELETE FROM tarea_corresponsables WHERE tarea_id = $1`, [id]);
       if (Array.isArray(corresponsables) && corresponsables.length > 0) {
-        const corrInserts = corresponsables.map((uid: string) => ({
-          tarea_id: id,
-          usuario_id: uid
-        }));
-        await supabase.from('tarea_corresponsables').insert(corrInserts);
+        for (const uid of corresponsables) {
+          await pool.query(
+            `INSERT INTO tarea_corresponsables (tarea_id, usuario_id) VALUES ($1, $2)`,
+            [id, uid]
+          );
+        }
       }
     }
 
     if (nota_texto) {
-      await supabase.from('tarea_notas').insert({
-        tarea_id: id,
-        usuario_id: req.user?.id,
-        comentario: nota_texto
-      });
+      await pool.query(
+        `INSERT INTO tarea_notas (tarea_id, usuario_id, comentario) VALUES ($1, $2, $3)`,
+        [id, (req as any).user?.id, nota_texto]
+      );
     }
 
     res.json({ success: true });
@@ -274,30 +314,25 @@ export const updateTarea = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
-// POST /api/tareas/:id/notas
 export const addNota = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
     
     const { comentario } = req.body;
     
-    const { data, error } = await supabase
-      .from('tarea_notas')
-      .insert({
-        tarea_id: id,
-        usuario_id: req.user?.id,
-        comentario
-      })
-      .select('*, usuario:usuarios!tarea_notas_usuario_id_fkey(nombre)')
-      .single();
+    const { rows: insertedNotes } = await pool.query(
+      `INSERT INTO tarea_notas (tarea_id, usuario_id, comentario) VALUES ($1, $2, $3) RETURNING *`,
+      [id, (req as any).user?.id, comentario]
+    );
+    const data = insertedNotes[0];
 
-    if (error) throw error;
+    const { rows: users } = await pool.query(`SELECT nombre FROM usuarios WHERE id = $1`, [data.usuario_id]);
 
     const formattedNote = {
       ...data,
-      usuario_nombre: Array.isArray(data.usuario) ? data.usuario[0]?.nombre : (data.usuario?.nombre || req.user?.nombre || 'Usuario')
+      usuario_nombre: users.length > 0 ? users[0].nombre : ((req as any).user?.nombre || 'Usuario')
     };
 
     res.json(formattedNote);

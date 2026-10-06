@@ -1,16 +1,5 @@
+import { supabase, Vehiculo, CompanyService, CatalogoItem, ClienteItem, ProveedorItem, SubcategoriaItem, SucursalCliente, Usuario } from '@/services/supabase';
 import { logger } from '@/utils/logger';
-import {
-  CatalogoItem,
-  ClienteItem,
-  CompanyService,
-  
-  
-  ProveedorItem,
-  SubcategoriaItem,
-  SucursalCliente,
-  Usuario,
-  Vehiculo
-} from './supabase';
 
 import { AuthService, EnvService } from './supabase';
 import { getApiHeaders, getApiUrl } from './apiHelper';
@@ -248,3 +237,4 @@ export const CatalogService = {
     if (!res.ok) throw new Error('Error al eliminar vehículo en el servidor');
   }
 };
+

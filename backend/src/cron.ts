@@ -1,72 +1,71 @@
 import cron from 'node-cron';
-import { getSupabaseClient } from './config/supabase';
+import { getDbPool } from './config/database';
 
 // Inicializar todos los Cron Jobs del backend
 export const initCronJobs = () => {
   console.log('[Cron] Inicializando tareas programadas...');
 
-  // Tarea: Recordatorio de salida a las 6:00 PM (18:00) y a las 8:00 PM (20:00)
-  // Se ejecuta todos los días a las 18:00 y 20:00 (hora local del servidor)
   cron.schedule('0 18,20 * * *', async () => {
     console.log('[Cron] Ejecutando verificación de asistencias pendientes de salida...');
     try {
-      // Usaremos un client default, en producción se deberá ajustar para múltiples tenants si es necesario
       const company = 'inttec';
-      const env: 'cloud' | 'test' = 'cloud';
-      const supabase = getSupabaseClient(company, env);
+      const env = 'prod'; // Se usaba 'cloud', ahora mapped to prod
+      const pool = getDbPool(company, env);
 
-      // Fecha actual en formato YYYY-MM-DD
       const today = new Date();
-      // Formato seguro para timezone local del servidor
       const dateStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
       
       const hour = today.getHours();
       const isLateReminder = hour >= 20;
 
-      const title = isLateReminder ? '⚠️ Último Aviso: Registro de Salida' : '⏰ Recordatorio de Salida';
+      const title = isLateReminder ? '⏰ Último Aviso: Registro de Salida' : '⏰ Recordatorio de Salida';
       const msg = isLateReminder 
         ? 'Aún no has registrado tu hora de salida en el sistema. Por favor marca tu salida.' 
         : 'Parece que olvidaste marcar tu salida hoy. Recuerda hacerlo antes de terminar tu jornada.';
 
-      // Buscar asistencias de hoy que tengan entrada pero no salida
-      const { data: asistencias, error } = await supabase
-        .from('asistencias')
-        .select('empleado_id')
-        .eq('fecha', dateStr)
-        .not('hora_entrada', 'is', null)
-        .is('hora_salida', null);
-
-      if (error) throw error;
+      const asistQuery = `
+        SELECT empleado_id 
+        FROM asistencias 
+        WHERE fecha = $1 
+          AND hora_entrada IS NOT NULL 
+          AND hora_salida IS NULL
+      `;
+      const { rows: asistencias } = await pool.query(asistQuery, [dateStr]);
 
       if (asistencias && asistencias.length > 0) {
         const empleadoIds = asistencias.map((a: any) => a.empleado_id);
         
         // Obtener los push tokens de estos empleados
-        const { data: usuarios } = await supabase
-          .from('usuarios')
-          .select('id, expo_push_token')
-          .in('id', empleadoIds);
+        const placeholders = empleadoIds.map((_: any, i: number) => `$${i + 1}`).join(',');
+        const usersQuery = `SELECT id, expo_push_token FROM usuarios WHERE id IN (${placeholders})`;
+        const { rows: usuarios } = await pool.query(usersQuery, empleadoIds);
 
         if (usuarios && usuarios.length > 0) {
           // 1. Insertar notificaciones In-App
-          const notificaciones = usuarios.map(u => ({
+          const notificaciones = usuarios.map((u: any) => ({
             usuario_id: u.id,
             titulo: title,
             mensaje: msg,
             tipo: 'RECORDATORIO_SALIDA',
             referencia_id: null,
           }));
-          await supabase.from('notificaciones').insert(notificaciones);
+
+          for (const notif of notificaciones) {
+            await pool.query(
+              `INSERT INTO notificaciones (usuario_id, titulo, mensaje, tipo, referencia_id) VALUES ($1, $2, $3, $4, $5)`,
+              [notif.usuario_id, notif.titulo, notif.mensaje, notif.tipo, notif.referencia_id]
+            );
+          }
 
           // 2. Enviar push notifications
           const pushMessages = usuarios
-            .filter(u => u.expo_push_token && typeof u.expo_push_token === 'string' && u.expo_push_token.trim().length > 0)
-            .map(u => ({
+            .filter((u: any) => u.expo_push_token && typeof u.expo_push_token === 'string' && u.expo_push_token.trim().length > 0)
+            .map((u: any) => ({
               to: u.expo_push_token.trim(),
               sound: 'default',
               title: title,
               body: msg,
-              data: { screen: '/(empleado)' }, // Redirigir al inicio donde está el checador
+              data: { screen: '/(empleado)' },
               priority: 'high',
               channelId: 'default',
             }));

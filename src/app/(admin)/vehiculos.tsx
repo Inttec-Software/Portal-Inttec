@@ -12,7 +12,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
+import { Vehiculo, RegistroGasolina, VehiculoService, supabase } from '@/services/supabase';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';

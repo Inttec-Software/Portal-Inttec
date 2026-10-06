@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
 let hikvisionHeartbeatCounter = 0;
 
@@ -8,39 +8,29 @@ export const getAsistenciaHoy = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { empleado_id } = req.params;
     const { fecha } = req.query;
 
     if (!fecha) return res.status(400).json({ error: 'Fecha es requerida' });
 
     // 1. Primero buscar si hay algún turno ABIERTO hoy (tiene entrada pero no salida)
-    const { data: openShift } = await client
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleado_id)
-      .eq('fecha', fecha as string)
-      .is('hora_salida', null)
-      .order('creado_en', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const openShiftResult = await pool.query(
+      `SELECT * FROM asistencias WHERE empleado_id = $1 AND fecha = $2 AND hora_salida IS NULL ORDER BY creado_en DESC LIMIT 1`,
+      [empleado_id, fecha]
+    );
 
-    if (openShift) {
-      return res.json(openShift);
+    if (openShiftResult.rows.length > 0) {
+      return res.json(openShiftResult.rows[0]);
     }
 
     // 2. Si no hay turno abierto, retornar el último turno cerrado de hoy
-    const { data: lastShift, error } = await client
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleado_id)
-      .eq('fecha', fecha as string)
-      .order('creado_en', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const lastShiftResult = await pool.query(
+      `SELECT * FROM asistencias WHERE empleado_id = $1 AND fecha = $2 ORDER BY creado_en DESC LIMIT 1`,
+      [empleado_id, fecha]
+    );
 
-    if (error) throw error;
-    return res.json(lastShift || null);
+    return res.json(lastShiftResult.rows[0] || null);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -53,45 +43,37 @@ export const registrarEntrada = async (req: Request, res: Response) => {
     const { env } = tenant;
     const payload = req.body;
 
-    // Sincronización dual garantizada con service_role en el backend
-    const clientInttec = getSupabaseClient('inttec', env);
-    const clientDaravisa = getSupabaseClient('daravisa', env);
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
 
     // Auto-cierre de turnos anteriores abiertos (olvidos de checada): fijar salida a las 18:00:00
     if (payload.empleado_id && payload.fecha) {
       try {
-        const autoClosePayload = {
-          hora_salida: '18:00:00'
-        };
+        const updateQuery = `UPDATE asistencias SET hora_salida = '18:00:00' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`;
         await Promise.allSettled([
-          clientInttec
-            .from('asistencias')
-            .update(autoClosePayload)
-            .eq('empleado_id', payload.empleado_id)
-            .lt('fecha', payload.fecha)
-            .is('hora_salida', null),
-          clientDaravisa
-            .from('asistencias')
-            .update(autoClosePayload)
-            .eq('empleado_id', payload.empleado_id)
-            .lt('fecha', payload.fecha)
-            .is('hora_salida', null),
+          poolInttec.query(updateQuery, [payload.empleado_id, payload.fecha]),
+          poolDaravisa.query(updateQuery, [payload.empleado_id, payload.fecha]),
         ]);
       } catch (autoErr) {
         console.warn('Advertencia en auto-cierre de turnos anteriores:', autoErr);
       }
     }
 
+    const keys = Object.keys(payload);
+    const values = Object.values(payload);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+    const insertQuery = `INSERT INTO asistencias (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+
     const [inttecRes, daravisaRes] = await Promise.allSettled([
-      clientInttec.from('asistencias').insert([payload]).select().single(),
-      clientDaravisa.from('asistencias').insert([payload]).select().single(),
+      poolInttec.query(insertQuery, values),
+      poolDaravisa.query(insertQuery, values),
     ]);
 
     const data =
-      inttecRes.status === 'fulfilled' && inttecRes.value.data
-        ? inttecRes.value.data
-        : daravisaRes.status === 'fulfilled' && daravisaRes.value.data
-          ? daravisaRes.value.data
+      inttecRes.status === 'fulfilled' && (inttecRes.value as any)?.rows?.[0]
+        ? (inttecRes.value as any).rows[0]
+        : daravisaRes.status === 'fulfilled' && (daravisaRes.value as any)?.rows?.[0]
+          ? (daravisaRes.value as any).rows[0]
           : null;
 
     if (!data) {
@@ -117,49 +99,51 @@ export const registrarSalida = async (req: Request, res: Response) => {
     const { env } = tenant;
     const { id, empleado_id, fecha, ...payload } = req.body;
 
-    const clientInttec = getSupabaseClient('inttec', env);
-    const clientDaravisa = getSupabaseClient('daravisa', env);
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
+
+    const keys = Object.keys(payload);
+    const values = Object.values(payload);
+    const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
 
     // Actualizar en Inttec
     let updateInttecPromise;
     if (id) {
-      updateInttecPromise = clientInttec.from('asistencias').update(payload).eq('id', id).select().maybeSingle();
+      updateInttecPromise = poolInttec.query(
+        `UPDATE asistencias SET ${setClause} WHERE id = $${keys.length + 1} RETURNING *`,
+        [...values, id]
+      );
     } else if (empleado_id && fecha) {
-      updateInttecPromise = clientInttec
-        .from('asistencias')
-        .update(payload)
-        .eq('empleado_id', empleado_id)
-        .eq('fecha', fecha)
-        .is('hora_salida', null)
-        .select()
-        .maybeSingle();
+      updateInttecPromise = poolInttec.query(
+        `UPDATE asistencias SET ${setClause} WHERE empleado_id = $${keys.length + 1} AND fecha = $${keys.length + 2} AND hora_salida IS NULL RETURNING *`,
+        [...values, empleado_id, fecha]
+      );
     }
 
     // Actualizar en Daravisa (por turno abierto del empleado y fecha)
     let updateDaravisaPromise;
     if (empleado_id && fecha) {
-      updateDaravisaPromise = clientDaravisa
-        .from('asistencias')
-        .update(payload)
-        .eq('empleado_id', empleado_id)
-        .eq('fecha', fecha)
-        .is('hora_salida', null)
-        .select()
-        .maybeSingle();
+      updateDaravisaPromise = poolDaravisa.query(
+        `UPDATE asistencias SET ${setClause} WHERE empleado_id = $${keys.length + 1} AND fecha = $${keys.length + 2} AND hora_salida IS NULL RETURNING *`,
+        [...values, empleado_id, fecha]
+      );
     } else if (id) {
-      updateDaravisaPromise = clientDaravisa.from('asistencias').update(payload).eq('id', id).select().maybeSingle();
+      updateDaravisaPromise = poolDaravisa.query(
+        `UPDATE asistencias SET ${setClause} WHERE id = $${keys.length + 1} RETURNING *`,
+        [...values, id]
+      );
     }
 
     const [resI, resD] = await Promise.allSettled([
-      updateInttecPromise || Promise.resolve({ data: null }),
-      updateDaravisaPromise || Promise.resolve({ data: null }),
+      updateInttecPromise || Promise.resolve({ rows: [] }),
+      updateDaravisaPromise || Promise.resolve({ rows: [] }),
     ]);
 
     const data =
-      resI.status === 'fulfilled' && (resI.value as any)?.data
-        ? (resI.value as any).data
-        : resD.status === 'fulfilled' && (resD.value as any)?.data
-          ? (resD.value as any).data
+      resI.status === 'fulfilled' && (resI.value as any)?.rows?.[0]
+        ? (resI.value as any).rows[0]
+        : resD.status === 'fulfilled' && (resD.value as any)?.rows?.[0]
+          ? (resD.value as any).rows[0]
           : { success: true };
 
     return res.json(data);
@@ -173,25 +157,27 @@ export const getHistorial = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { empleado_id } = req.params;
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
 
-    let query = client
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleado_id);
+    let query = `SELECT * FROM asistencias WHERE empleado_id = $1`;
+    const params: any[] = [empleado_id];
 
-    if (startDate) query = query.gte('fecha', startDate);
-    if (endDate) query = query.lte('fecha', endDate);
+    if (startDate) {
+      params.push(startDate);
+      query += ` AND fecha >= $${params.length}`;
+    }
+    if (endDate) {
+      params.push(endDate);
+      query += ` AND fecha <= $${params.length}`;
+    }
 
-    // Ordenar cronológicamente por fecha descendente, y los turnos del mismo día de más temprano a más tarde
-    const { data, error } = await query
-      .order('fecha', { ascending: false })
-      .order('hora_entrada', { ascending: true });
+    query += ` ORDER BY fecha DESC, hora_entrada ASC`;
 
-    if (error) throw error;
-    return res.json(data || []);
+    const result = await pool.query(query, params);
+
+    return res.json(result.rows || []);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -281,8 +267,8 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
     console.log(`\n🟢 [HIKVISION] 👤 Checada recibida -> No: "${employeeNo}", Nombre: "${employeeName}", Modo: "${verifyMode}"`);
 
     // Buscar el usuario en Supabase (Inttec o Daravisa)
-    const clientInttec = getSupabaseClient('inttec', 'cloud');
-    const clientDaravisa = getSupabaseClient('daravisa', 'cloud');
+    const poolInttec = getDbPool('inttec', 'cloud');
+    const poolDaravisa = getDbPool('daravisa', 'cloud');
 
     let usuario: any = null;
 
@@ -294,15 +280,16 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
     if (employeeNo) {
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(employeeNo);
       if (isUUID) {
-        const { data: uInttec } = await clientInttec.from('usuarios').select('id, nombre, email').eq('id', employeeNo).maybeSingle();
-        if (uInttec) usuario = uInttec;
+        const uInttecRes = await poolInttec.query('SELECT id, nombre, email FROM usuarios WHERE id = $1 LIMIT 1', [employeeNo]);
+        if (uInttecRes.rows.length > 0) usuario = uInttecRes.rows[0];
       }
     }
 
     // 2. Buscar por coincidencia de nombre flexible (ej: "Adriana Juarez" -> "Karla Adriana Juárez Reyes")
     if (!usuario && employeeName) {
-      const { data: allUsersInttec } = await clientInttec.from('usuarios').select('id, nombre, email');
-      if (allUsersInttec && allUsersInttec.length > 0) {
+      const allUsersInttecRes = await poolInttec.query('SELECT id, nombre, email FROM usuarios');
+      if (allUsersInttecRes.rows.length > 0) {
+        const allUsersInttec = allUsersInttecRes.rows;
         const targetTokens = normalize(employeeName).split(/\s+/).filter(Boolean);
         usuario = allUsersInttec.find((u: any) => {
           const uNorm = normalize(u.nombre);
@@ -315,14 +302,15 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
     if (!usuario && employeeNo) {
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(employeeNo);
       if (isUUID) {
-        const { data: uDaravisa } = await clientDaravisa.from('usuarios').select('id, nombre, email').eq('id', employeeNo).maybeSingle();
-        if (uDaravisa) usuario = uDaravisa;
+        const uDaravisaRes = await poolDaravisa.query('SELECT id, nombre, email FROM usuarios WHERE id = $1 LIMIT 1', [employeeNo]);
+        if (uDaravisaRes.rows.length > 0) usuario = uDaravisaRes.rows[0];
       }
     }
 
     if (!usuario && employeeName) {
-      const { data: allUsersDaravisa } = await clientDaravisa.from('usuarios').select('id, nombre, email');
-      if (allUsersDaravisa && allUsersDaravisa.length > 0) {
+      const allUsersDaravisaRes = await poolDaravisa.query('SELECT id, nombre, email FROM usuarios');
+      if (allUsersDaravisaRes.rows.length > 0) {
+        const allUsersDaravisa = allUsersDaravisaRes.rows;
         const targetTokens = normalize(employeeName).split(/\s+/).filter(Boolean);
         usuario = allUsersDaravisa.find((u: any) => {
           const uNorm = normalize(u.nombre);
@@ -439,14 +427,12 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
     }
 
     // 1. Buscar registros existentes del empleado en esta fecha para verificar idempotencia
-    const { data: recordsForDay } = await clientInttec
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleadoId)
-      .eq('fecha', fechaJornada)
-      .order('creado_en', { ascending: true });
+    const recordsForDayRes = await poolInttec.query(
+      'SELECT * FROM asistencias WHERE empleado_id = $1 AND fecha = $2 ORDER BY creado_en ASC',
+      [empleadoId, fechaJornada]
+    );
 
-    const existingList = recordsForDay || [];
+    const existingList = recordsForDayRes.rows || [];
 
     // Helper para convertir HH:MM:SS a segundos
     const toSeconds = (tStr: string | null) => {
@@ -459,7 +445,7 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
     const currentSec = toSeconds(horaLocal);
 
     // Verificar si esta checada exacta ya fue registrada (duplicado idéntico por reenvío de cola)
-    const isDuplicate = existingList.some(r => {
+    const isDuplicate = existingList.some((r: any) => {
       const inSec = toSeconds(r.hora_entrada);
       const outSec = toSeconds(r.hora_salida);
       return (inSec >= 0 && Math.abs(currentSec - inSec) < 60) || (outSec >= 0 && Math.abs(currentSec - outSec) < 60);
@@ -476,7 +462,7 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
     }
 
     // Buscar si hay turno abierto para esta fecha
-    const openShift = existingList.find(r => !r.hora_salida);
+    const openShift = existingList.find((r: any) => !r.hora_salida);
 
     if (!openShift) {
       // Registrar ENTRADA
@@ -488,8 +474,8 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
         descripcion: 'Cierre automático 6:00 PM (olvido de checada)'
       };
       await Promise.allSettled([
-        clientInttec.from('asistencias').update(autoClosePayload).eq('empleado_id', empleadoId).lt('fecha', fechaJornada).is('hora_salida', null),
-        clientDaravisa.from('asistencias').update(autoClosePayload).eq('empleado_id', empleadoId).lt('fecha', fechaJornada).is('hora_salida', null),
+        poolInttec.query("UPDATE asistencias SET hora_salida = $1, descripcion = $2 WHERE empleado_id = $3 AND fecha < $4 AND hora_salida IS NULL", [autoClosePayload.hora_salida, autoClosePayload.descripcion, empleadoId, fechaJornada]),
+        poolDaravisa.query("UPDATE asistencias SET hora_salida = $1, descripcion = $2 WHERE empleado_id = $3 AND fecha < $4 AND hora_salida IS NULL", [autoClosePayload.hora_salida, autoClosePayload.descripcion, empleadoId, fechaJornada]),
       ]);
 
       const entradaPayload = {
@@ -500,8 +486,8 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
       };
 
       await Promise.allSettled([
-        clientInttec.from('asistencias').insert([entradaPayload]),
-        clientDaravisa.from('asistencias').insert([entradaPayload]),
+        poolInttec.query("INSERT INTO asistencias (empleado_id, fecha, hora_entrada, direccion_entrada) VALUES ($1, $2, $3, $4)", [empleadoId, fechaJornada, horaLocal, entradaPayload.direccion_entrada]),
+        poolDaravisa.query("INSERT INTO asistencias (empleado_id, fecha, hora_entrada, direccion_entrada) VALUES ($1, $2, $3, $4)", [empleadoId, fechaJornada, horaLocal, entradaPayload.direccion_entrada]),
       ]);
 
       return res.status(200).json({
@@ -536,8 +522,8 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
       };
 
       await Promise.allSettled([
-        clientInttec.from('asistencias').update(salidaPayload).eq('id', openShift.id),
-        clientDaravisa.from('asistencias').update(salidaPayload).eq('empleado_id', empleadoId).eq('fecha', fechaJornada).is('hora_salida', null),
+        poolInttec.query("UPDATE asistencias SET hora_salida = $1, direccion_salida = $2 WHERE id = $3", [salidaPayload.hora_salida, salidaPayload.direccion_salida, openShift.id]),
+        poolDaravisa.query("UPDATE asistencias SET hora_salida = $1, direccion_salida = $2 WHERE empleado_id = $3 AND fecha = $4 AND hora_salida IS NULL", [salidaPayload.hora_salida, salidaPayload.direccion_salida, empleadoId, fechaJornada]),
       ]);
 
       return res.status(200).json({
@@ -576,26 +562,20 @@ export const editarHorasAsistencia = async (req: Request, res: Response) => {
     }
 
     // Doble verificación del rol DEV: en token y en la base de datos
-    const clientInttec = getSupabaseClient('inttec', tenant?.env || 'cloud');
-    const clientDaravisa = getSupabaseClient('daravisa', tenant?.env || 'cloud');
+    const poolInttec = getDbPool('inttec', tenant?.env || 'cloud');
+    const poolDaravisa = getDbPool('daravisa', tenant?.env || 'cloud');
 
     let userRole = user.rol || user.role || user.user_metadata?.rol || user.app_metadata?.rol;
 
     if (userRole !== 'DEV') {
-      const { data: dbUser } = await clientInttec
-        .from('usuarios')
-        .select('rol, nombre')
-        .eq('id', user.id)
-        .maybeSingle();
+      const dbUserRes = await poolInttec.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
+      const dbUser = dbUserRes.rows[0];
 
       if (dbUser?.rol === 'DEV') {
         userRole = 'DEV';
       } else {
-        const { data: dbUserDaravisa } = await clientDaravisa
-          .from('usuarios')
-          .select('rol, nombre')
-          .eq('id', user.id)
-          .maybeSingle();
+        const dbUserDaravisaRes = await poolDaravisa.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
+        const dbUserDaravisa = dbUserDaravisaRes.rows[0];
         if (dbUserDaravisa?.rol === 'DEV') {
           userRole = 'DEV';
         }
@@ -632,44 +612,38 @@ export const editarHorasAsistencia = async (req: Request, res: Response) => {
 
     // Buscar el registro actual en Inttec o Daravisa para obtener los datos de referencia
     let currentRecord: any = null;
-    const { data: recInttec } = await clientInttec.from('asistencias').select('*').eq('id', id).maybeSingle();
-    if (recInttec) currentRecord = recInttec;
+    const recInttecRes = await poolInttec.query('SELECT * FROM asistencias WHERE id = $1 LIMIT 1', [id]);
+    if (recInttecRes.rows.length > 0) currentRecord = recInttecRes.rows[0];
     if (!currentRecord) {
-      const { data: recDaravisa } = await clientDaravisa.from('asistencias').select('*').eq('id', id).maybeSingle();
-      if (recDaravisa) currentRecord = recDaravisa;
+      const recDaravisaRes = await poolDaravisa.query('SELECT * FROM asistencias WHERE id = $1 LIMIT 1', [id]);
+      if (recDaravisaRes.rows.length > 0) currentRecord = recDaravisaRes.rows[0];
     }
 
-    const updatePayload: any = {
-      hora_entrada: cleanHoraEntrada,
-      hora_salida: cleanHoraSalida,
-    };
-
+    let query = 'UPDATE asistencias SET hora_entrada = $1, hora_salida = $2';
+    let params: any[] = [cleanHoraEntrada, cleanHoraSalida];
     if (fecha) {
-      updatePayload.fecha = fecha;
+      query += ', fecha = $3';
+      params.push(fecha);
     }
 
     const editorNombre = user.nombre || user.email || 'DEV';
 
     // Actualizar simultáneamente en Inttec y Daravisa
     const updatePromises: any[] = [
-      clientInttec.from('asistencias').update(updatePayload).eq('id', id),
-      clientDaravisa.from('asistencias').update(updatePayload).eq('id', id),
+      poolInttec.query(query + ` WHERE id = $${params.length + 1}`, [...params, id]),
+      poolDaravisa.query(query + ` WHERE id = $${params.length + 1}`, [...params, id]),
     ];
 
     if (currentRecord?.empleado_id && currentRecord?.fecha) {
       updatePromises.push(
-        clientInttec
-          .from('asistencias')
-          .update(updatePayload)
-          .eq('empleado_id', currentRecord.empleado_id)
-          .eq('fecha', currentRecord.fecha)
-          .eq('hora_entrada', currentRecord.hora_entrada),
-        clientDaravisa
-          .from('asistencias')
-          .update(updatePayload)
-          .eq('empleado_id', currentRecord.empleado_id)
-          .eq('fecha', currentRecord.fecha)
-          .eq('hora_entrada', currentRecord.hora_entrada)
+        poolInttec.query(
+          query + ` WHERE empleado_id = $${params.length + 1} AND fecha = $${params.length + 2} AND hora_entrada = $${params.length + 3}`,
+          [...params, currentRecord.empleado_id, currentRecord.fecha, currentRecord.hora_entrada]
+        ),
+        poolDaravisa.query(
+          query + ` WHERE empleado_id = $${params.length + 1} AND fecha = $${params.length + 2} AND hora_entrada = $${params.length + 3}`,
+          [...params, currentRecord.empleado_id, currentRecord.fecha, currentRecord.hora_entrada]
+        )
       );
     }
 
@@ -680,16 +654,12 @@ export const editarHorasAsistencia = async (req: Request, res: Response) => {
       if (r.status === 'rejected') {
         errors.push(r.reason);
       } else if (r.status === 'fulfilled') {
-        if (r.value?.error) {
-          errors.push(r.value.error);
-        } else {
-          updatedCount++;
-        }
+        updatedCount += (r.value as any).rowCount || 0;
       }
     }
 
     if (updatedCount === 0 && errors.length > 0) {
-      console.error('[DEV EDIT] Error al actualizar en Supabase:', errors[0]);
+      console.error('[DEV EDIT] Error al actualizar en BD:', errors[0]);
       throw new Error(errors[0]?.message || 'Error al actualizar asistencia en la base de datos');
     }
 
@@ -729,26 +699,20 @@ export const eliminarAsistencia = async (req: Request, res: Response) => {
     }
 
     // Doble verificación del rol DEV
-    const clientInttec = getSupabaseClient('inttec', tenant?.env || 'cloud');
-    const clientDaravisa = getSupabaseClient('daravisa', tenant?.env || 'cloud');
+    const poolInttec = getDbPool('inttec', tenant?.env || 'cloud');
+    const poolDaravisa = getDbPool('daravisa', tenant?.env || 'cloud');
 
     let userRole = user.rol || user.role || user.user_metadata?.rol || user.app_metadata?.rol;
 
     if (userRole !== 'DEV') {
-      const { data: dbUser } = await clientInttec
-        .from('usuarios')
-        .select('rol, nombre')
-        .eq('id', user.id)
-        .maybeSingle();
+      const dbUserRes = await poolInttec.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
+      const dbUser = dbUserRes.rows[0];
 
       if (dbUser?.rol === 'DEV') {
         userRole = 'DEV';
       } else {
-        const { data: dbUserDaravisa } = await clientDaravisa
-          .from('usuarios')
-          .select('rol, nombre')
-          .eq('id', user.id)
-          .maybeSingle();
+        const dbUserDaravisaRes = await poolDaravisa.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
+        const dbUserDaravisa = dbUserDaravisaRes.rows[0];
         if (dbUserDaravisa?.rol === 'DEV') {
           userRole = 'DEV';
         }
@@ -763,32 +727,28 @@ export const eliminarAsistencia = async (req: Request, res: Response) => {
 
     // Buscar el registro para conocer fecha y empleado
     let currentRecord: any = null;
-    const { data: recInttec } = await clientInttec.from('asistencias').select('*').eq('id', id).maybeSingle();
-    if (recInttec) currentRecord = recInttec;
+    const recInttecRes = await poolInttec.query('SELECT * FROM asistencias WHERE id = $1 LIMIT 1', [id]);
+    if (recInttecRes.rows.length > 0) currentRecord = recInttecRes.rows[0];
     if (!currentRecord) {
-      const { data: recDaravisa } = await clientDaravisa.from('asistencias').select('*').eq('id', id).maybeSingle();
-      if (recDaravisa) currentRecord = recDaravisa;
+      const recDaravisaRes = await poolDaravisa.query('SELECT * FROM asistencias WHERE id = $1 LIMIT 1', [id]);
+      if (recDaravisaRes.rows.length > 0) currentRecord = recDaravisaRes.rows[0];
     }
 
     const deletePromises: any[] = [
-      clientInttec.from('asistencias').delete().eq('id', id),
-      clientDaravisa.from('asistencias').delete().eq('id', id),
+      poolInttec.query('DELETE FROM asistencias WHERE id = $1', [id]),
+      poolDaravisa.query('DELETE FROM asistencias WHERE id = $1', [id]),
     ];
 
     if (currentRecord?.empleado_id && currentRecord?.fecha && currentRecord?.hora_entrada) {
       deletePromises.push(
-        clientInttec
-          .from('asistencias')
-          .delete()
-          .eq('empleado_id', currentRecord.empleado_id)
-          .eq('fecha', currentRecord.fecha)
-          .eq('hora_entrada', currentRecord.hora_entrada),
-        clientDaravisa
-          .from('asistencias')
-          .delete()
-          .eq('empleado_id', currentRecord.empleado_id)
-          .eq('fecha', currentRecord.fecha)
-          .eq('hora_entrada', currentRecord.hora_entrada)
+        poolInttec.query(
+          'DELETE FROM asistencias WHERE empleado_id = $1 AND fecha = $2 AND hora_entrada = $3',
+          [currentRecord.empleado_id, currentRecord.fecha, currentRecord.hora_entrada]
+        ),
+        poolDaravisa.query(
+          'DELETE FROM asistencias WHERE empleado_id = $1 AND fecha = $2 AND hora_entrada = $3',
+          [currentRecord.empleado_id, currentRecord.fecha, currentRecord.hora_entrada]
+        )
       );
     }
 
@@ -799,16 +759,12 @@ export const eliminarAsistencia = async (req: Request, res: Response) => {
       if (r.status === 'rejected') {
         errors.push(r.reason);
       } else if (r.status === 'fulfilled') {
-        if (r.value?.error) {
-          errors.push(r.value.error);
-        } else {
-          deletedCount++;
-        }
+        deletedCount += (r.value as any).rowCount || 0;
       }
     }
 
     if (deletedCount === 0 && errors.length > 0) {
-      console.error('[DEV DELETE] Error al eliminar en Supabase:', errors[0]);
+      console.error('[DEV DELETE] Error al eliminar en BD:', errors[0]);
       throw new Error(errors[0]?.message || 'Error al eliminar asistencia de la base de datos');
     }
 

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
 // Helper: calcular estado de pago
 function calcularEstadoPago(precioTotal: number, totalPagado: number): string {
@@ -10,36 +10,25 @@ function calcularEstadoPago(precioTotal: number, totalPagado: number): string {
 }
 
 // Helper: sync payment status in DB
-async function syncPaymentStatusInternal(client: any, ventaId: string) {
+async function syncPaymentStatusInternal(pool: any, ventaId: string) {
   try {
-    const { data: venta, error: vErr } = await client
-      .from('ventas')
-      .select('precio_total_facturado')
-      .eq('id', ventaId)
-      .single();
+    const ventaRes = await pool.query('SELECT precio_total_facturado FROM ventas WHERE id = $1', [ventaId]);
+    const venta = ventaRes.rows[0];
 
-    if (vErr || !venta) return;
+    if (!venta) return;
 
-    const { data: pagos, error: pErr } = await client
-      .from('ventas_pagos')
-      .select('monto')
-      .eq('venta_id', ventaId);
-
-    if (pErr) return;
+    const pagosRes = await pool.query('SELECT monto FROM ventas_pagos WHERE venta_id = $1', [ventaId]);
+    const pagos = pagosRes.rows;
 
     const precioTotal = Number(venta.precio_total_facturado) || 0;
     const totalPagado = (pagos || []).reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0);
     const saldoPendiente = Math.max(0, precioTotal - totalPagado);
     const estadoPago = calcularEstadoPago(precioTotal, totalPagado);
 
-    await client
-      .from('ventas')
-      .update({
-        total_pagado: totalPagado,
-        saldo_pendiente: saldoPendiente,
-        estado_pago: estadoPago
-      })
-      .eq('id', ventaId);
+    await pool.query(
+      'UPDATE ventas SET total_pagado = $1, saldo_pendiente = $2, estado_pago = $3 WHERE id = $4',
+      [totalPagado, saldoPendiente, estadoPago, ventaId]
+    );
   } catch (err) {
     // Silently fail – non-critical
   }
@@ -51,15 +40,19 @@ export const getVentasHistorial = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
-    const { data: ventasData, error } = await client
-      .from('ventas')
-      .select('*, cotizaciones(folio), usuarios!ventas_registrado_por_fkey(nombre), ventas_partidas(descripcion, unidad)')
-      .order('created_at', { ascending: false })
-      .limit(300);
+    const ventasRes = await pool.query(`
+      SELECT v.*,
+             (SELECT row_to_json(c_obj) FROM (SELECT folio FROM cotizaciones c WHERE c.id = v.cotizacion_id) c_obj) as cotizaciones,
+             (SELECT row_to_json(u_obj) FROM (SELECT nombre FROM usuarios u WHERE u.id = v.registrado_por) u_obj) as usuarios,
+             (SELECT json_agg(row_to_json(vp_obj)) FROM (SELECT descripcion, unidad FROM ventas_partidas vp WHERE vp.venta_id = v.id) vp_obj) as ventas_partidas
+      FROM ventas v
+      ORDER BY v.created_at DESC
+      LIMIT 300
+    `);
 
-    if (error) throw error;
+    const ventasData = ventasRes.rows;
 
     // Excluir registros generados como Factura Directa que no corresponden a ventas operativas
     const rawVentas = (ventasData || []).filter((v: any) => {
@@ -75,18 +68,15 @@ export const getVentasHistorial = async (req: Request, res: Response) => {
     let pagosMap: Record<string, any[]> = {};
     if (ventaIds.length > 0) {
       try {
-        const { data: pagosData, error: pagosErr } = await client
-          .from('ventas_pagos')
-          .select('*')
-          .in('venta_id', ventaIds)
-          .order('fecha_pago', { ascending: false });
-
-        if (!pagosErr && pagosData) {
-          pagosData.forEach((p: any) => {
-            if (!pagosMap[p.venta_id]) pagosMap[p.venta_id] = [];
-            pagosMap[p.venta_id].push(p);
-          });
-        }
+        const pagosRes = await pool.query(`
+          SELECT * FROM ventas_pagos WHERE venta_id = ANY($1) ORDER BY fecha_pago DESC
+        `, [ventaIds]);
+        
+        const pagosData = pagosRes.rows;
+        pagosData.forEach((p: any) => {
+          if (!pagosMap[p.venta_id]) pagosMap[p.venta_id] = [];
+          pagosMap[p.venta_id].push(p);
+        });
       } catch (_) {
         // Table may not exist yet
       }
@@ -128,34 +118,37 @@ export const getVentaDetalle = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
 
-    // Fetch partidas, gastos vinculados, and pagos in parallel
     const [partidasRes, gastosRes, pagosRes] = await Promise.all([
-      client.from('ventas_partidas').select('*').eq('venta_id', id),
-      client.from('gastos').select(`
-        *,
-        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-        proveedor_rel:proveedores(id, nombre),
-        cliente_rel:clientes(id, nombre),
-        sucursal_rel:sucursales_cliente(id, nombre)
-      `).eq('venta_id', id).eq('status', 'APPROVED'),
-      client.from('ventas_pagos').select('*').eq('venta_id', id).order('fecha_pago', { ascending: false }),
+      pool.query('SELECT * FROM ventas_partidas WHERE venta_id = $1', [id]),
+      pool.query(`
+        SELECT g.*,
+          (SELECT row_to_json(s_obj) FROM (
+            SELECT s.id, s.nombre, s.categoria_id,
+                   (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
+            FROM subcategorias s WHERE s.id = g.subcategoria_id
+          ) s_obj) as subcategoria_rel,
+          (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
+          (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
+          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
+        FROM gastos g
+        WHERE g.venta_id = $1 AND g.status = 'APPROVED'
+      `, [id]),
+      pool.query('SELECT * FROM ventas_pagos WHERE venta_id = $1 ORDER BY fecha_pago DESC', [id]),
     ]);
 
-    if (partidasRes.error) throw partidasRes.error;
-
     // Sync payment status in the background
-    await syncPaymentStatusInternal(client, id as string);
+    await syncPaymentStatusInternal(pool, id as string);
 
-    const pagos = pagosRes.data || [];
+    const pagos = pagosRes.rows || [];
     const totalPagado = pagos.reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0);
 
     return res.json({
-      partidas: partidasRes.data || [],
-      gastos: gastosRes.data || [],
+      partidas: partidasRes.rows || [],
+      gastos: gastosRes.rows || [],
       pagos: pagos,
       totalPagado,
     });
@@ -170,22 +163,16 @@ export const getVentaPagos = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
 
-    const { data: pagosData, error } = await client
-      .from('ventas_pagos')
-      .select('*')
-      .eq('venta_id', id)
-      .order('fecha_pago', { ascending: false });
-
-    if (error) throw error;
+    const pagosRes = await pool.query('SELECT * FROM ventas_pagos WHERE venta_id = $1 ORDER BY fecha_pago DESC', [id]);
 
     // Sync payment status
-    await syncPaymentStatusInternal(client, id as string);
+    await syncPaymentStatusInternal(pool, id as string);
 
-    return res.json({ pagos: pagosData || [] });
+    return res.json({ pagos: pagosRes.rows || [] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -197,28 +184,19 @@ export const registrarPago = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
     const { monto, fecha_pago, metodo_pago, referencia, registrado_por } = req.body;
 
-    const payload = {
-      venta_id: id,
-      monto: parseFloat(monto),
-      fecha_pago,
-      metodo_pago: metodo_pago || 'Transferencia',
-      referencia: referencia || null,
-      registrado_por: registrado_por || null,
-    };
-
-    const { error } = await client
-      .from('ventas_pagos')
-      .insert([payload]);
-
-    if (error) throw error;
+    await pool.query(
+      `INSERT INTO ventas_pagos (venta_id, monto, fecha_pago, metodo_pago, referencia, registrado_por)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, parseFloat(monto), fecha_pago, metodo_pago || 'Transferencia', referencia || null, registrado_por || null]
+    );
 
     // Sync payment status after insert
-    await syncPaymentStatusInternal(client, id as string);
+    await syncPaymentStatusInternal(pool, id as string);
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -232,19 +210,14 @@ export const deletePago = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id, pagoId } = req.params;
 
-    const { error } = await client
-      .from('ventas_pagos')
-      .delete()
-      .eq('id', pagoId);
-
-    if (error) throw error;
+    await pool.query('DELETE FROM ventas_pagos WHERE id = $1', [pagoId]);
 
     // Sync payment status after delete
-    await syncPaymentStatusInternal(client, id as string);
+    await syncPaymentStatusInternal(pool, id as string);
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -258,20 +231,16 @@ export const createVenta = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { ventaPayload, partidasPayload } = req.body;
 
     // Generate sequential folio (escalable, ignorando A1 y buscando el máximo real)
-    const { data: allFolios } = await client
-      .from('ventas')
-      .select('folio')
-      .not('folio', 'is', null)
-      .ilike('folio', 'A%');
-
+    const allFoliosRes = await pool.query("SELECT folio FROM ventas WHERE folio IS NOT NULL AND folio ILIKE 'A%'");
+    
     let maxNum = 3999; // Base para que empiece en A4000 si no hay mayores
-    if (allFolios && allFolios.length > 0) {
-      for (const item of allFolios) {
+    if (allFoliosRes.rows && allFoliosRes.rows.length > 0) {
+      for (const item of allFoliosRes.rows) {
         if (item.folio) {
           const numStr = item.folio.substring(1);
           const num = parseInt(numStr, 10);
@@ -283,28 +252,33 @@ export const createVenta = async (req: Request, res: Response) => {
     }
 
     const nextFolio = `A${maxNum + 1}`;
-
     const ventaPayloadWithFolio = { ...ventaPayload, folio: nextFolio };
 
-    const { data: ventaData, error: ventaError } = await client
-      .from('ventas')
-      .insert([ventaPayloadWithFolio])
-      .select()
-      .single();
+    const keys = Object.keys(ventaPayloadWithFolio);
+    const values = Object.values(ventaPayloadWithFolio);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
 
-    if (ventaError) throw ventaError;
+    const ventaDataRes = await pool.query(
+      `INSERT INTO ventas (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+      values
+    );
+    const ventaData = ventaDataRes.rows[0];
 
     // Insert partidas
-    const partidasWithVentaId = partidasPayload.map((p: any) => ({
-      ...p,
-      venta_id: ventaData.id,
-    }));
-
-    const { error: partidasError } = await client
-      .from('ventas_partidas')
-      .insert(partidasWithVentaId);
-
-    if (partidasError) throw partidasError;
+    if (partidasPayload && partidasPayload.length > 0) {
+      for (const p of partidasPayload) {
+        const pKeys = Object.keys(p);
+        pKeys.push('venta_id');
+        const pValues = Object.values(p);
+        pValues.push(ventaData.id);
+        const pPlaceholders = pKeys.map((_, i) => `$${i + 1}`).join(', ');
+        
+        await pool.query(
+          `INSERT INTO ventas_partidas (${pKeys.join(', ')}) VALUES (${pPlaceholders})`,
+          pValues
+        );
+      }
+    }
 
     return res.json({ success: true, venta: ventaData });
   } catch (error: any) {
@@ -318,38 +292,37 @@ export const updateVenta = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
     const { ventaPayload, partidasPayload } = req.body;
 
-    // Update the venta
-    const { error: updateError } = await client
-      .from('ventas')
-      .update(ventaPayload)
-      .eq('id', id);
-
-    if (updateError) throw updateError;
+    if (ventaPayload && Object.keys(ventaPayload).length > 0) {
+      const keys = Object.keys(ventaPayload);
+      const values = Object.values(ventaPayload);
+      const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
+      
+      await pool.query(`UPDATE ventas SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, id]);
+    }
 
     // Delete old partidas
-    const { error: deletePartidasError } = await client
-      .from('ventas_partidas')
-      .delete()
-      .eq('venta_id', id);
-
-    if (deletePartidasError) throw deletePartidasError;
+    await pool.query('DELETE FROM ventas_partidas WHERE venta_id = $1', [id]);
 
     // Insert new partidas
-    const partidasWithVentaId = partidasPayload.map((p: any) => ({
-      ...p,
-      venta_id: id,
-    }));
-
-    const { error: partidasError } = await client
-      .from('ventas_partidas')
-      .insert(partidasWithVentaId);
-
-    if (partidasError) throw partidasError;
+    if (partidasPayload && partidasPayload.length > 0) {
+      for (const p of partidasPayload) {
+        const pKeys = Object.keys(p);
+        pKeys.push('venta_id');
+        const pValues = Object.values(p);
+        pValues.push(id);
+        const pPlaceholders = pKeys.map((_, i) => `$${i + 1}`).join(', ');
+        
+        await pool.query(
+          `INSERT INTO ventas_partidas (${pKeys.join(', ')}) VALUES (${pPlaceholders})`,
+          pValues
+        );
+      }
+    }
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -363,35 +336,22 @@ export const deleteVenta = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
 
     // Delete partidas first (foreign key)
-    const { error: partError } = await client
-      .from('ventas_partidas')
-      .delete()
-      .eq('venta_id', id);
-
-    if (partError) throw partError;
+    await pool.query('DELETE FROM ventas_partidas WHERE venta_id = $1', [id]);
 
     // Delete pagos
     try {
-      await client
-        .from('ventas_pagos')
-        .delete()
-        .eq('venta_id', id);
+      await pool.query('DELETE FROM ventas_pagos WHERE venta_id = $1', [id]);
     } catch (_) {
       // Table may not exist, ignore
     }
 
     // Delete the venta
-    const { error: ventError } = await client
-      .from('ventas')
-      .delete()
-      .eq('id', id);
-
-    if (ventError) throw ventError;
+    await pool.query('DELETE FROM ventas WHERE id = $1', [id]);
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -405,18 +365,13 @@ export const getVentaPartidas = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
 
-    const { data, error } = await client
-      .from('ventas_partidas')
-      .select('*')
-      .eq('venta_id', id);
+    const partidasRes = await pool.query('SELECT * FROM ventas_partidas WHERE venta_id = $1', [id]);
 
-    if (error) throw error;
-
-    return res.json({ partidas: data || [] });
+    return res.json({ partidas: partidasRes.rows || [] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -428,16 +383,13 @@ export const checkDuplicateReference = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const ref = req.query.ref as string;
     if (!ref) return res.json({ exists: false });
 
-    const { data: existing } = await client
-      .from('ventas')
-      .select('id')
-      .ilike('factura_referencia', ref.trim())
-      .maybeSingle();
+    const existingRes = await pool.query('SELECT id FROM ventas WHERE factura_referencia ILIKE $1 LIMIT 1', [ref.trim()]);
+    const existing = existingRes.rows[0];
 
     return res.json({ exists: !!existing, id: existing?.id || null });
   } catch (error: any) {
@@ -451,16 +403,16 @@ export const getVentasCatalogs = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const [cliRes, sucRes] = await Promise.all([
-      client.from('clientes').select('*').order('nombre'),
-      client.from('sucursales_cliente').select('*').order('nombre'),
+      pool.query('SELECT * FROM clientes ORDER BY nombre'),
+      pool.query('SELECT * FROM sucursales_cliente ORDER BY nombre'),
     ]);
 
     return res.json({
-      clientes: cliRes.data || [],
-      sucursales: sucRes.data || [],
+      clientes: cliRes.rows || [],
+      sucursales: sucRes.rows || [],
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -473,37 +425,24 @@ export const getVentaPdfData = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
 
-    // Get the venta to find client name and cotizacion_id
-    const { data: venta, error: ventaErr } = await client
-      .from('ventas')
-      .select('cliente, cotizacion_id')
-      .eq('id', id)
-      .single();
-
-    if (ventaErr) throw ventaErr;
+    const ventaRes = await pool.query('SELECT cliente, cotizacion_id FROM ventas WHERE id = $1', [id]);
+    const venta = ventaRes.rows[0];
 
     let clientData = null;
     if (venta?.cliente) {
-      const { data } = await client
-        .from('clientes')
-        .select('*')
-        .eq('nombre', venta.cliente)
-        .single();
-      clientData = data;
+      const clientRes = await pool.query('SELECT * FROM clientes WHERE nombre = $1 LIMIT 1', [venta.cliente]);
+      clientData = clientRes.rows[0];
     }
 
     let cotizacionLineas: any[] = [];
     if (venta?.cotizacion_id) {
-      const { data: cotData } = await client
-        .from('cotizaciones')
-        .select('lineas')
-        .eq('id', venta.cotizacion_id)
-        .single();
-      if (cotData?.lineas) cotizacionLineas = cotData.lineas;
+      const cotDataRes = await pool.query('SELECT lineas FROM cotizaciones WHERE id = $1', [venta.cotizacion_id]);
+      const cotData = cotDataRes.rows[0];
+      if (cotData?.lineas) cotizacionLineas = typeof cotData.lineas === 'string' ? JSON.parse(cotData.lineas) : cotData.lineas;
     }
 
     return res.json({
@@ -521,10 +460,10 @@ export const syncPaymentStatus = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
-    await syncPaymentStatusInternal(client, id as string);
+    await syncPaymentStatusInternal(pool, id as string);
 
     return res.json({ success: true });
   } catch (error: any) {

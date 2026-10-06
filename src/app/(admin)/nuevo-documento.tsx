@@ -15,7 +15,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/theme';
-import { supabase, DocumentoService, Usuario, sortUsuariosByRoleAndName } from '@/services/supabase';
+import { DocumentoService, Usuario, sortUsuariosByRoleAndName, supabase } from '@/services/supabase';
 import { PushNotificationService } from '@/services/pushNotifications';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -1369,3 +1369,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
+

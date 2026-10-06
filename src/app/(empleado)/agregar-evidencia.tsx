@@ -18,7 +18,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Usuario, AuthService, inttecClient, daravisaClient } from '@/services/supabase';
+import { Usuario, AuthService, supabase } from '@/services/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
@@ -188,44 +188,13 @@ export default function EvidenciaForm() {
         console.warn('API inventario-colaboradores error:', apiErr);
       }
 
-      // 2. Fallback directo a Supabase en caso de que el backend no devuelva datos
-      if (colabInventarioData.length === 0) {
-        try {
-          const activeClient = company === 'daravisa' ? daravisaClient : inttecClient;
-          const { data: dbData, error: dbError } = await activeClient
-            .from('inventario_empleados')
-            .select('id, cantidad_disponible, producto_id, empleado_id, productos(id, sku_interno, nombre_oficial, unidad)')
-            .in('empleado_id', colabIds)
-            .gt('cantidad_disponible', 0);
-          
-          if (!dbError && Array.isArray(dbData)) {
-            colabInventarioData = dbData;
-          }
-        } catch (dbErr) {
-          console.warn('Direct Supabase inventario query fallback error:', dbErr);
-        }
-      }
-
       // Si algún item no trae `productos` anidado, buscar en el catálogo o consultarlo
       const missingProdIds = colabInventarioData
         .filter(item => (!item.productos || !item.productos.nombre_oficial) && item.producto_id)
         .map(item => item.producto_id);
 
       let extraProdMap = new Map<string, any>();
-      if (missingProdIds.length > 0) {
-        try {
-          const activeClient = company === 'daravisa' ? daravisaClient : inttecClient;
-          const { data: pData } = await activeClient
-            .from('productos')
-            .select('id, sku_interno, nombre_oficial, unidad')
-            .in('id', missingProdIds);
-          if (pData) {
-            pData.forEach(p => extraProdMap.set(p.id, p));
-          }
-        } catch (pErr) {
-          console.warn('Error fetching missing productos details:', pErr);
-        }
-      }
+      // Ya no hacemos fallback a Supabase directo. El API debería devolver los productos.
 
       const colabProductos: ProductoInventario[] = colabInventarioData.map((item: any) => {
         const empName = colabs.find(c => c.id === item.empleado_id)?.nombre || 'Colaborador';
@@ -884,9 +853,29 @@ export default function EvidenciaForm() {
       return parts[1] || null;
     }
 
-    // Si ya es un URL público de Supabase o web, no se necesita Base64 para subir
-    if (photo.uri.startsWith('http://') || photo.uri.startsWith('https://')) {
+    // Si ya es un URL público de Supabase/S3 o web (no localhost ni blob), no se necesita Base64 para subir
+    if ((photo.uri.startsWith('http://') || photo.uri.startsWith('https://')) && !photo.uri.includes('localhost') && !photo.uri.includes('127.0.0.1')) {
       return null;
+    }
+
+    // En Web, si es un URI blob: o local, leerlo directamente como blob para obtener su base64
+    if (photo.uri.startsWith('blob:') || (Platform.OS === 'web' && !photo.uri.startsWith('http'))) {
+      try {
+        const response = await fetch(photo.uri);
+        const blob = await response.blob();
+        const b64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const dataUrl = reader.result as string;
+            resolve(dataUrl.split('base64,')[1] || '');
+          };
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(blob);
+        });
+        if (b64) return b64;
+      } catch (err) {
+        console.warn('Error reading blob uri on web:', err);
+      }
     }
 
     try {
@@ -897,7 +886,23 @@ export default function EvidenciaForm() {
       );
       return manipulated.base64 || null;
     } catch (err) {
-      console.warn('Error reading photo base64:', err);
+      console.warn('Error reading photo base64 with ImageManipulator:', err);
+      // Fallback secundario para web
+      if (Platform.OS === 'web') {
+        try {
+          const response = await fetch(photo.uri);
+          const blob = await response.blob();
+          return await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const dataUrl = reader.result as string;
+              resolve(dataUrl.split('base64,')[1] || null as any);
+            };
+            reader.onerror = () => resolve(null as any);
+            reader.readAsDataURL(blob);
+          });
+        } catch (e) {}
+      }
       return null;
     }
   };
@@ -1004,7 +1009,7 @@ export default function EvidenciaForm() {
                 if (b64) {
                   return await uploadPhoto(b64, `t${i}_extra_${j + chunkIdx}`);
                 }
-                return extra.uri || null;
+                return (extra.uri && !extra.uri.startsWith('blob:')) ? extra.uri : null;
               })
             );
             urls.forEach(u => {
@@ -2812,3 +2817,4 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
 });
+

@@ -1,17 +1,22 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
 export const obtenerDocumentosAdmin = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
-    const client = getSupabaseClient(tenant.company, tenant.env);
-    const { data, error } = await client
-      .from('documentos')
-      .select('*, documentos_firmados(id, estado)')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
+    const pool = getDbPool(tenant.company, tenant.env);
+    const { rows: data } = await pool.query(`
+      SELECT d.*, 
+        COALESCE(
+          (SELECT json_agg(json_build_object('id', df.id, 'estado', df.estado)) 
+           FROM documentos_firmados df WHERE df.documento_id = d.id),
+          '[]'::json
+        ) as documentos_firmados
+      FROM documentos d
+      ORDER BY d.created_at DESC
+    `);
 
-    const formattedData = (data || []).map((doc: any) => ({
+    const formattedData = data.map((doc: any) => ({
       ...doc,
       total_asignados: doc.documentos_firmados ? doc.documentos_firmados.length : 0,
       total_firmados: doc.documentos_firmados ? doc.documentos_firmados.filter((f: any) => f.estado === 'FIRMADO').length : 0,
@@ -26,25 +31,30 @@ export const obtenerDocumentosAdmin = async (req: Request, res: Response) => {
 export const crearDocumento = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
     const { doc, empleadosIds } = req.body;
 
-    let { data: newDoc, error: docError } = await client
-      .from('documentos')
-      .insert([doc])
-      .select()
-      .single();
-
-    if (docError) {
+    let newDoc;
+    try {
+      const keys = Object.keys(doc);
+      const values = Object.values(doc);
+      const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+      const { rows } = await pool.query(
+        `INSERT INTO documentos (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+        values
+      );
+      newDoc = rows[0];
+    } catch (docError: any) {
       if (docError.message?.includes('posicion_firma') || docError.code === 'PGRST204' || docError.details?.includes('posicion_firma')) {
         const { posicion_firma, ...docSinPosicion } = doc;
-        const { data: retryDoc, error: retryErr } = await client
-          .from('documentos')
-          .insert([docSinPosicion])
-          .select()
-          .single();
-        if (retryErr) throw retryErr;
-        newDoc = retryDoc;
+        const keys = Object.keys(docSinPosicion);
+        const values = Object.values(docSinPosicion);
+        const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+        const { rows: retryRows } = await pool.query(
+          `INSERT INTO documentos (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+          values
+        );
+        newDoc = retryRows[0];
       } else {
         throw docError;
       }
@@ -52,41 +62,42 @@ export const crearDocumento = async (req: Request, res: Response) => {
 
     let targetEmpleados: any[] = [];
     if (doc.requiere_todos || !empleadosIds || empleadosIds.length === 0) {
-      const { data: users } = await client.from('usuarios').select('*');
-      targetEmpleados = users || [];
+      const { rows } = await pool.query(`SELECT * FROM usuarios`);
+      targetEmpleados = rows;
     } else {
-      const { data: users } = await client.from('usuarios').select('*').in('id', empleadosIds);
-      targetEmpleados = users || [];
+      const placeholders = empleadosIds.map((_: any, i: number) => `$${i + 1}`).join(', ');
+      const { rows } = await pool.query(`SELECT * FROM usuarios WHERE id IN (${placeholders})`, empleadosIds);
+      targetEmpleados = rows;
     }
 
     if (targetEmpleados.length > 0) {
-      const asignaciones = targetEmpleados.map((emp) => ({
-        documento_id: newDoc.id,
-        empleado_id: emp.id,
-        empleado_nombre: emp.nombre,
-        empleado_email: emp.email,
-        estado: 'PENDIENTE',
-      }));
-      const { error: asigError } = await client.from('documentos_firmados').insert(asignaciones);
-      if (asigError) console.error('Error asignando empleados:', asigError);
+      const asignaciones = targetEmpleados.map((emp) => [
+        newDoc.id, emp.id, emp.nombre, emp.email, 'PENDIENTE'
+      ]);
+      try {
+        for (const asig of asignaciones) {
+          await pool.query(
+            `INSERT INTO documentos_firmados (documento_id, empleado_id, empleado_nombre, empleado_email, estado) VALUES ($1, $2, $3, $4, $5)`,
+            asig
+          );
+        }
+      } catch (asigError) {
+        console.error('Error asignando empleados:', asigError);
+      }
 
       const docTitulo = newDoc.titulo || doc.titulo || 'Documento Corporativo';
 
-      // 1. Guardar notificaciones internas en la base de datos (In-App)
       try {
-        const notificaciones = targetEmpleados.map((emp) => ({
-          usuario_id: emp.id,
-          titulo: '📝 Nuevo Documento por Firmar',
-          mensaje: `Se te ha asignado el documento "${docTitulo}" para tu firma digital.`,
-          tipo: 'DOCUMENTO_NUEVO',
-          referencia_id: newDoc.id,
-        }));
-        await client.from('notificaciones').insert(notificaciones);
+        for (const emp of targetEmpleados) {
+          await pool.query(
+            `INSERT INTO notificaciones (usuario_id, titulo, mensaje, tipo, referencia_id) VALUES ($1, $2, $3, $4, $5)`,
+            [emp.id, '📝 Nuevo Documento por Firmar', `Se te ha asignado el documento "${docTitulo}" para tu firma digital.`, 'DOCUMENTO_NUEVO', newDoc.id]
+          );
+        }
       } catch (notifErr) {
         console.warn('[Documentos] No se pudieron insertar notificaciones en BD:', notifErr);
       }
 
-      // 2. Enviar notificaciones push a los dispositivos móviles de los empleados mediante Expo
       try {
         const pushMessages = targetEmpleados
           .filter(
@@ -111,7 +122,6 @@ export const crearDocumento = async (req: Request, res: Response) => {
 
         if (pushMessages.length > 0) {
           console.log(`[Documentos] Enviando ${pushMessages.length} notificaciones push a empleados...`);
-          // Expo Push API permite lotes de hasta 100 mensajes
           const chunkSize = 100;
           for (let i = 0; i < pushMessages.length; i += chunkSize) {
             const chunk = pushMessages.slice(i, i + chunkSize);
@@ -146,14 +156,16 @@ export const crearDocumento = async (req: Request, res: Response) => {
 export const obtenerMisDocumentos = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
     const { empleadoId } = req.params;
-    const { data, error } = await client
-      .from('documentos_firmados')
-      .select('*, documentos(*)')
-      .eq('empleado_id', empleadoId)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
+    const { rows: data } = await pool.query(
+      `SELECT df.*, row_to_json(d.*) as documentos 
+       FROM documentos_firmados df 
+       LEFT JOIN documentos d ON df.documento_id = d.id 
+       WHERE df.empleado_id = $1 
+       ORDER BY df.created_at DESC`,
+      [empleadoId]
+    );
     return res.json(data);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -163,14 +175,12 @@ export const obtenerMisDocumentos = async (req: Request, res: Response) => {
 export const obtenerFirmas = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
     const { documentoId } = req.params;
-    const { data, error } = await client
-      .from('documentos_firmados')
-      .select('*')
-      .eq('documento_id', documentoId)
-      .order('empleado_nombre', { ascending: true });
-    if (error) throw error;
+    const { rows: data } = await pool.query(
+      `SELECT * FROM documentos_firmados WHERE documento_id = $1 ORDER BY empleado_nombre ASC`,
+      [documentoId]
+    );
     return res.json(data);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -180,26 +190,16 @@ export const obtenerFirmas = async (req: Request, res: Response) => {
 export const registrarFirma = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
     const { idAsignacion } = req.params;
     const params = req.body;
-    const { data, error } = await client
-      .from('documentos_firmados')
-      .update({
-        estado: 'FIRMADO',
-        firma_base64: params.firmaBase64,
-        pdf_firmado_url: params.pdfUrl,
-        ip_registro: params.ipRegistro,
-        ubicacion_gps: params.ubicacionGps,
-        dispositivo_info: params.dispositivoInfo,
-        hash_sha256: params.hashSha256,
-        firmado_at: new Date().toISOString(),
-      })
-      .eq('id', idAsignacion)
-      .select()
-      .maybeSingle();
-    if (error) throw error;
-    return res.json(data || { id: idAsignacion, estado: 'FIRMADO' });
+    const { rows: data } = await pool.query(
+      `UPDATE documentos_firmados 
+       SET estado = 'FIRMADO', firma_base64 = $1, pdf_firmado_url = $2, ip_registro = $3, ubicacion_gps = $4, dispositivo_info = $5, hash_sha256 = $6, firmado_at = $7 
+       WHERE id = $8 RETURNING *`,
+      [params.firmaBase64, params.pdfUrl, params.ipRegistro, params.ubicacionGps, params.dispositivoInfo, params.hashSha256, new Date().toISOString(), idAsignacion]
+    );
+    return res.json(data[0] || { id: idAsignacion, estado: 'FIRMADO' });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -208,13 +208,11 @@ export const registrarFirma = async (req: Request, res: Response) => {
 export const eliminarDocumento = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
     const { id } = req.params;
-    const { error } = await client.from('documentos').delete().eq('id', id);
-    if (error) throw error;
+    await pool.query(`DELETE FROM documentos WHERE id = $1`, [id]);
     return res.json({ success: true });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
 };
-

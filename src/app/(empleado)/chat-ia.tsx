@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -5,7 +6,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase } from '@/services/supabase';
+import {} from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { GeminiService } from '@/services/gemini';
 import { useAuth } from '@/context/AuthContext';
@@ -351,3 +352,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+

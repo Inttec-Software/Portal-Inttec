@@ -15,7 +15,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/theme';
-import { DocumentoService, DocumentoFirmado } from '@/services/supabase';
+import { DocumentoService, DocumentoFirmado, supabase } from '@/services/supabase';
 import { PdfDocumentoService } from '@/services/pdfDocumentoService';
 import SignatureCanvasModal from '@/components/SignatureCanvasModal';
 import CustomButton from '@/components/CustomButton';

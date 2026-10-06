@@ -23,7 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName } from '@/services/supabase';
+import { Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName, supabase } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
@@ -479,7 +479,7 @@ export default function AdminEmpleadosScreen() {
       const [ventasRes, cliRes, sucRes] = await Promise.all([
         supabase.from('ventas').select('*').order('fecha', { ascending: false }).limit(1000),
         supabase.from('clientes').select('*').order('nombre'),
-        supabase.from('sucursales_cliente').select('*').order('nombre'),
+        supabase.from('sucursales_cliente').select('*').order('nombre')
       ]);
       if (ventasRes.error) throw ventasRes.error;
       setSalesForLinking(ventasRes.data || []);
@@ -1455,7 +1455,7 @@ export default function AdminEmpleadosScreen() {
     try {
       const [prodRes, catRes] = await Promise.all([
         supabase.from('productos').select('*').order('nombre_oficial'),
-        supabase.from('categorias_productos').select('*').order('nombre'),
+        supabase.from('categorias_productos').select('*').order('nombre')
       ]);
       if (prodRes.error) throw prodRes.error;
       if (catRes.error) throw catRes.error;
@@ -1472,7 +1472,7 @@ export default function AdminEmpleadosScreen() {
     try {
       const [prodRes, catRes] = await Promise.all([
         supabase.from('productos').select('*').order('nombre_oficial'),
-        supabase.from('categorias_productos').select('*').order('nombre'),
+        supabase.from('categorias_productos').select('*').order('nombre')
       ]);
       if (prodRes.error) throw prodRes.error;
       if (catRes.error) throw catRes.error;
@@ -5324,3 +5324,4 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
   },
 });
+

@@ -169,14 +169,8 @@ export default function AdminAsistencia() {
           const asistData = await resAsist.json();
           setAllAsistenciasSemana(asistData || []);
         } else {
-          const client = company === 'daravisa' ? daravisaClient : inttecClient;
-          const { data: aData } = await client
-            .from('asistencias')
-            .select('*')
-            .gte('fecha', range.mondayStr)
-            .lte('fecha', range.sundayStr)
-            .order('fecha', { ascending: false });
-          setAllAsistenciasSemana(aData || []);
+          setAllAsistenciasSemana([]);
+          console.warn('[Admin Asistencia] API devolvió error:', await resAsist.text().catch(()=>''));
         }
       } catch (err) {
         console.error('[Admin Asistencia] Error cargando asistencias generales:', err);

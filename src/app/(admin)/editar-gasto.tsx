@@ -22,18 +22,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { CatalogService } from '@/services/catalogService';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import {
-  supabase,
-  CatalogoItem,
-  SubcategoriaItem,
-  ClienteItem,
-  ProveedorItem,
-  Usuario,
-  AuthService,
-  SucursalCliente,
-  recalculateVentaTotals,
-  GastoHelper,
-} from '@/services/supabase';
+import { CatalogoItem, SubcategoriaItem, ClienteItem, ProveedorItem, Usuario, AuthService, SucursalCliente, recalculateVentaTotals, GastoHelper, supabase } from '@/services/supabase';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { PushNotificationService } from '@/services/pushNotifications';
 import { getComentariosPlaceholder } from '@/utils/helpers';
@@ -3010,3 +2999,4 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+

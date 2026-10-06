@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';

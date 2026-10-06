@@ -18,7 +18,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, daravisaClient, inttecClient, Usuario, CatalogoItem } from '@/services/supabase';
+import { Usuario, CatalogoItem, supabase } from '@/services/supabase';
 import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 import CustomButton from '@/components/CustomButton';
@@ -5031,3 +5031,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+

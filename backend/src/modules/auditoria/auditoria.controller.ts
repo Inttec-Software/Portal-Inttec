@@ -1,42 +1,49 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
 // === GET /api/auditoria/gastos ===
-// Endpoint para obtener los gastos de una tarjeta en un rango de fechas para la conciliación
 export const getGastosParaAuditoria = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { tarjeta, metodoPago, minDate, maxDate } = req.query;
 
-    let query = client
-      .from('gastos')
-      .select(`
-        *,
-        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-        proveedor_rel:proveedores(id, nombre),
-        cliente_rel:clientes(id, nombre),
-        sucursal_rel:sucursales_cliente(id, nombre)
-      `)
-      .eq('status', 'APPROVED')
-      .eq('tipo_tarjeta', tarjeta)
-      .gte('fecha_comprobante', minDate)
-      .lte('fecha_comprobante', maxDate);
+    let sql = `
+      SELECT 
+        g.*,
+        CASE WHEN s.id IS NOT NULL THEN json_build_object(
+          'id', s.id, 
+          'nombre', s.nombre, 
+          'categoria_id', s.categoria_id, 
+          'categorias', json_build_object('id', c.id, 'nombre', c.nombre)
+        ) ELSE null END as subcategoria_rel,
+        CASE WHEN p.id IS NOT NULL THEN json_build_object('id', p.id, 'nombre', p.nombre) ELSE null END as proveedor_rel,
+        CASE WHEN cl.id IS NOT NULL THEN json_build_object('id', cl.id, 'nombre', cl.nombre) ELSE null END as cliente_rel,
+        CASE WHEN sc.id IS NOT NULL THEN json_build_object('id', sc.id, 'nombre', sc.nombre) ELSE null END as sucursal_rel
+      FROM gastos g
+      LEFT JOIN subcategorias s ON g.subcategoria_id = s.id
+      LEFT JOIN categorias c ON s.categoria_id = c.id
+      LEFT JOIN proveedores p ON g.proveedor_id = p.id
+      LEFT JOIN clientes cl ON g.cliente_id = cl.id
+      LEFT JOIN sucursales_cliente sc ON g.sucursal_id = sc.id
+      WHERE g.status = 'APPROVED'
+        AND g.tipo_tarjeta = $1
+        AND g.fecha_comprobante >= $2
+        AND g.fecha_comprobante <= $3
+    `;
+    const values: any[] = [tarjeta, minDate, maxDate];
 
     if (metodoPago !== 'tarjeta') {
-      // Specific method: credit or debit
-      query = query.eq('metodo_pago', metodoPago);
+      sql += ` AND g.metodo_pago = $4`;
+      values.push(metodoPago);
     } else {
-      // "Any" card method
-      query = query.in('metodo_pago', ['tarjeta', 'tarjeta_credito', 'tarjeta_debito']);
+      sql += ` AND g.metodo_pago IN ('tarjeta', 'tarjeta_credito', 'tarjeta_debito')`;
     }
 
-    const { data, error } = await query;
-
-    if (error) throw error;
-    return res.json({ gastos: data || [] });
+    const { rows } = await pool.query(sql, values);
+    return res.json({ gastos: rows || [] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -47,18 +54,19 @@ export const guardarAuditoria = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const auditoria = req.body;
+    const keys = Object.keys(auditoria);
+    const values = Object.values(auditoria);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
 
-    const { data, error } = await client
-      .from('auditorias_tarjeta')
-      .insert([auditoria])
-      .select()
-      .single();
+    const { rows } = await pool.query(
+      `INSERT INTO auditorias_tarjeta (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+      values
+    );
 
-    if (error) throw error;
-    return res.json({ success: true, data });
+    return res.json({ success: true, data: rows[0] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -69,23 +77,22 @@ export const obtenerAuditorias = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { tarjeta } = req.query;
-
-    let query = client
-      .from('auditorias_tarjeta')
-      .select('*')
-      .order('creado_en', { ascending: false });
+    
+    let sql = `SELECT * FROM auditorias_tarjeta`;
+    const values: any[] = [];
 
     if (tarjeta && tarjeta !== 'TODAS') {
-      query = query.eq('tarjeta', tarjeta);
+      sql += ` WHERE tarjeta = $1`;
+      values.push(tarjeta);
     }
+    
+    sql += ` ORDER BY creado_en DESC`;
 
-    const { data, error } = await query;
-
-    if (error) throw error;
-    return res.json({ auditorias: data || [] });
+    const { rows } = await pool.query(sql, values);
+    return res.json({ auditorias: rows || [] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -96,16 +103,11 @@ export const eliminarAuditoria = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { id } = req.params;
 
-    const { error } = await client
-      .from('auditorias_tarjeta')
-      .delete()
-      .eq('id', id);
-
-    if (error) throw error;
+    await pool.query(`DELETE FROM auditorias_tarjeta WHERE id = $1`, [id]);
     return res.json({ success: true });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 import { SatSyncService } from '../../services/satSyncService';
 
 // === GET /api/facturas-recibidas ===
@@ -7,23 +7,22 @@ export const getFacturasRecibidas = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
-    const { data, error } = await client
-      .from('facturas_recibidas')
-      // Exclude conceptos_json to optimize payload size
-      .select('id, uuid, rfc_emisor, nombre_emisor, rfc_receptor, fecha_emision, subtotal, descuento, iva, retencion_isr, retencion_iva, total, moneda, tipo_comprobante, estado_sat, xml_url, pdf_url, created_at')
-      .order('fecha_emision', { ascending: false })
-      .limit(1000);
-
-    if (error) {
-      if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, uuid, rfc_emisor, nombre_emisor, rfc_receptor, fecha_emision, subtotal, descuento, iva, retencion_isr, retencion_iva, total, moneda, tipo_comprobante, estado_sat, xml_url, pdf_url, created_at
+         FROM facturas_recibidas
+         ORDER BY fecha_emision DESC
+         LIMIT 1000`
+      );
+      return res.json({ facturas: rows || [], tableMissing: false });
+    } catch (dbError: any) {
+      if (dbError.code === '42P01') {
         return res.json({ facturas: [], tableMissing: true });
       }
-      throw error;
+      throw dbError;
     }
-
-    return res.json({ facturas: data || [], tableMissing: false });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -34,17 +33,12 @@ export const getFacturaById = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { id } = req.params;
-    const { data, error } = await client
-      .from('facturas_recibidas')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const { rows } = await pool.query(`SELECT * FROM facturas_recibidas WHERE id = $1`, [id]);
 
-    if (error) throw error;
-    return res.json({ factura: data });
+    return res.json({ factura: rows[0] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -55,24 +49,19 @@ export const getSatSolicitudes = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const isPendingOnly = req.query.pending === 'true';
-    let query = client
-      .from('sat_descarga_solicitudes')
-      .select('*')
-      .order('created_at', { ascending: false });
-
+    let sql = `SELECT * FROM sat_descarga_solicitudes`;
     if (isPendingOnly) {
-      query = query.in('estado_sat', ['PENDIENTE', 'EN_PROCESO']).limit(5);
+      sql += ` WHERE estado_sat IN ('PENDIENTE', 'EN_PROCESO') ORDER BY created_at DESC LIMIT 5`;
     } else {
-      query = query.limit(50);
+      sql += ` ORDER BY created_at DESC LIMIT 50`;
     }
 
-    const { data, error } = await query;
+    const { rows } = await pool.query(sql);
 
-    if (error) throw error;
-    return res.json({ solicitudes: data || [] });
+    return res.json({ solicitudes: rows || [] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -83,39 +72,41 @@ export const importFactura = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { parsed } = req.body;
     if (!parsed || !parsed.uuid) return res.status(400).json({ error: 'Invalid payload' });
 
-    const { data, error } = await client
-      .from('facturas_recibidas')
-      .upsert(
-        {
-          uuid: parsed.uuid,
-          rfc_emisor: parsed.rfcEmisor,
-          nombre_emisor: parsed.nombreEmisor,
-          rfc_receptor: parsed.rfcReceptor,
-          fecha_emision: parsed.fechaEmision,
-          subtotal: parsed.subtotal,
-          descuento: parsed.descuento,
-          iva: parsed.iva,
-          retencion_isr: parsed.retencionIsr,
-          retencion_iva: parsed.retencionIva,
-          total: parsed.total,
-          moneda: parsed.moneda,
-          tipo_comprobante: parsed.tipoComprobante,
-          estado_sat: parsed.estadoSat,
-          conceptos_json: parsed.conceptos,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'uuid' }
-      )
-      .select()
-      .single();
+    const payload = {
+      uuid: parsed.uuid,
+      rfc_emisor: parsed.rfcEmisor,
+      nombre_emisor: parsed.nombreEmisor,
+      rfc_receptor: parsed.rfcReceptor,
+      fecha_emision: parsed.fechaEmision,
+      subtotal: parsed.subtotal,
+      descuento: parsed.descuento,
+      iva: parsed.iva,
+      retencion_isr: parsed.retencionIsr,
+      retencion_iva: parsed.retencionIva,
+      total: parsed.total,
+      moneda: parsed.moneda,
+      tipo_comprobante: parsed.tipoComprobante,
+      estado_sat: parsed.estadoSat,
+      conceptos_json: JSON.stringify(parsed.conceptos || []),
+      updated_at: new Date().toISOString(),
+    };
 
-    if (error) throw error;
-    return res.json({ success: true, factura: data });
+    const keys = Object.keys(payload);
+    const values = Object.values(payload);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+    const updateEx = keys.map(k => `${k} = EXCLUDED.${k}`).join(', ');
+
+    const { rows } = await pool.query(
+      `INSERT INTO facturas_recibidas (${keys.join(', ')}) VALUES (${placeholders}) ON CONFLICT (uuid) DO UPDATE SET ${updateEx} RETURNING *`,
+      values
+    );
+
+    return res.json({ success: true, factura: rows[0] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -144,5 +135,3 @@ export const triggerSatSync = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
-
-

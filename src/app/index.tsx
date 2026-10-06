@@ -12,7 +12,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { AuthService } from '@/services/supabase';
+import { AuthService, supabase } from '@/services/supabase';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';

@@ -15,17 +15,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import {
-  HerramientaEmpleado,
-  HerramientaVehiculo,
-  ChecklistVehiculoHerramientas,
-  ChecklistItem,
-  HerramientasService,
-  Vehiculo,
-  VehiculoService,
-  AuthService,
-  Usuario,
-} from '@/services/supabase';
+import { HerramientaEmpleado, HerramientaVehiculo, ChecklistVehiculoHerramientas, ChecklistItem, HerramientasService, Vehiculo, VehiculoService, AuthService, Usuario, supabase } from '@/services/supabase';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';

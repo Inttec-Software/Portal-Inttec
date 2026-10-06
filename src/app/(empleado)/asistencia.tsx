@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient } from '@/services/supabase';
+import { AuthService, Usuario, Asistencia, AsistenciaService, supabase, inttecClient, daravisaClient } from '@/services/supabase';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -968,3 +968,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+

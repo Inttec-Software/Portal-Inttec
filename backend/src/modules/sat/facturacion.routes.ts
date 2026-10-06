@@ -1884,7 +1884,7 @@ router.get('/facturas-pendientes-cliente', async (req: Request, res: Response) =
 
     if (error) throw error;
 
-    const ventaIds = (facturas || []).map(f => f.id);
+    const ventaIds = (facturas || []).map((f: any) => f.id);
     let pagosPorVenta: Record<number, any[]> = {};
 
     if (ventaIds.length > 0) {
@@ -1901,7 +1901,7 @@ router.get('/facturas-pendientes-cliente', async (req: Request, res: Response) =
       } catch (_) {}
     }
 
-    const pendientes = (facturas || []).map(f => {
+    const pendientes = (facturas || []).map((f: any) => {
       const total = Number(f.precio_total_facturado || 0);
       const pagosVenta = pagosPorVenta[f.id] || [];
       const pagado = pagosVenta.reduce((acc: number, p: any) => acc + (Number(p.monto) || 0), 0);
@@ -1923,7 +1923,7 @@ router.get('/facturas-pendientes-cliente', async (req: Request, res: Response) =
         num_parcialidad_siguiente: pagosVenta.length + 1,
         metodo_pago: (f as any).metodo_pago_cfdi || (f as any).metodo_pago || 'PPD'
       };
-    }).filter(f => f.saldo_pendiente > 0.05);
+    }).filter((f: any) => f.saldo_pendiente > 0.05);
 
     return res.json({ success: true, facturas: pendientes });
   } catch (err: any) {

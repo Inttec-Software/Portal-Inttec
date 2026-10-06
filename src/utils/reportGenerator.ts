@@ -4,7 +4,8 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import { Platform, Alert } from 'react-native';
-import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService, supabase, inttecClient, daravisaClient } from '../services/supabase';
+import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
+import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
 import { getWeekRange, processAsistenciasSemana, formatMinutesToHours, formatHoraDisplay } from './asistenciaUtils';
 
@@ -1998,11 +1999,7 @@ export const ReportGenerator = {
     const userNamesMap = new Map<string, string>();
     if (missingUserIds.size > 0) {
       try {
-        const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
-        const { data: usersData } = await client
-          .from('usuarios')
-          .select('id, nombre')
-          .in('id', Array.from(missingUserIds));
+        const usersData = await apiClient.get('/api/usuarios');
 
         if (usersData) {
           usersData.forEach((u: any) => {
@@ -3420,11 +3417,7 @@ export const ReportGenerator = {
             const userNamesMap = new Map<string, string>();
             if (missingUserIds.size > 0) {
               try {
-                const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
-                const { data: usersData } = await client
-                  .from('usuarios')
-                  .select('id, nombre')
-                  .in('id', Array.from(missingUserIds));
+                const usersData = await apiClient.get('/api/usuarios');
 
                 if (usersData) {
                   usersData.forEach((u: any) => {
@@ -3566,9 +3559,14 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
   const titleStr = tipoDocumento === 'venta' ? 'Orden de venta' : 'Cotizacion';
   const title = `${titleStr} - ${folioPDF}`;
   
-  const formatMoney = (val: any) =>
-    Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
+  const formatMoney = (val: any) => {
+    const num = typeof val === 'number' ? val : parseFloat(val);
+    return (isNaN(num) ? 0 : num).toLocaleString('es-MX', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
+  
   const renderDescription = (name: string, description: string) => {
     const fullText = (name || '') + (description ? '\n' + description : '');
     const parts = fullText.split('\n');
@@ -3781,7 +3779,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
                           <td class="text-center">
                               ${linea.tiempoEntrega || ''}
                           </td>
-                          <td class="text-center">${linea.cantidad.toFixed(1)}</td>
+                          <td class="text-center">${Number(linea.cantidad || 0).toFixed(1)}</td>
                           <td class="text-end">$ ${formatMoney(linea.precioUnitario)}</td>
                           
                           <td class="text-center">

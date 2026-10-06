@@ -13,7 +13,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
-import { Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
+import { Vehiculo, RegistroGasolina, VehiculoService, supabase } from '@/services/supabase';
 import ImageViewerModal from '@/components/ImageViewerModal';
 
 export default function EmpleadoVehiculosScreen() {

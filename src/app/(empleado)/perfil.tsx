@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -15,7 +16,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
-import { supabase } from '@/services/supabase';
+import {} from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -76,7 +77,9 @@ export default function EmpleadoPerfilScreen() {
 
       Alert.alert('Éxito', 'Perfil actualizado correctamente');
       setProfilePassword('');
-      router.back();
+      if (router.canGoBack()) {
+        router.back();
+      }
     } catch (error: any) {
       console.error('Error al actualizar perfil:', error.message);
       Alert.alert('Error', 'No se pudo actualizar el perfil');
@@ -181,3 +184,4 @@ const styles = StyleSheet.create({
     padding: Spacing.four,
   },
 });
+

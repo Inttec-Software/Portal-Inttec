@@ -23,7 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName } from '@/services/supabase';
+import { Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName, supabase, inttecClient, daravisaClient } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
@@ -6629,3 +6629,4 @@ const styles = StyleSheet.create({
     color: '#0984e3',
   },
 });
+

@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { NotificacionesService, Notificacion } from '@/services/supabase';
+import { NotificacionesService, Notificacion, supabase } from '@/services/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'expo-router';
 

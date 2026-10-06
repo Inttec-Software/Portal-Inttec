@@ -1,14 +1,14 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import bcrypt from 'bcryptjs';
+import { getDbPool } from '../../config/database';
 
 export const getUsuarios = async (req: Request, res: Response) => {
   try {
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
-    const { data, error } = await supabase.from('usuarios').select('*').order('nombre');
+    const pool = getDbPool(company, env);
+    const { rows } = await pool.query(`SELECT * FROM usuarios ORDER BY nombre`);
     
-    if (error) throw error;
-    res.json(data);
+    res.json(rows);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -18,25 +18,38 @@ export const createUsuario = async (req: Request, res: Response) => {
   try {
     const { nombre, email, password, rol, telefono } = req.body;
     
-    // We need both clients for the active environment to sync the user across companies
+    // We need both pools for the active environment to sync the user across companies
     const { company: activeCompany, env } = req.tenant!;
     const secondaryCompany = activeCompany === 'inttec' ? 'daravisa' : 'inttec';
     
-    const primaryClient = getSupabaseClient(activeCompany, env);
-    const secondaryClient = getSupabaseClient(secondaryCompany, env);
+    const primaryPool = getDbPool(activeCompany, env);
+    const secondaryPool = getDbPool(secondaryCompany, env);
 
-    const usuarioData = { nombre, email, password, rol, telefono };
+    let hashedPassword = password;
+    if (password && !password.startsWith('$2a$') && !password.startsWith('$2b$')) {
+      hashedPassword = await bcrypt.hash(password, 10);
+    }
 
-    const { data, error } = await primaryClient
-      .from('usuarios')
-      .insert([usuarioData])
-      .select()
-      .single();
+    const usuarioData = { nombre, email, password: hashedPassword, rol, telefono };
+    const keys = Object.keys(usuarioData);
+    const values = Object.values(usuarioData);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
 
-    if (error) throw error;
+    const { rows } = await primaryPool.query(
+      `INSERT INTO usuarios (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+      values
+    );
+    const data = rows[0];
 
     try {
-      await secondaryClient.from('usuarios').upsert([data]);
+      const allKeys = Object.keys(data);
+      const allVals = Object.values(data);
+      const allPl = allKeys.map((_, i) => `$${i + 1}`).join(', ');
+      const updateEx = allKeys.map(k => `${k} = EXCLUDED.${k}`).join(', ');
+      await secondaryPool.query(
+        `INSERT INTO usuarios (${allKeys.join(', ')}) VALUES (${allPl}) ON CONFLICT (id) DO UPDATE SET ${updateEx}`,
+        allVals
+      );
     } catch (syncErr: any) {
       console.error('[UsuariosController] Error syncing user to secondary db:', syncErr);
     }
@@ -50,34 +63,37 @@ export const createUsuario = async (req: Request, res: Response) => {
 export const updateUsuario = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const updates = { ...req.body };
+    
+    if (updates.password && !updates.password.startsWith('$2a$') && !updates.password.startsWith('$2b$')) {
+      updates.password = await bcrypt.hash(updates.password, 10);
+    }
     
     const { env } = req.tenant!;
-    const clientInttec = getSupabaseClient('inttec', env);
-    const clientDaravisa = getSupabaseClient('daravisa', env);
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
 
     let userEmail = updates.email?.trim().toLowerCase();
     if (!userEmail) {
-      const { data: uInttec } = await clientInttec.from('usuarios').select('email').eq('id', id).maybeSingle();
-      const { data: uDaravisa } = await clientDaravisa.from('usuarios').select('email').eq('id', id).maybeSingle();
-      userEmail = (uInttec?.email || uDaravisa?.email)?.trim().toLowerCase();
+      const uInttec = await poolInttec.query(`SELECT email FROM usuarios WHERE id = $1`, [id]);
+      const uDaravisa = await poolDaravisa.query(`SELECT email FROM usuarios WHERE id = $1`, [id]);
+      userEmail = (uInttec.rows[0]?.email || uDaravisa.rows[0]?.email)?.trim().toLowerCase();
     }
 
-    const updateInttec = async () => {
-      await clientInttec.from('usuarios').update(updates).eq('id', id);
+    const updateDb = async (pool: any) => {
+      const keys = Object.keys(updates);
+      const values = Object.values(updates);
+      if (keys.length === 0) return;
+      
+      const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+      await pool.query(`UPDATE usuarios SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, id]);
+
       if (userEmail) {
-        await clientInttec.from('usuarios').update(updates).eq('email', userEmail);
+        await pool.query(`UPDATE usuarios SET ${setClause} WHERE email = $${keys.length + 1}`, [...values, userEmail]);
       }
     };
 
-    const updateDaravisa = async () => {
-      await clientDaravisa.from('usuarios').update(updates).eq('id', id);
-      if (userEmail) {
-        await clientDaravisa.from('usuarios').update(updates).eq('email', userEmail);
-      }
-    };
-
-    await Promise.allSettled([updateInttec(), updateDaravisa()]);
+    await Promise.allSettled([updateDb(poolInttec), updateDb(poolDaravisa)]);
 
     res.json({ success: true, message: 'Usuario actualizado correctamente' });
   } catch (error: any) {
@@ -90,31 +106,21 @@ export const deleteUsuario = async (req: Request, res: Response) => {
     const { id } = req.params;
     
     const { env } = req.tenant!;
-    const clientInttec = getSupabaseClient('inttec', env);
-    const clientDaravisa = getSupabaseClient('daravisa', env);
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
 
-    const { data: uInttec } = await clientInttec.from('usuarios').select('email').eq('id', id).maybeSingle();
-    const { data: uDaravisa } = await clientDaravisa.from('usuarios').select('email').eq('id', id).maybeSingle();
-    const userEmail = (uInttec?.email || uDaravisa?.email)?.trim().toLowerCase();
+    const uInttec = await poolInttec.query(`SELECT email FROM usuarios WHERE id = $1`, [id]);
+    const uDaravisa = await poolDaravisa.query(`SELECT email FROM usuarios WHERE id = $1`, [id]);
+    const userEmail = (uInttec.rows[0]?.email || uDaravisa.rows[0]?.email)?.trim().toLowerCase();
 
-    const deleteInttec = async () => {
-      const { error } = await clientInttec.from('usuarios').delete().eq('id', id);
-      if (error) throw error;
+    const deleteDb = async (pool: any) => {
+      await pool.query(`DELETE FROM usuarios WHERE id = $1`, [id]);
       if (userEmail) {
-        await clientInttec.from('usuarios').delete().eq('email', userEmail);
+        await pool.query(`DELETE FROM usuarios WHERE email = $1`, [userEmail]);
       }
     };
 
-    const deleteDaravisa = async () => {
-      const { error } = await clientDaravisa.from('usuarios').delete().eq('id', id);
-      if (error) throw error;
-      if (userEmail) {
-        await clientDaravisa.from('usuarios').delete().eq('email', userEmail);
-      }
-    };
-
-    // We use Promise.all to catch errors like Foreign Key Constraints (23503)
-    await Promise.all([deleteInttec(), deleteDaravisa()]);
+    await Promise.all([deleteDb(poolInttec), deleteDb(poolDaravisa)]);
 
     res.json({ success: true, message: 'Usuario eliminado correctamente' });
   } catch (error: any) {

@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import { logger } from '../utils/logger';
 import { GastoHelper } from './supabase';
 import { getApiUrl, getApiHeaders } from './apiHelper';
