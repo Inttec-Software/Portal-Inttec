@@ -191,6 +191,7 @@ export interface Usuario {
   email: string;
   rol: 'ADMIN' | 'EMPLEADO' | 'DEV';
   telefono?: string;
+  sucursal?: string;
   created_at?: string;
 }
 
@@ -625,21 +626,26 @@ export const AsistenciaService = {
    * Registra la salida del empleado (actualiza el registro existente de la jornada).
    */
   async registrarSalida(
-    asistenciaId: string,
+    asistenciaId: string | null | undefined,
     fotoUrl: string,
     latitud: number,
     longitud: number,
-    direccion: string
+    direccion: string,
+    empleadoId?: string,
+    fecha?: string
   ): Promise<Asistencia> {
     const ahora = new Date();
     const horaStr = this.getHoraLocal(ahora);
+    const fechaStr = fecha || this.getFechaJornada(ahora);
 
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/asistencias/salida`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({
-        id: asistenciaId,
+        id: asistenciaId || undefined,
+        empleado_id: empleadoId,
+        fecha: fechaStr,
         hora_salida: horaStr,
         foto_salida_url: fotoUrl,
         latitud_salida: latitud,
@@ -652,11 +658,15 @@ export const AsistenciaService = {
   },
 
   /**
-   * Obtiene el historial de asistencias de un empleado.
+   * Obtiene el historial de asistencias de un empleado (opcionalmente filtrado por rango de fechas).
    */
-  async getHistorialEmpleado(empleadoId: string): Promise<Asistencia[]> {
+  async getHistorialEmpleado(empleadoId: string, startDate?: string, endDate?: string): Promise<Asistencia[]> {
     const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/asistencias/historial/${empleadoId}`, { headers });
+    const params = new URLSearchParams();
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`${getApiUrl()}/api/asistencias/historial/${empleadoId}${qs}`, { headers });
     if (!res.ok) throw new Error('Error al obtener historial de asistencia');
     return await res.json();
   },

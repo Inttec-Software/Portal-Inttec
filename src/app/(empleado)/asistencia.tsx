@@ -25,6 +25,8 @@ import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '@/context/AuthContext';
+import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
+import { getWeekRange, formatHoraDisplay } from '@/utils/asistenciaUtils';
 
 export default function EmpleadoAsistencia() {
   const router = useRouter();
@@ -80,6 +82,11 @@ export default function EmpleadoAsistencia() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const dateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // --- Historial Semanal ---
+  const [selectedMonday, setSelectedMonday] = useState<Date>(() => getWeekRange().mondayDate);
+  const [historialAsistencias, setHistorialAsistencias] = useState<Asistencia[]>([]);
+  const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
+
   // --- Cargar usuario ---
   useEffect(() => {
     const loadUser = async () => {
@@ -97,14 +104,47 @@ export default function EmpleadoAsistencia() {
     loadUser();
   }, [company]);
 
-  // --- Abrir checador automáticamente al cargar ---
+  // Cargar estado del día e historial cuando el usuario esté disponible
   useEffect(() => {
-    if (user && !isLoadingChecador) {
-      handleOpenChecador();
+    if (user) {
+      cargarEstadoHoy();
+      cargarHistorialSemana(selectedMonday, user.id);
     }
-  }, [user]);
+  }, [user, selectedMonday]);
 
-  // --- Checador: Lógica ---
+  const cargarEstadoHoy = async () => {
+    if (!user) return;
+    setIsLoadingChecador(true);
+    try {
+      const registro = await AsistenciaService.getRegistroHoy(user.id);
+      setRegistroHoy(registro);
+    } catch (err: any) {
+      console.error('[Checador] Error al cargar registro hoy:', err);
+    } finally {
+      setIsLoadingChecador(false);
+    }
+  };
+
+  const cargarHistorialSemana = async (monday: Date, uid?: string) => {
+    const targetId = uid || user?.id;
+    if (!targetId) return;
+    setIsLoadingHistorial(true);
+    try {
+      const range = getWeekRange(monday);
+      const historial = await AsistenciaService.getHistorialEmpleado(
+        targetId,
+        range.mondayStr,
+        range.sundayStr
+      );
+      setHistorialAsistencias(historial || []);
+    } catch (err: any) {
+      console.error('[Checador] Error al cargar historial semanal:', err);
+    } finally {
+      setIsLoadingHistorial(false);
+    }
+  };
+
+  // --- Checador: Abrir modal de checar ---
   const handleOpenChecador = async () => {
     if (!user) {
       console.error('[Checador] Error: user es nulo o indefinido en handleOpenChecador');
@@ -117,17 +157,7 @@ export default function EmpleadoAsistencia() {
     try {
       const registro = await AsistenciaService.getRegistroHoy(user.id);
       setRegistroHoy(registro);
-      if (registro && registro.hora_entrada && registro.hora_salida) {
-        if (Platform.OS === 'web') {
-          window.alert(`Turno Completo ✅\n\nYa registraste tu entrada (${registro.hora_entrada?.substring(0,5)}) y salida (${registro.hora_salida?.substring(0,5)}) el día de hoy.`);
-        } else {
-          Alert.alert(
-            'Turno Completo ✅',
-            `Ya registraste tu entrada (${registro.hora_entrada?.substring(0,5)}) y salida (${registro.hora_salida?.substring(0,5)}) el día de hoy.`,
-          );
-        }
-        return;
-      }
+      // Flujo continuo: entrada -> salida -> entrada -> salida (sin bloqueo de Turno Completo)
       setChecadorInstructionVisible(true);
     } catch (err: any) {
       console.error('[Checador] Error en handleOpenChecador:', err.message || err);
@@ -270,7 +300,8 @@ export default function EmpleadoAsistencia() {
       if (dateIntervalRef.current) clearInterval(dateIntervalRef.current);
       setChecadorCameraVisible(false);
 
-      const tipoRegistro = registroHoy?.hora_entrada ? 'salida' : 'entrada';
+      const isTurnoAbierto = !!(registroHoy?.hora_entrada && !registroHoy?.hora_salida);
+      const tipoRegistro: 'entrada' | 'salida' = isTurnoAbierto ? 'salida' : 'entrada';
       // MODO DOBLE REGISTRO (INTTEC + DARAVISA) EN PARALELO
       const fotoUrl = await AsistenciaService.subirFotoAsistencia(user.id, base64Data, tipoRegistro);
       const lat = currentLocation?.lat || 0;
@@ -281,46 +312,34 @@ export default function EmpleadoAsistencia() {
       const fechaStr = AsistenciaService.getFechaJornada(new Date());
 
       if (tipoRegistro === 'entrada') {
-        const insertData = {
-          empleado_id: user.id,
-          fecha: fechaStr,
-          hora_entrada: horaStr,
-          foto_entrada_url: fotoUrl,
-          latitud_entrada: lat,
-          longitud_entrada: lng,
-          direccion_entrada: addressToSave,
-        };
-        await Promise.allSettled([
-          inttecClient.from('asistencias').insert([insertData]),
-          daravisaClient.from('asistencias').insert([insertData]),
-        ]);
+        await AsistenciaService.registrarEntrada(
+          user.id,
+          fotoUrl,
+          lat,
+          lng,
+          addressToSave
+        );
         setChecadorResultMsg('Entrada registrada en Inttec y Daravisa');
       } else {
-        const updateData = {
-          hora_salida: horaStr,
-          foto_salida_url: fotoUrl,
-          latitud_salida: lat,
-          longitud_salida: lng,
-          direccion_salida: addressToSave,
-        };
-        const [asisInttecRes, asisDaravisaRes] = await Promise.all([
-          inttecClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
-          daravisaClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
-        ]);
-        const updatePromises: Promise<any>[] = [];
-        if (asisInttecRes.data?.id) {
-          updatePromises.push(Promise.resolve(inttecClient.from('asistencias').update(updateData).eq('id', asisInttecRes.data.id)));
-        }
-        if (asisDaravisaRes.data?.id) {
-          updatePromises.push(Promise.resolve(daravisaClient.from('asistencias').update(updateData).eq('id', asisDaravisaRes.data.id)));
-        }
-        await Promise.allSettled(updatePromises);
+        await AsistenciaService.registrarSalida(
+          registroHoy?.id,
+          fotoUrl,
+          lat,
+          lng,
+          addressToSave,
+          user.id,
+          fechaStr
+        );
         setChecadorResultMsg('Salida registrada en Inttec y Daravisa');
       }
 
       setCapturedPhotoUri(photo.uri);
       setChecadorResultType(tipoRegistro);
       setChecadorResultVisible(true);
+
+      // Actualizar estado del día y recargar la semana
+      cargarEstadoHoy();
+      cargarHistorialSemana(selectedMonday);
     } catch (err: any) {
       Alert.alert('Error al registrar', err.message || 'No se pudo procesar la asistencia.');
     } finally {
@@ -375,20 +394,30 @@ export default function EmpleadoAsistencia() {
 
           {/* Estado del día */}
           {registroHoy?.hora_entrada && !registroHoy?.hora_salida && (
-            <View style={[styles.checadorStatusCard, { backgroundColor: themeColors.success + '10', borderColor: themeColors.success }]}>
-              <Ionicons name="checkmark-circle" size={20} color={themeColors.success} />
-              <Text style={[styles.checadorStatusText, { color: themeColors.success }]}>
-                Entrada registrada a las {registroHoy.hora_entrada?.substring(0, 5)}
-              </Text>
+            <View style={[styles.checadorStatusCard, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning }]}>
+              <Ionicons name="time" size={20} color={themeColors.warning} />
+              <View style={{ marginLeft: 8, flex: 1 }}>
+                <Text style={[styles.checadorStatusText, { color: themeColors.warning, fontWeight: '700' }]}>
+                  Turno Activo: Entrada a las {formatHoraDisplay(registroHoy.hora_entrada)}
+                </Text>
+                <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                  Recuerda checar tu salida al terminar tu turno o para salir a comer.
+                </Text>
+              </View>
             </View>
           )}
 
           {registroHoy?.hora_entrada && registroHoy?.hora_salida && (
-            <View style={[styles.checadorStatusCard, { backgroundColor: themeColors.accent + '10', borderColor: themeColors.accent }]}>
-              <Ionicons name="checkmark-done-circle" size={20} color={themeColors.accent} />
-              <Text style={[styles.checadorStatusText, { color: themeColors.accent }]}>
-                Turno completo: {registroHoy.hora_entrada?.substring(0, 5)} - {registroHoy.hora_salida?.substring(0, 5)}
-              </Text>
+            <View style={[styles.checadorStatusCard, { backgroundColor: themeColors.success + '10', borderColor: themeColors.success }]}>
+              <Ionicons name="checkmark-done-circle" size={20} color={themeColors.success} />
+              <View style={{ marginLeft: 8, flex: 1 }}>
+                <Text style={[styles.checadorStatusText, { color: themeColors.success, fontWeight: '700' }]}>
+                  Último turno: {formatHoraDisplay(registroHoy.hora_entrada)} - {formatHoraDisplay(registroHoy.hora_salida)}
+                </Text>
+                <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                  Listo para registrar una nueva entrada si inicias otro turno.
+                </Text>
+              </View>
             </View>
           )}
 
@@ -396,18 +425,54 @@ export default function EmpleadoAsistencia() {
             title={
               isLoadingChecador
                 ? 'Verificando...'
-                : registroHoy?.hora_entrada && registroHoy?.hora_salida
-                  ? 'Turno Completo ✅'
-                  : registroHoy?.hora_entrada
-                    ? 'Registrar Salida'
+                : registroHoy?.hora_entrada && !registroHoy?.hora_salida
+                  ? 'Registrar Salida'
+                  : registroHoy?.hora_entrada && registroHoy?.hora_salida
+                    ? 'Registrar Entrada (Nuevo Turno)'
                     : 'Registrar Entrada'
             }
             onPress={handleOpenChecador}
-            variant="success"
+            variant={registroHoy?.hora_entrada && !registroHoy?.hora_salida ? 'primary' : 'success'}
             loading={isLoadingChecador}
-            disabled={isLoadingChecador || (registroHoy?.hora_entrada && registroHoy?.hora_salida ? true : false)}
-            style={{ width: '100%', marginTop: Spacing.three }}
-            icon={<Ionicons name="camera-outline" size={20} color="#fff" style={{ marginRight: 8 }} />}
+            disabled={isLoadingChecador}
+            style={{ width: '100%', marginTop: Spacing.two }}
+            icon={
+              <Ionicons
+                name={registroHoy?.hora_entrada && !registroHoy?.hora_salida ? 'exit-outline' : 'camera-outline'}
+                size={20}
+                color="#fff"
+                style={{ marginRight: 8 }}
+              />
+            }
+          />
+
+          {/* Tarjeta de Resumen Semanal y Desglose de Horas */}
+          <AsistenciaSemanalCard
+            asistencias={historialAsistencias}
+            empleadoNombre={user?.nombre || 'Empleado'}
+            isLoading={isLoadingHistorial}
+            onRefresh={() => {
+              cargarEstadoHoy();
+              cargarHistorialSemana(selectedMonday);
+            }}
+            selectedMonday={selectedMonday}
+            onChangeWeek={(newMonday) => {
+              setSelectedMonday(newMonday);
+              cargarHistorialSemana(newMonday);
+            }}
+            onViewFoto={(info) => {
+              setActivePreviewUrl(info.url);
+              setSelectedAsistenciaInfo({
+                fecha: info.fecha,
+                hora: info.hora,
+                direccion: info.direccion,
+                lat: info.lat,
+                lng: info.lng,
+                empleadoNombre: info.empleadoNombre,
+                tipo: info.tipo,
+              });
+              setViewerVisible(true);
+            }}
           />
         </ScrollView>
 
@@ -433,26 +498,26 @@ export default function EmpleadoAsistencia() {
                 </View>
 
                 <Text style={[styles.checadorTitle, { color: themeColors.text }]}>
-                  {registroHoy?.hora_entrada ? 'Registrar Salida' : 'Registrar Entrada'}
+                  {registroHoy?.hora_entrada && !registroHoy?.hora_salida ? 'Registrar Salida' : 'Registrar Entrada'}
                 </Text>
 
                 <Text style={[styles.checadorDesc, { color: themeColors.textSecondary }]}>
                   Se tomará una selfie con la cámara frontal para registrar tu asistencia. También se capturará tu ubicación como verificación.
                 </Text>
 
-                {registroHoy?.hora_entrada && (
-                  <View style={[styles.checadorStatusCard, { backgroundColor: themeColors.success + '10', borderColor: themeColors.success }]}>
-                    <Ionicons name="checkmark-circle" size={20} color={themeColors.success} />
-                    <Text style={[styles.checadorStatusText, { color: themeColors.success }]}>
-                      Entrada registrada a las {registroHoy.hora_entrada?.substring(0, 5)}
+                {registroHoy?.hora_entrada && !registroHoy?.hora_salida && (
+                  <View style={[styles.checadorStatusCard, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning }]}>
+                    <Ionicons name="time" size={20} color={themeColors.warning} />
+                    <Text style={[styles.checadorStatusText, { color: themeColors.warning, marginLeft: 8 }]}>
+                      Entrada registrada a las {formatHoraDisplay(registroHoy.hora_entrada)}
                     </Text>
                   </View>
                 )}
 
                 <CustomButton
-                  title={registroHoy?.hora_entrada ? 'Registrar Salida' : 'Registrar Entrada'}
+                  title={registroHoy?.hora_entrada && !registroHoy?.hora_salida ? 'Registrar Salida' : 'Registrar Entrada'}
                   onPress={handleStartCamera}
-                  variant="success"
+                  variant={registroHoy?.hora_entrada && !registroHoy?.hora_salida ? 'primary' : 'success'}
                   style={{ width: '100%', marginTop: Spacing.three }}
                   icon={<Ionicons name="camera-outline" size={20} color="#fff" style={{ marginRight: 8 }} />}
                 />
@@ -484,7 +549,7 @@ export default function EmpleadoAsistencia() {
                 </TouchableOpacity>
                 <View style={styles.watermarkBadge}>
                   <Text style={styles.watermarkBadgeText}>
-                    {registroHoy?.hora_entrada ? '📤 SALIDA' : '📥 ENTRADA'}
+                    {registroHoy?.hora_entrada && !registroHoy?.hora_salida ? '📤 SALIDA' : '📥 ENTRADA'}
                   </Text>
                 </View>
               </View>
@@ -664,28 +729,32 @@ const styles = StyleSheet.create({
   },
   mainContent: {
     flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: Spacing.four,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.seven,
+    width: '100%',
   },
   checadorIconCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: Spacing.three,
+    alignSelf: 'center',
+    marginBottom: Spacing.two,
   },
   checadorTitle: {
     fontSize: 22,
     fontWeight: '800',
     textAlign: 'center',
-    marginBottom: Spacing.one,
+    alignSelf: 'center',
+    marginBottom: 4,
   },
   checadorDesc: {
-    fontSize: 14,
+    fontSize: 13,
     textAlign: 'center',
-    lineHeight: 20,
+    alignSelf: 'center',
+    lineHeight: 18,
     paddingHorizontal: Spacing.two,
     marginBottom: Spacing.two,
   },

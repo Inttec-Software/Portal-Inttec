@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { Platform, Alert } from 'react-native';
 import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService, supabase, inttecClient, daravisaClient } from '../services/supabase';
 import { Cotizacion } from '@/types/ventas';
+import { getWeekRange, processAsistenciasSemana, formatMinutesToHours, formatHoraDisplay } from './asistenciaUtils';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
 // Esto evita ~959 KB en el bundle principal de la app
@@ -1205,8 +1206,490 @@ export const ReportGenerator = {
   },
 
   /**
-   * Genera un reporte PDF de inventario y lo comparte
+   * Helper unificado para imprimir en Web o guardar y compartir en Móvil
    */
+  async _printOrShareHtml(htmlContent: string, fileName: string, dialogTitle: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (iframeDoc) {
+        iframeDoc.open();
+        iframeDoc.write(htmlContent);
+        iframeDoc.close();
+
+        setTimeout(() => {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 1000);
+        }, 500);
+      }
+      return;
+    }
+
+    const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+    const safeUri = `${cacheDirectory}${fileName}`;
+    await writeAsStringAsync(safeUri, base64 || '', {
+      encoding: EncodingType.Base64,
+    });
+
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(safeUri, {
+        mimeType: 'application/pdf',
+        dialogTitle: dialogTitle || 'Exportar PDF',
+        UTI: 'com.adobe.pdf',
+      });
+    } else {
+      throw new Error('La función de compartir no está disponible.');
+    }
+  },
+
+  /**
+   * Genera el Reporte General de Asistencia Semanal en PDF (Todos los empleados)
+   * Incluye total de horas de la semana por empleado y subíndice detallado de cada turno por día
+   */
+  async exportReporteAsistenciaSemanalGeneralPDF(
+    asistencias: Asistencia[],
+    personal: Usuario[],
+    weekMondayInput?: Date | string
+  ): Promise<void> {
+    const range = getWeekRange(weekMondayInput);
+    const branding = await getCompanyBranding();
+
+    const asistenciasPorEmpleado = new Map<string, Asistencia[]>();
+    for (const a of asistencias) {
+      const empId = a.empleado_id;
+      if (!empId) continue;
+      const list = asistenciasPorEmpleado.get(empId) || [];
+      list.push(a);
+      asistenciasPorEmpleado.set(empId, list);
+    }
+
+    const personalTarget = (personal || []).filter(
+      p => p.rol === 'EMPLEADO' || p.rol === 'ADMIN' || asistenciasPorEmpleado.has(p.id)
+    );
+
+    let totalMinutosEmpresa = 0;
+    let totalTurnosEmpresa = 0;
+    let empleadosConRegistro = 0;
+
+    let empleadosHtml = '';
+
+    for (const emp of personalTarget) {
+      const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
+      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate);
+
+      if (semanaData.turnosTotales > 0) {
+        empleadosConRegistro++;
+        totalMinutosEmpresa += semanaData.totalMinutosSemana;
+        totalTurnosEmpresa += semanaData.turnosTotales;
+      }
+
+      let diasHtml = '';
+      const diasConTurnos = semanaData.dias.filter(d => d.turnos.length > 0);
+
+      if (diasConTurnos.length === 0) {
+        diasHtml = `
+          <tr>
+            <td colspan="5" style="text-align: center; color: #888; font-style: italic; padding: 10px;">
+              Sin registros de asistencia en esta semana
+            </td>
+          </tr>
+        `;
+      } else {
+        for (const dia of diasConTurnos) {
+          for (const turno of dia.turnos) {
+            diasHtml += `
+              <tr>
+                <td style="font-weight: 600; color: #0d1b2a;">
+                  ${dia.dayName} ${dia.shortDate}
+                </td>
+                <td style="text-align: center;">
+                  <span style="background-color: #64748b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold;">
+                    Turno #${turno.index}
+                  </span>
+                </td>
+                <td>
+                  <span style="color: #16a34a; font-weight: bold;">📥 ${turno.hora_entrada}</span>
+                  ${turno.direccion_entrada ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_entrada}</div>` : ''}
+                </td>
+                <td>
+                  <span style="color: ${turno.hora_salida ? '#0284c7' : '#d97706'}; font-weight: bold;">
+                    ${turno.hora_salida ? `📤 ${turno.hora_salida}` : '⏳ Pendiente'}
+                  </span>
+                  ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
+                </td>
+                <td style="text-align: right; font-weight: bold; color: ${turno.enCurso ? '#d97706' : '#16a34a'};">
+                  ${turno.duracionStr}
+                </td>
+              </tr>
+            `;
+          }
+        }
+      }
+
+      empleadosHtml += `
+        <div style="margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; page-break-inside: avoid;">
+          <div style="background-color: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <span style="font-size: 13px; font-weight: bold; color: #0f172a;">👤 ${emp.nombre}</span>
+              <span style="margin-left: 8px; font-size: 10px; background-color: #e2e8f0; color: #475569; padding: 2px 6px; border-radius: 4px;">${emp.rol || 'EMPLEADO'}</span>
+              ${emp.sucursal ? `<span style="margin-left: 6px; font-size: 10px; color: #64748b;">(${emp.sucursal})</span>` : ''}
+            </div>
+            <div style="text-align: right;">
+              <span style="font-size: 10px; color: #64748b; margin-right: 8px;">Días: <b>${semanaData.diasLaborados}/7</b></span>
+              <span style="background-color: #dcfce7; color: #15803d; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 12px;">
+                ⏱ ${semanaData.totalHorasSemanaStr}
+              </span>
+            </div>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+            <thead>
+              <tr style="background-color: #f1f5f9; color: #475569; text-transform: uppercase; font-size: 9px;">
+                <th style="padding: 6px 10px; text-align: left; width: 18%;">Día / Fecha</th>
+                <th style="padding: 6px 8px; text-align: center; width: 12%;">Subíndice</th>
+                <th style="padding: 6px 10px; text-align: left; width: 32%;">Entrada</th>
+                <th style="padding: 6px 10px; text-align: left; width: 32%;">Salida</th>
+                <th style="padding: 6px 10px; text-align: right; width: 16%;">Duración</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${diasHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Reporte General de Asistencia Semanal</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            margin: 0;
+            padding: 24px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @page {
+            size: letter;
+            margin: 12mm;
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 20px;
+            font-weight: bold;
+            margin: 0;
+          }
+          .summary-grid {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 10px;
+          }
+          .summary-card {
+            flex: 1;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+          }
+          .summary-card .value {
+            font-size: 15px;
+            font-weight: bold;
+            color: #0d1b2a;
+            margin-top: 3px;
+          }
+          .summary-card .label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: bold;
+          }
+          table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid #f1f5f9;
+          }
+          .footer {
+            margin-top: 25px;
+            text-align: center;
+            font-size: 9px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 8px;
+          }
+          .logo-img {
+            max-height: 44px;
+            max-width: 170px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <table style="width: 100%; border-collapse: collapse; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 14px; border: none;">
+          <tr>
+            <td style="vertical-align: middle; border: none; padding: 0;">
+              <h1 class="title">Reporte General de Asistencia Semanal</h1>
+              <p style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
+              <p style="margin: 3px 0 0 0; font-size: 10px; color: #64748b;">Generado el: ${new Date().toLocaleString('es-MX')}</p>
+            </td>
+            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
+              ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
+            </td>
+          </tr>
+        </table>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div class="label">Total Horas Empresa</div>
+            <div class="value" style="color: #16a34a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Personal con Registro</div>
+            <div class="value">${empleadosConRegistro} de ${personalTarget.length}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Turnos Totales</div>
+            <div class="value">${totalTurnosEmpresa} turnos</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Promedio / Empleado</div>
+            <div class="value">${empleadosConRegistro > 0 ? formatMinutesToHours(Math.round(totalMinutosEmpresa / empleadosConRegistro)) : '0h 0m'}</div>
+          </div>
+        </div>
+
+        ${empleadosHtml}
+
+        <div class="footer">
+          Sistema Inttec & Daravisa - Reporte Oficial de Asistencias y Turnos Semanales - Documento Confidencial
+        </div>
+      </body>
+      </html>
+    `;
+
+    await ReportGenerator._printOrShareHtml(
+      htmlContent,
+      `reporte_asistencia_general_${range.mondayStr}.pdf`,
+      'Reporte General de Asistencia PDF'
+    );
+  },
+
+  /**
+   * Genera el Reporte Individual de Asistencia Semanal en PDF para un empleado
+   */
+  async exportReporteAsistenciaEmpleadoPDF(
+    asistencias: Asistencia[],
+    empleado: Usuario,
+    weekMondayInput?: Date | string
+  ): Promise<void> {
+    const range = getWeekRange(weekMondayInput);
+    const branding = await getCompanyBranding();
+    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate);
+
+    let diasHtml = '';
+    for (const dia of semanaData.dias) {
+      if (dia.turnos.length === 0) {
+        diasHtml += `
+          <tr>
+            <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+            <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
+          </tr>
+        `;
+      } else {
+        dia.turnos.forEach((turno, idx) => {
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">
+                ${idx === 0 ? `${dia.dayName} ${dia.shortDate}` : `<span style="color: #94a3b8; font-size: 8px;">↳ ${dia.dayName}</span>`}
+              </td>
+              <td style="text-align: center;">
+                <span style="background-color: #64748b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold;">
+                  Turno #${turno.index}
+                </span>
+              </td>
+              <td>
+                <span style="color: #16a34a; font-weight: bold;">📥 ${turno.hora_entrada}</span>
+                ${turno.direccion_entrada ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_entrada}</div>` : ''}
+              </td>
+              <td>
+                <span style="color: ${turno.hora_salida ? '#0284c7' : '#d97706'}; font-weight: bold;">
+                  ${turno.hora_salida ? `📤 ${turno.hora_salida}` : '⏳ Pendiente'}
+                </span>
+                ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
+              </td>
+              <td style="text-align: right; font-weight: bold; color: ${turno.enCurso ? '#d97706' : '#16a34a'};">
+                ${turno.duracionStr}
+              </td>
+            </tr>
+          `;
+        });
+      }
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Reporte de Asistencia - ${empleado.nombre}</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            margin: 0;
+            padding: 24px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @page {
+            size: letter;
+            margin: 12mm;
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 20px;
+            font-weight: bold;
+            margin: 0;
+          }
+          .summary-grid {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 10px;
+          }
+          .summary-card {
+            flex: 1;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+          }
+          .summary-card .value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #0d1b2a;
+            margin-top: 3px;
+          }
+          .summary-card .label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: bold;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            overflow: hidden;
+          }
+          th {
+            background-color: #0d1b2a;
+            color: white;
+            text-align: left;
+            padding: 8px 10px;
+            font-size: 9px;
+            text-transform: uppercase;
+          }
+          td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #f1f5f9;
+          }
+          .footer {
+            margin-top: 25px;
+            text-align: center;
+            font-size: 9px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 8px;
+          }
+          .logo-img {
+            max-height: 44px;
+            max-width: 170px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <table style="width: 100%; border-collapse: collapse; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 14px; border: none;">
+          <tr>
+            <td style="vertical-align: middle; border: none; padding: 0;">
+              <h1 class="title">Reporte Individual de Asistencia</h1>
+              <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">👤 ${empleado.nombre}</p>
+              <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'}</p>
+            </td>
+            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
+              ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
+            </td>
+          </tr>
+        </table>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div class="label">Total Horas Semana</div>
+            <div class="value" style="color: #16a34a; font-size: 18px;">${semanaData.totalHorasSemanaStr}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Días Laborados</div>
+            <div class="value">${semanaData.diasLaborados} de 7</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Turnos Totales</div>
+            <div class="value">${semanaData.turnosTotales} turnos</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Promedio Diario</div>
+            <div class="value">${semanaData.diasLaborados > 0 ? formatMinutesToHours(Math.round(semanaData.totalMinutosSemana / semanaData.diasLaborados)) : '0h 0m'}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 18%;">Día / Fecha</th>
+              <th style="width: 12%; text-align: center;">Subíndice</th>
+              <th style="width: 32%;">Entrada</th>
+              <th style="width: 32%;">Salida</th>
+              <th style="width: 16%; text-align: right;">Duración</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${diasHtml}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Sistema Inttec & Daravisa - Reporte Oficial de Asistencias - Documento Confidencial
+        </div>
+      </body>
+      </html>
+    `;
+
+    const safeName = (empleado.nombre || 'empleado').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    await ReportGenerator._printOrShareHtml(
+      htmlContent,
+      `reporte_asistencia_${safeName}_${range.mondayStr}.pdf`,
+      `Reporte Asistencia ${empleado.nombre}`
+    );
+  },
   async exportInventarioToPDF(
     productos: ReportProducto[],
     categorias: ReportCategoria[],
@@ -2676,6 +3159,172 @@ export const ReportGenerator = {
               return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada || 'Sin registro', a.direccion_entrada || '', a.hora_salida || 'Sin registro', a.direccion_salida || '' ];
             });
             await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
+    },
+
+    /**
+     * Exporta el Reporte General de Asistencia Semanal en formato Excel XLSX
+     * Incluye resumen por empleado, horas totales de la semana y el subíndice detallado de cada turno por día
+     */
+    async exportReporteAsistenciaSemanalGeneralXLSX(
+      asistencias: Asistencia[],
+      personal: Usuario[],
+      weekMondayInput?: Date | string,
+      fileName?: string
+    ): Promise<void> {
+      const range = getWeekRange(weekMondayInput);
+      const asistenciasPorEmpleado = new Map<string, Asistencia[]>();
+      for (const a of asistencias) {
+        const empId = a.empleado_id;
+        if (!empId) continue;
+        const list = asistenciasPorEmpleado.get(empId) || [];
+        list.push(a);
+        asistenciasPorEmpleado.set(empId, list);
+      }
+
+      const personalTarget = (personal || []).filter(
+        p => p.rol === 'EMPLEADO' || p.rol === 'ADMIN' || asistenciasPorEmpleado.has(p.id)
+      );
+
+      const headers = [
+        'Semana',
+        'Empleado',
+        'Rol',
+        'Sucursal',
+        'Fecha',
+        'Día',
+        'Subíndice Turno',
+        'Hora Entrada',
+        'Dirección Entrada',
+        'Hora Salida',
+        'Dirección Salida',
+        'Duración Turno',
+        'Total Horas Día',
+        'Total Horas Semana Empleado'
+      ];
+
+      const rows: any[][] = [];
+
+      for (const emp of personalTarget) {
+        const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
+        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate);
+
+        let tieneRegistros = false;
+        for (const dia of semanaData.dias) {
+          if (dia.turnos.length > 0) {
+            tieneRegistros = true;
+            for (const turno of dia.turnos) {
+              rows.push([
+                range.label,
+                emp.nombre,
+                emp.rol || 'EMPLEADO',
+                emp.sucursal || 'N/A',
+                dia.dateStr,
+                dia.dayName,
+                `Turno #${turno.index}`,
+                turno.hora_entrada,
+                turno.direccion_entrada || '',
+                turno.hora_salida || 'Pendiente',
+                turno.direccion_salida || '',
+                turno.duracionStr,
+                dia.totalHorasStr,
+                semanaData.totalHorasSemanaStr
+              ]);
+            }
+          }
+        }
+
+        if (!tieneRegistros) {
+          rows.push([
+            range.label,
+            emp.nombre,
+            emp.rol || 'EMPLEADO',
+            emp.sucursal || 'N/A',
+            '-',
+            '-',
+            'Sin registros',
+            '-',
+            '',
+            '-',
+            '',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m'
+          ]);
+        }
+      }
+
+      const targetFileName = fileName || `reporte_asistencia_general_${range.mondayStr}.xlsx`;
+      await ReportGenerator._exportArrayToXLSX('Asistencia General', headers, rows, targetFileName);
+    },
+
+    /**
+     * Exporta el Reporte Individual de Asistencia Semanal en formato Excel XLSX para un empleado
+     */
+    async exportReporteAsistenciaEmpleadoXLSX(
+      asistencias: Asistencia[],
+      empleado: Usuario,
+      weekMondayInput?: Date | string,
+      fileName?: string
+    ): Promise<void> {
+      const range = getWeekRange(weekMondayInput);
+      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate);
+
+      const headers = [
+        'Semana',
+        'Empleado',
+        'Fecha',
+        'Día',
+        'Turno #',
+        'Hora Entrada',
+        'Dirección Entrada',
+        'Hora Salida',
+        'Dirección Salida',
+        'Duración Turno',
+        'Total Horas Día',
+        'Total Horas Semana'
+      ];
+
+      const rows: any[][] = [];
+
+      for (const dia of semanaData.dias) {
+        if (dia.turnos.length > 0) {
+          for (const turno of dia.turnos) {
+            rows.push([
+              range.label,
+              empleado.nombre,
+              dia.dateStr,
+              dia.dayName,
+              `Turno #${turno.index}`,
+              turno.hora_entrada,
+              turno.direccion_entrada || '',
+              turno.hora_salida || 'Pendiente',
+              turno.direccion_salida || '',
+              turno.duracionStr,
+              dia.totalHorasStr,
+              semanaData.totalHorasSemanaStr
+            ]);
+          }
+        } else {
+          rows.push([
+            range.label,
+            empleado.nombre,
+            dia.dateStr,
+            dia.dayName,
+            '-',
+            '-',
+            '',
+            '-',
+            '',
+            '0h 0m',
+            '0h 0m',
+            semanaData.totalHorasSemanaStr
+          ]);
+        }
+      }
+
+      const safeName = (empleado.nombre || 'empleado').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      const targetFileName = fileName || `reporte_asistencia_${safeName}_${range.mondayStr}.xlsx`;
+      await ReportGenerator._exportArrayToXLSX('Asistencia Semanal', headers, rows, targetFileName);
     },
     async exportInventarioToXLSX(productos: any[], categorias: ReportCategoria[], fileName: string = 'reporte_inventario.xlsx'): Promise<void> {
 

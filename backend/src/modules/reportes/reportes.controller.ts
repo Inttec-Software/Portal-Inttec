@@ -222,10 +222,13 @@ export const getExportData = async (req: Request, res: Response) => {
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
 
     if (type === 'asistencias') {
-      let query = client.from('asistencias').select('*').order('fecha', { ascending: false });
+      let query = client.from('asistencias').select('*');
+      if (req.query.empleado_id) query = query.eq('empleado_id', req.query.empleado_id as string);
       if (startDate) query = query.gte('fecha', startDate);
       if (endDate) query = query.lte('fecha', endDate);
-      const { data, error } = await query;
+      const { data, error } = await query
+        .order('fecha', { ascending: false })
+        .order('creado_en', { ascending: true });
       if (error) throw error;
       return res.json(data || []);
     } else if (type === 'inventario') {

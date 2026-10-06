@@ -33,6 +33,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
+import { getWeekRange, getPreviousWeekMonday, getNextWeekMonday } from '@/utils/asistenciaUtils';
 import GastoFotosGallery from '@/components/GastoFotosGallery';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -173,6 +175,10 @@ export default function ReportesScreen() {
     empleadoNombre: string;
     tipo: 'Entrada' | 'Salida';
   } | null>(null);
+
+  // Filtros específicos para Reporte de Asistencia
+  const [asistenciaReportEmpleadoId, setAsistenciaReportEmpleadoId] = useState<string>('todos');
+  const [asistenciaSelectedMonday, setAsistenciaSelectedMonday] = useState<Date>(() => getWeekRange().mondayDate);
 
   const [isFetchingAsistencias, setIsFetchingAsistencias] = useState(false);
   const [isFetchingInventario, setIsFetchingInventario] = useState(false);
@@ -1320,13 +1326,14 @@ export default function ReportesScreen() {
   };
 
   // Ver Historial de Asistencia de un Empleado
-  const handleOpenAsistencia = async (empleado: Usuario) => {
+  const handleOpenAsistencia = async (empleado: Usuario, monday: Date = asistenciaSelectedMonday) => {
     setAsistenciaEmpleado(empleado);
     setAsistenciaModalVisible(true);
     setIsLoadingAsistencias(true);
     try {
-      const historial = await AsistenciaService.getHistorialEmpleado(empleado.id);
-      setAsistencias(historial);
+      const range = getWeekRange(monday);
+      const historial = await AsistenciaService.getHistorialEmpleado(empleado.id, range.mondayStr, range.sundayStr);
+      setAsistencias(historial || []);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'No se pudo cargar el historial de asistencia.');
     } finally {
@@ -1523,16 +1530,34 @@ export default function ReportesScreen() {
   const handleExportAsistenciasPDF = async () => {
     setIsFetchingAsistencias(true);
     try {
+      const range = getWeekRange(asistenciaSelectedMonday);
       const headers = await getApiHeaders();
       const params = new URLSearchParams();
-      if (startDateFilter) params.append('startDate', startDateFilter);
-      if (endDateFilter) params.append('endDate', endDateFilter);
-      const qs = params.toString() ? `?${params.toString()}` : '';
+      params.append('startDate', range.mondayStr);
+      params.append('endDate', range.sundayStr);
+      if (asistenciaReportEmpleadoId !== 'todos') {
+        params.append('empleado_id', asistenciaReportEmpleadoId);
+      }
+      const qs = `?${params.toString()}`;
       const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/asistencias${qs}`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      const periodo = getPeriodoLabel();
-      await ReportGenerator.exportAsistenciasToPDF(data || [], personal, 'Reporte de Asistencia General', periodo);
+
+      if (asistenciaReportEmpleadoId === 'todos') {
+        await ReportGenerator.exportReporteAsistenciaSemanalGeneralPDF(
+          data || [],
+          personal,
+          asistenciaSelectedMonday
+        );
+      } else {
+        const emp = personal.find((p) => p.id === asistenciaReportEmpleadoId);
+        if (!emp) throw new Error('Empleado no encontrado');
+        await ReportGenerator.exportReporteAsistenciaEmpleadoPDF(
+          data || [],
+          emp,
+          asistenciaSelectedMonday
+        );
+      }
     } catch (err: any) {
       showAlert('Error PDF Asistencia', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -1543,16 +1568,34 @@ export default function ReportesScreen() {
   const handleExportAsistenciasCSV = async () => {
     setIsFetchingAsistencias(true);
     try {
+      const range = getWeekRange(asistenciaSelectedMonday);
       const headers = await getApiHeaders();
       const params = new URLSearchParams();
-      if (startDateFilter) params.append('startDate', startDateFilter);
-      if (endDateFilter) params.append('endDate', endDateFilter);
-      const qs = params.toString() ? `?${params.toString()}` : '';
+      params.append('startDate', range.mondayStr);
+      params.append('endDate', range.sundayStr);
+      if (asistenciaReportEmpleadoId !== 'todos') {
+        params.append('empleado_id', asistenciaReportEmpleadoId);
+      }
+      const qs = `?${params.toString()}`;
       const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/asistencias${qs}`, { headers });
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
-      const suffix = getFilePeriodoSuffix();
-      await ReportGenerator.exportAsistenciasToXLSX(data || [], personal, `reporte_asistencia_general_${suffix}.xlsx`);
+
+      if (asistenciaReportEmpleadoId === 'todos') {
+        await ReportGenerator.exportReporteAsistenciaSemanalGeneralXLSX(
+          data || [],
+          personal,
+          asistenciaSelectedMonday
+        );
+      } else {
+        const emp = personal.find((p) => p.id === asistenciaReportEmpleadoId);
+        if (!emp) throw new Error('Empleado no encontrado');
+        await ReportGenerator.exportReporteAsistenciaEmpleadoXLSX(
+          data || [],
+          emp,
+          asistenciaSelectedMonday
+        );
+      }
     } catch (err: any) {
       showAlert('Error Excel Asistencia', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -3014,19 +3057,101 @@ export default function ReportesScreen() {
           </View>
 
           {/* Tarjeta 2: Reporte de Asistencia */}
-          <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one }]}>
+          <View style={[styles.configCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, flexDirection: 'column', alignItems: 'stretch', gap: Spacing.two }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
               <Ionicons name="time-outline" size={28} color={themeColors.accent} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Asistencia</Text>
+                <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Asistencia Semanal</Text>
                 <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                  Entradas y salidas de checado en: <Text style={{ color: themeColors.accent, fontWeight: '700' }}>{getPeriodoLabel()}</Text>
+                  Total de horas semanales, horas por día y subíndice detallado de turnos.
                 </Text>
               </View>
             </View>
+
+            {/* Selector de Semana */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: themeColors.background, padding: 8, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border }}>
+              <TouchableOpacity
+                onPress={() => setAsistenciaSelectedMonday(getPreviousWeekMonday(asistenciaSelectedMonday))}
+                style={{ padding: 4 }}
+              >
+                <Ionicons name="chevron-back" size={20} color={themeColors.text} />
+              </TouchableOpacity>
+              <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, textAlign: 'center' }}>
+                  {getWeekRange(asistenciaSelectedMonday).label}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setAsistenciaSelectedMonday(getNextWeekMonday(asistenciaSelectedMonday))}
+                style={{ padding: 4 }}
+              >
+                <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Selector de Tipo / Empleado */}
+            <View>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: themeColors.textSecondary, marginBottom: 4, letterSpacing: 0.5 }}>
+                ALCANCE DEL REPORTE:
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                <TouchableOpacity
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: BorderRadius.medium,
+                    backgroundColor: asistenciaReportEmpleadoId === 'todos' ? themeColors.accent : themeColors.background,
+                    borderWidth: 1,
+                    borderColor: asistenciaReportEmpleadoId === 'todos' ? themeColors.accent : themeColors.border,
+                  }}
+                  onPress={() => setAsistenciaReportEmpleadoId('todos')}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: asistenciaReportEmpleadoId === 'todos' ? '#fff' : themeColors.text }}>
+                    👥 Todos los empleados (General)
+                  </Text>
+                </TouchableOpacity>
+
+                {personal.map((p) => {
+                  const isSel = asistenciaReportEmpleadoId === p.id;
+                  return (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: BorderRadius.medium,
+                        backgroundColor: isSel ? themeColors.accent : themeColors.background,
+                        borderWidth: 1,
+                        borderColor: isSel ? themeColors.accent : themeColors.border,
+                      }}
+                      onPress={() => setAsistenciaReportEmpleadoId(p.id)}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: isSel ? '#fff' : themeColors.text }}>
+                        👤 {p.nombre}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* Botones de Descarga */}
             <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-              <CustomButton title="PDF" onPress={handleExportAsistenciasPDF} style={{ flex: 1, height: 36 }} loading={isFetchingAsistencias} />
-              <CustomButton title="Excel" onPress={handleExportAsistenciasCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isFetchingAsistencias} />
+              <CustomButton
+                title={asistenciaReportEmpleadoId === 'todos' ? 'PDF General' : 'PDF Individual'}
+                onPress={handleExportAsistenciasPDF}
+                style={{ flex: 1, height: 38 }}
+                loading={isFetchingAsistencias}
+                icon={<Ionicons name="document-text-outline" size={16} color="#fff" style={{ marginRight: 6 }} />}
+              />
+              <CustomButton
+                title={asistenciaReportEmpleadoId === 'todos' ? 'Excel General' : 'Excel Individual'}
+                onPress={handleExportAsistenciasCSV}
+                variant="success"
+                style={{ flex: 1, height: 38 }}
+                loading={isFetchingAsistencias}
+                icon={<Ionicons name="download-outline" size={16} color="#fff" style={{ marginRight: 6 }} />}
+              />
             </View>
           </View>
 
@@ -5037,142 +5162,63 @@ export default function ReportesScreen() {
                 <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando historial...</Text>
               </View>
             ) : (
-              <FlatList scrollEnabled={false}
-                data={asistencias}
-                initialNumToRender={8}
-                maxToRenderPerBatch={8}
-                windowSize={5}
-                removeClippedSubviews={true}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={{ paddingBottom: Spacing.seven }}
-                renderItem={({ item }) => (
-                  <View style={[styles.asistenciaCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                    <Text style={[styles.asistenciaFecha, { color: themeColors.text }]}>
-                      📅 {formatAsistenciaFecha(item.fecha)}
-                    </Text>
-                    <View style={styles.asistenciaRow}>
-                      {/* Entrada */}
-                      <View style={styles.asistenciaBlock}>
-                        <Text style={[styles.asistenciaBlockLabel, { color: themeColors.success }]}>📥 Entrada</Text>
-                        {item.foto_entrada_url ? (
-                          <TouchableOpacity
-                            style={styles.asistenciaThumb}
-                            activeOpacity={0.8}
-                            onPress={() => {
-                              setAsistenciaPreviewUrl(item.foto_entrada_url!);
-                              setSelectedAsistenciaInfo({
-                                fecha: item.fecha,
-                                hora: item.hora_entrada!,
-                                direccion: item.direccion_entrada || 'Dirección no registrada',
-                                lat: Number(item.latitud_entrada),
-                                lng: Number(item.longitud_entrada),
-                                empleadoNombre: asistenciaEmpleado?.nombre || 'Empleado',
-                                tipo: 'Entrada',
-                              });
-                              setAsistenciaViewerVisible(true);
-                            }}
-                          >
-                            <Image source={{ uri: item.foto_entrada_url }} style={styles.asistenciaThumbImg} resizeMode="cover" />
-                          </TouchableOpacity>
-                        ) : (
-                          <View style={[styles.asistenciaNoImg, { backgroundColor: themeColors.backgroundSelected }]}>
-                            <Ionicons name="image-outline" size={24} color={themeColors.textSecondary} />
-                          </View>
-                        )}
-                        <Text style={[styles.asistenciaHora, { color: themeColors.text }]}>
-                          {item.hora_entrada?.substring(0, 5) || '--:--'}
-                        </Text>
-                        {item.direccion_entrada ? (
-                          <TouchableOpacity
-                            onPress={() => handleOpenMap(Number(item.latitud_entrada), Number(item.longitud_entrada))}
-                            activeOpacity={0.7}
-                            style={{ width: '100%' }}
-                          >
-                            <Text style={[styles.asistenciaAddress, { color: themeColors.textSecondary }]} numberOfLines={3}>
-                              🏠 {item.direccion_entrada}
-                            </Text>
-                          </TouchableOpacity>
-                        ) : item.latitud_entrada != null && (
-                          <TouchableOpacity
-                            onPress={() => handleOpenMap(Number(item.latitud_entrada), Number(item.longitud_entrada))}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[styles.asistenciaCoords, { color: themeColors.textSecondary }]}>
-                              📍 {Number(item.latitud_entrada).toFixed(4)}, {Number(item.longitud_entrada).toFixed(4)}
-                            </Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-
-                      {/* Salida */}
-                      <View style={styles.asistenciaBlock}>
-                        <Text style={[styles.asistenciaBlockLabel, { color: item.hora_salida ? themeColors.accent : themeColors.warning }]}>
-                          📤 Salida
-                        </Text>
-                        {item.foto_salida_url ? (
-                          <TouchableOpacity
-                            style={styles.asistenciaThumb}
-                            activeOpacity={0.8}
-                            onPress={() => {
-                              setAsistenciaPreviewUrl(item.foto_salida_url!);
-                              setSelectedAsistenciaInfo({
-                                fecha: item.fecha,
-                                hora: item.hora_salida!,
-                                direccion: item.direccion_salida || 'Dirección no registrada',
-                                lat: Number(item.latitud_salida),
-                                lng: Number(item.longitud_salida),
-                                empleadoNombre: asistenciaEmpleado?.nombre || 'Empleado',
-                                tipo: 'Salida',
-                              });
-                              setAsistenciaViewerVisible(true);
-                            }}
-                          >
-                            <Image source={{ uri: item.foto_salida_url }} style={styles.asistenciaThumbImg} resizeMode="cover" />
-                          </TouchableOpacity>
-                        ) : (
-                          <View style={[styles.asistenciaNoImg, { backgroundColor: themeColors.backgroundSelected }]}>
-                            <Ionicons name={item.hora_salida ? 'image-outline' : 'hourglass-outline'} size={24} color={themeColors.textSecondary} />
-                            {!item.hora_salida && (
-                              <Text style={{ fontSize: 9, color: themeColors.warning, fontWeight: '700', marginTop: 2 }}>Pendiente</Text>
-                            )}
-                          </View>
-                        )}
-                        <Text style={[styles.asistenciaHora, { color: item.hora_salida ? themeColors.text : themeColors.warning }]}>
-                          {item.hora_salida?.substring(0, 5) || 'Pendiente'}
-                        </Text>
-                        {item.direccion_salida ? (
-                          <TouchableOpacity
-                            onPress={() => handleOpenMap(Number(item.latitud_salida), Number(item.longitud_salida))}
-                            activeOpacity={0.7}
-                            style={{ width: '100%' }}
-                          >
-                            <Text style={[styles.asistenciaAddress, { color: themeColors.textSecondary }]} numberOfLines={3}>
-                              🏠 {item.direccion_salida}
-                            </Text>
-                          </TouchableOpacity>
-                        ) : item.latitud_salida != null && (
-                          <TouchableOpacity
-                            onPress={() => handleOpenMap(Number(item.latitud_salida), Number(item.longitud_salida))}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[styles.asistenciaCoords, { color: themeColors.textSecondary }]}>
-                              📍 {Number(item.latitud_salida).toFixed(4)}, {Number(item.longitud_salida).toFixed(4)}
-                            </Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </View>
+              <ScrollView contentContainerStyle={{ paddingBottom: Spacing.seven }}>
+                {asistenciaEmpleado && (
+                  <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.two }}>
+                    <CustomButton
+                      title="PDF Semanal"
+                      onPress={() => {
+                        ReportGenerator.exportReporteAsistenciaEmpleadoPDF(
+                          asistencias,
+                          asistenciaEmpleado,
+                          asistenciaSelectedMonday
+                        );
+                      }}
+                      style={{ flex: 1, height: 36 }}
+                      icon={<Ionicons name="document-text-outline" size={16} color="#fff" style={{ marginRight: 6 }} />}
+                    />
+                    <CustomButton
+                      title="Excel Semanal"
+                      onPress={() => {
+                        ReportGenerator.exportReporteAsistenciaEmpleadoXLSX(
+                          asistencias,
+                          asistenciaEmpleado,
+                          asistenciaSelectedMonday
+                        );
+                      }}
+                      variant="success"
+                      style={{ flex: 1, height: 36 }}
+                      icon={<Ionicons name="download-outline" size={16} color="#fff" style={{ marginRight: 6 }} />}
+                    />
                   </View>
                 )}
-                ListEmptyComponent={
-                  <View style={styles.emptyContainer}>
-                    <Ionicons name="calendar-outline" size={48} color={themeColors.textSecondary} />
-                    <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-                      No hay registros de asistencia para este empleado.
-                    </Text>
-                  </View>
-                }
-              />
+
+                <AsistenciaSemanalCard
+                  asistencias={asistencias}
+                  empleadoNombre={asistenciaEmpleado?.nombre || 'Empleado'}
+                  isLoading={isLoadingAsistencias}
+                  selectedMonday={asistenciaSelectedMonday}
+                  onChangeWeek={(newMonday) => {
+                    setAsistenciaSelectedMonday(newMonday);
+                    if (asistenciaEmpleado) {
+                      handleOpenAsistencia(asistenciaEmpleado, newMonday);
+                    }
+                  }}
+                  onViewFoto={(info) => {
+                    setAsistenciaPreviewUrl(info.url);
+                    setSelectedAsistenciaInfo({
+                      fecha: info.fecha,
+                      hora: info.hora,
+                      direccion: info.direccion,
+                      lat: info.lat,
+                      lng: info.lng,
+                      empleadoNombre: info.empleadoNombre,
+                      tipo: info.tipo,
+                    });
+                    setAsistenciaViewerVisible(true);
+                  }}
+                />
+              </ScrollView>
             )}
           </View>
         </View>

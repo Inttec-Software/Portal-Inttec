@@ -78,6 +78,7 @@ export default function AdminLayout() {
     { route: '/(admin)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
     { route: '/(admin)/inventario', icon: 'cube-outline', color: '#48dbfb', name: 'Inventario' },
     { route: '/(admin)/empleados', icon: 'people-outline', color: '#1dd1a1', name: 'Empleados' },
+    { route: '/(admin)/asistencia', icon: 'time-outline', color: '#2ed573', name: 'Asistencia' },
     { route: '/(admin)/vehiculos', icon: 'car-outline', color: '#ff9ff3', name: 'Flota' },
     { route: '/(admin)/herramientas', icon: 'build-outline', color: '#00cec9', name: 'Herramientas' },
     { route: '/(admin)/evidencias', icon: 'briefcase-outline', color: '#ff5252', name: 'Evidencias' },

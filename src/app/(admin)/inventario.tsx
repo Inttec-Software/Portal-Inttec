@@ -2896,6 +2896,7 @@ export default function InventarioDashboard() {
                                     {Number(m.devolver) > 0 && (
                                       <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 13 }}>+ {m.devolver} {m.unidad || 'un.'} (Devuelto)</Text>
                                     )}
+                                    {Number(m.gastar) > 0 && (
                                       <Text style={{ color: themeColors.danger || '#EF4444', fontWeight: 'bold', fontSize: 13 }}>- {m.gastar} {m.unidad || 'un.'} (Gastado)</Text>
                                     )}
                                   </View>
