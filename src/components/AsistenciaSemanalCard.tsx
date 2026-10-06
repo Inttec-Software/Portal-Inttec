@@ -12,6 +12,7 @@ import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Asistencia } from '@/services/supabase';
+import { useAuth } from '@/context/AuthContext';
 import {
   WeekRange,
   TurnoAsistencia,
@@ -53,6 +54,8 @@ export default function AsistenciaSemanalCard({
 }: AsistenciaSemanalCardProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { user } = useAuth();
+  const canViewOvertime = user?.rol === 'ADMIN' || user?.rol === 'DEV';
 
   // Estados de días expandidos (por defecto expandir días que tengan turnos)
   const [expandedDays, setExpandedDays] = useState<{ [dateStr: string]: boolean }>({});
@@ -145,36 +148,67 @@ export default function AsistenciaSemanalCard({
         <View style={styles.summaryMetricCol}>
           <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TOTAL HORAS</Text>
           <View style={styles.hoursValueRow}>
-            <Ionicons name="time" size={17} color={themeColors.success} style={{ marginRight: 4 }} />
-            <Text style={[styles.summaryHoursText, { color: themeColors.success }]}>
+            <Ionicons name="time" size={16} color={themeColors.text} style={{ marginRight: 4 }} />
+            <Text style={[styles.summaryHoursText, { color: themeColors.text }]}>
               {semanaData.totalHorasSemanaStr}
             </Text>
           </View>
         </View>
+
+        {canViewOvertime && (
+          <>
+            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
+
+            <View style={styles.summaryMetricCol}>
+              <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>REGULARES (8-6)</Text>
+              <View style={styles.hoursValueRow}>
+                <Ionicons name="business-outline" size={14} color={themeColors.success} style={{ marginRight: 4 }} />
+                <Text style={[styles.summarySecondaryText, { color: themeColors.success, fontWeight: '800' }]}>
+                  {semanaData.totalHorasRegularesStr}
+                </Text>
+              </View>
+            </View>
+
+            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
+
+            <View style={styles.summaryMetricCol}>
+              <Text style={[styles.summaryMetricLabel, { color: semanaData.totalMinutosExtra > 0 ? '#ea580c' : themeColors.textSecondary }]}>HORAS EXTRAS</Text>
+              <View style={styles.hoursValueRow}>
+                <Ionicons name="flame" size={15} color={semanaData.totalMinutosExtra > 0 ? '#ea580c' : themeColors.textSecondary} style={{ marginRight: 4 }} />
+                <Text style={[styles.summaryHoursText, { color: semanaData.totalMinutosExtra > 0 ? '#ea580c' : themeColors.textSecondary }]}>
+                  {semanaData.totalHorasExtraStr}
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
 
         <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
 
         <View style={styles.summaryMetricCol}>
           <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>DÍAS LAB.</Text>
           <View style={styles.hoursValueRow}>
-            <Ionicons name="briefcase-outline" size={15} color={themeColors.accent} style={{ marginRight: 4 }} />
+            <Ionicons name="briefcase-outline" size={14} color={themeColors.accent} style={{ marginRight: 4 }} />
             <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
               {semanaData.diasLaborados} / 7
             </Text>
           </View>
         </View>
 
-        <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
-
-        <View style={styles.summaryMetricCol}>
-          <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TURNOS</Text>
-          <View style={styles.hoursValueRow}>
-            <Ionicons name="layers-outline" size={15} color={themeColors.warning} style={{ marginRight: 4 }} />
-            <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
-              {semanaData.turnosTotales}
-            </Text>
-          </View>
-        </View>
+        {!canViewOvertime && (
+          <>
+            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
+            <View style={styles.summaryMetricCol}>
+              <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TURNOS</Text>
+              <View style={styles.hoursValueRow}>
+                <Ionicons name="layers-outline" size={14} color={themeColors.warning} style={{ marginRight: 4 }} />
+                <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
+                  {semanaData.turnosTotales}
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
       </View>
 
       {isLoading ? (
@@ -237,6 +271,15 @@ export default function AsistenciaSemanalCard({
                 </View>
 
                 <View style={styles.dayInfoRight}>
+                  {canViewOvertime && dia.minutosExtra > 0 && (
+                    <View style={[styles.extraHoursBadge, { backgroundColor: '#ea580c18', borderColor: '#ea580c50' }]}>
+                      <Ionicons name="flame" size={11} color="#ea580c" style={{ marginRight: 2 }} />
+                      <Text style={[styles.extraHoursText, { color: '#ea580c' }]}>
+                        +{dia.horasExtraStr} extra
+                      </Text>
+                    </View>
+                  )}
+
                   <View
                     style={[
                       styles.dayHoursBadge,
@@ -799,5 +842,29 @@ const styles = StyleSheet.create({
   turnoPendingText: {
     fontSize: 9,
     fontWeight: '600',
+  },
+  extraHoursBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    marginRight: 6,
+  },
+  extraHoursText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  turnoExtraBadge: {
+    marginTop: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  turnoExtraText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
 });

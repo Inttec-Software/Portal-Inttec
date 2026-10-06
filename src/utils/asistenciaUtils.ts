@@ -32,7 +32,12 @@ export interface TurnoAsistencia {
   longitud_salida?: number | null;
   minutos: number;
   duracionStr: string;
+  minutosRegulares: number;
+  horasRegularesStr: string;
+  minutosExtra: number;
+  horasExtraStr: string;
   enCurso: boolean;
+  autoCerrado?: boolean;
 }
 
 export interface DiaAsistencia {
@@ -42,6 +47,10 @@ export interface DiaAsistencia {
   isToday: boolean;
   totalMinutos: number;
   totalHorasStr: string;
+  minutosRegulares: number;
+  horasRegularesStr: string;
+  minutosExtra: number;
+  horasExtraStr: string;
   turnos: TurnoAsistencia[];
   tieneTurnoEnCurso: boolean;
 }
@@ -51,8 +60,72 @@ export interface SemanaAsistencia {
   dias: DiaAsistencia[];
   totalMinutosSemana: number;
   totalHorasSemanaStr: string;
+  totalMinutosRegulares: number;
+  totalHorasRegularesStr: string;
+  totalMinutosExtra: number;
+  totalHorasExtraStr: string;
   diasLaborados: number;
   turnosTotales: number;
+}
+
+/**
+ * Horario laboral regular estándar de la empresa:
+ * 08:00 AM (480 mins) a 06:00 PM (1080 mins) -> 10 horas regulares por jornada
+ */
+export const HORARIO_LABORAL_REGULAR = {
+  horaInicio: '08:00',
+  horaFin: '18:00',
+  minutosInicio: 8 * 60,        // 480
+  minutosFin: 18 * 60,          // 1080
+  minutosJornadaMax: 10 * 60,   // 600 minutos
+};
+
+/**
+ * Desglosa los minutos trabajados de un turno entre horas regulares (08:00 a 18:00) y horas extras (antes de 08:00 o después de 18:00)
+ */
+export function calculateTurnoHorasDesglose(
+  horaEntrada?: string | null,
+  horaSalida?: string | null
+): { totalMins: number; regularesMins: number; extrasMins: number } {
+  if (!horaEntrada || !horaSalida) {
+    return { totalMins: 0, regularesMins: 0, extrasMins: 0 };
+  }
+
+  const partsEntrada = horaEntrada.split(':').map(Number);
+  const partsSalida = horaSalida.split(':').map(Number);
+
+  const h1 = partsEntrada[0] || 0;
+  const m1 = partsEntrada[1] || 0;
+  const h2 = partsSalida[0] || 0;
+  const m2 = partsSalida[1] || 0;
+
+  const startMins = h1 * 60 + m1;
+  let endMins = h2 * 60 + m2;
+
+  if (endMins < startMins) {
+    endMins += 24 * 60; // Cruce de medianoche
+  }
+
+  const totalMins = Math.max(0, endMins - startMins);
+  if (totalMins === 0) {
+    return { totalMins: 0, regularesMins: 0, extrasMins: 0 };
+  }
+
+  // Traslape con la ventana regular de 08:00 a 18:00 (480 a 1080)
+  const regWindowStart = HORARIO_LABORAL_REGULAR.minutosInicio;
+  const regWindowEnd = HORARIO_LABORAL_REGULAR.minutosFin;
+
+  const overlapStart = Math.max(startMins, regWindowStart);
+  const overlapEnd = Math.min(endMins, regWindowEnd);
+
+  const regularesMins = Math.max(0, overlapEnd - overlapStart);
+  const extrasMins = Math.max(0, totalMins - regularesMins);
+
+  return {
+    totalMins,
+    regularesMins,
+    extrasMins,
+  };
 }
 
 /**
@@ -199,7 +272,7 @@ export function getNextWeekMonday(currentMondayDate: Date): Date {
 }
 
 /**
- * Procesa una lista de asistencias y las organiza en la semana solicitada con cálculo de horas y subíndices de turnos
+ * Procesa una lista de asistencias y las organiza en la semana solicitada con cálculo de horas regulares (8 a 6) y horas extras
  */
 export function processAsistenciasSemana(
   asistencias: Asistencia[],
@@ -221,8 +294,12 @@ export function processAsistenciasSemana(
   }
 
   let totalMinutosSemana = 0;
+  let totalMinutosRegulares = 0;
+  let totalMinutosExtra = 0;
   let diasLaborados = 0;
   let turnosTotales = 0;
+
+  const hoyStr = formatDateToLocalYMD(new Date());
 
   const dias: DiaAsistencia[] = range.days.map((dayInfo) => {
     const items = porFecha.get(dayInfo.dateStr) || [];
@@ -238,15 +315,30 @@ export function processAsistenciasSemana(
     let tieneTurnoEnCurso = false;
 
     const turnos: TurnoAsistencia[] = items.map((item, idx) => {
-      const enCurso = !!(item.hora_entrada && !item.hora_salida);
+      // REGLA: Si el empleado olvidó checar salida y es de un día pasado,
+      // automáticamente la salida se marca a las 6:00 PM (18:00:00) para no generar horas extra indebidas.
+      const esDiaPasado = dayInfo.dateStr < hoyStr;
+      const sinSalida = !item.hora_salida;
+      const autoCerrado = sinSalida && esDiaPasado;
+      const enCurso = sinSalida && !esDiaPasado;
+
       if (enCurso) {
         tieneTurnoEnCurso = true;
       }
 
-      // REGLA DEL USUARIO: Solo sumar los bloques con salida registrada
-      const mins = !enCurso && item.hora_salida
-        ? calculateDurationMinutes(item.hora_entrada, item.hora_salida)
-        : 0;
+      const horaSalidaEfectiva = item.hora_salida || (autoCerrado ? '18:00:00' : null);
+
+      // Desglose de horas regulares y extras del turno
+      let mins = 0;
+      let regMins = 0;
+      let extMins = 0;
+
+      if (horaSalidaEfectiva) {
+        const desglose = calculateTurnoHorasDesglose(item.hora_entrada, horaSalidaEfectiva);
+        mins = desglose.totalMins;
+        regMins = desglose.regularesMins;
+        extMins = desglose.extrasMins;
+      }
 
       minutosDia += mins;
       turnosTotales++;
@@ -255,18 +347,29 @@ export function processAsistenciasSemana(
         id: item.id,
         index: idx + 1,
         hora_entrada: formatHoraDisplay(item.hora_entrada),
-        hora_salida: item.hora_salida ? formatHoraDisplay(item.hora_salida) : null,
+        hora_salida: autoCerrado
+          ? '18:00 (Auto)'
+          : item.hora_salida
+          ? formatHoraDisplay(item.hora_salida)
+          : null,
         foto_entrada_url: item.foto_entrada_url,
         foto_salida_url: item.foto_salida_url,
         direccion_entrada: item.direccion_entrada,
-        direccion_salida: item.direccion_salida,
+        direccion_salida: autoCerrado
+          ? 'Cierre automático 6:00 PM (olvido de checada)'
+          : item.direccion_salida,
         latitud_entrada: item.latitud_entrada,
         longitud_entrada: item.longitud_entrada,
         latitud_salida: item.latitud_salida,
         longitud_salida: item.longitud_salida,
         minutos: mins,
         duracionStr: enCurso ? 'En curso' : formatMinutesToHours(mins),
+        minutosRegulares: regMins,
+        horasRegularesStr: formatMinutesToHours(regMins),
+        minutosExtra: extMins,
+        horasExtraStr: formatMinutesToHours(extMins),
         enCurso,
+        autoCerrado,
       };
     });
 
@@ -274,7 +377,14 @@ export function processAsistenciasSemana(
       diasLaborados++;
     }
 
+    // Cálculo diario de horas regulares (máximo 10h = 600m en horario 8 a 6) y extras
+    const rawRegularesDia = turnos.reduce((acc, t) => acc + t.minutosRegulares, 0);
+    const minutosRegularesDia = Math.min(rawRegularesDia, HORARIO_LABORAL_REGULAR.minutosJornadaMax);
+    const minutosExtraDia = Math.max(0, minutosDia - minutosRegularesDia);
+
     totalMinutosSemana += minutosDia;
+    totalMinutosRegulares += minutosRegularesDia;
+    totalMinutosExtra += minutosExtraDia;
 
     return {
       dateStr: dayInfo.dateStr,
@@ -283,6 +393,10 @@ export function processAsistenciasSemana(
       isToday: dayInfo.isToday,
       totalMinutos: minutosDia,
       totalHorasStr: formatMinutesToHours(minutosDia),
+      minutosRegulares: minutosRegularesDia,
+      horasRegularesStr: formatMinutesToHours(minutosRegularesDia),
+      minutosExtra: minutosExtraDia,
+      horasExtraStr: formatMinutesToHours(minutosExtraDia),
       turnos,
       tieneTurnoEnCurso,
     };
@@ -293,6 +407,10 @@ export function processAsistenciasSemana(
     dias,
     totalMinutosSemana,
     totalHorasSemanaStr: formatMinutesToHours(totalMinutosSemana),
+    totalMinutosRegulares,
+    totalHorasRegularesStr: formatMinutesToHours(totalMinutosRegulares),
+    totalMinutosExtra,
+    totalHorasExtraStr: formatMinutesToHours(totalMinutosExtra),
     diasLaborados,
     turnosTotales,
   };

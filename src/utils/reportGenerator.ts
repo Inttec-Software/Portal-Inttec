@@ -1279,6 +1279,8 @@ export const ReportGenerator = {
     );
 
     let totalMinutosEmpresa = 0;
+    let totalMinutosRegularesEmpresa = 0;
+    let totalMinutosExtrasEmpresa = 0;
     let totalTurnosEmpresa = 0;
     let empleadosConRegistro = 0;
 
@@ -1291,6 +1293,8 @@ export const ReportGenerator = {
       if (semanaData.turnosTotales > 0) {
         empleadosConRegistro++;
         totalMinutosEmpresa += semanaData.totalMinutosSemana;
+        totalMinutosRegularesEmpresa += semanaData.totalMinutosRegulares;
+        totalMinutosExtrasEmpresa += semanaData.totalMinutosExtra;
         totalTurnosEmpresa += semanaData.turnosTotales;
       }
 
@@ -1328,8 +1332,9 @@ export const ReportGenerator = {
                   </span>
                   ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
                 </td>
-                <td style="text-align: right; font-weight: bold; color: ${turno.enCurso ? '#d97706' : '#16a34a'};">
-                  ${turno.duracionStr}
+                <td style="text-align: right; font-weight: bold;">
+                  <span style="color: ${turno.enCurso ? '#d97706' : '#16a34a'};">${turno.duracionStr}</span>
+                  ${turno.minutosExtra > 0 ? `<div style="font-size: 8.5px; color: #ea580c; font-weight: bold; margin-top: 2px;">+${turno.horasExtraStr} extra</div>` : ''}
                 </td>
               </tr>
             `;
@@ -1345,10 +1350,18 @@ export const ReportGenerator = {
               <span style="margin-left: 8px; font-size: 10px; background-color: #e2e8f0; color: #475569; padding: 2px 6px; border-radius: 4px;">${emp.rol || 'EMPLEADO'}</span>
               ${emp.sucursal ? `<span style="margin-left: 6px; font-size: 10px; color: #64748b;">(${emp.sucursal})</span>` : ''}
             </div>
-            <div style="text-align: right;">
-              <span style="font-size: 10px; color: #64748b; margin-right: 8px;">Días: <b>${semanaData.diasLaborados}/7</b></span>
-              <span style="background-color: #dcfce7; color: #15803d; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 12px;">
-                ⏱ ${semanaData.totalHorasSemanaStr}
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="font-size: 10px; color: #64748b;">Días: <b>${semanaData.diasLaborados}/7</b></span>
+              <span style="background-color: #dcfce7; color: #15803d; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
+                Regulares: ${semanaData.totalHorasRegularesStr}
+              </span>
+              ${semanaData.totalMinutosExtra > 0 ? `
+                <span style="background-color: #ffedd5; color: #c2410c; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
+                  🔥 Extras: +${semanaData.totalHorasExtraStr}
+                </span>
+              ` : ''}
+              <span style="background-color: #f1f5f9; color: #0f172a; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 12px;">
+                Total: ${semanaData.totalHorasSemanaStr}
               </span>
             </div>
           </div>
@@ -1446,7 +1459,7 @@ export const ReportGenerator = {
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title">Reporte General de Asistencia Semanal</h1>
               <p style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
-              <p style="margin: 3px 0 0 0; font-size: 10px; color: #64748b;">Generado el: ${new Date().toLocaleString('es-MX')}</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Horario laboral estándar: 08:00 AM - 06:00 PM (10h jornada)</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
@@ -1456,20 +1469,20 @@ export const ReportGenerator = {
 
         <div class="summary-grid">
           <div class="summary-card">
-            <div class="label">Total Horas Empresa</div>
-            <div class="value" style="color: #16a34a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
-          </div>
-          <div class="summary-card">
-            <div class="label">Personal con Registro</div>
+            <div class="label">Personal Activo</div>
             <div class="value">${empleadosConRegistro} de ${personalTarget.length}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Turnos Totales</div>
-            <div class="value">${totalTurnosEmpresa} turnos</div>
+            <div class="label">Total Horas Empresa</div>
+            <div class="value" style="color: #0f172a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Promedio / Empleado</div>
-            <div class="value">${empleadosConRegistro > 0 ? formatMinutesToHours(Math.round(totalMinutosEmpresa / empleadosConRegistro)) : '0h 0m'}</div>
+            <div class="label">Horas Regulares (8-6)</div>
+            <div class="value" style="color: #16a34a;">${formatMinutesToHours(totalMinutosRegularesEmpresa)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Extras Totales</div>
+            <div class="value" style="color: #ea580c;">${formatMinutesToHours(totalMinutosExtrasEmpresa)}</div>
           </div>
         </div>
 
@@ -1532,8 +1545,9 @@ export const ReportGenerator = {
                 </span>
                 ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
               </td>
-              <td style="text-align: right; font-weight: bold; color: ${turno.enCurso ? '#d97706' : '#16a34a'};">
-                ${turno.duracionStr}
+              <td style="text-align: right; font-weight: bold;">
+                <span style="color: ${turno.enCurso ? '#d97706' : '#16a34a'};">${turno.duracionStr}</span>
+                ${turno.minutosExtra > 0 ? `<div style="font-size: 8.5px; color: #ea580c; font-weight: bold; margin-top: 2px;">+${turno.horasExtraStr} extra</div>` : ''}
               </td>
             </tr>
           `;
@@ -1634,7 +1648,7 @@ export const ReportGenerator = {
               <h1 class="title">Reporte Individual de Asistencia</h1>
               <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">👤 ${empleado.nombre}</p>
               <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
-              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'}</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Horario: 08:00 - 18:00</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
@@ -1645,19 +1659,19 @@ export const ReportGenerator = {
         <div class="summary-grid">
           <div class="summary-card">
             <div class="label">Total Horas Semana</div>
-            <div class="value" style="color: #16a34a; font-size: 18px;">${semanaData.totalHorasSemanaStr}</div>
+            <div class="value" style="color: #0f172a; font-size: 17px;">${semanaData.totalHorasSemanaStr}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Regulares (8-6)</div>
+            <div class="value" style="color: #16a34a; font-size: 17px;">${semanaData.totalHorasRegularesStr}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Extras</div>
+            <div class="value" style="color: #ea580c; font-size: 17px;">${semanaData.totalHorasExtraStr}</div>
           </div>
           <div class="summary-card">
             <div class="label">Días Laborados</div>
             <div class="value">${semanaData.diasLaborados} de 7</div>
-          </div>
-          <div class="summary-card">
-            <div class="label">Turnos Totales</div>
-            <div class="value">${semanaData.turnosTotales} turnos</div>
-          </div>
-          <div class="summary-card">
-            <div class="label">Promedio Diario</div>
-            <div class="value">${semanaData.diasLaborados > 0 ? formatMinutesToHours(Math.round(semanaData.totalMinutosSemana / semanaData.diasLaborados)) : '0h 0m'}</div>
           </div>
         </div>
 
@@ -3212,8 +3226,13 @@ export const ReportGenerator = {
         'Hora Salida',
         'Dirección Salida',
         'Duración Turno',
+        'Regulares Turno',
+        'Extras Turno',
         'Total Horas Día',
-        'Total Horas Semana Empleado'
+        'Extras Día',
+        'Total Horas Semana',
+        'Total Regulares Semana',
+        'Total Extras Semana'
       ];
 
       const rows: any[][] = [];
@@ -3240,8 +3259,13 @@ export const ReportGenerator = {
                 turno.hora_salida || 'Pendiente',
                 turno.direccion_salida || '',
                 turno.duracionStr,
+                turno.horasRegularesStr,
+                turno.horasExtraStr,
                 dia.totalHorasStr,
-                semanaData.totalHorasSemanaStr
+                dia.horasExtraStr,
+                semanaData.totalHorasSemanaStr,
+                semanaData.totalHorasRegularesStr,
+                semanaData.totalHorasExtraStr
               ]);
             }
           }
@@ -3260,6 +3284,11 @@ export const ReportGenerator = {
             '',
             '-',
             '',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
             '0h 0m',
             '0h 0m',
             '0h 0m'
@@ -3294,8 +3323,12 @@ export const ReportGenerator = {
         'Hora Salida',
         'Dirección Salida',
         'Duración Turno',
+        'Regulares Turno',
+        'Extras Turno',
         'Total Horas Día',
-        'Total Horas Semana'
+        'Extras Día',
+        'Total Horas Semana',
+        'Total Extras Semana'
       ];
 
       const rows: any[][] = [];
@@ -3314,8 +3347,12 @@ export const ReportGenerator = {
               turno.hora_salida || 'Pendiente',
               turno.direccion_salida || '',
               turno.duracionStr,
+              turno.horasRegularesStr,
+              turno.horasExtraStr,
               dia.totalHorasStr,
-              semanaData.totalHorasSemanaStr
+              dia.horasExtraStr,
+              semanaData.totalHorasSemanaStr,
+              semanaData.totalHorasExtraStr
             ]);
           }
         } else {
@@ -3331,7 +3368,11 @@ export const ReportGenerator = {
             '',
             '0h 0m',
             '0h 0m',
-            semanaData.totalHorasSemanaStr
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            semanaData.totalHorasSemanaStr,
+            semanaData.totalHorasExtraStr
           ]);
         }
       }

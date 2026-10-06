@@ -55,6 +55,7 @@ function AdminLayoutContent() {
     if (lastPart === 'inventario') return 'Inventario';
     if (lastPart === 'facturacion') return 'Facturación CFDI';
     if (lastPart === 'facturas-recibidas') return 'Facturas Recibidas';
+    if (lastPart === 'asistencia') return 'Asistencia';
     if (lastPart === 'reportes') return 'Reportes';
     if (lastPart === 'auditoria-tarjeta') return 'Auditoría';
     return lastPart.charAt(0).toUpperCase() + lastPart.slice(1).replace(/-/g, ' ');

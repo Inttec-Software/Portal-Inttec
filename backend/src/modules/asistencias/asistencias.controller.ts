@@ -55,6 +55,32 @@ export const registrarEntrada = async (req: Request, res: Response) => {
     const clientInttec = getSupabaseClient('inttec', env);
     const clientDaravisa = getSupabaseClient('daravisa', env);
 
+    // Auto-cierre de turnos anteriores abiertos (olvidos de checada): fijar salida a las 18:00:00
+    if (payload.empleado_id && payload.fecha) {
+      try {
+        const autoClosePayload = {
+          hora_salida: '18:00:00',
+          descripcion: 'Cierre automático 6:00 PM (olvido de checada)'
+        };
+        await Promise.allSettled([
+          clientInttec
+            .from('asistencias')
+            .update(autoClosePayload)
+            .eq('empleado_id', payload.empleado_id)
+            .lt('fecha', payload.fecha)
+            .is('hora_salida', null),
+          clientDaravisa
+            .from('asistencias')
+            .update(autoClosePayload)
+            .eq('empleado_id', payload.empleado_id)
+            .lt('fecha', payload.fecha)
+            .is('hora_salida', null),
+        ]);
+      } catch (autoErr) {
+        console.warn('Advertencia en auto-cierre de turnos anteriores:', autoErr);
+      }
+    }
+
     const [inttecRes, daravisaRes] = await Promise.allSettled([
       clientInttec.from('asistencias').insert([payload]).select().single(),
       clientDaravisa.from('asistencias').insert([payload]).select().single(),
