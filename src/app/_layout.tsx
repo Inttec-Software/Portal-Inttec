@@ -4,7 +4,8 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors } from '@/constants/theme';
 import { AuthProvider } from '@/context/AuthContext';
 import { useEffect, useState } from 'react';
-import { supabase, CompanyService, EnvService } from '@/services/supabase';
+import { CompanyService, EnvService, supabase } from '@/services/supabase';
+import { apiClient } from '@/services/apiClient';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -39,11 +40,7 @@ export default function RootLayout() {
       // Verificación de versión en segundo plano (sin bloquear el arranque ni el Splash)
       if (Platform.OS !== 'web') {
         try {
-          const versionPromise = supabase
-            .from('app_settings')
-            .select('min_version_code')
-            .eq('id', 1)
-            .single();
+          const versionPromise = apiClient.get('/api/settings/version');
 
           const timeoutPromise = new Promise<{ data: any; error: any }>((resolve) =>
             setTimeout(() => resolve({ data: null, error: new Error('Version check timeout') }), 2500)

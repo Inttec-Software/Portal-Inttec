@@ -23,7 +23,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, Venta, VentaPartida, VentaPago, calcularEstadoPago, EstadoPagoVenta, syncVentaPaymentStatus, recalculateVentaTotals, ClienteItem, SucursalCliente, GastoHelper } from '@/services/supabase';
+import { AuthService, Usuario, Venta, VentaPartida, VentaPago, calcularEstadoPago, EstadoPagoVenta, syncVentaPaymentStatus, recalculateVentaTotals, ClienteItem, SucursalCliente, GastoHelper, supabase } from '@/services/supabase';
 import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
@@ -290,8 +290,7 @@ export default function VentasScreen() {
 
         // 2. Fallback resiliente directo a Supabase
         const [{ data: clientesData }, { data: sucursalesData }] = await Promise.all([
-          supabase.from('clientes').select('*').order('nombre'),
-          supabase.from('sucursales').select('*').order('nombre'),
+          supabase.from('clientes').select('*').order('nombre'), supabase.from('sucursales').select('*').order('nombre'),
         ]);
         if (clientesData) setClientes(clientesData);
         if (sucursalesData) setSucursalesCliente(sucursalesData);
@@ -3939,3 +3938,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
+

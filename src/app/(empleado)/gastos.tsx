@@ -17,7 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService } from '@/services/supabase';
+import { Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Vehiculo, RegistroGasolina, VehiculoService, supabase, inttecClient, daravisaClient } from '@/services/supabase';
 import { SyncService, OfflineGastoItem } from '@/services/sync';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { TareasService } from '@/services/tareasService';
@@ -2104,3 +2104,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+

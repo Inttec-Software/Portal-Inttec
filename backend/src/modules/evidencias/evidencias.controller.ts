@@ -1,29 +1,31 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
-// 1. GET /api/evidencias/catalogos
 export const getCatalogos = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
     const user = req.user;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
-    const [cliRes, sucRes, prodRes] = await Promise.all([
-      client.from('clientes').select('*').order('nombre'),
-      client.from('sucursales_cliente').select('*').order('nombre'),
-      user?.id ? client.from('inventario_empleados').select('cantidad_disponible, producto_id, productos(sku_interno, nombre_oficial)').eq('empleado_id', user.id).gt('cantidad_disponible', 0) : Promise.resolve({ data: [], error: null }),
-    ]);
-
-    if (cliRes.error) throw cliRes.error;
-    if (sucRes.error) throw sucRes.error;
-    if (prodRes.error) throw prodRes.error;
+    const cliRes = await pool.query('SELECT * FROM clientes ORDER BY nombre');
+    const sucRes = await pool.query('SELECT * FROM sucursales_cliente ORDER BY nombre');
+    
+    let prodRes = { rows: [] };
+    if (user?.id) {
+      prodRes = await pool.query(`
+        SELECT ie.cantidad_disponible, ie.producto_id, row_to_json(p.*) as productos
+        FROM inventario_empleados ie
+        LEFT JOIN productos p ON ie.producto_id = p.id
+        WHERE ie.empleado_id = $1 AND ie.cantidad_disponible > 0
+      `, [user.id]);
+    }
 
     return res.json({
-      clientes: cliRes.data || [],
-      sucursales: sucRes.data || [],
-      inventario: prodRes.data || []
+      clientes: cliRes.rows || [],
+      sucursales: sucRes.rows || [],
+      inventario: prodRes.rows || []
     });
 
   } catch (error: any) {
@@ -31,18 +33,17 @@ export const getCatalogos = async (req: Request, res: Response) => {
   }
 };
 
-// 2. POST /api/evidencias
 export const crearEvidencia = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
     const user = req.user;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const {
       cliente,
-      descripcion_trabajo, // This is a JSON string of trabajosPayload
+      descripcion_trabajo,
       materiales_usados,
       observaciones,
       foto_antes_url,
@@ -54,7 +55,6 @@ export const crearEvidencia = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'No autorizado' });
     }
 
-    // Parse the trabajosPayload to process inventory deducts
     let trabajosPayload: any[] = [];
     try {
       if (descripcion_trabajo) {
@@ -62,7 +62,6 @@ export const crearEvidencia = async (req: Request, res: Response) => {
       }
     } catch (e) {}
 
-    // 1. Agrupar y calcular uso total por material para evitar inconsistencias y validar antes
     const materialUsage: Record<string, { usado: number; nombre: string; dbId?: string; currentStock?: number; motivos: string[] }> = {};
     for (const t of trabajosPayload) {
       for (const m of (t.materiales_usados || [])) {
@@ -78,17 +77,15 @@ export const crearEvidencia = async (req: Request, res: Response) => {
       }
     }
 
-    // 2. Validar que exista suficiente stock en el inventario del empleado para todos los materiales
     for (const prodId of Object.keys(materialUsage)) {
       const item = materialUsage[prodId];
-      const { data: invEmp, error: invError } = await client
-        .from('inventario_empleados')
-        .select('id, cantidad_disponible')
-        .eq('empleado_id', user.id)
-        .eq('producto_id', prodId)
-        .maybeSingle();
+      const { rows } = await pool.query(
+        `SELECT id, cantidad_disponible FROM inventario_empleados WHERE empleado_id = $1 AND producto_id = $2`,
+        [user.id, prodId]
+      );
+      const invEmp = rows[0];
 
-      if (invError || !invEmp) {
+      if (!invEmp) {
         return res.status(400).json({ error: `No se encontró inventario para el material: ${item.nombre}` });
       }
 
@@ -100,45 +97,33 @@ export const crearEvidencia = async (req: Request, res: Response) => {
       item.currentStock = invEmp.cantidad_disponible;
     }
 
-    // 3. Insertar Evidencia
-    const { data: evidenciaData, error: evidenciaError } = await client.from('evidencias').insert([
-      {
-        empleado_id: user.id,
-        empleado_nombre: user.nombre,
-        cliente,
-        descripcion_trabajo,
-        materiales_usados,
-        observaciones,
-        foto_antes_url,
-        foto_despues_url,
-        fotos_adicionales_urls,
-      }
-    ]).select().single();
+    const cleanMateriales = typeof materiales_usados === 'string'
+      ? materiales_usados
+      : (materiales_usados ? JSON.stringify(materiales_usados) : null);
 
-    if (evidenciaError) throw evidenciaError;
+    const cleanFotosAdicionales = Array.isArray(fotos_adicionales_urls)
+      ? fotos_adicionales_urls
+      : (fotos_adicionales_urls ? [fotos_adicionales_urls] : []);
 
-    // 4. Descontar del inventario y registrar movimientos de forma consistente
+    const { rows: evidenciaDataRows } = await pool.query(
+      `INSERT INTO evidencias (empleado_id, empleado_nombre, cliente, descripcion_trabajo, materiales_usados, observaciones, foto_antes_url, foto_despues_url, fotos_adicionales_urls)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [user.id, user.nombre, cliente, descripcion_trabajo, cleanMateriales, observaciones, foto_antes_url, foto_despues_url, cleanFotosAdicionales]
+    );
+    const evidenciaData = evidenciaDataRows[0];
+
     for (const prodId of Object.keys(materialUsage)) {
       const item = materialUsage[prodId];
       if (item.dbId && item.currentStock !== undefined) {
-        // Actualizar inventario
-        await client
-          .from('inventario_empleados')
-          .update({ 
-            cantidad_disponible: item.currentStock - item.usado,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', item.dbId);
+        await pool.query(
+          `UPDATE inventario_empleados SET cantidad_disponible = $1, updated_at = $2 WHERE id = $3`,
+          [item.currentStock - item.usado, new Date().toISOString(), item.dbId]
+        );
           
-        // Crear log de movimiento
-        await client.from('movimientos_inventario').insert({
-          producto_id: prodId,
-          empleado_id: user.id,
-          cantidad: item.usado,
-          tipo: 'USO_EVIDENCIA',
-          motivo: `Utilizado en evidencia. ${item.motivos.join(' | ')}`,
-          empresa: company
-        });
+        await pool.query(
+          `INSERT INTO movimientos_inventario (producto_id, empleado_id, cantidad, tipo, motivo, empresa) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [prodId, user.id, item.usado, 'USO_EVIDENCIA', `Utilizado en evidencia. ${item.motivos.join(' | ')}`, company]
+        );
       }
     }
 
@@ -149,25 +134,19 @@ export const crearEvidencia = async (req: Request, res: Response) => {
   }
 };
 
-// 3. GET /api/evidencias/admin/all
 export const getAdminEvidencias = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
-    const [evidencesRes, employeesRes] = await Promise.all([
-      client.from('evidencias').select('*').order('created_at', { ascending: false }),
-      client.from('usuarios').select('*').eq('rol', 'EMPLEADO').order('nombre'),
-    ]);
-
-    if (evidencesRes.error) throw evidencesRes.error;
-    if (employeesRes.error) throw employeesRes.error;
+    const evidencesRes = await pool.query('SELECT * FROM evidencias ORDER BY created_at DESC');
+    const employeesRes = await pool.query("SELECT * FROM usuarios WHERE rol = 'EMPLEADO' ORDER BY nombre");
 
     return res.json({
-      evidencias: evidencesRes.data || [],
-      employees: employeesRes.data || []
+      evidencias: evidencesRes.rows || [],
+      employees: employeesRes.rows || []
     });
 
   } catch (error: any) {
@@ -176,26 +155,22 @@ export const getAdminEvidencias = async (req: Request, res: Response) => {
   }
 };
 
-// 4. GET /api/evidencias/mis-evidencias
 export const getMisEvidencias = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
     const user = req.user;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     if (!user) {
       return res.status(401).json({ error: 'No autorizado' });
     }
 
-    const { data, error } = await client
-      .from('evidencias')
-      .select('*')
-      .eq('empleado_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
+    const { rows: data } = await pool.query(
+      'SELECT * FROM evidencias WHERE empleado_id = $1 ORDER BY created_at DESC',
+      [user.id]
+    );
 
     return res.json({ evidencias: data || [] });
   } catch (error: any) {
@@ -203,14 +178,13 @@ export const getMisEvidencias = async (req: Request, res: Response) => {
   }
 };
 
-// 5. PUT /api/evidencias/admin/:id
 export const actualizarEvidencia = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
     const user = req.user;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { id } = req.params;
 
     if (!user || (user.rol !== 'ADMIN' && user.rol !== 'DEV')) {
@@ -227,47 +201,39 @@ export const actualizarEvidencia = async (req: Request, res: Response) => {
       fotos_adicionales_urls,
     } = req.body;
 
-    const { data, error } = await client
-      .from('evidencias')
-      .update({
-        cliente,
-        descripcion_trabajo,
-        materiales_usados,
-        observaciones,
-        foto_antes_url,
-        foto_despues_url,
-        fotos_adicionales_urls,
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    const cleanMateriales = typeof materiales_usados === 'string'
+      ? materiales_usados
+      : (materiales_usados ? JSON.stringify(materiales_usados) : null);
 
-    if (error) throw error;
+    const cleanFotosAdicionales = Array.isArray(fotos_adicionales_urls)
+      ? fotos_adicionales_urls
+      : (fotos_adicionales_urls ? [fotos_adicionales_urls] : []);
 
-    return res.json(data);
+    const { rows: data } = await pool.query(
+      `UPDATE evidencias SET 
+        cliente = $1, descripcion_trabajo = $2, materiales_usados = $3, observaciones = $4, 
+        foto_antes_url = $5, foto_despues_url = $6, fotos_adicionales_urls = $7
+       WHERE id = $8 RETURNING *`,
+      [cliente, descripcion_trabajo, cleanMateriales, observaciones, foto_antes_url, foto_despues_url, cleanFotosAdicionales, id]
+    );
+
+    return res.json(data[0]);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
 };
 
-// 6. GET /api/evidencias/admin/:id
 export const getAdminEvidenciaById = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { id } = req.params;
 
-    const { data, error } = await client
-      .from('evidencias')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const { rows: data } = await pool.query('SELECT * FROM evidencias WHERE id = $1', [id]);
 
-    if (error) throw error;
-
-    return res.json({ evidencia: data });
+    return res.json({ evidencia: data[0] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

@@ -17,7 +17,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { supabase, CompanyService, inttecClient, daravisaClient } from '@/services/supabase';
+import { CompanyService, supabase, inttecClient, daravisaClient } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
 import CustomInput from '@/components/CustomInput';
@@ -4969,3 +4969,4 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
 });
+

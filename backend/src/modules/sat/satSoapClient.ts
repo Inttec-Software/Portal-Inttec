@@ -4,7 +4,7 @@
  * Implementa autenticación WS-Security X.509 y firmado digital con e.firma (node-forge)
  */
 
-import forge from "https://esm.sh/node-forge@1.3.1";
+import forge from "node-forge";
 
 export interface SatCredentials {
   rfc: string;

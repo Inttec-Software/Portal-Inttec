@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
-// Helper for syncing cross-company
 const getOtherCompany = (company: 'inttec' | 'daravisa'): 'inttec' | 'daravisa' => {
   return company === 'inttec' ? 'daravisa' : 'inttec';
 };
@@ -9,9 +8,16 @@ const getOtherCompany = (company: 'inttec' | 'daravisa'): 'inttec' | 'daravisa' 
 const syncToOtherCompany = async (table: string, data: any, company: 'inttec' | 'daravisa', env: 'cloud' | 'test') => {
   try {
     const otherCompany = getOtherCompany(company);
-    const secondaryClient = getSupabaseClient(otherCompany, env);
-    // Upsert expects an array
-    await secondaryClient.from(table).upsert([data]);
+    const pool = getDbPool(otherCompany, env);
+    const keys = Object.keys(data);
+    const values = Object.values(data);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+    const updateEx = keys.map(k => `${k} = EXCLUDED.${k}`).join(', ');
+    
+    await pool.query(
+      `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders}) ON CONFLICT (id) DO UPDATE SET ${updateEx}`,
+      values
+    );
   } catch (error) {
     console.error(`Error syncing ${table} to ${getOtherCompany(company)}:`, error);
   }
@@ -19,9 +25,15 @@ const syncToOtherCompany = async (table: string, data: any, company: 'inttec' | 
 
 const executeSyncUpdate = async (table: string, id: string, updates: any, env: 'cloud' | 'test') => {
   try {
+    const keys = Object.keys(updates);
+    const values = Object.values(updates);
+    const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+    const sql = `UPDATE ${table} SET ${setClause} WHERE id = $${keys.length + 1}`;
+    const params = [...values, id];
+
     await Promise.allSettled([
-      getSupabaseClient('inttec', env).from(table).update(updates).eq('id', id),
-      getSupabaseClient('daravisa', env).from(table).update(updates).eq('id', id)
+      getDbPool('inttec', env).query(sql, params),
+      getDbPool('daravisa', env).query(sql, params)
     ]);
   } catch (error) {
     console.error(`Error updating ${table}:`, error);
@@ -30,9 +42,10 @@ const executeSyncUpdate = async (table: string, id: string, updates: any, env: '
 
 const executeSyncDelete = async (table: string, id: string, env: 'cloud' | 'test') => {
   try {
+    const sql = `DELETE FROM ${table} WHERE id = $1`;
     await Promise.allSettled([
-      getSupabaseClient('inttec', env).from(table).delete().eq('id', id),
-      getSupabaseClient('daravisa', env).from(table).delete().eq('id', id)
+      getDbPool('inttec', env).query(sql, [id]),
+      getDbPool('daravisa', env).query(sql, [id])
     ]);
   } catch (error) {
     console.error(`Error deleting ${table}:`, error);
@@ -44,25 +57,20 @@ export const getAllCatalogos = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const [catRes, subRes, cliRes, provRes] = await Promise.all([
-      client.from('categorias').select('*').order('nombre'),
-      client.from('subcategorias').select('*').order('nombre'),
-      client.from('clientes').select('*').order('nombre'),
-      client.from('proveedores').select('*').order('nombre'),
+      pool.query(`SELECT * FROM categorias ORDER BY nombre`),
+      pool.query(`SELECT * FROM subcategorias ORDER BY nombre`),
+      pool.query(`SELECT * FROM clientes ORDER BY nombre`),
+      pool.query(`SELECT * FROM proveedores ORDER BY nombre`),
     ]);
 
-    if (catRes.error) throw catRes.error;
-    if (subRes.error) throw subRes.error;
-    if (cliRes.error) throw cliRes.error;
-    if (provRes.error) throw provRes.error;
-
     return res.json({
-      categorias: catRes.data || [],
-      subcategorias: subRes.data || [],
-      clientes: cliRes.data || [],
-      proveedores: provRes.data || []
+      categorias: catRes.rows || [],
+      subcategorias: subRes.rows || [],
+      clientes: cliRes.rows || [],
+      proveedores: provRes.rows || []
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -74,23 +82,21 @@ export const getClientes = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
-
-    let query = client
-      .from('clientes')
-      .select('id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi');
+    const pool = getDbPool(company, env);
 
     const q = String(req.query.q || '').trim();
+    let sql = '';
+    let values: any[] = [];
+
     if (q) {
-      query = query
-        .or(`razon_social.ilike.%${q}%,nombre.ilike.%${q}%,rfc.ilike.%${q}%`)
-        .limit(20);
+      sql = `SELECT id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi FROM clientes WHERE razon_social ILIKE $1 OR nombre ILIKE $1 OR rfc ILIKE $1 ORDER BY nombre LIMIT 20`;
+      values.push(`%${q}%`);
+    } else {
+      sql = `SELECT id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi FROM clientes ORDER BY nombre`;
     }
 
-    const { data, error } = await query.order('nombre');
-
-    if (error) throw error;
-    return res.json(data || []);
+    const { rows } = await pool.query(sql, values);
+    return res.json(rows || []);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -102,16 +108,14 @@ export const getSucursales = async (req: Request, res: Response) => {
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
     const { clienteId } = req.params;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
-    const { data, error } = await client
-      .from('sucursales_cliente')
-      .select('*')
-      .eq('cliente_id', clienteId)
-      .order('nombre');
+    const { rows } = await pool.query(
+      `SELECT * FROM sucursales_cliente WHERE cliente_id = $1 ORDER BY nombre`,
+      [clienteId]
+    );
       
-    if (error) throw error;
-    return res.json(data || []);
+    return res.json(rows || []);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -123,17 +127,17 @@ export const getClienteSummary = async (req: Request, res: Response) => {
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
     const { clienteId } = req.params;
-    const clienteNombre = req.query.clienteNombre as string; // Pasa el nombre por querystring para ventas
-    const client = getSupabaseClient(company, env);
+    const clienteNombre = req.query.clienteNombre as string;
+    const pool = getDbPool(company, env);
 
     const [gastosRes, ventasRes] = await Promise.all([
-      client.from('gastos').select('monto').eq('cliente_id', clienteId).neq('status', 'REJECTED'),
-      client.from('ventas').select('precio_total_facturado, costo_total').eq('cliente', clienteNombre)
+      pool.query(`SELECT monto FROM gastos WHERE cliente_id = $1 AND status != 'REJECTED'`, [clienteId]),
+      pool.query(`SELECT precio_total_facturado, costo_total FROM ventas WHERE cliente = $1`, [clienteNombre])
     ]);
 
     return res.json({
-      gastos: gastosRes.data || [],
-      ventas: ventasRes.data || []
+      gastos: gastosRes.rows || [],
+      ventas: ventasRes.rows || []
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -151,9 +155,16 @@ export const createCatalogo = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Tabla no permitida' });
     }
 
-    const client = getSupabaseClient(company, env);
-    const { data: inserted, error } = await client.from(table).insert([data]).select().single();
-    if (error) throw error;
+    const pool = getDbPool(company, env);
+    const keys = Object.keys(data);
+    const values = Object.values(data);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+
+    const { rows } = await pool.query(
+      `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+      values
+    );
+    const inserted = rows[0];
 
     await syncToOtherCompany(table, inserted, company, env);
 

@@ -4,7 +4,8 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import { Platform, Alert } from 'react-native';
-import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService, supabase, inttecClient, daravisaClient } from '../services/supabase';
+import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
+import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
@@ -1501,11 +1502,7 @@ export const ReportGenerator = {
     const userNamesMap = new Map<string, string>();
     if (missingUserIds.size > 0) {
       try {
-        const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
-        const { data: usersData } = await client
-          .from('usuarios')
-          .select('id, nombre')
-          .in('id', Array.from(missingUserIds));
+        const usersData = await apiClient.get('/api/usuarios');
 
         if (usersData) {
           usersData.forEach((u: any) => {
@@ -2716,11 +2713,7 @@ export const ReportGenerator = {
             const userNamesMap = new Map<string, string>();
             if (missingUserIds.size > 0) {
               try {
-                const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
-                const { data: usersData } = await client
-                  .from('usuarios')
-                  .select('id, nombre')
-                  .in('id', Array.from(missingUserIds));
+                const usersData = await apiClient.get('/api/usuarios');
 
                 if (usersData) {
                   usersData.forEach((u: any) => {
@@ -2826,6 +2819,14 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
 
   const titleStr = tipoDocumento === 'venta' ? 'Orden de venta' : 'Cotizacion';
   const title = `${titleStr} - ${folioPDF}`;
+  
+  const formatMoney = (val: any) => {
+    const num = typeof val === 'number' ? val : parseFloat(val);
+    return (isNaN(num) ? 0 : num).toLocaleString('es-MX', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
   
   const renderDescription = (name: string, description: string) => {
     const fullText = (name || '') + (description ? '\n' + description : '');
@@ -3032,14 +3033,14 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
                           <td class="text-center">
                               ${linea.tiempoEntrega || ''}
                           </td>
-                          <td class="text-center">${linea.cantidad.toFixed(1)}</td>
-                          <td class="text-end">$ ${linea.precioUnitario.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          <td class="text-center">${Number(linea.cantidad || 0).toFixed(1)}</td>
+                          <td class="text-end">$ ${formatMoney(linea.precioUnitario)}</td>
                           
                           <td class="text-center">
                               ${linea.impuestoPorcentaje}%
                           </td>
 
-                          <td class="text-end">$ ${linea.importe.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          <td class="text-end">$ ${formatMoney(linea.importe)}</td>
                       </tr>
                   `).join('')}
               </tbody>
@@ -3063,11 +3064,11 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
               </div>
               <div class="col-5">
                   <table class="table-totals">
-                      <tr><td>Subtotal</td><td class="text-end">$ ${cotizacion.subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
-                      <tr><td>IVA 16%</td><td class="text-end">$ ${cotizacion.iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
+                      <tr><td>Subtotal</td><td class="text-end">$ ${formatMoney(cotizacion.subtotal)}</td></tr>
+                      <tr><td>IVA 16%</td><td class="text-end">$ ${formatMoney(cotizacion.iva)}</td></tr>
                       <tr>
                           <td>TOTAL</td>
-                          <td class="text-end">$ ${cotizacion.total.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          <td class="text-end">$ ${formatMoney(cotizacion.total)}</td>
                       </tr>
                   </table>
               </div>

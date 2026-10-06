@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
-import { AuthService } from '@/services/supabase';
+import { AuthService, supabase } from '@/services/supabase';
 import { TareasService } from '@/services/tareasService';
 import PendingTasksPopover from '@/components/PendingTasksPopover';
 import AsyncStorage from '@react-native-async-storage/async-storage';

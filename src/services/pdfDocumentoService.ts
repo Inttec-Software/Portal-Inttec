@@ -1,9 +1,10 @@
+import { supabase } from '@/services/supabase';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { cacheDirectory, copyAsync, writeAsStringAsync, EncodingType, getContentUriAsync } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import { supabase, Documento, DocumentoFirmado } from './supabase';
+import { Documento, DocumentoFirmado } from './supabase';
 
 /**
  * Calculador de Hash SHA-256 simple y sin dependencias externas
@@ -662,3 +663,4 @@ export const PdfDocumentoService = {
     }
   },
 };
+

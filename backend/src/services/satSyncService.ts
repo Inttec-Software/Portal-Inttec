@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../config/supabase';
+import { processSatSync } from '../modules/sat/satSyncWorker';
 
 interface CompanySyncStatus {
   company: string;
@@ -81,12 +82,11 @@ export class SatSyncService {
       console.log(`🤖 [SAT Cron] Ejecutando sincronización automática para [${company.toUpperCase()}]...`);
       console.log(`⏰ [SAT Cron] Hora: ${new Date().toISOString()}`);
 
-      const client = getSupabaseClient(company, env);
-
-      // Invocamos la Edge Function de sincronización de facturas recibidas
-      const { data, error } = await client.functions.invoke('sync-facturas-recibidas', {
-        body: { action: 'sync' },
-      });
+      const data: any = await processSatSync(company, env, { action: 'sync' });
+      let error: any = null;
+      if (!data.success && !data.missingCredentials) {
+        error = new Error(data.error || data.message || 'Error en processSatSync');
+      }
 
       status.lastSyncTime = new Date().toISOString();
 
@@ -98,9 +98,9 @@ export class SatSyncService {
       }
 
       if (data?.missingCredentials) {
-        console.warn(`⚠️ [SAT Cron] Faltan credenciales de e.firma para ${company} en Supabase Secrets.`);
+        console.warn(`⚠️ [SAT Cron] Faltan credenciales de e.firma para ${company} en el archivo .env.`);
         status.lastStatus = 'idle';
-        status.lastMessage = 'Faltan credenciales SAT configuradas en Secrets';
+        status.lastMessage = 'Faltan credenciales SAT configuradas en el archivo .env';
         return data;
       }
 

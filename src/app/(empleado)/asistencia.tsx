@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, Asistencia, AsistenciaService, inttecClient, daravisaClient } from '@/services/supabase';
+import { AuthService, Usuario, Asistencia, AsistenciaService, supabase, inttecClient, daravisaClient } from '@/services/supabase';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -291,8 +291,7 @@ export default function EmpleadoAsistencia() {
           direccion_entrada: addressToSave,
         };
         await Promise.allSettled([
-          inttecClient.from('asistencias').insert([insertData]),
-          daravisaClient.from('asistencias').insert([insertData]),
+          inttecClient.from('asistencias').insert([insertData]), daravisaClient.from('asistencias').insert([insertData]),
         ]);
         setChecadorResultMsg('Entrada registrada en Inttec y Daravisa');
       } else {
@@ -304,8 +303,7 @@ export default function EmpleadoAsistencia() {
           direccion_salida: addressToSave,
         };
         const [asisInttecRes, asisDaravisaRes] = await Promise.all([
-          inttecClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
-          daravisaClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
+          inttecClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).maybeSingle(), daravisaClient.from('asistencias').select('id').eq('empleado_id', user.id).eq('fecha', fechaStr).order('creado_en', { ascending: false }).limit(1).maybeSingle(),
         ]);
         const updatePromises: Promise<any>[] = [];
         if (asisInttecRes.data?.id) {
@@ -898,3 +896,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+

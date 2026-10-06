@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
@@ -17,9 +18,8 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
-import { parseCfdiXml } from '../../../supabase/functions/sync-facturas-recibidas/xmlParser';
+import { parseCfdiXml } from '@/utils/xmlParser';
 import { exportFacturaCfdiToPdf } from '@/utils/cfdiPdfGenerator';
 import { ModuleCache } from '@/services/moduleCache';
 
@@ -78,7 +78,7 @@ export default function FacturasRecibidasScreen() {
   const [satSolicitudes, setSatSolicitudes] = useState<SatSolicitud[]>([]);
   const [syncStatus, setSyncStatus] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterPeriodo, setFilterPeriodo] = useState<'mes_actual' | 'mes_anterior' | 'todos'>('mes_actual');
+  const [filterPeriodo, setFilterPeriodo] = useState<'mes_actual' | 'mes_anterior' | 'todos'>('todos');
   const [filterEstado, setFilterEstado] = useState<'todos' | 'VIGENTE' | 'CANCELADO'>('todos');
 
   // Modales
@@ -174,9 +174,9 @@ export default function FacturasRecibidasScreen() {
       const q = searchQuery.toLowerCase().trim();
       const matchText =
         !q ||
-        f.nombre_emisor.toLowerCase().includes(q) ||
-        f.rfc_emisor.toLowerCase().includes(q) ||
-        f.uuid.toLowerCase().includes(q);
+        (f.nombre_emisor || '').toLowerCase().includes(q) ||
+        (f.rfc_emisor || '').toLowerCase().includes(q) ||
+        (f.uuid || '').toLowerCase().includes(q);
 
       // Filtro de Estatus
       const matchEstado = filterEstado === 'todos' || f.estado_sat === filterEstado;

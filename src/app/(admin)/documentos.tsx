@@ -16,7 +16,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { DocumentoService, Documento, DocumentoFirmado } from '@/services/supabase';
+import { DocumentoService, Documento, DocumentoFirmado, supabase } from '@/services/supabase';
 import { PdfDocumentoService } from '@/services/pdfDocumentoService';
 import SignatureCanvasModal from '@/components/SignatureCanvasModal';
 import CustomButton from '@/components/CustomButton';
@@ -664,7 +664,7 @@ export default function AdminDocumentosScreen() {
                   const initials = (firmante.empleado_nombre || 'E')
                     .split(' ')
                     .filter(Boolean)
-                    .map((n) => n[0])
+                    .map((n: string) => n[0])
                     .slice(0, 2)
                     .join('')
                     .toUpperCase();

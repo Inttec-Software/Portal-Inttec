@@ -15,7 +15,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, Evidencia } from '@/services/supabase';
+import { AuthService, Usuario, Evidencia, supabase } from '@/services/supabase';
 import { useAuth } from '@/context/AuthContext';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import { EvidenceDraftService, EvidenceDraft } from '@/services/evidenceDraftService';
@@ -912,3 +912,4 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
 });
+

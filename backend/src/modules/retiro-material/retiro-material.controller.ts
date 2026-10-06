@@ -1,20 +1,20 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
 // === GET /api/retiro-material/productos ===
 export const getProductosDisponibles = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
-    const { data, error } = await client
-      .from('productos')
-      .select('id, sku_interno, nombre_oficial, stock_actual, stock_nuevo, stock_usado, stock_por_revisar, unidad')
-      .eq('activo', true)
-      .order('nombre_oficial');
-
-    if (error) throw error;
+    const { rows: data } = await pool.query(
+      `SELECT id, sku_interno, nombre_oficial, stock_actual, stock_nuevo, stock_usado, stock_por_revisar, unidad
+       FROM productos
+       WHERE activo = $1
+       ORDER BY nombre_oficial`,
+      [true]
+    );
     
     const mapped = (data || []).map((p: any) => {
       let unidad = p.unidad;
@@ -54,7 +54,7 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
     
     const {
       cart,
@@ -99,46 +99,47 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
 
     // 1. Guardar registro estructurado en retiros_material
     try {
-      const { error: retiroErr } = await client
-        .from('retiros_material')
-        .insert([{
-          empleado_id: sanitizeUuid(currentUser.id) || currentUser.id,
-          empleado_nombre: currentUser.nombre || currentUser.email || 'Empleado',
-          tipo_gasto: tipoGasto || 'Operativo',
-          detalle_servicio_proyecto: detalleServicioProyecto || '',
-          proveedor: proveedor || '',
-          proveedor_id: sanitizeUuid(proveedorId),
-          cliente_id: sanitizeUuid(clienteId),
-          cliente_nombre: clienteNombre || '',
-          sucursal_id: sanitizeUuid(sucursalId),
-          sucursal_nombre: sucursalNombre || '',
-          is_split: Boolean(isSplit),
-          splits_json: splits || [],
-          materiales: materialesSnapshot,
-          motivo: (motivoRetiro || '').trim(),
-          firma_base64: firmaBase64 || null,
-          responsiva_aceptada: responsivaAceptada !== false,
-          firmado_en: new Date().toISOString(),
-          dispositivo_info: dispositivoInfo || null,
-          created_at: new Date().toISOString()
-        }]);
-
-      if (retiroErr) {
-        console.warn('Aviso al insertar en retiros_material:', retiroErr.message);
-      }
+      await pool.query(
+        `INSERT INTO retiros_material (
+          empleado_id, empleado_nombre, tipo_gasto, detalle_servicio_proyecto, proveedor, proveedor_id, cliente_id, cliente_nombre, sucursal_id, sucursal_nombre, is_split, splits_json, materiales, motivo, firma_base64, responsiva_aceptada, firmado_en, dispositivo_info, created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+        )`,
+        [
+          sanitizeUuid(currentUser.id) || currentUser.id,
+          currentUser.nombre || currentUser.email || 'Empleado',
+          tipoGasto || 'Operativo',
+          detalleServicioProyecto || '',
+          proveedor || '',
+          sanitizeUuid(proveedorId),
+          sanitizeUuid(clienteId),
+          clienteNombre || '',
+          sanitizeUuid(sucursalId),
+          sucursalNombre || '',
+          Boolean(isSplit),
+          JSON.stringify(splits || []),
+          JSON.stringify(materialesSnapshot),
+          (motivoRetiro || '').trim(),
+          firmaBase64 || null,
+          responsivaAceptada !== false,
+          new Date().toISOString(),
+          dispositivoInfo ? JSON.stringify(dispositivoInfo) : null,
+          new Date().toISOString()
+        ]
+      );
     } catch (saveRetiroErr: any) {
       console.warn('Error capturado en retiros_material insert:', saveRetiroErr.message);
     }
 
     // 2. Procesar cada material: descontar stock por estado específico, movimiento salida, inventario empleado
     for (const item of cart) {
-      const { data: prodData, error: prodErr } = await client
-        .from('productos')
-        .select('*')
-        .eq('id', item.producto.id)
-        .single();
+      const { rows: prodRows } = await pool.query(
+        `SELECT * FROM productos WHERE id = $1`,
+        [item.producto.id]
+      );
+      const prodData = prodRows[0];
         
-      if (prodErr || !prodData) continue;
+      if (!prodData) continue;
       
       let nuevo = Number(prodData.stock_nuevo) || 0;
       let usado = Number(prodData.stock_usado) || 0;
@@ -189,42 +190,41 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
       const newStock = Math.round((nuevo + usado + porRevisar) * 100) / 100;
 
       // Descontar del inventario general
-      const { error: stockErr } = await client
-        .from('productos')
-        .update({ stock_actual: newStock, stock_nuevo: nuevo, stock_usado: usado, stock_por_revisar: porRevisar })
-        .eq('id', item.producto.id);
-
-      if (stockErr) throw stockErr;
+      await pool.query(
+        `UPDATE productos SET stock_actual = $1, stock_nuevo = $2, stock_usado = $3, stock_por_revisar = $4 WHERE id = $5`,
+        [newStock, nuevo, usado, porRevisar, item.producto.id]
+      );
 
       // Registrar movimiento de salida
       const clientLabel = isSplit ? 'Varios clientes' : (clienteNombre ? `${clienteNombre}${sucursalNombre ? ` - ${sucursalNombre}` : ''}` : '');
       const fullFolio = `RETIRO: ${(motivoRetiro || '').trim()}${tipoGasto ? ` [${tipoGasto}]` : ''}${clientLabel ? ` (${clientLabel})` : ''}`;
 
-      const { error: moveErr } = await client
-        .from('movimientos_inventario')
-        .insert([
-          {
-            producto_id: item.producto.id,
-            tipo: 'SALIDA',
-            cantidad: item.cantidad,
-            folio_factura: fullFolio,
-            creado_por: currentUser.id,
-            firma_base64: firmaBase64 || null,
-          },
-        ]);
-
-      if (moveErr) {
+      try {
+        await pool.query(
+          `INSERT INTO movimientos_inventario (producto_id, tipo, cantidad, folio_factura, creado_por, firma_base64)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            item.producto.id,
+            'SALIDA',
+            item.cantidad,
+            fullFolio,
+            currentUser.id,
+            firmaBase64 || null
+          ]
+        );
+      } catch (moveErr: any) {
         console.warn('No se pudo registrar histórico:', moveErr.message);
       }
 
       // Agregar al inventario del empleado con desglose de estados
       try {
-        const { data: invEmp } = await client
-          .from('inventario_empleados')
-          .select('id, cantidad_disponible, cantidad_nuevo, cantidad_usado, cantidad_por_revisar')
-          .eq('empleado_id', currentUser.id)
-          .eq('producto_id', item.producto.id)
-          .maybeSingle();
+        const { rows: invEmpRows } = await pool.query(
+          `SELECT id, cantidad_disponible, cantidad_nuevo, cantidad_usado, cantidad_por_revisar 
+           FROM inventario_empleados 
+           WHERE empleado_id = $1 AND producto_id = $2`,
+          [currentUser.id, item.producto.id]
+        );
+        const invEmp = invEmpRows[0];
 
         if (invEmp) {
           const curNuevo = Number(invEmp.cantidad_nuevo) || 0;
@@ -241,51 +241,39 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
           const nextPorRev = curPorRev + withdrawPorRevisar;
           const nextTotal = Math.round((nextNuevo + nextUsado + nextPorRev) * 100) / 100;
 
-          await client
-            .from('inventario_empleados')
-            .update({ 
-              cantidad_disponible: nextTotal, 
-              cantidad_nuevo: nextNuevo,
-              cantidad_usado: nextUsado,
-              cantidad_por_revisar: nextPorRev,
-              updated_at: new Date().toISOString() 
-            })
-            .eq('id', invEmp.id);
+          await pool.query(
+            `UPDATE inventario_empleados 
+             SET cantidad_disponible = $1, cantidad_nuevo = $2, cantidad_usado = $3, cantidad_por_revisar = $4, updated_at = $5 
+             WHERE id = $6`,
+            [nextTotal, nextNuevo, nextUsado, nextPorRev, new Date().toISOString(), invEmp.id]
+          );
         } else {
-          await client
-            .from('inventario_empleados')
-            .insert([{
-              empleado_id: currentUser.id,
-              producto_id: item.producto.id,
-              cantidad_disponible: item.cantidad,
-              cantidad_nuevo: withdrawNuevo,
-              cantidad_usado: withdrawUsado,
-              cantidad_por_revisar: withdrawPorRevisar
-            }]);
+          await pool.query(
+            `INSERT INTO inventario_empleados (empleado_id, producto_id, cantidad_disponible, cantidad_nuevo, cantidad_usado, cantidad_por_revisar)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [currentUser.id, item.producto.id, item.cantidad, withdrawNuevo, withdrawUsado, withdrawPorRevisar]
+          );
         }
       } catch (invSaveErr: any) {
         console.warn('Fallback al actualizar inventario_empleados:', invSaveErr?.message);
         // Fallback simple si la tabla no tuviera las columnas todavía
-        const { data: fallbackInv } = await client
-          .from('inventario_empleados')
-          .select('id, cantidad_disponible')
-          .eq('empleado_id', currentUser.id)
-          .eq('producto_id', item.producto.id)
-          .maybeSingle();
+        const { rows: fallbackInvRows } = await pool.query(
+          `SELECT id, cantidad_disponible FROM inventario_empleados WHERE empleado_id = $1 AND producto_id = $2`,
+          [currentUser.id, item.producto.id]
+        );
+        const fallbackInv = fallbackInvRows[0];
 
         if (fallbackInv) {
-          await client
-            .from('inventario_empleados')
-            .update({ cantidad_disponible: fallbackInv.cantidad_disponible + item.cantidad, updated_at: new Date().toISOString() })
-            .eq('id', fallbackInv.id);
+          await pool.query(
+            `UPDATE inventario_empleados SET cantidad_disponible = $1, updated_at = $2 WHERE id = $3`,
+            [fallbackInv.cantidad_disponible + item.cantidad, new Date().toISOString(), fallbackInv.id]
+          );
         } else {
-          await client
-            .from('inventario_empleados')
-            .insert([{
-              empleado_id: currentUser.id,
-              producto_id: item.producto.id,
-              cantidad_disponible: item.cantidad
-            }]);
+          await pool.query(
+            `INSERT INTO inventario_empleados (empleado_id, producto_id, cantidad_disponible)
+             VALUES ($1, $2, $3)`,
+            [currentUser.id, item.producto.id, item.cantidad]
+          );
         }
       }
     }
@@ -301,20 +289,16 @@ export const getHistorialRetiros = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     // 1. Intentar consultar de la tabla dedicada retiros_material
     let structuredRetiros: any[] = [];
     try {
-      const { data: retirosData, error: retirosErr } = await client
-        .from('retiros_material')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (!retirosErr && Array.isArray(retirosData)) {
+      const { rows: retirosData } = await pool.query(
+        `SELECT * FROM retiros_material ORDER BY created_at DESC`
+      );
+      if (Array.isArray(retirosData)) {
         structuredRetiros = retirosData;
-      } else if (retirosErr) {
-        console.warn('Aviso al consultar retiros_material:', retirosErr.message);
       }
     } catch (dbErr: any) {
       console.warn('Excepción al consultar retiros_material:', dbErr?.message);
@@ -322,27 +306,39 @@ export const getHistorialRetiros = async (req: Request, res: Response) => {
 
     // 2. Consultar movimientos_inventario para incluir retiros históricos / legados
     const [movsRes, usersRes] = await Promise.all([
-      client
-        .from('movimientos_inventario')
-        .select('*, producto:productos(id, sku_interno, nombre_oficial, unidad)')
-        .eq('tipo', 'SALIDA')
-        .ilike('folio_factura', 'RETIRO:%')
-        .order('fecha', { ascending: false })
-        .limit(200),
-      client
-        .from('usuarios')
-        .select('id, nombre, email')
+      pool.query(
+        `SELECT m.*, 
+          p.id as p_id, 
+          p.sku_interno as p_sku_interno, 
+          p.nombre_oficial as p_nombre_oficial, 
+          p.unidad as p_unidad
+         FROM movimientos_inventario m
+         LEFT JOIN productos p ON m.producto_id = p.id
+         WHERE m.tipo = $1 AND m.folio_factura ILIKE $2
+         ORDER BY m.fecha DESC
+         LIMIT 200`,
+        ['SALIDA', 'RETIRO:%']
+      ),
+      pool.query(`SELECT id, nombre, email FROM usuarios`)
     ]);
 
     const usersMap = new Map<string, string>();
-    if (usersRes.data) {
-      usersRes.data.forEach((u: any) => {
+    if (usersRes.rows) {
+      usersRes.rows.forEach((u: any) => {
         usersMap.set(u.id, u.nombre || u.email || 'Empleado');
       });
     }
 
     // Agrupar movimientos_inventario en transacciones de retiro
-    const rawMovs = movsRes.data || [];
+    const rawMovs = movsRes.rows.map(row => ({
+      ...row,
+      producto: row.p_id ? {
+        id: row.p_id,
+        sku_interno: row.p_sku_interno,
+        nombre_oficial: row.p_nombre_oficial,
+        unidad: row.p_unidad
+      } : null
+    }));
     const legacyGroups: any[] = [];
 
     for (const m of rawMovs) {
@@ -426,4 +422,3 @@ export const getHistorialRetiros = async (req: Request, res: Response) => {
     return res.json({ retiros: [] });
   }
 };
-

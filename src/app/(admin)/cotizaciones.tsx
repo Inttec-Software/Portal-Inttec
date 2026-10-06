@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Platform, TextInput, Alert, useWindowDimensions, Pressable } from 'react-native';
 import { Image } from 'expo-image';
@@ -6,7 +7,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '@/services/supabase';
+import {} from '@/services/supabase';
 import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { Cotizacion } from '@/types/ventas';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
@@ -1179,3 +1180,4 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     justifyContent: 'center',
   },
 });
+

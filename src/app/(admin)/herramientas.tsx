@@ -15,17 +15,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import {
-  Herramienta,
-  HerramientaEmpleado,
-  HerramientaVehiculo,
-  ChecklistVehiculoHerramientas,
-  HerramientasService,
-  Vehiculo,
-  VehiculoService,
-  Usuario,
-  TrazabilidadHerramienta,
-} from '@/services/supabase';
+import { Herramienta, HerramientaEmpleado, HerramientaVehiculo, ChecklistVehiculoHerramientas, HerramientasService, Vehiculo, VehiculoService, Usuario, TrazabilidadHerramienta, supabase } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import CustomButton from '@/components/CustomButton';
 import { normalizeText } from '@/utils/helpers';

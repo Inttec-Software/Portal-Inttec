@@ -1,10 +1,15 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { tenantMiddleware } from './middlewares/tenant.middleware';
+import storageRoutes from './modules/storage/storage.routes';
 import authRoutes from './modules/auth/auth.routes';
 import tareasRoutes from './modules/tareas/tareas.routes';
 import usuariosRoutes from './modules/usuarios/usuarios.routes';
+import settingsRoutes from './modules/settings/settings.routes';
+import notificacionesRoutes from './modules/notificaciones/notificaciones.routes';
 import vehiculosRoutes from './modules/vehiculos/vehiculos.routes';
 import evidenciasRoutes from './modules/evidencias/evidencias.routes';
 import inventarioRoutes from './modules/inventario/inventario.routes';
@@ -21,6 +26,7 @@ import devolucionesRoutes from './modules/devoluciones/devoluciones.routes';
 import documentosRoutes from './modules/documentos/documentos.routes';
 import satRoutes from './modules/sat/sat.routes';
 import herramientasRoutes from './modules/herramientas/herramientas.routes';
+import queryRoutes from './modules/query/query.routes';
 
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -71,7 +77,8 @@ const corsOptions: cors.CorsOptions = {
     'x-company',
     'x-env',
     'x-tenant-company',
-    'x-tenant-env'
+    'x-tenant-env',
+    'x-query-client'
   ]
 };
 
@@ -84,9 +91,13 @@ app.use(express.json({ limit: '10mb' }));
 app.use(tenantMiddleware);
 
 // Rutas de la API
+app.use('/api/upload', storageRoutes);
+// Rutas de la API
 app.use('/api/auth', authRoutes);
 app.use('/api/tareas', tareasRoutes);
 app.use('/api/usuarios', usuariosRoutes);
+  app.use('/api/settings', settingsRoutes);
+  app.use('/api/notificaciones', notificacionesRoutes);
 app.use('/api/vehiculos', vehiculosRoutes);
 app.use('/api/evidencias', evidenciasRoutes);
 app.use('/api/inventario', inventarioRoutes);
@@ -103,6 +114,34 @@ app.use('/api/devoluciones', devolucionesRoutes);
 app.use('/api/documentos', documentosRoutes);
 app.use('/api/sat', satRoutes);
 app.use('/api/herramientas', herramientasRoutes);
+app.use('/api/query', queryRoutes);
+
+// Ruta de prueba para verificar conexión a la base de datos PostgreSQL pura
+import { getDbPool } from './config/database';
+
+app.get('/api/test-db', async (req, res) => {
+  try {
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
+    
+    // Ejecutamos una consulta sencilla para ver si PostgreSQL responde
+    const result = await pool.query('SELECT current_database(), current_user, now();');
+    
+    res.json({
+      status: 'success',
+      message: '¡Conexión a PostgreSQL exitosa!',
+      tenantInfo: { company, env },
+      dbResult: result.rows[0],
+    });
+  } catch (error: any) {
+    console.error('[Test DB] Error conectando a PostgreSQL:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Fallo al conectar con la base de datos',
+      error: error.message,
+    });
+  }
+});
 
 // Ruta base
 app.get('/', (req, res) => {
@@ -119,4 +158,5 @@ app.listen(Number(PORT), '0.0.0.0', () => {
   // Iniciar servicio en segundo plano de sincronización automática con el SAT
   SatSyncService.startScheduler();
 });
+
 

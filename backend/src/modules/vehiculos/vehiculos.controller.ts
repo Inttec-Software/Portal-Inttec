@@ -1,24 +1,42 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
+
+// Helper for insert queries
+const insertInto = async (pool: any, table: string, data: any) => {
+  const keys = Object.keys(data);
+  const values = Object.values(data);
+  const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+  const query = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+  const result = await pool.query(query, values);
+  return result.rows[0];
+};
+
+// Helper for update queries
+const updateTable = async (pool: any, table: string, data: any, id: any) => {
+  const keys = Object.keys(data);
+  const values = Object.values(data);
+  const setString = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+  values.push(id);
+  const query = `UPDATE ${table} SET ${setString} WHERE id = $${values.length} RETURNING *`;
+  const result = await pool.query(query, values);
+  return result.rows[0];
+};
 
 // 1. GET /api/vehiculos
 export const getVehiculos = async (req: Request, res: Response) => {
   try {
-    const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
+    const soloActivos = req.query.soloActivos;
     
-    // Default to soloActivos=true if not passed, to match frontend behavior
-    const { soloActivos } = req.query;
-    let query = supabase.from('vehiculos').select('*');
-    
+    let query = 'SELECT * FROM vehiculos';
     if (soloActivos === 'true' || soloActivos === undefined) {
-      query = query.eq('activo', true);
+      query += ' WHERE activo = true';
     }
+    query += ' ORDER BY marca ASC';
     
-    const { data, error } = await query.order('marca', { ascending: true });
-    
-    if (error) throw error;
-    res.json(data || []);
+    const { rows } = await pool.query(query);
+    res.json(rows);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -27,28 +45,27 @@ export const getVehiculos = async (req: Request, res: Response) => {
 // 2. POST /api/vehiculos
 export const createVehiculo = async (req: Request, res: Response) => {
   try {
-    const { env } = req.tenant!;
-    const { company: activeCompany } = req.tenant!;
+    const { env, company: activeCompany } = (req as any).tenant;
     const secondaryCompany = activeCompany === 'inttec' ? 'daravisa' : 'inttec';
     
-    const primaryClient = getSupabaseClient(activeCompany, env);
-    const secondaryClient = getSupabaseClient(secondaryCompany, env);
+    const primaryPool = getDbPool(activeCompany, env);
+    const secondaryPool = getDbPool(secondaryCompany, env);
 
-    const { data, error } = await primaryClient
-      .from('vehiculos')
-      .insert([req.body])
-      .select()
-      .single();
-
-    if (error) throw error;
+    const inserted = await insertInto(primaryPool, 'vehiculos', req.body);
 
     try {
-      await secondaryClient.from('vehiculos').upsert([data]);
+      // Intentar sincronizar en la secundaria
+      const check = await secondaryPool.query('SELECT id FROM vehiculos WHERE id = $1', [inserted.id]);
+      if (check.rows.length > 0) {
+        await updateTable(secondaryPool, 'vehiculos', req.body, inserted.id);
+      } else {
+        await insertInto(secondaryPool, 'vehiculos', { ...req.body, id: inserted.id });
+      }
     } catch (syncErr: any) {
-      console.warn('Error syncing vehiculo to secondary db:', syncErr);
+      console.warn('Error syncing vehiculo to secondary db:', syncErr.message);
     }
 
-    res.status(201).json(data);
+    res.status(201).json(inserted);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -58,29 +75,21 @@ export const createVehiculo = async (req: Request, res: Response) => {
 export const updateVehiculo = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { env } = req.tenant!;
-    const { company: activeCompany } = req.tenant!;
+    const { env, company: activeCompany } = (req as any).tenant;
     const secondaryCompany = activeCompany === 'inttec' ? 'daravisa' : 'inttec';
 
-    const primaryClient = getSupabaseClient(activeCompany, env);
-    const secondaryClient = getSupabaseClient(secondaryCompany, env);
+    const primaryPool = getDbPool(activeCompany, env);
+    const secondaryPool = getDbPool(secondaryCompany, env);
 
-    const { data, error } = await primaryClient
-      .from('vehiculos')
-      .update(req.body)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
+    const updated = await updateTable(primaryPool, 'vehiculos', req.body, id);
 
     try {
-      await secondaryClient.from('vehiculos').update(req.body).eq('id', id);
+      await updateTable(secondaryPool, 'vehiculos', req.body, id);
     } catch (syncErr: any) {
-      console.warn('Error updating vehiculo in secondary db:', syncErr);
+      console.warn('Error updating vehiculo in secondary db:', syncErr.message);
     }
 
-    res.json(data);
+    res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -90,15 +99,15 @@ export const updateVehiculo = async (req: Request, res: Response) => {
 export const deleteVehiculo = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { env } = req.tenant!;
+    const { env } = (req as any).tenant;
     
-    const clientInttec = getSupabaseClient('inttec', env);
-    const clientDaravisa = getSupabaseClient('daravisa', env);
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
 
-    const deleteInttec = async () => clientInttec.from('vehiculos').delete().eq('id', id);
-    const deleteDaravisa = async () => clientDaravisa.from('vehiculos').delete().eq('id', id);
-
-    await Promise.allSettled([deleteInttec(), deleteDaravisa()]);
+    await Promise.allSettled([
+      poolInttec.query('DELETE FROM vehiculos WHERE id = $1', [id]),
+      poolDaravisa.query('DELETE FROM vehiculos WHERE id = $1', [id])
+    ]);
 
     res.json({ success: true, message: 'Vehiculo eliminado' });
   } catch (error: any) {
@@ -109,42 +118,42 @@ export const deleteVehiculo = async (req: Request, res: Response) => {
 // 5. GET /api/vehiculos/gasolina
 export const getRegistrosGasolina = async (req: Request, res: Response) => {
   try {
-    const { env } = req.tenant!;
+    const { env, company } = (req as any).tenant;
     const { vehiculoId, empleadoId, placas } = req.query;
 
-    const inttecClient = getSupabaseClient('inttec', env);
-    const daravisaClient = getSupabaseClient('daravisa', env);
+    const inttecPool = getDbPool('inttec', env);
+    const daravisaPool = getDbPool('daravisa', env);
 
     let targetPlacas = placas as string | undefined;
 
-    // We query activeCompany client first if we need to find plates by vehiculoId
     if (vehiculoId && !targetPlacas) {
       try {
-        const primaryClient = getSupabaseClient(req.tenant!.company, env);
-        const { data: v } = await primaryClient.from('vehiculos').select('placas').eq('id', vehiculoId).single();
-        if (v?.placas) targetPlacas = v.placas;
+        const primaryPool = getDbPool(company, env);
+        const { rows } = await primaryPool.query('SELECT placas FROM vehiculos WHERE id = $1', [vehiculoId]);
+        if (rows.length > 0) targetPlacas = rows[0].placas;
       } catch (e) {}
     }
 
-    const fetchFromClient = async (client: any, empresaNombre: string) => {
+    const fetchFromPool = async (pool: any, empresaNombre: string) => {
       try {
-        let query = client
-          .from('registro_gasolina')
-          .select('*, vehiculo:vehiculo_id (marca, modelo, placas), empleado:empleado_id (nombre)');
-
+        let query = `
+          SELECT rg.*, 
+                 v.marca as vehiculo_marca, v.modelo as vehiculo_modelo, v.placas as vehiculo_placas,
+                 u.nombre as empleado_nombre
+          FROM registro_gasolina rg
+          LEFT JOIN vehiculos v ON rg.vehiculo_id = v.id
+          LEFT JOIN usuarios u ON rg.empleado_id = u.id
+          WHERE 1=1
+        `;
+        const values: any[] = [];
         if (empleadoId) {
-          query = query.eq('empleado_id', empleadoId);
+          values.push(empleadoId);
+          query += ` AND rg.empleado_id = $${values.length}`;
         }
 
-        const { data, error } = await query;
-        if (error || !data) return [];
-        
-        return data.map((row: any) => ({
+        const { rows } = await pool.query(query, values);
+        return rows.map((row: any) => ({
           ...row,
-          vehiculo_marca: row.vehiculo?.marca,
-          vehiculo_modelo: row.vehiculo?.modelo,
-          vehiculo_placas: row.vehiculo?.placas,
-          empleado_nombre: row.empleado?.nombre,
           empresa_origen: empresaNombre,
         }));
       } catch (err) {
@@ -153,8 +162,8 @@ export const getRegistrosGasolina = async (req: Request, res: Response) => {
     };
 
     const [inttecLogs, daravisaLogs] = await Promise.all([
-      fetchFromClient(inttecClient, 'INTTEC'),
-      fetchFromClient(daravisaClient, 'DARAVISA'),
+      fetchFromPool(inttecPool, 'INTTEC'),
+      fetchFromPool(daravisaPool, 'DARAVISA'),
     ]);
 
     const logMap = new Map<string, any>();
@@ -205,28 +214,22 @@ export const getRegistrosGasolina = async (req: Request, res: Response) => {
 // 6. POST /api/vehiculos/gasolina
 export const createRegistroGasolina = async (req: Request, res: Response) => {
   try {
-    const { env, company } = req.tenant!;
-    const primaryClient = getSupabaseClient(company, env);
+    const { env, company } = (req as any).tenant;
+    const primaryPool = getDbPool(company, env);
     
-    // We insert into active company database
-    const { data, error } = await primaryClient
-      .from('registro_gasolina')
-      .insert([req.body])
-      .select()
-      .single();
-      
-    if (error) throw error;
+    const inserted = await insertInto(primaryPool, 'registro_gasolina', req.body);
 
-    // Synchronize current mileage in BOTH companies
     if (req.body.vehiculo_id && req.body.kilometraje_actual) {
       try {
-        const { data: v } = await primaryClient.from('vehiculos').select('placas').eq('id', req.body.vehiculo_id).single();
-        if (v?.placas) {
-          const clientInttec = getSupabaseClient('inttec', env);
-          const clientDaravisa = getSupabaseClient('daravisa', env);
+        const { rows } = await primaryPool.query('SELECT placas FROM vehiculos WHERE id = $1', [req.body.vehiculo_id]);
+        if (rows.length > 0) {
+          const placas = rows[0].placas;
+          const poolInttec = getDbPool('inttec', env);
+          const poolDaravisa = getDbPool('daravisa', env);
+          
           await Promise.allSettled([
-            clientInttec.from('vehiculos').update({ kilometraje_actual: req.body.kilometraje_actual }).eq('placas', v.placas),
-            clientDaravisa.from('vehiculos').update({ kilometraje_actual: req.body.kilometraje_actual }).eq('placas', v.placas),
+            poolInttec.query('UPDATE vehiculos SET kilometraje_actual = $1 WHERE placas = $2', [req.body.kilometraje_actual, placas]),
+            poolDaravisa.query('UPDATE vehiculos SET kilometraje_actual = $1 WHERE placas = $2', [req.body.kilometraje_actual, placas]),
           ]);
         }
       } catch (err) {
@@ -234,7 +237,7 @@ export const createRegistroGasolina = async (req: Request, res: Response) => {
       }
     }
 
-    res.status(201).json(data);
+    res.status(201).json(inserted);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

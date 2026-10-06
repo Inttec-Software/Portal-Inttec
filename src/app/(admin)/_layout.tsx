@@ -7,7 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DevToolsFAB from '@/components/DevToolsFAB';
-import { AuthService } from '@/services/supabase';
+import { AuthService, supabase } from '@/services/supabase';
 
 export default function AdminLayout() {
   const { user, setUser } = useAuth();

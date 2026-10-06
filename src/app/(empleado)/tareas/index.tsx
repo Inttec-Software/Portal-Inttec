@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -18,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { supabase } from '@/services/supabase';
+import {} from '@/services/supabase';
 import { TareasService } from '@/services/tareasService';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import EditarTareaModal from '@/components/EditarTareaModal';
@@ -711,3 +712,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
   }
 });
+

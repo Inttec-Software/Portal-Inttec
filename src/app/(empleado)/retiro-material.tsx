@@ -18,7 +18,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { AuthService, Usuario, CatalogoItem, SucursalCliente } from '@/services/supabase';
+import { AuthService, Usuario, CatalogoItem, SucursalCliente, supabase } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';

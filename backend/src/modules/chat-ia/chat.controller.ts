@@ -1,39 +1,49 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 import { GoogleGenAI } from '@google/genai';
 
-const safeFetch = async (client: any, table: string) => {
+const safeFetch = async (pool: any, table: string) => {
   try {
-    let query = table === 'gastos'
-      ? client.from('gastos').select(`
-          *,
-          subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-          proveedor_rel:proveedores(id, nombre),
-          cliente_rel:clientes(id, nombre),
-          sucursal_rel:sucursales_cliente(id, nombre)
-        `)
-      : client.from(table).select('*');
-
-    if (['gastos', 'ventas', 'asistencias', 'registro_gasolina'].includes(table)) {
-      query = query.order('created_at', { ascending: false }).limit(1000);
+    let query = '';
+    if (table === 'gastos') {
+      query = `
+        SELECT 
+          g.*,
+          CASE WHEN s.id IS NOT NULL THEN json_build_object(
+            'id', s.id, 
+            'nombre', s.nombre, 
+            'categoria_id', s.categoria_id, 
+            'categorias', json_build_object('id', c.id, 'nombre', c.nombre)
+          ) ELSE null END as subcategoria_rel,
+          CASE WHEN p.id IS NOT NULL THEN json_build_object('id', p.id, 'nombre', p.nombre) ELSE null END as proveedor_rel,
+          CASE WHEN cl.id IS NOT NULL THEN json_build_object('id', cl.id, 'nombre', cl.nombre) ELSE null END as cliente_rel,
+          CASE WHEN sc.id IS NOT NULL THEN json_build_object('id', sc.id, 'nombre', sc.nombre) ELSE null END as sucursal_rel
+        FROM gastos g
+        LEFT JOIN subcategorias s ON g.subcategoria_id = s.id
+        LEFT JOIN categorias c ON s.categoria_id = c.id
+        LEFT JOIN proveedores p ON g.proveedor_id = p.id
+        LEFT JOIN clientes cl ON g.cliente_id = cl.id
+        LEFT JOIN sucursales_cliente sc ON g.sucursal_id = sc.id
+        ORDER BY g.created_at DESC LIMIT 1000
+      `;
+    } else if (['ventas', 'asistencias', 'registro_gasolina'].includes(table)) {
+      query = `SELECT * FROM ${table} ORDER BY created_at DESC LIMIT 1000`;
     } else {
-      query = query.limit(500);
+      query = `SELECT * FROM ${table} LIMIT 500`;
     }
-    const { data, error } = await query;
-    if (error) {
-      const fallback = await client.from(table).select('*').limit(500);
-      if (fallback.error) {
-        return [];
-      }
-      return fallback.data || [];
-    }
-    return data || [];
+    const { rows } = await pool.query(query);
+    return rows || [];
   } catch (e: any) {
-    return [];
+    try {
+      const fallback = await pool.query(`SELECT * FROM ${table} LIMIT 500`);
+      return fallback.rows || [];
+    } catch {
+      return [];
+    }
   }
 };
 
-const fetchCompanyData = async (client: any, companyName: string) => {
+const fetchCompanyData = async (pool: any, companyName: string) => {
   try {
     const [
       gastosData,
@@ -52,21 +62,21 @@ const fetchCompanyData = async (client: any, companyName: string) => {
       movimientosData,
       cotizacionesData
     ] = await Promise.all([
-      safeFetch(client, 'gastos'),
-      safeFetch(client, 'ventas'),
-      safeFetch(client, 'ventas_partidas'),
-      safeFetch(client, 'usuarios'),
-      safeFetch(client, 'asistencias'),
-      safeFetch(client, 'vehiculos'),
-      safeFetch(client, 'registro_gasolina'),
-      safeFetch(client, 'auditorias_tarjeta'),
-      safeFetch(client, 'clientes'),
-      safeFetch(client, 'sucursales_cliente'),
-      safeFetch(client, 'productos'),
-      safeFetch(client, 'categorias_productos'),
-      safeFetch(client, 'proveedores'),
-      safeFetch(client, 'movimientos_inventario'),
-      safeFetch(client, 'cotizaciones')
+      safeFetch(pool, 'gastos'),
+      safeFetch(pool, 'ventas'),
+      safeFetch(pool, 'ventas_partidas'),
+      safeFetch(pool, 'usuarios'),
+      safeFetch(pool, 'asistencias'),
+      safeFetch(pool, 'vehiculos'),
+      safeFetch(pool, 'registro_gasolina'),
+      safeFetch(pool, 'auditorias_tarjeta'),
+      safeFetch(pool, 'clientes'),
+      safeFetch(pool, 'sucursales_cliente'),
+      safeFetch(pool, 'productos'),
+      safeFetch(pool, 'categorias_productos'),
+      safeFetch(pool, 'proveedores'),
+      safeFetch(pool, 'movimientos_inventario'),
+      safeFetch(pool, 'cotizaciones')
     ]);
 
     const userMap: Record<string, string> = {};
@@ -126,16 +136,14 @@ export const getChatContext = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
 
-    // Client for the active tenant
-    const activeClient = getSupabaseClient(tenant.company, tenant.env);
-    // Hardcoded clients for INTTEC and DARAVISA to match frontend logic
-    const inttecClient = getSupabaseClient('inttec', 'cloud');
-    const daravisaClient = getSupabaseClient('daravisa', 'cloud');
+    const activePool = getDbPool(tenant.company, tenant.env);
+    const inttecPool = getDbPool('inttec', 'cloud');
+    const daravisaPool = getDbPool('daravisa', 'cloud');
 
     const [activeData, inttecData, daravisaData] = await Promise.all([
-      fetchCompanyData(activeClient, 'Empresa Activa'),
-      fetchCompanyData(inttecClient, 'Inttec'),
-      fetchCompanyData(daravisaClient, 'Daravisa')
+      fetchCompanyData(activePool, 'Empresa Activa'),
+      fetchCompanyData(inttecPool, 'Inttec'),
+      fetchCompanyData(daravisaPool, 'Daravisa')
     ]);
 
     const context = {
@@ -156,7 +164,7 @@ export const getEmployeeChatContext = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { userId } = req.query;
     if (!userId) {
@@ -165,24 +173,42 @@ export const getEmployeeChatContext = async (req: Request, res: Response) => {
 
     const safeQuery = async (queryPromise: any) => {
       try {
-        const { data, error } = await queryPromise;
-        if (error) return [];
-        return data || [];
+        const { rows } = await queryPromise;
+        return rows || [];
       } catch {
         return [];
       }
     };
 
+    const gastosQuery = pool.query(`
+      SELECT 
+        g.*,
+        CASE WHEN s.id IS NOT NULL THEN json_build_object(
+          'id', s.id, 
+          'nombre', s.nombre, 
+          'categoria_id', s.categoria_id, 
+          'categorias', json_build_object('id', c.id, 'nombre', c.nombre)
+        ) ELSE null END as subcategoria_rel,
+        CASE WHEN p.id IS NOT NULL THEN json_build_object('id', p.id, 'nombre', p.nombre) ELSE null END as proveedor_rel,
+        CASE WHEN cl.id IS NOT NULL THEN json_build_object('id', cl.id, 'nombre', cl.nombre) ELSE null END as cliente_rel,
+        CASE WHEN sc.id IS NOT NULL THEN json_build_object('id', sc.id, 'nombre', sc.nombre) ELSE null END as sucursal_rel
+      FROM gastos g
+      LEFT JOIN subcategorias s ON g.subcategoria_id = s.id
+      LEFT JOIN categorias c ON s.categoria_id = c.id
+      LEFT JOIN proveedores p ON g.proveedor_id = p.id
+      LEFT JOIN clientes cl ON g.cliente_id = cl.id
+      LEFT JOIN sucursales_cliente sc ON g.sucursal_id = sc.id
+      WHERE g.empleado_id = $1
+      ORDER BY g.created_at DESC LIMIT 500
+    `, [userId]);
+
+    const asistenciasQuery = pool.query(`SELECT * FROM asistencias WHERE usuario_id = $1 ORDER BY fecha DESC LIMIT 100`, [userId]);
+    const gasolinasQuery = pool.query(`SELECT * FROM registro_gasolina WHERE empleado_id = $1 ORDER BY fecha DESC LIMIT 100`, [userId]);
+
     const [misGastos, misAsistencias, misGasolinas] = await Promise.all([
-      safeQuery(client.from('gastos').select(`
-        *,
-        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-        proveedor_rel:proveedores(id, nombre),
-        cliente_rel:clientes(id, nombre),
-        sucursal_rel:sucursales_cliente(id, nombre)
-      `).eq('empleado_id', userId).order('created_at', { ascending: false }).limit(500)),
-      safeQuery(client.from('asistencias').select('*').eq('usuario_id', userId).order('fecha', { ascending: false }).limit(100)),
-      safeQuery(client.from('registro_gasolina').select('*').eq('empleado_id', userId).order('fecha', { ascending: false }).limit(100))
+      safeQuery(gastosQuery),
+      safeQuery(asistenciasQuery),
+      safeQuery(gasolinasQuery)
     ]);
 
     const context = {

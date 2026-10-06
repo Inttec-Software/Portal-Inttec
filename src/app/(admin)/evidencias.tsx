@@ -16,7 +16,7 @@ import {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, AuthService, Usuario, Evidencia } from '@/services/supabase';
+import { AuthService, Usuario, Evidencia, supabase } from '@/services/supabase';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -939,3 +939,4 @@ const styles = StyleSheet.create({
     height: '100%',
   },
 });
+

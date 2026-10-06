@@ -1,137 +1,13 @@
 import { logger } from '@/utils/logger';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createClient } from '@supabase/supabase-js';
-
 import { getApiHeaders, getApiUrl, invalidateHeaderCache } from './apiHelper';
+import { apiClient } from './apiClient';
 import { Platform } from 'react-native';
 
-import Constants from 'expo-constants';
+const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
 
-const sanitizeUrl = (url: string) => {
-  return url ? url.replace(/\/rest\/v1\/?$/, '') : url;
-};
-
-const resolveLocalhost = (url: string) => {
-  // Solo en desarrollo y si la URL tiene localhost
-  if (__DEV__ && url && (url.includes('localhost') || url.includes('127.0.0.1'))) {
-    const debuggerHost = Constants.expoConfig?.hostUri || (Constants.manifest as any)?.debuggerHost;
-    if (debuggerHost) {
-      const ip = debuggerHost.split(':')[0];
-      // Reemplaza localhost por la IP real de tu PC en la red local
-      return url.replace(/localhost|127\.0\.0\.1/, ip);
-    }
-  }
-  return url;
-};
-
-const inttecUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_INTTEC || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
-const inttecAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_INTTEC || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
-
-const daravisaUrl = sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder-url.supabase.co');
-const daravisaAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
-
-const inttecTestUrl = resolveLocalhost(sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_TEST || 'http://localhost:54321'));
-const inttecTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_TEST || 'placeholder-anon-key';
-
-const daravisaTestUrl = resolveLocalhost(sanitizeUrl(process.env.EXPO_PUBLIC_SUPABASE_URL_DARAVISA_TEST || 'http://localhost:54321'));
-const daravisaTestAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY_DARAVISA_TEST || 'placeholder-anon-key';
-
-const isLocalUrl = (url: string) => url ? (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('192.168.') || url.includes('10.') || url.startsWith('http://')) : false;
-
-if (!inttecUrl || !inttecAnonKey) {
-  logger.error('WARNING: Supabase INTTEC credentials missing in .env file.');
-} else {
-  console.log(isLocalUrl(inttecUrl) ? `🐳 [DATABASE INTTEC] Local Docker (${inttecUrl})` : `☁️ [DATABASE INTTEC] Supabase Cloud (${inttecUrl})`);
-}
-
-if (!daravisaUrl || !daravisaAnonKey) {
-  logger.error('WARNING: Supabase DARAVISA credentials missing in .env file.');
-} else {
-  console.log(isLocalUrl(daravisaUrl) ? `🐳 [DATABASE DARAVISA] Local Docker (${daravisaUrl})` : `☁️ [DATABASE DARAVISA] Supabase Cloud (${daravisaUrl})`);
-}
-
-const isBrowser = Platform.OS !== 'web' || typeof window !== 'undefined';
-
-const ssrSafeStorage = {
-  getItem: async (key: string) => {
-    if (isBrowser) {
-      return AsyncStorage.getItem(key);
-    }
-    return null;
-  },
-  setItem: async (key: string, value: string) => {
-    if (isBrowser) {
-      await AsyncStorage.setItem(key, value);
-    }
-  },
-  removeItem: async (key: string) => {
-    if (isBrowser) {
-      await AsyncStorage.removeItem(key);
-    }
-  },
-};
-
-export const inttecClient = createClient(inttecUrl, inttecAnonKey, {
-  auth: {
-    storage: ssrSafeStorage,
-    storageKey: 'supabase.auth.token.inttec',
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
-
-export const daravisaClient = createClient(daravisaUrl, daravisaAnonKey, {
-  auth: {
-    storage: ssrSafeStorage,
-    storageKey: 'supabase.auth.token.daravisa',
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
-
-export const inttecTestClient = createClient(inttecTestUrl, inttecTestAnonKey, {
-  auth: {
-    storage: ssrSafeStorage,
-    storageKey: 'supabase.auth.token.inttec.test',
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
-
-export const daravisaTestClient = createClient(daravisaTestUrl, daravisaTestAnonKey, {
-  auth: {
-    storage: ssrSafeStorage,
-    storageKey: 'supabase.auth.token.daravisa.test',
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
 
 let activeCompany: 'inttec' | 'daravisa' = 'inttec';
-let activeEnv: 'cloud' | 'test' = 'cloud';
-let activeClient = inttecClient;
-
-const updateActiveClient = () => {
-  if (activeEnv === 'test') {
-    activeClient = activeCompany === 'daravisa' ? daravisaTestClient : inttecTestClient;
-  } else {
-    activeClient = activeCompany === 'daravisa' ? daravisaClient : inttecClient;
-  }
-};
-
-export const supabase = new Proxy({}, {
-  get(target, prop) {
-    const value = Reflect.get(activeClient, prop);
-    if (typeof value === 'function') {
-      return value.bind(activeClient);
-    }
-    return value;
-  }
-}) as unknown as typeof inttecClient;
 
 export const CompanyService = {
   getActiveCompany(): 'inttec' | 'daravisa' {
@@ -139,8 +15,7 @@ export const CompanyService = {
   },
   async setActiveCompany(company: 'inttec' | 'daravisa'): Promise<void> {
     activeCompany = company;
-    updateActiveClient();
-    invalidateHeaderCache();
+        invalidateHeaderCache();
     if (isBrowser) {
       await AsyncStorage.setItem('active_company', company);
     }
@@ -150,22 +25,21 @@ export const CompanyService = {
       const saved = await AsyncStorage.getItem('active_company');
       if (saved === 'daravisa' || saved === 'inttec') {
         activeCompany = saved;
-        updateActiveClient();
-        invalidateHeaderCache();
+                invalidateHeaderCache();
       }
     }
     return activeCompany;
   }
 };
 
+let activeEnv: 'cloud' | 'test' = 'cloud';
 export const EnvService = {
   getActiveEnv(): 'cloud' | 'test' {
     return activeEnv;
   },
   async setActiveEnv(env: 'cloud' | 'test'): Promise<void> {
     activeEnv = env;
-    updateActiveClient();
-    invalidateHeaderCache();
+        invalidateHeaderCache();
     if (isBrowser) {
       await AsyncStorage.setItem('active_env', env);
     }
@@ -175,15 +49,13 @@ export const EnvService = {
       const saved = await AsyncStorage.getItem('active_env');
       if (saved === 'cloud' || saved === 'test') {
         activeEnv = saved;
-        updateActiveClient();
-      }
+              }
     }
     return activeEnv;
   }
 };
 
-export const getInttecClient = () => EnvService.getActiveEnv() === 'test' ? inttecTestClient : inttecClient;
-export const getDaravisaClient = () => EnvService.getActiveEnv() === 'test' ? daravisaTestClient : daravisaClient;
+
 
 export interface Usuario {
   id: string;
@@ -681,420 +553,7 @@ export const AsistenciaService = {
     }
 
     try {
-      const binaryStr = atob(cleanBase64);
-      const len = binaryStr.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryStr.charCodeAt(i);
-      }
-
-      const { error: uploadError } = await supabase.storage
-        .from('tickets')
-        .upload(fileName, bytes.buffer, {
-          contentType: 'image/jpeg',
-          upsert: true,
-        });
-
-      if (uploadError) {
-        logger.error('[Supabase Storage] Error en upload:', uploadError);
-        throw uploadError;
-      }
-
-      const { data: urlData } = supabase.storage
-        .from('tickets')
-        .getPublicUrl(fileName);
-
-      return urlData.publicUrl;
-    } catch (err: any) {
-      logger.error('[Supabase Storage] Excepción capturada en subirFotoAsistencia:', err.message || err);
-      throw err;
-    }
-  },
-};
-
-export interface Venta {
-  id: string;
-  registrado_por: string;
-  fecha: string;
-  cliente: string;
-  factura_referencia?: string | null;
-  tipo_proyecto?: string | null;
-  proveedor?: string | null;
-  precio_total_facturado: number;
-  costo_total: number;
-  utilidad_bruta: number;
-  margen_porcentual: number;
-  total_pagado?: number;
-  saldo_pendiente?: number;
-  estado_pago?: EstadoPagoVenta;
-  factura_url?: string | null;
-  notas?: string | null;
-  descripcion?: string | null;
-  agregar_iva?: boolean;
-  folio?: string | null;
-  created_at?: string;
-  cfdi_uuid?: string | null;
-  cfdi_facturapi_id?: string | null;
-  cfdi_estado?: string | null;
-  cfdi_xml_url?: string | null;
-  sucursal?: string | null;
-  cotizaciones?: { folio: string } | null;
-  usuarios?: { nombre: string } | null;
-  cotizacion_id?: string | null;
-  ventas_partidas?: { descripcion: string; unidad?: string }[] | null;
-}
-
-export interface VentaPartida {
-  id: string;
-  venta_id: string;
-  descripcion: string;
-  cantidad: number;
-  unidad: string;
-  precio_unitario_venta: number;
-  costo_unitario_proveedor: number;
-  precio_total_venta: number;
-  costo_total_proveedor: number;
-}
-
-export interface VentaPago {
-  id: string;
-  venta_id: string;
-  monto: number;
-  fecha_pago: string;
-  metodo_pago?: string | null;
-  referencia?: string | null;
-  registrado_por?: string | null;
-  created_at?: string;
-}
-
-export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO';
-
-export function calcularEstadoPago(precioTotalFacturado: number, totalPagado: number): EstadoPagoVenta {
-  if (totalPagado >= precioTotalFacturado && precioTotalFacturado > 0) {
-    return 'PAGADO';
-  } else if (totalPagado > 0) {
-    return 'PAGO PARCIAL';
-  } else {
-    return 'PENDIENTE DE PAGO';
-  }
-}
-
-export async function recalculateVentaTotals(ventaId: string): Promise<void> {
-  try {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/reportes/ventas/${ventaId}/recalculate`, {
-      method: 'POST',
-      headers
-    });
-    if (!res.ok) throw new Error('Error recalculating venta totals via API');
-    const data = await res.json();
-    logger.info(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Total: ${data.costoTotal}`);
-  } catch (err) {
-    logger.error('[Recalculate] Error recalculating venta totals:', err);
-  }
-}
-
-export async function syncVentaPaymentStatus(ventaId: string): Promise<void> {
-  try {
-    const headers = await getApiHeaders();
-    await fetch(`${getApiUrl()}/api/ventas/${ventaId}/sync-payment`, {
-      method: 'POST',
-      headers
-    });
-  } catch (err) {
-    // Captura limpia sin romper la ejecucion
-  }
-}
-
-
-export interface Vehiculo {
-  id: string;
-  marca: string;
-  modelo: string;
-  anio: number;
-  placas: string;
-  numero_economico?: string | null;
-  activo: boolean;
-  created_at?: string;
-}
-
-export interface RegistroGasolina {
-  id: string;
-  gasto_id?: string | null;
-  vehiculo_id: string;
-  empleado_id: string;
-  fecha: string;
-  kilometraje_actual: number;
-  kilometraje_anterior?: number | null;
-  distancia_recorrida?: number | null;
-  rendimiento_km_l?: number | null;
-  litros: number;
-  costo_total: number;
-  ticket_foto_url?: string | null;
-  observaciones?: string | null;
-  created_at?: string;
-  vehiculo_marca?: string;
-  vehiculo_modelo?: string;
-  vehiculo_placas?: string;
-  empleado_nombre?: string;
-  empresa_origen?: string;
-}
-
-export const VehiculoService = {
-  async getVehiculos(soloActivos = true): Promise<Vehiculo[]> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/vehiculos?soloActivos=${soloActivos}`, { headers });
-    if (!res.ok) throw new Error('Error al obtener vehículos');
-    return res.json();
-  },
-
-  async crearVehiculo(vehiculo: Omit<Vehiculo, 'id' | 'created_at'>): Promise<Vehiculo> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/vehiculos`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(vehiculo)
-    });
-    if (!res.ok) throw new Error('Error al crear vehículo');
-    return res.json();
-  },
-
-  async actualizarVehiculo(id: string, updates: Partial<Vehiculo>): Promise<Vehiculo> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify(updates)
-    });
-    if (!res.ok) throw new Error('Error al actualizar vehículo');
-    return res.json();
-  },
-
-  async eliminarVehiculo(id: string): Promise<void> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
-      method: 'DELETE',
-      headers
-    });
-    if (!res.ok) throw new Error('Error al eliminar vehículo');
-  },
-
-  async syncVehiculoKilometraje(placas: string | undefined | null, nuevoKilometraje: number): Promise<void> {
-    // This is handled automatically by the backend now, but we'll leave it as a no-op just in case it's called manually somewhere
-  },
-
-  async getRegistrosGasolina(filtros?: { vehiculoId?: string; empleadoId?: string; placas?: string }): Promise<RegistroGasolina[]> {
-    const headers = await getApiHeaders();
-    
-    let url = `${getApiUrl()}/api/vehiculos/gasolina?`;
-    if (filtros?.vehiculoId) url += `vehiculoId=${filtros.vehiculoId}&`;
-    if (filtros?.empleadoId) url += `empleadoId=${filtros.empleadoId}&`;
-    if (filtros?.placas) url += `placas=${filtros.placas}&`;
-    
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error('Error al obtener registros de gasolina');
-    return res.json();
-  },
-
-  async crearRegistroGasolina(registro: Omit<RegistroGasolina, 'id' | 'created_at'>): Promise<RegistroGasolina> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/vehiculos/gasolina`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(registro)
-    });
-    if (!res.ok) throw new Error('Error al crear registro de gasolina');
-    return res.json();
-  },
-};
-
-export interface AuditoriaTarjeta {
-  id: string;
-  tarjeta: string;
-  metodo_pago: string;
-  titular?: string | null;
-  periodo_inicio?: string | null;
-  periodo_fin?: string | null;
-  total_cargos: number;
-  total_conciliado: number;
-  total_faltante: number;
-  resultado_json: any;
-  creado_por?: string | null;
-  creado_por_nombre?: string | null;
-  creado_en?: string;
-}
-
-export const AuditoriaService = {
-  async guardarAuditoria(auditoria: Omit<AuditoriaTarjeta, 'id' | 'creado_en'>): Promise<AuditoriaTarjeta> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/auditoria`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(auditoria)
-    });
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      logger.error('Error al guardar auditoría de tarjeta:', errorText);
-      throw new Error(errorText);
-    }
-    const json = await res.json();
-    return json.data as AuditoriaTarjeta;
-  },
-
-  async obtenerAuditorias(tarjeta?: string): Promise<AuditoriaTarjeta[]> {
-    const headers = await getApiHeaders();
-    const url = tarjeta && tarjeta !== 'TODAS' 
-      ? `${getApiUrl()}/api/auditoria?tarjeta=${encodeURIComponent(tarjeta)}`
-      : `${getApiUrl()}/api/auditoria`;
-
-    const res = await fetch(url, { headers });
-    if (!res.ok) {
-      const errorText = await res.text();
-      logger.error('Error al obtener auditorías de tarjeta:', errorText);
-      throw new Error(errorText);
-    }
-    const json = await res.json();
-    return (json.auditorias || []) as AuditoriaTarjeta[];
-  },
-
-  async eliminarAuditoria(id: string): Promise<void> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/auditoria/${id}`, {
-      method: 'DELETE',
-      headers
-    });
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      logger.error('Error al eliminar auditoría de tarjeta:', errorText);
-      throw new Error(errorText);
-    }
-  }
-};
-
-export interface Documento {
-  id: string;
-  titulo: string;
-  descripcion?: string | null;
-  contenido_html: string;
-  archivo_pdf_url?: string | null;
-  tipo_documento?: 'TEXTO' | 'PDF';
-  posicion_firma?: string | null;
-  creador_id?: string | null;
-  creador_nombre: string;
-  requiere_todos: boolean;
-  estado: 'BORRADOR' | 'PUBLICADO' | 'ARCHIVADO';
-  created_at?: string;
-  updated_at?: string;
-  total_asignados?: number;
-  total_firmados?: number;
-}
-
-export interface DocumentoFirmado {
-  id: string;
-  documento_id: string;
-  empleado_id: string;
-  empleado_nombre: string;
-  empleado_email?: string | null;
-  estado: 'PENDIENTE' | 'FIRMADO' | 'RECHAZADO';
-  firma_base64?: string | null;
-  firma_url?: string | null;
-  pdf_firmado_url?: string | null;
-  ip_registro?: string | null;
-  ubicacion_gps?: string | null;
-  dispositivo_info?: string | null;
-  hash_sha256?: string | null;
-  motivo_rechazo?: string | null;
-  firmado_at?: string | null;
-  created_at?: string;
-  documentos?: Documento;
-}
-
-export const DocumentoService = {
-  async obtenerDocumentosAdmin(): Promise<Documento[]> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/documentos/admin`, { headers });
-    if (!res.ok) throw new Error('Error al obtener documentos (Admin)');
-    return res.json();
-  },
-
-  async crearDocumento(
-    doc: Omit<Documento, 'id' | 'created_at' | 'updated_at'>,
-    empleadosIds: string[]
-  ): Promise<Documento> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/documentos`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ doc, empleadosIds })
-    });
-    if (!res.ok) throw new Error('Error al crear documento');
-    return res.json();
-  },
-
-  async obtenerMisDocumentosEmpleado(empleadoId: string): Promise<DocumentoFirmado[]> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/documentos/empleado/${empleadoId}`, { headers });
-    if (!res.ok) throw new Error('Error al obtener documentos del empleado');
-    return res.json();
-  },
-
-  async obtenerFirmasDeDocumento(documentoId: string): Promise<DocumentoFirmado[]> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/documentos/${documentoId}/firmas`, { headers });
-    if (!res.ok) throw new Error('Error al obtener firmas');
-    return res.json();
-  },
-
-  async registrarFirma(
-    idAsignacion: string,
-    params: {
-      firmaBase64: string;
-      pdfUrl?: string;
-      ipRegistro?: string;
-      ubicacionGps?: string;
-      dispositivoInfo?: string;
-      hashSha256?: string;
-    }
-  ): Promise<DocumentoFirmado> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/documentos/firmas/${idAsignacion}`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify(params)
-    });
-    if (!res.ok) throw new Error('Error al registrar firma');
-    return res.json();
-  },
-
-  async eliminarDocumento(id: string): Promise<void> {
-    const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/documentos/${id}`, { method: 'DELETE', headers });
-    if (!res.ok) throw new Error('Error al eliminar documento');
-  },
-
-  async subirPdfOriginal(fileUri: string, fileName: string): Promise<string> {
-    try {
-      const response = await fetch(fileUri);
-      const blob = await response.blob();
-      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const filePath = `originales/${Date.now()}_${cleanFileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('documentos-firmados')
-        .upload(filePath, blob, {
-          contentType: 'application/pdf',
-          upsert: true,
-        });
-
-      if (uploadError) {
-        logger.error('Error al subir PDF original:', uploadError);
-        throw uploadError;
-      }
-
-      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
-      return data.publicUrl;
+      const b64 = "data:image/jpeg;base64," + cleanBase64; const url = await apiClient.uploadBase64(b64, fileName, 'image/jpeg', 'asistencias'); return url;
     } catch (e) {
       logger.error('Fallo la subida de PDF original:', e);
       throw e;
@@ -1108,20 +567,7 @@ export const DocumentoService = {
       const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
       const filePath = `firmados/${Date.now()}_${cleanFileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('documentos-firmados')
-        .upload(filePath, blob, {
-          contentType: 'application/pdf',
-          upsert: true,
-        });
-
-      if (uploadError) {
-        logger.error('Error al subir PDF firmado:', uploadError);
-        throw uploadError;
-      }
-
-      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
-      return data.publicUrl;
+      const b64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onloadend = () => resolve(reader.result as string); reader.readAsDataURL(blob); }); const url = await apiClient.uploadBase64(b64, filePath, 'application/pdf', 'documentos-firmados'); return url;
     } catch (e) {
       logger.error('Fallo la subida de PDF firmado:', e);
       throw e;
@@ -1516,29 +962,662 @@ export interface Notificacion {
   created_at: string;
 }
 
+
+class FrontendQueryBuilder {
+  table: string;
+  clientType: 'inttec' | 'daravisa' | 'active';
+  query: any;
+
+  constructor(table: string, clientType: 'inttec' | 'daravisa' | 'active') {
+    this.table = table;
+    this.clientType = clientType;
+    this.query = { table, action: 'select', cols: '*', conditions: [] };
+  }
+
+  select(cols = '*') { this.query.action = 'select'; this.query.cols = cols; return this; }
+  insert(payload: any) { this.query.action = 'insert'; this.query.payload = payload; return this; }
+  update(payload: any) { this.query.action = 'update'; this.query.payload = payload; return this; }
+  delete() { this.query.action = 'delete'; return this; }
+
+  eq(col: string, val: any) { this.query.conditions.push({ col, op: 'eq', val }); return this; }
+  neq(col: string, val: any) { this.query.conditions.push({ col, op: 'neq', val }); return this; }
+  in(col: string, val: any[]) { this.query.conditions.push({ col, op: 'in', val }); return this; }
+  ilike(col: string, val: any) { this.query.conditions.push({ col, op: 'ilike', val }); return this; }
+  or(val: string) { this.query.conditions.push({ col: '', op: 'or', val }); return this; }
+
+  order(col: string, opts: { ascending?: boolean } = {}) { 
+    this.query.orderCol = col; 
+    this.query.orderAsc = opts.ascending ?? true; 
+    return this; 
+  }
+  limit(n: number) { this.query.limitCount = n; return this; }
+  single() { this.query.isSingle = true; this.query.limitCount = 1; return this; }
+  maybeSingle() { this.query.isSingle = true; this.query.limitCount = 1; return this; }
+
+  then<TResult1 = any, TResult2 = never>(
+    onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | undefined | null,
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null
+  ): PromiseLike<TResult1 | TResult2> {
+    return this.execute().then(onfulfilled, onrejected);
+  }
+
+  async execute(): Promise<any> {
+    try {
+      const headers = await getApiHeaders();
+      let company = CompanyService.getActiveCompany();
+      if (this.clientType !== 'active') {
+        company = this.clientType;
+      }
+      const reqHeaders = { ...headers, 'x-query-client': company };
+      const res = await fetch(`${getApiUrl()}/api/query`, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify(this.query)
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        return { data: null, error: json.error || new Error('Query error') };
+      } else {
+        return { data: json.data, error: null };
+      }
+    } catch(e) {
+      return { data: null, error: e };
+    }
+  }
+}
+
+const createShimClient = (clientType: 'inttec' | 'daravisa' | 'active') => {
+  return {
+    from: (table: string) => new FrontendQueryBuilder(table, clientType),
+    storage: {
+      from: (bucket: string) => ({
+        upload: async (path: string, file: any, opts: any) => {
+          try {
+            let b64 = '';
+            if (typeof file === 'string') {
+              b64 = file;
+            } else if (file instanceof Blob) {
+              b64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+              });
+            } else {
+              const blob = new Blob([file], { type: opts?.contentType || 'application/octet-stream' });
+              b64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+            }
+            const headers = await getApiHeaders();
+            const res = await fetch(`${getApiUrl()}/api/upload`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                fileBase64: b64,
+                fileName: path.split('/').pop(),
+                filePath: path,
+                contentType: opts?.contentType || 'application/octet-stream',
+                folder: bucket
+              })
+            });
+            const json = await res.json();
+            if(!res.ok) return { data: null, error: json.error || new Error('Error al subir archivo') };
+            return { data: { path }, error: null };
+          } catch(e) {
+            return { data: null, error: e };
+          }
+        },
+        download: async (path: string) => {
+          const bucketName = 'portal-inttec-storage'; 
+          const region = 'us-east-2';
+          const company = CompanyService.getActiveCompany();
+          const fullPath = path.startsWith('http')
+            ? path
+            : path.startsWith(`${company}/`)
+              ? `${bucket}/${path}`
+              : `${company}/${bucket}/${path}`;
+          const url = path.startsWith('http') ? path : `https://${bucketName}.s3.${region}.amazonaws.com/${fullPath}`;
+          try {
+            const res = await fetch(url);
+            if (!res.ok) return { data: null, error: new Error('Not found') };
+            const blob = await res.blob();
+            return { data: blob, error: null };
+          } catch(e) {
+            return { data: null, error: e };
+          }
+        },
+        getPublicUrl: (path: string) => {
+          const bucketName = 'portal-inttec-storage'; 
+          const region = 'us-east-2';
+          const company = CompanyService.getActiveCompany();
+          if (path.startsWith('http')) return { data: { publicUrl: path } };
+          const fullPath = path.startsWith(`${company}/`)
+            ? `${bucket}/${path}`
+            : `${company}/${bucket}/${path}`;
+          return { data: { publicUrl: `https://${bucketName}.s3.${region}.amazonaws.com/${fullPath}` } };
+        }
+      })
+    },
+    auth: { updateUser: async (updates: any) => { return { data: null, error: null }; } }, 
+    functions: { 
+      invoke: async (functionName: string, options?: any) => { 
+        const headers = await getApiHeaders(); 
+        let endpoint = `/api/functions/${functionName}`;
+        if (functionName === 'facturar-venta') endpoint = '/api/sat/timbrar-factura';
+        if (functionName === 'cancelar-factura') endpoint = '/api/sat/cancelar-factura';
+        if (functionName === 'sync-facturas-recibidas') endpoint = '/api/sat/sync-facturas-recibidas';
+        if (functionName === 'send-push') endpoint = '/api/notificaciones/send-push';
+        
+        const res = await fetch(`${getApiUrl()}${endpoint}`, { 
+          method: 'POST', 
+          headers: { ...headers, 'Content-Type': 'application/json' }, 
+          body: JSON.stringify(options?.body || {}) 
+        }); 
+        const json = await res.json().catch(() => ({})); 
+        if (!res.ok) return { data: null, error: json.error || new Error('Invoke failed') }; 
+        return { data: json.data || json, error: null }; 
+      } 
+    }
+  };
+};
+
+export const supabase = createShimClient('active');
+export const inttecClient = createShimClient('inttec');
+export const daravisaClient = createShimClient('daravisa');
+export interface Venta { id: string; registrado_por: string; fecha: string; cliente: string; factura_referencia?: string | null; tipo_proyecto?: string | null; proveedor?: string | null; precio_total_facturado: number; costo_total: number; utilidad_bruta: number; margen_porcentual: number; total_pagado?: number; saldo_pendiente?: number; estado_pago?: EstadoPagoVenta; factura_url?: string | null; notas?: string | null; descripcion?: string | null; agregar_iva?: boolean; folio?: string | null; created_at?: string; cfdi_uuid?: string | null; cfdi_facturapi_id?: string | null; cfdi_estado?: string | null; cfdi_xml_url?: string | null; sucursal?: string | null; cotizaciones?: { folio: string } | null; usuarios?: { nombre: string } | null; cotizacion_id?: string | null; ventas_partidas?: { descripcion: string; unidad?: string }[] | null; } export interface VentaPartida { id: string; venta_id: string; descripcion: string; cantidad: number; unidad: string; precio_unitario_venta: number; costo_unitario_proveedor: number; precio_total_venta: number; costo_total_proveedor: number; }
+
+export interface VentaPago {
+  id: string;
+  venta_id: string;
+  monto: number;
+  fecha_pago: string;
+  metodo_pago?: string | null;
+  referencia?: string | null;
+  registrado_por?: string | null;
+  created_at?: string;
+}
+
+export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO';
+
+export function calcularEstadoPago(precioTotalFacturado: number, totalPagado: number): EstadoPagoVenta {
+  if (totalPagado >= precioTotalFacturado && precioTotalFacturado > 0) {
+    return 'PAGADO';
+  } else if (totalPagado > 0) {
+    return 'PAGO PARCIAL';
+  } else {
+    return 'PENDIENTE DE PAGO';
+  }
+}
+
+export async function recalculateVentaTotals(ventaId: string): Promise<void> {
+  try {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/reportes/ventas/${ventaId}/recalculate`, {
+      method: 'POST',
+      headers
+    });
+    if (!res.ok) throw new Error('Error recalculating venta totals via API');
+    const data = await res.json();
+    logger.info(`[Recalculate] Venta ${ventaId} actualizada en base de datos. Costo Total: ${data.costoTotal}`);
+  } catch (err) {
+    logger.error('[Recalculate] Error recalculating venta totals:', err);
+  }
+}
+
+export async function syncVentaPaymentStatus(ventaId: string): Promise<void> {
+  try {
+    const headers = await getApiHeaders();
+    await fetch(`${getApiUrl()}/api/ventas/${ventaId}/sync-payment`, {
+      method: 'POST',
+      headers
+    });
+  } catch (err) {
+    // Captura limpia sin romper la ejecucion
+  }
+}
+
+
+export interface Vehiculo {
+  id: string;
+  marca: string;
+  modelo: string;
+  anio: number;
+  placas: string;
+  numero_economico?: string | null;
+  activo: boolean;
+  created_at?: string;
+}
+
+export interface RegistroGasolina {
+  id: string;
+  gasto_id?: string | null;
+  vehiculo_id: string;
+  empleado_id: string;
+  fecha: string;
+  kilometraje_actual: number;
+  kilometraje_anterior?: number | null;
+  distancia_recorrida?: number | null;
+  rendimiento_km_l?: number | null;
+  litros: number;
+  costo_total: number;
+  ticket_foto_url?: string | null;
+  observaciones?: string | null;
+  created_at?: string;
+  vehiculo_marca?: string;
+  vehiculo_modelo?: string;
+  vehiculo_placas?: string;
+  empleado_nombre?: string;
+  empresa_origen?: string;
+}
+
+export const VehiculoService = {
+  async getVehiculos(soloActivos = true): Promise<Vehiculo[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos?soloActivos=${soloActivos}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener veh+�culos');
+    return res.json();
+  },
+
+  async crearVehiculo(vehiculo: Omit<Vehiculo, 'id' | 'created_at'>): Promise<Vehiculo> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(vehiculo)
+    });
+    if (!res.ok) throw new Error('Error al crear veh+�culo');
+    return res.json();
+  },
+
+  async actualizarVehiculo(id: string, updates: Partial<Vehiculo>): Promise<Vehiculo> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates)
+    });
+    if (!res.ok) throw new Error('Error al actualizar veh+�culo');
+    return res.json();
+  },
+
+  async eliminarVehiculo(id: string): Promise<void> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${id}`, {
+      method: 'DELETE',
+      headers
+    });
+    if (!res.ok) throw new Error('Error al eliminar veh+�culo');
+  },
+
+  async syncVehiculoKilometraje(placas: string | undefined | null, nuevoKilometraje: number): Promise<void> {
+    // This is handled automatically by the backend now, but we'll leave it as a no-op just in case it's called manually somewhere
+  },
+
+  async getRegistrosGasolina(filtros?: { vehiculoId?: string; empleadoId?: string; placas?: string }): Promise<RegistroGasolina[]> {
+    const headers = await getApiHeaders();
+    
+    let url = `${getApiUrl()}/api/vehiculos/gasolina?`;
+    if (filtros?.vehiculoId) url += `vehiculoId=${filtros.vehiculoId}&`;
+    if (filtros?.empleadoId) url += `empleadoId=${filtros.empleadoId}&`;
+    if (filtros?.placas) url += `placas=${filtros.placas}&`;
+    
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error('Error al obtener registros de gasolina');
+    return res.json();
+  },
+
+  async crearRegistroGasolina(registro: Omit<RegistroGasolina, 'id' | 'created_at'>): Promise<RegistroGasolina> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/gasolina`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(registro)
+    });
+    if (!res.ok) throw new Error('Error al crear registro de gasolina');
+    return res.json();
+  },
+};
+
+export interface AuditoriaTarjeta {
+  id: string;
+  tarjeta: string;
+  metodo_pago: string;
+  titular?: string | null;
+  periodo_inicio?: string | null;
+  periodo_fin?: string | null;
+  total_cargos: number;
+  total_conciliado: number;
+  total_faltante: number;
+  resultado_json: any;
+  creado_por?: string | null;
+  creado_por_nombre?: string | null;
+  creado_en?: string;
+}
+
+export const AuditoriaService = {
+  async guardarAuditoria(auditoria: Omit<AuditoriaTarjeta, 'id' | 'creado_en'>): Promise<AuditoriaTarjeta> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/auditoria`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(auditoria)
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      logger.error('Error al guardar auditor+�a de tarjeta:', errorText);
+      throw new Error(errorText);
+    }
+    const json = await res.json();
+    return json.data as AuditoriaTarjeta;
+  },
+
+  async obtenerAuditorias(tarjeta?: string): Promise<AuditoriaTarjeta[]> {
+    const headers = await getApiHeaders();
+    const url = tarjeta && tarjeta !== 'TODAS' 
+      ? `${getApiUrl()}/api/auditoria?tarjeta=${encodeURIComponent(tarjeta)}`
+      : `${getApiUrl()}/api/auditoria`;
+
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const errorText = await res.text();
+      logger.error('Error al obtener auditor+�as de tarjeta:', errorText);
+      throw new Error(errorText);
+    }
+    const json = await res.json();
+    return (json.auditorias || []) as AuditoriaTarjeta[];
+  },
+
+  async eliminarAuditoria(id: string): Promise<void> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/auditoria/${id}`, {
+      method: 'DELETE',
+      headers
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(errorText);
+    }
+  }
+};
+
+export interface Notificacion {
+  id: string;
+  usuario_id: string;
+  titulo: string;
+  mensaje: string;
+  tipo: string;
+  referencia_id?: string;
+  leido: boolean;
+  created_at: string;
+}
+
 export const NotificacionesService = {
   async getMisNotificaciones(usuario_id: string): Promise<Notificacion[]> {
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/notificaciones/${usuario_id}`, { headers });
-    if (!res.ok) {
-      // Fallback a supabase si el backend no tiene endpoint (mientras lo creamos)
-      const { data, error } = await supabase
-        .from('notificaciones')
-        .select('*')
-        .eq('usuario_id', usuario_id)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      if (error) throw error;
-      return data || [];
-    }
+    if (!res.ok) throw new Error('Error getting notificaciones');
     return res.json();
   },
 
   async marcarComoLeida(id: string): Promise<void> {
-    const { error } = await supabase
-      .from('notificaciones')
-      .update({ leido: true })
-      .eq('id', id);
-    if (error) throw error;
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/notificaciones/${id}/leida`, { method: 'PUT', headers });
+    if (!res.ok) throw new Error('Error marking as read');
+  }
+};
+
+
+export interface Documento {
+  id: string;
+  titulo: string;
+  descripcion?: string | null;
+  contenido_html: string;
+  archivo_pdf_url?: string | null;
+  tipo_documento?: 'TEXTO' | 'PDF';
+  posicion_firma?: string | null;
+  creador_id?: string | null;
+  creador_nombre: string;
+  requiere_todos: boolean;
+  estado: 'BORRADOR' | 'PUBLICADO' | 'ARCHIVADO';
+  created_at?: string;
+  updated_at?: string;
+  total_asignados?: number;
+  total_firmados?: number;
+}
+
+export interface DocumentoFirmado {
+  id: string;
+  documento_id: string;
+  empleado_id: string;
+  empleado_nombre: string;
+  empleado_email?: string | null;
+  estado: 'PENDIENTE' | 'FIRMADO' | 'RECHAZADO';
+  firma_base64?: string | null;
+  firma_url?: string | null;
+  pdf_firmado_url?: string | null;
+  ip_registro?: string | null;
+  ubicacion_gps?: string | null;
+  dispositivo_info?: string | null;
+  hash_sha256?: string | null;
+  motivo_rechazo?: string | null;
+  firmado_at?: string | null;
+  created_at?: string;
+  documentos?: Documento;
+}
+
+export const DocumentoService = {
+  async obtenerDocumentosAdmin(): Promise<Documento[]> {
+    const { data: docs, error } = await supabase
+      .from('documentos')
+      .select('*, documentos_firmados(id, estado)')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      logger.error('Error al obtener documentos (Admin):', error);
+      throw error;
+    }
+
+    return (docs || []).map((doc: any) => {
+      const firmadosList = doc.documentos_firmados || [];
+      return {
+        ...doc,
+        total_asignados: firmadosList.length,
+        total_firmados: firmadosList.filter((f: any) => f.estado === 'FIRMADO').length,
+      };
+    }) as Documento[];
+  },
+
+  async crearDocumento(
+    doc: Omit<Documento, 'id' | 'created_at' | 'updated_at'>,
+    empleadosIds: string[]
+  ): Promise<Documento> {
+    let { data: newDoc, error: docError } = await supabase
+      .from('documentos')
+      .insert([doc])
+      .select()
+      .single();
+
+    if (docError) {
+      if (
+        docError.message?.includes('posicion_firma') ||
+        docError.code === 'PGRST204' ||
+        docError.details?.includes('posicion_firma')
+      ) {
+        const { posicion_firma, ...docSinPosicion } = doc;
+        const { data: retryDoc, error: retryErr } = await supabase
+          .from('documentos')
+          .insert([docSinPosicion])
+          .select()
+          .single();
+
+        if (retryErr) {
+          logger.error('Error al crear documento (reintento sin posicion_firma):', retryErr);
+          throw retryErr;
+        }
+        newDoc = retryDoc;
+      } else {
+        logger.error('Error al crear documento:', docError);
+        throw docError;
+      }
+    }
+
+    let targetEmpleados: Usuario[] = [];
+    if (doc.requiere_todos || empleadosIds.length === 0) {
+      const { data: users } = await supabase.from('usuarios').select('*');
+      targetEmpleados = users || [];
+    } else {
+      const { data: users } = await supabase.from('usuarios').select('*').in('id', empleadosIds);
+      targetEmpleados = users || [];
+    }
+
+    if (targetEmpleados.length > 0) {
+      const asignaciones = targetEmpleados.map((emp) => ({
+        documento_id: newDoc.id,
+        empleado_id: emp.id,
+        empleado_nombre: emp.nombre,
+        empleado_email: emp.email,
+        estado: 'PENDIENTE',
+      }));
+
+      const { error: asigError } = await supabase
+        .from('documentos_firmados')
+        .insert(asignaciones);
+
+      if (asigError) {
+        logger.error('Error al asignar empleados al documento:', asigError);
+      }
+    }
+
+    return newDoc as Documento;
+  },
+
+  async obtenerMisDocumentosEmpleado(empleadoId: string): Promise<DocumentoFirmado[]> {
+    const { data, error } = await supabase
+      .from('documentos_firmados')
+      .select('*, documentos(*)')
+      .eq('empleado_id', empleadoId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      logger.error('Error al obtener documentos del empleado:', error);
+      throw error;
+    }
+    return (data || []) as DocumentoFirmado[];
+  },
+
+  async obtenerFirmasDeDocumento(documentoId: string): Promise<DocumentoFirmado[]> {
+    const { data, error } = await supabase
+      .from('documentos_firmados')
+      .select('*')
+      .eq('documento_id', documentoId)
+      .order('empleado_nombre', { ascending: true });
+
+    if (error) {
+      logger.error('Error al obtener detalle de firmas:', error);
+      throw error;
+    }
+    return (data || []) as DocumentoFirmado[];
+  },
+
+  async registrarFirma(
+    idAsignacion: string,
+    params: {
+      firmaBase64: string;
+      pdfUrl?: string;
+      ipRegistro?: string;
+      ubicacionGps?: string;
+      dispositivoInfo?: string;
+      hashSha256?: string;
+    }
+  ): Promise<DocumentoFirmado> {
+    const { data, error } = await supabase
+      .from('documentos_firmados')
+      .update({
+        estado: 'FIRMADO',
+        firma_base64: params.firmaBase64,
+        pdf_firmado_url: params.pdfUrl,
+        ip_registro: params.ipRegistro,
+        ubicacion_gps: params.ubicacionGps,
+        dispositivo_info: params.dispositivoInfo,
+        hash_sha256: params.hashSha256,
+        firmado_at: new Date().toISOString(),
+      })
+      .eq('id', idAsignacion)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      logger.error('Error al registrar firma:', error);
+      throw error;
+    }
+    return (data || { id: idAsignacion, estado: 'FIRMADO' }) as DocumentoFirmado;
+  },
+
+  async eliminarDocumento(id: string): Promise<void> {
+    const { error } = await supabase.from('documentos').delete().eq('id', id);
+    if (error) {
+      logger.error('Error al eliminar documento:', error);
+      throw error;
+    }
+  },
+
+  async subirPdfOriginal(fileUri: string, fileName: string): Promise<string> {
+    try {
+      const response = await fetch(fileUri);
+      const blob = await response.blob();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `originales/${Date.now()}_${cleanFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documentos-firmados')
+        .upload(filePath, blob, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        logger.error('Error al subir PDF original:', uploadError);
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (e) {
+      logger.error('Fallo la subida de PDF original:', e);
+      throw e;
+    }
+  },
+
+  async subirPdfFirmado(fileUri: string, fileName: string): Promise<string> {
+    try {
+      const response = await fetch(fileUri);
+      const blob = await response.blob();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `firmados/${Date.now()}_${cleanFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documentos-firmados')
+        .upload(filePath, blob, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        logger.error('Error al subir PDF firmado:', uploadError);
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage.from('documentos-firmados').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (e) {
+      logger.error('Fallo la subida de PDF firmado:', e);
+      throw e;
+    }
   }
 };

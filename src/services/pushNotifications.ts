@@ -1,7 +1,8 @@
+import { supabase } from '@/services/supabase';
 import * as Device from 'expo-device';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
-import { supabase } from '@/services/supabase';
+import {} from '@/services/supabase';
 
 const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
@@ -104,3 +105,4 @@ export class PushNotificationService {
     }
   }
 }
+

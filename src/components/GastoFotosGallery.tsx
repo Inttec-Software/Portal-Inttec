@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from '
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Spacing, BorderRadius } from '@/constants/theme';
-import { Gasto, GastoHelper } from '@/services/supabase';
+import { Gasto, GastoHelper, supabase } from '@/services/supabase';
 
 interface GastoFotosGalleryProps {
   gasto?: Gasto | null;

@@ -6,7 +6,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { AuthService } from '@/services/supabase';
+import { AuthService, supabase } from '@/services/supabase';
 import DevToolsFAB from '@/components/DevToolsFAB';
 
 export default function EmpleadoLayout() {

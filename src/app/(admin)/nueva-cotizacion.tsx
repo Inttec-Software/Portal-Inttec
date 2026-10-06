@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, ScrollView, TouchableOpacity, Alert, StyleSheet, useWindowDimensions, TextInput, KeyboardAvoidingView, Platform, Keyboard, Pressable } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -7,7 +8,7 @@ import CustomInput from '@/components/CustomInput';
 import { Cotizacion, CotizacionLinea } from '@/types/ventas';
 import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { ThemedText } from '@/components/themed-text';
-import { supabase } from '@/services/supabase';
+import {} from '@/services/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
@@ -245,9 +246,20 @@ export default function NuevaCotizacionScreen() {
     }
   }, [user?.nombre, editId]);
 
-  const subtotal = useMemo(() => cotizacion.lineas.reduce((acc, item) => acc + (item.cantidad * item.precioUnitario), 0), [cotizacion.lineas]);
-  const iva = useMemo(() => cotizacion.lineas.reduce((acc, item) => acc + ((item.cantidad * item.precioUnitario) * (item.impuestoPorcentaje / 100)), 0), [cotizacion.lineas]);
-  const total = subtotal + iva;
+  const subtotal = useMemo(() => {
+    const sum = cotizacion.lineas.reduce((acc, item) => acc + (Number(item.cantidad || 0) * Number(item.precioUnitario || 0)), 0);
+    return Math.round(sum * 100) / 100;
+  }, [cotizacion.lineas]);
+
+  const iva = useMemo(() => {
+    const sum = cotizacion.lineas.reduce((acc, item) => {
+      const lineaSub = Number(item.cantidad || 0) * Number(item.precioUnitario || 0);
+      return acc + (lineaSub * (Number(item.impuestoPorcentaje || 0) / 100));
+    }, 0);
+    return Math.round(sum * 100) / 100;
+  }, [cotizacion.lineas]);
+
+  const total = useMemo(() => Math.round((subtotal + iva) * 100) / 100, [subtotal, iva]);
 
   const handleAddLine = () => {
     const nuevaLinea: CotizacionLinea = {
@@ -272,7 +284,7 @@ export default function NuevaCotizacionScreen() {
           const updated = { ...linea, [field]: value };
           // Recalculate importe for this line
           if (field === 'cantidad' || field === 'precioUnitario') {
-            updated.importe = (updated.cantidad || 0) * (updated.precioUnitario || 0);
+            updated.importe = Math.round(((updated.cantidad || 0) * (updated.precioUnitario || 0)) * 100) / 100;
           }
           return updated;
         }
@@ -298,7 +310,7 @@ export default function NuevaCotizacionScreen() {
             [strKey]: sanitized,
             [field]: numVal 
           };
-          updated.importe = (updated.cantidad || 0) * (updated.precioUnitario || 0);
+          updated.importe = Math.round(((updated.cantidad || 0) * (updated.precioUnitario || 0)) * 100) / 100;
           return updated;
         }
         return linea;
@@ -525,7 +537,7 @@ export default function NuevaCotizacionScreen() {
                           <Ionicons name="person-circle-outline" size={24} color={themeColors.primary} />
                           <View style={{ flex: 1 }}>
                             <ThemedText style={{ fontWeight: '600', color: themeColors.text }}>{client.nombre}</ThemedText>
-                            {(client.rfc || client.correo_electronico) && (
+                            {!!(client.rfc || client.correo_electronico) && (
                               <ThemedText style={{ fontSize: 11, color: themeColors.textSecondary }}>
                                 {client.rfc}{client.correo_electronico ? ` • ${client.correo_electronico}` : ''}
                               </ThemedText>
@@ -830,15 +842,15 @@ export default function NuevaCotizacionScreen() {
           <View style={[styles.totalsCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
             <View style={styles.totalsRow}>
               <ThemedText style={[styles.totalLabel, { color: themeColors.textSecondary }]}>Subtotal:</ThemedText>
-              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
+              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${subtotal.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</ThemedText>
             </View>
             <View style={styles.totalsRow}>
               <ThemedText style={[styles.totalLabel, { color: themeColors.textSecondary }]}>IVA (Calculado):</ThemedText>
-              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
+              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${iva.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</ThemedText>
             </View>
             <View style={[styles.totalsRow, styles.totalFinalRow, { borderTopColor: themeColors.border }]}>
               <ThemedText style={[styles.totalFinalLabel, { color: themeColors.text }]}>Total a Cobrar:</ThemedText>
-              <ThemedText style={[styles.totalFinalValue, { color: themeColors.primary }]}>${total.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
+              <ThemedText style={[styles.totalFinalValue, { color: themeColors.primary }]}>${total.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</ThemedText>
             </View>
           </View>
           
@@ -1096,3 +1108,4 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
 });
+

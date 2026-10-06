@@ -1,6 +1,8 @@
+import { supabase } from '@/services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
-import { supabase, CompanyService } from './supabase';
+import { CompanyService } from './supabase';
+import { apiClient } from './apiClient';
 import { Paths, File, EncodingType } from 'expo-file-system';
 
 const getOfflineQueueKey = () => `offline_gastos_queue_${CompanyService.getActiveCompany()}`;
@@ -205,20 +207,11 @@ export const SyncService = {
               const fileName = `${item.empleado_id}/ticket_${Date.now()}_${i}.${ext}`;
               const arrayBuffer = base64ToArrayBuffer(fItem.base64);
 
-              const { error: uploadError } = await supabase.storage
-                .from('tickets')
-                .upload(fileName, arrayBuffer, {
-                  contentType: contentType,
-                  upsert: true,
-                });
-
-              if (uploadError) {
-                console.error(`Storage ticket upload error [${i}]:`, uploadError.message);
-              } else {
-                const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-                if (urlData?.publicUrl) {
-                  uploadedFotoUrls.push(urlData.publicUrl);
-                }
+              try {
+                const url = await apiClient.uploadBase64(fItem.base64, fileName, contentType, 'tickets');
+                uploadedFotoUrls.push(url);
+              } catch(e) {
+                console.error(`Storage ticket upload error: ${e}`);
               }
             }
             if (uploadedFotoUrls.length > 0) {
@@ -253,20 +246,11 @@ export const SyncService = {
               const fileName = `${item.empleado_id}/factura_${Date.now()}_${i}.${ext}`;
               const arrayBuffer = base64ToArrayBuffer(fItem.base64);
 
-              const { data: _uploadData, error: uploadError } = await supabase.storage
-                .from('tickets')
-                .upload(fileName, arrayBuffer, {
-                  contentType: contentType,
-                  upsert: true,
-                });
-
-              if (uploadError) {
-                console.error(`Storage invoice upload error [${i}]:`, uploadError.message);
-              } else {
-                const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-                if (urlData?.publicUrl) {
-                  uploadedInvoiceUrls.push(urlData.publicUrl);
-                }
+              try {
+                const url = await apiClient.uploadBase64(fItem.base64, fileName, contentType, 'tickets');
+                uploadedInvoiceUrls.push(url);
+              } catch(e) {
+                console.error(`Storage invoice upload error: ${e}`);
               }
             }
             if (uploadedInvoiceUrls.length > 0) {
@@ -275,10 +259,7 @@ export const SyncService = {
           }
 
           // 2. Insertar registro en Supabase Gastos Table
-          const { data: insertedData, error: dbError } = await supabase
-            .from('gastos')
-            .insert([
-              {
+          const gastoData = {
                 empleado_id: item.empleado_id,
                 empleado_nombre: item.empleado_nombre,
                 monto: item.monto,
@@ -299,21 +280,15 @@ export const SyncService = {
                 tipo_servicio_proyecto: item.tipo_servicio_proyecto || null,
                 detalle_servicio_proyecto: item.detalle_servicio_proyecto || null,
                 created_at: item.created_at,
-              },
-            ])
-            .select();
-
-          if (dbError) {
-            throw new Error(`Database insert error: ${dbError.message}`);
-          }
+              };
+              
+          const insertedData = await apiClient.post('/api/reportes/gastos', gastoData).then(r => [r]);
 
           // 3. Si es combustible y se insertó con éxito, insertar el registro de gasolina
           if (insertedData && insertedData.length > 0 && item.vehiculo_id) {
             const gastoId = insertedData[0].id;
-            const { error: gasError } = await supabase
-              .from('registro_gasolina')
-              .insert([
-                {
+            try {
+              await apiClient.post('/api/vehiculos/gasolina', {
                   gasto_id: gastoId,
                   vehiculo_id: item.vehiculo_id,
                   empleado_id: item.empleado_id,
@@ -322,10 +297,8 @@ export const SyncService = {
                   litros: item.litros || 0,
                   costo_total: item.monto,
                   ticket_foto_url: publicUrl || null,
-                },
-              ]);
-
-            if (gasError) {
+              });
+            } catch(gasError) {
               console.error('Failed to insert gasoline log during sync:', gasError);
             }
           }

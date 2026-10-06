@@ -1,28 +1,23 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
 export const getAsistenciaHoy = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { empleado_id } = req.params;
     const { fecha } = req.query;
 
     if (!fecha) return res.status(400).json({ error: 'Fecha es requerida' });
 
-    const { data, error } = await client
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleado_id)
-      .eq('fecha', fecha as string)
-      .order('creado_en', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const result = await pool.query(
+      `SELECT * FROM asistencias WHERE empleado_id = $1 AND fecha = $2 ORDER BY creado_en DESC LIMIT 1`,
+      [empleado_id, fecha]
+    );
 
-    if (error) throw error;
-    return res.json(data || null);
+    return res.json(result.rows[0] || null);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -33,17 +28,19 @@ export const registrarEntrada = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const payload = req.body;
 
-    const { data, error } = await client
-      .from('asistencias')
-      .insert([payload])
-      .select()
-      .single();
+    const keys = Object.keys(payload);
+    const values = Object.values(payload);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
 
-    if (error) throw error;
-    return res.json(data);
+    const result = await pool.query(
+      `INSERT INTO asistencias (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+      values
+    );
+
+    return res.json(result.rows[0]);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -54,18 +51,19 @@ export const registrarSalida = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { id, ...payload } = req.body;
 
-    const { data, error } = await client
-      .from('asistencias')
-      .update(payload)
-      .eq('id', id)
-      .select()
-      .single();
+    const keys = Object.keys(payload);
+    const values = Object.values(payload);
+    const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
 
-    if (error) throw error;
-    return res.json(data);
+    const result = await pool.query(
+      `UPDATE asistencias SET ${setClause} WHERE id = $${keys.length + 1} RETURNING *`,
+      [...values, id]
+    );
+
+    return res.json(result.rows[0]);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -76,17 +74,15 @@ export const getHistorial = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { empleado_id } = req.params;
 
-    const { data, error } = await client
-      .from('asistencias')
-      .select('*')
-      .eq('empleado_id', empleado_id)
-      .order('fecha', { ascending: false });
+    const result = await pool.query(
+      `SELECT * FROM asistencias WHERE empleado_id = $1 ORDER BY fecha DESC`,
+      [empleado_id]
+    );
 
-    if (error) throw error;
-    return res.json(data || []);
+    return res.json(result.rows || []);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

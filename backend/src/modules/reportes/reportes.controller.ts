@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
-import { PostgrestError } from '@supabase/supabase-js';
+import { getDbPool } from '../../config/database';
 
 const formatGasto = (g: any) => {
   let cat = 'Sin clasificar';
@@ -39,47 +38,50 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const limitQuery = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
-    let gastosQuery = client.from('gastos').select(`
-      *,
-      subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-      proveedor_rel:proveedores(id, nombre),
-      cliente_rel:clientes(id, nombre),
-      sucursal_rel:sucursales_cliente(id, nombre)
-    `).order('created_at', { ascending: false });
-
+    let limitSql = '';
     if (limitQuery && !isNaN(limitQuery) && limitQuery > 0) {
-      gastosQuery = gastosQuery.limit(limitQuery);
+      limitSql = `LIMIT ${limitQuery}`;
     }
 
     const [gastosRes, usersRes, vehiculosRes, gasolinaRes, provRes] = await Promise.all([
-      gastosQuery,
-      client.from('usuarios').select('*').order('nombre'),
-      client.from('vehiculos').select('*').eq('archivado', false).order('marca'),
-      client.from('registro_gasolina').select('*, vehiculos(marca, modelo)').order('created_at', { ascending: false }).limit(250),
-      client.from('proveedores').select('id, nombre, rfc').order('nombre')
+      pool.query(`
+        SELECT g.*,
+          (SELECT row_to_json(s_obj) FROM (
+            SELECT s.id, s.nombre, s.categoria_id,
+                   (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
+            FROM subcategorias s WHERE s.id = g.subcategoria_id
+          ) s_obj) as subcategoria_rel,
+          (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
+          (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
+          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
+        FROM gastos g
+        ORDER BY g.created_at DESC
+        ${limitSql}
+      `),
+      pool.query('SELECT * FROM usuarios ORDER BY nombre'),
+      pool.query('SELECT * FROM vehiculos WHERE activo = true ORDER BY marca'),
+      pool.query(`
+        SELECT rg.*, 
+               (SELECT row_to_json(v_obj) FROM (SELECT marca, modelo FROM vehiculos v WHERE v.id = rg.vehiculo_id) v_obj) as vehiculos
+        FROM registro_gasolina rg
+        ORDER BY rg.created_at DESC
+        LIMIT 250
+      `),
+      pool.query('SELECT id, nombre, rfc FROM proveedores ORDER BY nombre')
     ]);
 
-    if (usersRes.error) throw usersRes.error;
-
-
-    let rawGastos = gastosRes.data || [];
-    if (gastosRes.error) {
-      console.warn('Relational gastos query failed, attempting basic select:', gastosRes.error.message);
-      const fallbackRes = await client.from('gastos').select('*').order('created_at', { ascending: false });
-      rawGastos = fallbackRes.data || [];
-    }
-
+    let rawGastos = gastosRes.rows || [];
     const enrichedGastos = rawGastos.map(formatGasto);
 
     return res.json({
       gastos: enrichedGastos,
-      usuarios: usersRes.data || [],
-      vehiculos: vehiculosRes.data || [],
-      registrosGasolina: gasolinaRes.data || [],
-      proveedores: provRes.data || []
+      usuarios: usersRes.rows || [],
+      vehiculos: vehiculosRes.rows || [],
+      registrosGasolina: gasolinaRes.rows || [],
+      proveedores: provRes.rows || []
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -91,29 +93,34 @@ export const getEmpleadoGastos = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'No autorizado' });
 
     const limitQuery = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
-    let query = client.from('gastos').select(`
-        *,
-        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-        proveedor_rel:proveedores(id, nombre),
-        cliente_rel:clientes(id, nombre),
-        sucursal_rel:sucursales_cliente(id, nombre)
-      `).eq('empleado_id', userId).order('created_at', { ascending: false });
-
+    let limitSql = '';
     if (limitQuery && !isNaN(limitQuery) && limitQuery > 0) {
-      query = query.limit(limitQuery);
+      limitSql = `LIMIT ${limitQuery}`;
     }
 
-    const gastosRes = await query;
+    const gastosRes = await pool.query(`
+        SELECT g.*,
+          (SELECT row_to_json(s_obj) FROM (
+            SELECT s.id, s.nombre, s.categoria_id,
+                   (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
+            FROM subcategorias s WHERE s.id = g.subcategoria_id
+          ) s_obj) as subcategoria_rel,
+          (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
+          (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
+          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
+        FROM gastos g
+        WHERE g.empleado_id = $1
+        ORDER BY g.created_at DESC
+        ${limitSql}
+    `, [userId]);
 
-    const rawGastos = gastosRes.data || [];
-
-
+    const rawGastos = gastosRes.rows || [];
     const gastosEnriquecidos = rawGastos.map(formatGasto);
 
     return res.json({ gastos: gastosEnriquecidos });
@@ -127,23 +134,25 @@ export const getGastoById = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
 
-    const { data, error } = await client
-      .from('gastos')
-      .select(`
-        *,
-        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-        proveedor_rel:proveedores(id, nombre),
-        cliente_rel:clientes(id, nombre),
-        sucursal_rel:sucursales_cliente(id, nombre)
-      `)
-      .eq('id', id)
-      .single();
+    const gastosRes = await pool.query(`
+        SELECT g.*,
+          (SELECT row_to_json(s_obj) FROM (
+            SELECT s.id, s.nombre, s.categoria_id,
+                   (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
+            FROM subcategorias s WHERE s.id = g.subcategoria_id
+          ) s_obj) as subcategoria_rel,
+          (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
+          (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
+          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
+        FROM gastos g
+        WHERE g.id = $1
+    `, [id]);
 
-    if (error) throw error;
+    const data = gastosRes.rows[0];
 
     return res.json({ gasto: data });
   } catch (error: any) {
@@ -156,31 +165,32 @@ export const updateGastoStatus = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
     const { status, payload, actor_id, monto } = req.body;
 
-    const { error: updateError } = await client
-      .from('gastos')
-      .update(payload)
-      .eq('id', id);
-
-    if (updateError) throw updateError;
+    if (payload && Object.keys(payload).length > 0) {
+      const keys = Object.keys(payload);
+      const values = Object.values(payload);
+      const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
+      
+      await pool.query(`UPDATE gastos SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, id]);
+    }
 
     let actionName = 'UPDATE';
     if (status === 'APPROVED') actionName = 'APPROVE';
     else if (status === 'REJECTED') actionName = 'REJECT';
     else if (status === 'PENDING') actionName = 'REVERT';
 
-    await client.from('audit_logs').insert([{
-      action: actionName,
-      actor_id,
-      target_id: id,
-      details: req.body.audit_details || (status === 'PENDING'
-        ? `Gasto por ${monto} devuelto a revisión por Admin.`
-        : `Gasto por ${monto} revisado por Admin. Estado final: ${status}`),
-    }]);
+    const details = req.body.audit_details || (status === 'PENDING'
+      ? `Gasto por ${monto} devuelto a revisión por Admin.`
+      : `Gasto por ${monto} revisado por Admin. Estado final: ${status}`);
+
+    await pool.query(
+      `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)`,
+      [actionName, actor_id, id, details]
+    );
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -193,18 +203,18 @@ export const getSalesForLinking = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const [ventasRes, cliRes, sucRes] = await Promise.all([
-      client.from('ventas').select('*').order('fecha', { ascending: false }).limit(50),
-      client.from('clientes').select('*').order('nombre'),
-      client.from('sucursales_cliente').select('*').order('nombre'),
+      pool.query('SELECT * FROM ventas ORDER BY fecha DESC LIMIT 50'),
+      pool.query('SELECT * FROM clientes ORDER BY nombre'),
+      pool.query('SELECT * FROM sucursales_cliente ORDER BY nombre'),
     ]);
 
     return res.json({
-      ventas: ventasRes.data || [],
-      clientes: cliRes.data || [],
-      sucursales: sucRes.data || [],
+      ventas: ventasRes.rows || [],
+      clientes: cliRes.rows || [],
+      sucursales: sucRes.rows || [],
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -216,40 +226,62 @@ export const getExportData = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { type } = req.params;
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
 
     if (type === 'asistencias') {
-      let query = client.from('asistencias').select('*').order('fecha', { ascending: false });
-      if (startDate) query = query.gte('fecha', startDate);
-      if (endDate) query = query.lte('fecha', endDate);
-      const { data, error } = await query;
-      if (error) throw error;
-      return res.json(data || []);
+      let query = 'SELECT * FROM asistencias';
+      const params = [];
+      const conditions = [];
+      
+      if (startDate) {
+        params.push(startDate);
+        conditions.push(`fecha >= $${params.length}`);
+      }
+      if (endDate) {
+        params.push(endDate);
+        conditions.push(`fecha <= $${params.length}`);
+      }
+      if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
+      }
+      query += ' ORDER BY fecha DESC';
+      
+      const { rows } = await pool.query(query, params);
+      return res.json(rows || []);
     } else if (type === 'inventario') {
       const [prodRes, catRes] = await Promise.all([
-        client.from('productos').select('*').order('nombre_oficial'),
-        client.from('categorias_productos').select('*').order('nombre'),
+        pool.query('SELECT * FROM productos ORDER BY nombre_oficial'),
+        pool.query('SELECT * FROM categorias_productos ORDER BY nombre'),
       ]);
-      if (prodRes.error) throw prodRes.error;
-      if (catRes.error) throw catRes.error;
-      return res.json({ productos: prodRes.data || [], categorias: catRes.data || [] });
+      return res.json({ productos: prodRes.rows || [], categorias: catRes.rows || [] });
     } else if (type === 'consumos') {
-      let query = client.from('movimientos_inventario')
-        .select('*, producto:productos(nombre_oficial, sku_interno, precio_unitario)')
-        .eq('tipo', 'SALIDA')
-        .order('fecha', { ascending: false });
-      if (startDate) query = query.gte('fecha', `${startDate}T00:00:00`);
-      if (endDate) query = query.lte('fecha', `${endDate}T23:59:59.999Z`);
+      let query = `
+        SELECT m.*, 
+               (SELECT row_to_json(p_obj) FROM (SELECT nombre_oficial, sku_interno, precio_unitario FROM productos p WHERE p.id = m.producto_id) p_obj) as producto
+        FROM movimientos_inventario m
+        WHERE m.tipo = 'SALIDA'
+      `;
+      const params: any[] = [];
+      if (startDate) {
+        params.push(`${startDate}T00:00:00`);
+        query += ` AND m.fecha >= $${params.length}`;
+      }
+      if (endDate) {
+        params.push(`${endDate}T23:59:59.999Z`);
+        query += ` AND m.fecha <= $${params.length}`;
+      }
+      query += ' ORDER BY m.fecha DESC';
+      
       const [movRes, userRes] = await Promise.all([
-        query,
-        client.from('usuarios').select('id, nombre, email')
+        pool.query(query, params),
+        pool.query('SELECT id, nombre, email FROM usuarios')
       ]);
-      if (movRes.error) throw movRes.error;
-      const userMap = new Map((userRes.data || []).map((u: any) => [u.id, u]));
-      const dataWithUsers = (movRes.data || []).map((m: any) => {
+      
+      const userMap = new Map((userRes.rows || []).map((u: any) => [u.id, u]));
+      const dataWithUsers = (movRes.rows || []).map((m: any) => {
         const u = userMap.get(m.creado_por || m.empleado_id);
         const uName = u?.nombre || m.empleado_nombre || m.usuario_nombre || 'No especificado / Almacén';
         return {
@@ -264,20 +296,30 @@ export const getExportData = async (req: Request, res: Response) => {
       });
       return res.json(dataWithUsers);
     } else if (type === 'ventas') {
-      let query = client.from('ventas').select('*').order('fecha', { ascending: false });
-      if (startDate) query = query.gte('fecha', startDate);
-      if (endDate) query = query.lte('fecha', endDate);
+      let query = 'SELECT * FROM ventas';
+      const params: any[] = [];
+      const conditions: string[] = [];
+      if (startDate) {
+        params.push(startDate);
+        conditions.push(`fecha >= $${params.length}`);
+      }
+      if (endDate) {
+        params.push(endDate);
+        conditions.push(`fecha <= $${params.length}`);
+      }
+      if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
+      }
+      query += ' ORDER BY fecha DESC';
       
       const [ventasRes, usersRes] = await Promise.all([
-        query,
-        client.from('usuarios').select('id, nombre, email')
+        pool.query(query, params),
+        pool.query('SELECT id, nombre, email FROM usuarios')
       ]);
       
-      if (ventasRes.error) throw ventasRes.error;
+      const userMap = new Map((usersRes.rows || []).map((u: any) => [u.id, u]));
       
-      const userMap = new Map((usersRes.data || []).map((u: any) => [u.id, u]));
-      
-      const mappedData = (ventasRes.data || []).map((v: any) => {
+      const mappedData = (ventasRes.rows || []).map((v: any) => {
         const usuario = userMap.get(v.registrado_por);
         return {
           ...v,
@@ -290,22 +332,35 @@ export const getExportData = async (req: Request, res: Response) => {
       
       return res.json(mappedData);
     } else if (type === 'gastos') {
-      let query = client.from('gastos').select(`
-        *,
-        subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
-        proveedor_rel:proveedores(id, nombre),
-        cliente_rel:clientes(id, nombre),
-        sucursal_rel:sucursales_cliente(id, nombre)
-      `).order('created_at', { ascending: false });
+      let query = `
+        SELECT g.*,
+          (SELECT row_to_json(s_obj) FROM (
+            SELECT s.id, s.nombre, s.categoria_id,
+                   (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
+            FROM subcategorias s WHERE s.id = g.subcategoria_id
+          ) s_obj) as subcategoria_rel,
+          (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
+          (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
+          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
+        FROM gastos g
+      `;
+      const params: any[] = [];
+      const conditions: string[] = [];
       if (startDate) {
-        query = query.gte('created_at', `${startDate}T00:00:00`);
+        params.push(`${startDate}T00:00:00`);
+        conditions.push(`g.created_at >= $${params.length}`);
       }
       if (endDate) {
-        query = query.lte('created_at', `${endDate}T23:59:59.999Z`);
+        params.push(`${endDate}T23:59:59.999Z`);
+        conditions.push(`g.created_at <= $${params.length}`);
       }
-      const { data, error } = await query;
-      if (error) throw error;
-      return res.json((data || []).map(formatGasto));
+      if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
+      }
+      query += ' ORDER BY g.created_at DESC';
+      
+      const { rows } = await pool.query(query, params);
+      return res.json((rows || []).map(formatGasto));
     }
 
     return res.status(400).json({ error: 'Tipo de exportación inválido' });
@@ -319,12 +374,11 @@ export const updateGasto = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
     const { updatePayload, gasolinaPayload, ...restPayload } = req.body;
     
-    // Support both new {updatePayload} format and old direct payload format
     const payload = updatePayload || restPayload;
 
     if (payload.estado_reembolso !== undefined) {
@@ -335,36 +389,38 @@ export const updateGasto = async (req: Request, res: Response) => {
     }
 
     // Get old gasto to see if it's linked to a sale
-    const { data: oldGasto } = await client
-      .from('gastos')
-      .select('venta_id')
-      .eq('id', id)
-      .single();
+    const oldGastoRes = await pool.query('SELECT venta_id FROM gastos WHERE id = $1', [id]);
+    const oldGasto = oldGastoRes.rows[0];
 
-    const { error: updateError } = await client
-      .from('gastos')
-      .update(payload)
-      .eq('id', id);
-
-    if (updateError) throw updateError;
+    if (payload && Object.keys(payload).length > 0) {
+      const keys = Object.keys(payload);
+      const values = Object.values(payload);
+      const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
+      
+      await pool.query(`UPDATE gastos SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, id]);
+    }
 
     if (gasolinaPayload) {
       if (gasolinaPayload.action === 'upsert') {
-        const { error: gasError } = await client
-          .from('registro_gasolina')
-          .upsert([{ ...gasolinaPayload.data, gasto_id: id }], { onConflict: 'gasto_id' });
-        if (gasError) throw gasError;
+        const gasKeys = Object.keys(gasolinaPayload.data);
+        const gasValues = Object.values(gasolinaPayload.data);
+        gasKeys.push('gasto_id');
+        gasValues.push(id);
+        
+        const placeholders = gasKeys.map((_, i) => `$${i + 1}`).join(', ');
+        const updates = gasKeys.map((k) => `${k} = EXCLUDED.${k}`).join(', ');
+        
+        await pool.query(
+          `INSERT INTO registro_gasolina (${gasKeys.join(', ')}) VALUES (${placeholders}) ON CONFLICT (gasto_id) DO UPDATE SET ${updates}`,
+          gasValues
+        );
       } else if (gasolinaPayload.action === 'delete') {
-        const { error: gasError } = await client
-          .from('registro_gasolina')
-          .delete()
-          .eq('gasto_id', id);
-        if (gasError) throw gasError;
+        await pool.query('DELETE FROM registro_gasolina WHERE gasto_id = $1', [id]);
       }
     }
 
     if (oldGasto && oldGasto.venta_id) {
-      await recalculateVentaTotalsInternal(client, oldGasto.venta_id);
+      await recalculateVentaTotalsInternal(pool, oldGasto.venta_id);
     }
 
     return res.json({ success: true });
@@ -373,28 +429,18 @@ export const updateGasto = async (req: Request, res: Response) => {
   }
 };
 
-export const recalculateVentaTotalsInternal = async (client: any, id: string) => {
-  const { data: venta, error: ventaErr } = await client
-    .from('ventas')
-    .select('precio_total_facturado')
-    .eq('id', id)
-    .single();
-  if (ventaErr || !venta) throw ventaErr || new Error('Sale not found');
+export const recalculateVentaTotalsInternal = async (pool: any, id: string) => {
+  const ventaRes = await pool.query('SELECT precio_total_facturado FROM ventas WHERE id = $1', [id]);
+  const venta = ventaRes.rows[0];
+  if (!venta) throw new Error('Sale not found');
 
-  const { data: partidas, error: partidasErr } = await client
-    .from('ventas_partidas')
-    .select('costo_total_proveedor')
-    .eq('venta_id', id);
-  if (partidasErr) throw partidasErr;
+  const partidasRes = await pool.query('SELECT costo_total_proveedor FROM ventas_partidas WHERE venta_id = $1', [id]);
+  const partidas = partidasRes.rows;
 
   const costoPartidas = (partidas || []).reduce((sum: number, p: any) => sum + (Number(p.costo_total_proveedor) || 0), 0);
 
-  const { data: gastos, error: gastosErr } = await client
-    .from('gastos')
-    .select('monto')
-    .eq('venta_id', id)
-    .eq('status', 'APPROVED');
-  if (gastosErr) throw gastosErr;
+  const gastosRes = await pool.query(`SELECT monto FROM gastos WHERE venta_id = $1 AND status = 'APPROVED'`, [id]);
+  const gastos = gastosRes.rows;
 
   const costoGastos = (gastos || []).reduce((sum: number, g: any) => sum + (Number(g.monto) || 0), 0);
 
@@ -403,17 +449,11 @@ export const recalculateVentaTotalsInternal = async (client: any, id: string) =>
   const utilidadBruta = Math.round((precioTotal - costoTotal) * 100) / 100;
   const margenPorcentual = precioTotal > 0 ? Math.round((utilidadBruta / precioTotal) * 10000) / 10000 : 0;
 
-  const { error: updateErr } = await client
-    .from('ventas')
-    .update({
-      costo_total: costoTotal,
-      utilidad_bruta: utilidadBruta,
-      margen_porcentual: margenPorcentual
-    })
-    .eq('id', id);
+  await pool.query(
+    'UPDATE ventas SET costo_total = $1, utilidad_bruta = $2, margen_porcentual = $3 WHERE id = $4',
+    [costoTotal, utilidadBruta, margenPorcentual, id]
+  );
   
-  if (updateErr) throw updateErr;
-
   return { costoTotal, utilidadBruta, margenPorcentual };
 };
 
@@ -422,10 +462,10 @@ export const recalculateVentaTotals = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
-    const result = await recalculateVentaTotalsInternal(client, id as string);
+    const result = await recalculateVentaTotalsInternal(pool, id as string);
     
     return res.json({ success: true, ...result });
   } catch (error: any) {
@@ -438,13 +478,12 @@ export const deleteGasto = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { id } = req.params;
 
-    const { error } = await client.from('gastos').delete().eq('id', id);
+    await pool.query('DELETE FROM gastos WHERE id = $1', [id]);
 
-    if (error) throw error;
     return res.json({ success: true });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -456,25 +495,33 @@ export const saveQuickSale = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { ventaPayload, partidasPayload } = req.body;
 
-    const { data: ventaData, error: ventaError } = await client
-      .from('ventas')
-      .insert([ventaPayload])
-      .select()
-      .single();
+    const vKeys = Object.keys(ventaPayload);
+    const vValues = Object.values(ventaPayload);
+    const vPlaceholders = vKeys.map((_, i) => `$${i + 1}`).join(', ');
 
-    if (ventaError) throw ventaError;
+    const ventaRes = await pool.query(
+      `INSERT INTO ventas (${vKeys.join(', ')}) VALUES (${vPlaceholders}) RETURNING *`,
+      vValues
+    );
+    const ventaData = ventaRes.rows[0];
 
     if (partidasPayload && partidasPayload.length > 0) {
-      const pPayload = partidasPayload.map((p: any) => ({ ...p, venta_id: ventaData.id }));
-      const { error: partidasError } = await client
-        .from('ventas_partidas')
-        .insert(pPayload);
-
-      if (partidasError) throw partidasError;
+      for (const p of partidasPayload) {
+        const pKeys = Object.keys(p);
+        pKeys.push('venta_id');
+        const pValues = Object.values(p);
+        pValues.push(ventaData.id);
+        const pPlaceholders = pKeys.map((_, i) => `$${i + 1}`).join(', ');
+        
+        await pool.query(
+          `INSERT INTO ventas_partidas (${pKeys.join(', ')}) VALUES (${pPlaceholders})`,
+          pValues
+        );
+      }
     }
 
     return res.json({ success: true, ventaId: ventaData.id });
@@ -488,26 +535,24 @@ export const getFormCatalogs = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const [catRes, subRes, cliRes, usersRes, sucRes, provRes] = await Promise.all([
-      client.from('categorias').select('*').order('nombre'),
-      client.from('subcategorias').select('*').order('nombre'),
-      client.from('clientes').select('*').order('nombre'),
-      client.from('usuarios').select('*').order('nombre'),
-      client.from('sucursales_cliente').select('*').order('nombre'),
-      client.from('proveedores').select('*').order('nombre'),
+      pool.query('SELECT * FROM categorias ORDER BY nombre'),
+      pool.query('SELECT * FROM subcategorias ORDER BY nombre'),
+      pool.query('SELECT * FROM clientes ORDER BY nombre'),
+      pool.query('SELECT * FROM usuarios ORDER BY nombre'),
+      pool.query('SELECT * FROM sucursales_cliente ORDER BY nombre'),
+      pool.query('SELECT * FROM proveedores ORDER BY nombre'),
     ]);
 
-    if (catRes.error) throw catRes.error;
-
     return res.json({
-      categorias: catRes.data || [],
-      subcategorias: subRes.data || [],
-      clientes: cliRes.data || [],
-      usuarios: usersRes.data || [],
-      sucursales: sucRes.data || [],
-      proveedores: provRes.data || [],
+      categorias: catRes.rows || [],
+      subcategorias: subRes.rows || [],
+      clientes: cliRes.rows || [],
+      usuarios: usersRes.rows || [],
+      sucursales: sucRes.rows || [],
+      proveedores: provRes.rows || [],
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -519,39 +564,53 @@ export const createGastos = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { company, env } = tenant;
-    const client = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const { payloadsToInsert, gasolinaPayload } = req.body;
 
-    const { data: insertedGastos, error: dbError } = await client
-      .from('gastos')
-      .insert(payloadsToInsert)
-      .select();
+    const insertedGastos = [];
+    if (payloadsToInsert && payloadsToInsert.length > 0) {
+      for (const payload of payloadsToInsert) {
+        const keys = Object.keys(payload);
+        const values = Object.values(payload);
+        const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+        const res = await pool.query(
+          `INSERT INTO gastos (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+          values
+        );
+        insertedGastos.push(res.rows[0]);
+      }
+    }
 
-    if (dbError) throw dbError;
-
-    if (gasolinaPayload && insertedGastos && insertedGastos.length > 0) {
+    if (gasolinaPayload && insertedGastos.length > 0) {
       gasolinaPayload.gasto_id = insertedGastos[0].id;
-      const { error: gasError } = await client
-        .from('registro_gasolina')
-        .insert([gasolinaPayload]);
-
-      if (gasError) throw gasError;
+      const gasKeys = Object.keys(gasolinaPayload);
+      const gasValues = Object.values(gasolinaPayload);
+      const placeholders = gasKeys.map((_, i) => `$${i + 1}`).join(', ');
+      await pool.query(
+        `INSERT INTO registro_gasolina (${gasKeys.join(', ')}) VALUES (${placeholders})`,
+        gasValues
+      );
     }
 
     const { createNotifications, employeeName, totalGasto, categoriaNombre } = req.body;
-    if (createNotifications && insertedGastos && insertedGastos.length > 0) {
+    if (createNotifications && insertedGastos.length > 0) {
       try {
-        const { data: admins } = await client.from('usuarios').select('id').eq('rol', 'ADMIN');
+        const adminsRes = await pool.query(`SELECT id FROM usuarios WHERE rol = 'ADMIN'`);
+        const admins = adminsRes.rows;
         if (admins && admins.length > 0) {
-          const notifications = admins.map((admin: any) => ({
-            usuario_id: admin.id,
-            titulo: 'Nuevo Gasto Registrado',
-            mensaje: `${employeeName || 'Un empleado'} ha registrado un gasto de $${Number(totalGasto || 0).toFixed(2)} (${categoriaNombre || 'Sin categoría'})`,
-            tipo: 'GASTO_NUEVO',
-            referencia_id: insertedGastos[0].id,
-          }));
-          await client.from('notificaciones').insert(notifications);
+          for (const admin of admins) {
+            await pool.query(
+              `INSERT INTO notificaciones (usuario_id, titulo, mensaje, tipo, referencia_id) VALUES ($1, $2, $3, $4, $5)`,
+              [
+                admin.id,
+                'Nuevo Gasto Registrado',
+                `${employeeName || 'Un empleado'} ha registrado un gasto de $${Number(totalGasto || 0).toFixed(2)} (${categoriaNombre || 'Sin categoría'})`,
+                'GASTO_NUEVO',
+                insertedGastos[0].id
+              ]
+            );
+          }
         }
       } catch (notifErr) {
         console.warn('Error inserting notifications:', notifErr);
@@ -563,5 +622,3 @@ export const createGastos = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
-
-

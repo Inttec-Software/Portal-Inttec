@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 import * as XLSX from 'xlsx';
 
 // ==========================================
@@ -10,44 +10,59 @@ import * as XLSX from 'xlsx';
 export const getHerramientas = async (req: Request, res: Response) => {
   try {
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { categoria, soloActivos } = req.query;
 
-    let query = supabase.from('herramientas').select('*');
+    let sql = 'SELECT * FROM herramientas WHERE 1=1';
+    let values: any[] = [];
+    let paramIndex = 1;
 
     if (soloActivos === 'true') {
-      query = query.eq('activo', true);
+      sql += ` AND activo = $${paramIndex++}`;
+      values.push(true);
     }
     if (categoria && typeof categoria === 'string' && categoria !== 'Todas') {
-      query = query.eq('categoria', categoria);
+      sql += ` AND categoria = $${paramIndex++}`;
+      values.push(categoria);
     }
 
-    const { data: tools, error } = await query.order('codigo', { ascending: true });
-    if (error) throw error;
+    sql += ' ORDER BY codigo ASC';
+
+    const { rows: tools } = await pool.query(sql, values);
 
     if (!tools || tools.length === 0) {
       return res.json([]);
     }
 
     // Obtener asignaciones actuales de empleados y vehículos para saber custodia y último usuario
-    const [empRes, vehRes, checkRes] = await Promise.all([
-      supabase
-        .from('inventario_herramientas_empleado')
-        .select('id, empleado_id, herramienta_id, cantidad, condicion, notas, fecha_asignacion, empleado:usuarios!empleado_id(id, nombre, email)'),
-      supabase
-        .from('inventario_herramientas_vehiculo')
-        .select('id, vehiculo_id, herramienta_id, cantidad, condicion, notas, fecha_asignacion, vehiculo:vehiculos!vehiculo_id(id, marca, modelo, placas)'),
-      supabase
-        .from('checklists_vehiculo_herramientas')
-        .select('id, vehiculo_id, empleado_id, fecha, hora, items, empleado:usuarios!empleado_id(id, nombre)')
-        .order('fecha', { ascending: false })
-        .order('hora', { ascending: false })
-        .limit(100),
-    ]);
+    const empResPromise = pool.query(`
+      SELECT h.id, h.empleado_id, h.herramienta_id, h.cantidad, h.condicion, h.notas, h.fecha_asignacion,
+             json_build_object('id', u.id, 'nombre', u.nombre, 'email', u.email) as empleado
+      FROM inventario_herramientas_empleado h
+      LEFT JOIN usuarios u ON h.empleado_id = u.id
+    `);
 
-    const empAssignments = empRes.data || [];
-    const vehAssignments = vehRes.data || [];
-    const recentChecklists = checkRes.data || [];
+    const vehResPromise = pool.query(`
+      SELECT h.id, h.vehiculo_id, h.herramienta_id, h.cantidad, h.condicion, h.notas, h.fecha_asignacion,
+             json_build_object('id', v.id, 'marca', v.marca, 'modelo', v.modelo, 'placas', v.placas) as vehiculo
+      FROM inventario_herramientas_vehiculo h
+      LEFT JOIN vehiculos v ON h.vehiculo_id = v.id
+    `);
+
+    const checkResPromise = pool.query(`
+      SELECT c.id, c.vehiculo_id, c.empleado_id, c.fecha, c.hora, c.items,
+             json_build_object('id', u.id, 'nombre', u.nombre) as empleado
+      FROM checklists_vehiculo_herramientas c
+      LEFT JOIN usuarios u ON c.empleado_id = u.id
+      ORDER BY c.fecha DESC, c.hora DESC
+      LIMIT 100
+    `);
+
+    const [empRes, vehRes, checkRes] = await Promise.all([empResPromise, vehResPromise, checkResPromise]);
+
+    const empAssignments = empRes.rows || [];
+    const vehAssignments = vehRes.rows || [];
+    const recentChecklists = checkRes.rows || [];
 
     const enrichedTools = tools.map((tool: any) => {
       const empAssign = empAssignments.find((a: any) => a.herramienta_id === tool.id);
@@ -65,7 +80,7 @@ export const getHerramientas = async (req: Request, res: Response) => {
         tipo: 'SIN_REGISTRO',
       };
 
-      if (empAssign && empAssign.empleado) {
+      if (empAssign && empAssign.empleado && empAssign.empleado.id) {
         custodia_actual = {
           tipo: 'EMPLEADO',
           descripcion: `Kit Personal: ${(empAssign.empleado as any).nombre}`,
@@ -82,7 +97,7 @@ export const getHerramientas = async (req: Request, res: Response) => {
         if (empAssign.condicion === 'DANADO') {
           estadoActual = 'DANADO';
         }
-      } else if (vehAssign && vehAssign.vehiculo) {
+      } else if (vehAssign && vehAssign.vehiculo && vehAssign.vehiculo.id) {
         const v = vehAssign.vehiculo as any;
         custodia_actual = {
           tipo: 'VEHICULO',
@@ -99,7 +114,7 @@ export const getHerramientas = async (req: Request, res: Response) => {
             c.items.some((it: any) => it.herramienta_id === tool.id)
         );
 
-        if (lastChecklist && lastChecklist.empleado) {
+        if (lastChecklist && lastChecklist.empleado && lastChecklist.empleado.id) {
           const checkItem = (lastChecklist.items as any[]).find((it: any) => it.herramienta_id === tool.id);
           const isFaltante = checkItem ? checkItem.presente === false : false;
 
@@ -160,10 +175,10 @@ export const getHerramientas = async (req: Request, res: Response) => {
 };
 
 // Helper para calcular el siguiente código secuencial H-1, H-2, H-3...
-export const getNextToolCodeHelper = async (client: any): Promise<string> => {
-  const { data } = await client.from('herramientas').select('codigo');
+export const getNextToolCodeHelper = async (pool: any): Promise<string> => {
+  const { rows } = await pool.query('SELECT codigo FROM herramientas');
   let maxNum = 0;
-  (data || []).forEach((t: any) => {
+  (rows || []).forEach((t: any) => {
     if (!t.codigo) return;
     const match = t.codigo.trim().match(/^H-(\d+)$/i);
     if (match) {
@@ -180,8 +195,8 @@ export const getNextToolCodeHelper = async (client: any): Promise<string> => {
 export const getSiguienteCodigo = async (req: Request, res: Response) => {
   try {
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
-    const siguienteCodigo = await getNextToolCodeHelper(supabase);
+    const pool = getDbPool(company, env);
+    const siguienteCodigo = await getNextToolCodeHelper(pool);
     return res.json({ codigo: siguienteCodigo });
   } catch (error: any) {
     console.error('[Herramientas] Error in getSiguienteCodigo:', error);
@@ -195,27 +210,34 @@ export const createHerramienta = async (req: Request, res: Response) => {
     const { company: activeCompany, env } = req.tenant!;
     const secondaryCompany = activeCompany === 'inttec' ? 'daravisa' : 'inttec';
 
-    const primaryClient = getSupabaseClient(activeCompany, env);
-    const secondaryClient = getSupabaseClient(secondaryCompany, env);
+    const primaryPool = getDbPool(activeCompany, env);
+    const secondaryPool = getDbPool(secondaryCompany, env);
 
     const body = { ...req.body };
     if (!body.codigo || typeof body.codigo !== 'string' || body.codigo.trim() === '') {
-      body.codigo = await getNextToolCodeHelper(primaryClient);
+      body.codigo = await getNextToolCodeHelper(primaryPool);
     } else {
       body.codigo = body.codigo.trim().toUpperCase();
     }
 
-    const { data, error } = await primaryClient
-      .from('herramientas')
-      .insert([body])
-      .select()
-      .single();
+    const cols = Object.keys(body);
+    const vals = Object.values(body);
+    const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ');
 
-    if (error) throw error;
+    const { rows } = await primaryPool.query(
+      `INSERT INTO herramientas (${cols.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+      vals
+    );
+
+    const data = rows[0];
 
     // Sync con base secundaria
     try {
-      await secondaryClient.from('herramientas').upsert([data]);
+      const updateSet = cols.map((c) => `${c} = EXCLUDED.${c}`).join(', ');
+      await secondaryPool.query(
+        `INSERT INTO herramientas (${cols.join(', ')}) VALUES (${placeholders}) ON CONFLICT (id) DO UPDATE SET ${updateSet}`,
+        vals
+      );
     } catch (syncErr: any) {
       console.warn('[Herramientas] Error syncing to secondary db:', syncErr?.message);
     }
@@ -234,20 +256,26 @@ export const updateHerramienta = async (req: Request, res: Response) => {
     const { company: activeCompany, env } = req.tenant!;
     const secondaryCompany = activeCompany === 'inttec' ? 'daravisa' : 'inttec';
 
-    const primaryClient = getSupabaseClient(activeCompany, env);
-    const secondaryClient = getSupabaseClient(secondaryCompany, env);
+    const primaryPool = getDbPool(activeCompany, env);
+    const secondaryPool = getDbPool(secondaryCompany, env);
 
-    const { data, error } = await primaryClient
-      .from('herramientas')
-      .update(req.body)
-      .eq('id', id)
-      .select()
-      .single();
+    const keys = Object.keys(req.body);
+    const values = Object.values(req.body);
+    const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+    const params = [...values, id];
 
-    if (error) throw error;
+    const { rows } = await primaryPool.query(
+      `UPDATE herramientas SET ${setClause} WHERE id = $${params.length} RETURNING *`,
+      params
+    );
+
+    const data = rows[0];
 
     try {
-      await secondaryClient.from('herramientas').update(req.body).eq('id', id);
+      await secondaryPool.query(
+        `UPDATE herramientas SET ${setClause} WHERE id = $${params.length}`,
+        params
+      );
     } catch (syncErr: any) {
       console.warn('[Herramientas] Error updating in secondary db:', syncErr?.message);
     }
@@ -265,12 +293,12 @@ export const deleteHerramienta = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { env } = req.tenant!;
 
-    const clientInttec = getSupabaseClient('inttec', env);
-    const clientDaravisa = getSupabaseClient('daravisa', env);
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
 
     await Promise.allSettled([
-      clientInttec.from('herramientas').delete().eq('id', id),
-      clientDaravisa.from('herramientas').delete().eq('id', id),
+      poolInttec.query('DELETE FROM herramientas WHERE id = $1', [id]),
+      poolDaravisa.query('DELETE FROM herramientas WHERE id = $1', [id]),
     ]);
 
     return res.json({ success: true, message: 'Herramienta eliminada' });
@@ -288,47 +316,33 @@ export const deleteHerramienta = async (req: Request, res: Response) => {
 export const getKitsEmpleados = async (req: Request, res: Response) => {
   try {
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { empleado_id } = req.query;
 
-    let query = supabase
-      .from('inventario_herramientas_empleado')
-      .select(`
-        id,
-        empleado_id,
-        herramienta_id,
-        cantidad,
-        condicion,
-        notas,
-        fecha_asignacion,
-        updated_at,
-        herramienta:herramientas (
-          id,
-          codigo,
-          nombre,
-          categoria,
-          descripcion,
-          numero_serie,
-          foto_url,
-          estado,
-          activo
-        ),
-        empleado:usuarios!empleado_id (
-          id,
-          nombre,
-          email,
-          rol
-        )
-      `);
-
+    let sql = `
+      SELECT 
+        i.id, i.empleado_id, i.herramienta_id, i.cantidad, i.condicion, i.notas, i.fecha_asignacion, i.updated_at,
+        json_build_object(
+          'id', h.id, 'codigo', h.codigo, 'nombre', h.nombre, 'categoria', h.categoria,
+          'descripcion', h.descripcion, 'numero_serie', h.numero_serie, 'foto_url', h.foto_url,
+          'estado', h.estado, 'activo', h.activo
+        ) as herramienta,
+        json_build_object('id', u.id, 'nombre', u.nombre, 'email', u.email, 'rol', u.rol) as empleado
+      FROM inventario_herramientas_empleado i
+      LEFT JOIN herramientas h ON i.herramienta_id = h.id
+      LEFT JOIN usuarios u ON i.empleado_id = u.id
+    `;
+    let values: any[] = [];
+    
     if (empleado_id && typeof empleado_id === 'string') {
-      query = query.eq('empleado_id', empleado_id);
+      sql += ` WHERE i.empleado_id = $1`;
+      values.push(empleado_id);
     }
+    
+    sql += ` ORDER BY i.fecha_asignacion DESC`;
 
-    const { data, error } = await query.order('fecha_asignacion', { ascending: false });
-    if (error) throw error;
-
-    return res.json(data || []);
+    const { rows } = await pool.query(sql, values);
+    return res.json(rows || []);
   } catch (error: any) {
     console.error('[Herramientas] Error in getKitsEmpleados:', error);
     return res.status(500).json({ error: error.message });
@@ -339,26 +353,27 @@ export const getKitsEmpleados = async (req: Request, res: Response) => {
 export const asignarHerramientaEmpleado = async (req: Request, res: Response) => {
   try {
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { empleado_id, herramienta_id, cantidad = 1, condicion = 'BUENO', notas = '', asignado_por = null } = req.body;
 
     if (!empleado_id || !herramienta_id) {
       return res.status(400).json({ error: 'empleado_id y herramienta_id son requeridos' });
     }
 
-    // Comprobar si ya existe asignación previa de esta herramienta al empleado
-    const { data: existing, error: checkErr } = await supabase
-      .from('inventario_herramientas_empleado')
-      .select('id')
-      .eq('empleado_id', empleado_id)
-      .eq('herramienta_id', herramienta_id)
-      .maybeSingle();
+    const { rows: existingRows } = await pool.query(
+      'SELECT id FROM inventario_herramientas_empleado WHERE empleado_id = $1 AND herramienta_id = $2 LIMIT 1',
+      [empleado_id, herramienta_id]
+    );
+    const existing = existingRows[0];
 
-    if (checkErr) {
-      console.warn('[Herramientas] Error checking existing employee tool assignment:', checkErr);
-    }
-
-    let savedId = existing?.id;
+    let resultData;
+    const fetchFullDataSql = `
+      SELECT i.id, i.empleado_id, i.herramienta_id, i.cantidad, i.condicion, i.notas, i.fecha_asignacion, i.updated_at,
+             json_build_object('id', h.id, 'codigo', h.codigo, 'nombre', h.nombre, 'categoria', h.categoria, 'descripcion', h.descripcion, 'numero_serie', h.numero_serie, 'estado', h.estado, 'activo', h.activo) as herramienta
+      FROM inventario_herramientas_empleado i
+      LEFT JOIN herramientas h ON i.herramienta_id = h.id
+      WHERE i.id = $1
+    `;
 
     if (existing) {
       const updatePayload: any = {
@@ -369,25 +384,15 @@ export const asignarHerramientaEmpleado = async (req: Request, res: Response) =>
       };
       if (asignado_por) updatePayload.asignado_por = asignado_por;
 
-      const { data: updated, error: updateErr } = await supabase
-        .from('inventario_herramientas_empleado')
-        .update(updatePayload)
-        .eq('id', existing.id)
-        .select(`
-          id,
-          empleado_id,
-          herramienta_id,
-          cantidad,
-          condicion,
-          notas,
-          fecha_asignacion,
-          updated_at,
-          herramienta:herramientas (*)
-        `)
-        .single();
+      const keys = Object.keys(updatePayload);
+      const values = Object.values(updatePayload);
+      const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+      const params = [...values, existing.id];
 
-      if (updateErr) throw updateErr;
-      return res.status(200).json(updated);
+      await pool.query(`UPDATE inventario_herramientas_empleado SET ${setClause} WHERE id = $${params.length}`, params);
+      const { rows } = await pool.query(fetchFullDataSql, [existing.id]);
+      resultData = rows[0];
+      return res.status(200).json(resultData);
     } else {
       const insertPayload: any = {
         empleado_id,
@@ -398,24 +403,19 @@ export const asignarHerramientaEmpleado = async (req: Request, res: Response) =>
       };
       if (asignado_por) insertPayload.asignado_por = asignado_por;
 
-      const { data: inserted, error: insertErr } = await supabase
-        .from('inventario_herramientas_empleado')
-        .insert(insertPayload)
-        .select(`
-          id,
-          empleado_id,
-          herramienta_id,
-          cantidad,
-          condicion,
-          notas,
-          fecha_asignacion,
-          updated_at,
-          herramienta:herramientas (*)
-        `)
-        .single();
+      const keys = Object.keys(insertPayload);
+      const values = Object.values(insertPayload);
+      const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
 
-      if (insertErr) throw insertErr;
-      return res.status(201).json(inserted);
+      const { rows: insertedRows } = await pool.query(
+        `INSERT INTO inventario_herramientas_empleado (${keys.join(', ')}) VALUES (${placeholders}) RETURNING id`,
+        values
+      );
+      const newId = insertedRows[0].id;
+      
+      const { rows } = await pool.query(fetchFullDataSql, [newId]);
+      resultData = rows[0];
+      return res.status(201).json(resultData);
     }
   } catch (error: any) {
     console.error('[Herramientas] Error in asignarHerramientaEmpleado:', error);
@@ -428,14 +428,9 @@ export const desasignarHerramientaEmpleado = async (req: Request, res: Response)
   try {
     const { id } = req.params;
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
-    const { error } = await supabase
-      .from('inventario_herramientas_empleado')
-      .delete()
-      .eq('id', id);
-
-    if (error) throw error;
+    await pool.query('DELETE FROM inventario_herramientas_empleado WHERE id = $1', [id]);
     return res.json({ success: true, message: 'Herramienta desasignada del empleado' });
   } catch (error: any) {
     console.error('[Herramientas] Error in desasignarHerramientaEmpleado:', error);
@@ -451,54 +446,37 @@ export const desasignarHerramientaEmpleado = async (req: Request, res: Response)
 export const getKitsVehiculos = async (req: Request, res: Response) => {
   try {
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { vehiculo_id } = req.query;
 
-    let query = supabase
-      .from('inventario_herramientas_vehiculo')
-      .select(`
-        id,
-        vehiculo_id,
-        herramienta_id,
-        cantidad,
-        condicion,
-        notas,
-        fecha_asignacion,
-        updated_at,
-        herramienta:herramientas (
-          id,
-          codigo,
-          nombre,
-          categoria,
-          descripcion,
-          numero_serie,
-          foto_url,
-          estado,
-          activo
-        ),
-        vehiculo:vehiculos!vehiculo_id (
-          id,
-          marca,
-          modelo,
-          placas,
-          numero_economico
-        )
-      `);
+    let sql = `
+      SELECT 
+        i.id, i.vehiculo_id, i.herramienta_id, i.cantidad, i.condicion, i.notas, i.fecha_asignacion, i.updated_at,
+        json_build_object('id', h.id, 'codigo', h.codigo, 'nombre', h.nombre, 'categoria', h.categoria, 'descripcion', h.descripcion, 'numero_serie', h.numero_serie, 'foto_url', h.foto_url, 'estado', h.estado, 'activo', h.activo) as herramienta,
+        json_build_object('id', v.id, 'marca', v.marca, 'modelo', v.modelo, 'placas', v.placas, 'numero_economico', v.numero_economico) as vehiculo
+      FROM inventario_herramientas_vehiculo i
+      LEFT JOIN herramientas h ON i.herramienta_id = h.id
+      LEFT JOIN vehiculos v ON i.vehiculo_id = v.id
+    `;
+    let values: any[] = [];
 
     if (vehiculo_id && typeof vehiculo_id === 'string') {
-      query = query.eq('vehiculo_id', vehiculo_id);
+      sql += ` WHERE i.vehiculo_id = $1`;
+      values.push(vehiculo_id);
     }
+    sql += ` ORDER BY i.fecha_asignacion DESC`;
 
-    const { data, error } = await query.order('fecha_asignacion', { ascending: false });
-    if (error) throw error;
+    const { rows: data } = await pool.query(sql, values);
 
-    // Consultar últimos checklists para reflejar el estado vivo de las herramientas en los vehículos
-    const { data: recentChecklists } = await supabase
-      .from('checklists_vehiculo_herramientas')
-      .select('id, vehiculo_id, fecha, hora, items, empleado:usuarios!empleado_id(nombre)')
-      .order('fecha', { ascending: false })
-      .order('hora', { ascending: false })
-      .limit(60);
+    // Consultar últimos checklists
+    const { rows: recentChecklists } = await pool.query(`
+      SELECT c.id, c.vehiculo_id, c.fecha, c.hora, c.items,
+             json_build_object('nombre', u.nombre) as empleado
+      FROM checklists_vehiculo_herramientas c
+      LEFT JOIN usuarios u ON c.empleado_id = u.id
+      ORDER BY c.fecha DESC, c.hora DESC
+      LIMIT 60
+    `);
 
     const enrichedKits = (data || []).map((item: any) => {
       const lastCheck = (recentChecklists || []).find(
@@ -546,23 +524,26 @@ export const getKitsVehiculos = async (req: Request, res: Response) => {
 export const asignarHerramientaVehiculo = async (req: Request, res: Response) => {
   try {
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { vehiculo_id, herramienta_id, cantidad = 1, condicion = 'BUENO', notas = '', asignado_por = null } = req.body;
 
     if (!vehiculo_id || !herramienta_id) {
       return res.status(400).json({ error: 'vehiculo_id y herramienta_id son requeridos' });
     }
 
-    const { data: existing, error: checkErr } = await supabase
-      .from('inventario_herramientas_vehiculo')
-      .select('id')
-      .eq('vehiculo_id', vehiculo_id)
-      .eq('herramienta_id', herramienta_id)
-      .maybeSingle();
+    const { rows: existingRows } = await pool.query(
+      'SELECT id FROM inventario_herramientas_vehiculo WHERE vehiculo_id = $1 AND herramienta_id = $2 LIMIT 1',
+      [vehiculo_id, herramienta_id]
+    );
+    const existing = existingRows[0];
 
-    if (checkErr) {
-      console.warn('[Herramientas] Error checking existing vehicle tool assignment:', checkErr);
-    }
+    const fetchFullDataSql = `
+      SELECT i.id, i.vehiculo_id, i.herramienta_id, i.cantidad, i.condicion, i.notas, i.fecha_asignacion, i.updated_at,
+             json_build_object('id', h.id, 'codigo', h.codigo, 'nombre', h.nombre, 'categoria', h.categoria, 'descripcion', h.descripcion, 'numero_serie', h.numero_serie, 'estado', h.estado, 'activo', h.activo) as herramienta
+      FROM inventario_herramientas_vehiculo i
+      LEFT JOIN herramientas h ON i.herramienta_id = h.id
+      WHERE i.id = $1
+    `;
 
     if (existing) {
       const updatePayload: any = {
@@ -573,25 +554,14 @@ export const asignarHerramientaVehiculo = async (req: Request, res: Response) =>
       };
       if (asignado_por) updatePayload.asignado_por = asignado_por;
 
-      const { data: updated, error: updateErr } = await supabase
-        .from('inventario_herramientas_vehiculo')
-        .update(updatePayload)
-        .eq('id', existing.id)
-        .select(`
-          id,
-          vehiculo_id,
-          herramienta_id,
-          cantidad,
-          condicion,
-          notas,
-          fecha_asignacion,
-          updated_at,
-          herramienta:herramientas (*)
-        `)
-        .single();
+      const keys = Object.keys(updatePayload);
+      const values = Object.values(updatePayload);
+      const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+      const params = [...values, existing.id];
 
-      if (updateErr) throw updateErr;
-      return res.status(200).json(updated);
+      await pool.query(`UPDATE inventario_herramientas_vehiculo SET ${setClause} WHERE id = $${params.length}`, params);
+      const { rows } = await pool.query(fetchFullDataSql, [existing.id]);
+      return res.status(200).json(rows[0]);
     } else {
       const insertPayload: any = {
         vehiculo_id,
@@ -602,24 +572,18 @@ export const asignarHerramientaVehiculo = async (req: Request, res: Response) =>
       };
       if (asignado_por) insertPayload.asignado_por = asignado_por;
 
-      const { data: inserted, error: insertErr } = await supabase
-        .from('inventario_herramientas_vehiculo')
-        .insert(insertPayload)
-        .select(`
-          id,
-          vehiculo_id,
-          herramienta_id,
-          cantidad,
-          condicion,
-          notas,
-          fecha_asignacion,
-          updated_at,
-          herramienta:herramientas (*)
-        `)
-        .single();
+      const keys = Object.keys(insertPayload);
+      const values = Object.values(insertPayload);
+      const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
 
-      if (insertErr) throw insertErr;
-      return res.status(201).json(inserted);
+      const { rows: insertedRows } = await pool.query(
+        `INSERT INTO inventario_herramientas_vehiculo (${keys.join(', ')}) VALUES (${placeholders}) RETURNING id`,
+        values
+      );
+      const newId = insertedRows[0].id;
+      
+      const { rows } = await pool.query(fetchFullDataSql, [newId]);
+      return res.status(201).json(rows[0]);
     }
   } catch (error: any) {
     console.error('[Herramientas] Error in asignarHerramientaVehiculo:', error);
@@ -632,14 +596,9 @@ export const desasignarHerramientaVehiculo = async (req: Request, res: Response)
   try {
     const { id } = req.params;
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
-    const { error } = await supabase
-      .from('inventario_herramientas_vehiculo')
-      .delete()
-      .eq('id', id);
-
-    if (error) throw error;
+    await pool.query('DELETE FROM inventario_herramientas_vehiculo WHERE id = $1', [id]);
     return res.json({ success: true, message: 'Herramienta desasignada del vehículo' });
   } catch (error: any) {
     console.error('[Herramientas] Error in desasignarHerramientaVehiculo:', error);
@@ -655,42 +614,40 @@ export const desasignarHerramientaVehiculo = async (req: Request, res: Response)
 export const getChecklists = async (req: Request, res: Response) => {
   try {
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
     const { vehiculo_id, empleado_id, fecha, limit = '50' } = req.query;
 
-    let query = supabase
-      .from('checklists_vehiculo_herramientas')
-      .select(`
-        *,
-        vehiculo:vehiculos (
-          id,
-          marca,
-          modelo,
-          placas,
-          numero_economico
-        ),
-        empleado:usuarios (
-          id,
-          nombre,
-          email
-        )
-      `);
+    let sql = `
+      SELECT c.*,
+             json_build_object('id', v.id, 'marca', v.marca, 'modelo', v.modelo, 'placas', v.placas, 'numero_economico', v.numero_economico) as vehiculo,
+             json_build_object('id', u.id, 'nombre', u.nombre, 'email', u.email) as empleado
+      FROM checklists_vehiculo_herramientas c
+      LEFT JOIN vehiculos v ON c.vehiculo_id = v.id
+      LEFT JOIN usuarios u ON c.empleado_id = u.id
+      WHERE 1=1
+    `;
+    let values: any[] = [];
+    let paramIndex = 1;
 
     if (vehiculo_id && typeof vehiculo_id === 'string') {
-      query = query.eq('vehiculo_id', vehiculo_id);
+      sql += ` AND c.vehiculo_id = $${paramIndex++}`;
+      values.push(vehiculo_id);
     }
     if (empleado_id && typeof empleado_id === 'string') {
-      query = query.eq('empleado_id', empleado_id);
+      sql += ` AND c.empleado_id = $${paramIndex++}`;
+      values.push(empleado_id);
     }
     if (fecha && typeof fecha === 'string') {
-      query = query.eq('fecha', fecha);
+      sql += ` AND c.fecha = $${paramIndex++}`;
+      values.push(fecha);
     }
 
     const limitNum = parseInt(limit as string, 10) || 50;
-    const { data, error } = await query.order('created_at', { ascending: false }).limit(limitNum);
+    sql += ` ORDER BY c.created_at DESC LIMIT $${paramIndex}`;
+    values.push(limitNum);
 
-    if (error) throw error;
-    return res.json(data || []);
+    const { rows } = await pool.query(sql, values);
+    return res.json(rows || []);
   } catch (error: any) {
     console.error('[Herramientas] Error in getChecklists:', error);
     return res.status(500).json({ error: error.message });
@@ -701,7 +658,7 @@ export const getChecklists = async (req: Request, res: Response) => {
 export const createChecklist = async (req: Request, res: Response) => {
   try {
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     const {
       vehiculo_id,
@@ -737,74 +694,69 @@ export const createChecklist = async (req: Request, res: Response) => {
     const hora = now.toTimeString().split(' ')[0]; // HH:mm:ss
     const todayStr = now.toISOString().split('T')[0];
 
-    const { data, error } = await supabase
-      .from('checklists_vehiculo_herramientas')
-      .insert([{
-        vehiculo_id,
-        empleado_id,
-        fecha: todayStr,
-        hora,
-        items: itemsList,
-        total_herramientas,
-        total_presentes,
-        total_faltantes,
-        total_danadas,
-        observaciones_generales,
-        ubicacion_gps,
-        foto_evidencia_url,
-      }])
-      .select(`
-        *,
-        vehiculo:vehiculos (id, marca, modelo, placas),
-        empleado:usuarios (id, nombre)
-      `)
-      .single();
+    const insertPayload = {
+      vehiculo_id,
+      empleado_id,
+      fecha: todayStr,
+      hora,
+      items: JSON.stringify(itemsList),
+      total_herramientas,
+      total_presentes,
+      total_faltantes,
+      total_danadas,
+      observaciones_generales,
+      ubicacion_gps: ubicacion_gps ? JSON.stringify(ubicacion_gps) : null,
+      foto_evidencia_url,
+    };
 
-    if (error) throw error;
+    const keys = Object.keys(insertPayload);
+    const values = Object.values(insertPayload);
+    const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
 
-    // Sincronizar automáticamente el estado de cada herramienta en el inventario del vehículo y catálogo maestro
+    const { rows: inserted } = await pool.query(
+      `INSERT INTO checklists_vehiculo_herramientas (${keys.join(', ')}) VALUES (${placeholders}) RETURNING id`,
+      values
+    );
+
+    const { rows: dataRows } = await pool.query(`
+      SELECT c.*,
+             json_build_object('id', v.id, 'marca', v.marca, 'modelo', v.modelo, 'placas', v.placas) as vehiculo,
+             json_build_object('id', u.id, 'nombre', u.nombre) as empleado
+      FROM checklists_vehiculo_herramientas c
+      LEFT JOIN vehiculos v ON c.vehiculo_id = v.id
+      LEFT JOIN usuarios u ON c.empleado_id = u.id
+      WHERE c.id = $1
+    `, [inserted[0].id]);
+    
+    const data = dataRows[0];
+
+    // Sincronizar automáticamente el estado de cada herramienta
     try {
       for (const it of itemsList) {
         if (!it.herramienta_id) continue;
 
         if (!it.presente) {
-          // 1. Marcar como FALTANTE en el inventario del vehículo
           const missingNote = `[FALTANTE] Reportada como faltante en revisión de vehículo el ${todayStr}${it.observaciones ? `: ${it.observaciones}` : ''}`;
-          await supabase
-            .from('inventario_herramientas_vehiculo')
-            .update({
-              condicion: 'DANADO',
-              notas: missingNote,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('vehiculo_id', vehiculo_id)
-            .eq('herramienta_id', it.herramienta_id);
+          await pool.query(
+            `UPDATE inventario_herramientas_vehiculo SET condicion = 'DANADO', notas = $1, updated_at = $2 WHERE vehiculo_id = $3 AND herramienta_id = $4`,
+            [missingNote, new Date().toISOString(), vehiculo_id, it.herramienta_id]
+          );
 
-          // 2. Marcar en catálogo maestro como BAJA / Faltante
-          await supabase
-            .from('herramientas')
-            .update({
-              estado: 'BAJA',
-            })
-            .eq('id', it.herramienta_id);
+          await pool.query(
+            `UPDATE herramientas SET estado = 'BAJA' WHERE id = $1`,
+            [it.herramienta_id]
+          );
         } else {
-          // Si está presente, sincronizar la condición reportada en el checklist
-          await supabase
-            .from('inventario_herramientas_vehiculo')
-            .update({
-              condicion: it.estado || 'BUENO',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('vehiculo_id', vehiculo_id)
-            .eq('herramienta_id', it.herramienta_id);
+          await pool.query(
+            `UPDATE inventario_herramientas_vehiculo SET condicion = $1, updated_at = $2 WHERE vehiculo_id = $3 AND herramienta_id = $4`,
+            [it.estado || 'BUENO', new Date().toISOString(), vehiculo_id, it.herramienta_id]
+          );
 
           if (it.estado) {
-            await supabase
-              .from('herramientas')
-              .update({
-                estado: it.estado,
-              })
-              .eq('id', it.herramienta_id);
+            await pool.query(
+              `UPDATE herramientas SET estado = $1 WHERE id = $2`,
+              [it.estado, it.herramienta_id]
+            );
           }
         }
       }
@@ -824,21 +776,18 @@ export const getUltimoChecklistVehiculo = async (req: Request, res: Response) =>
   try {
     const { vehiculoId } = req.params;
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
-    const { data, error } = await supabase
-      .from('checklists_vehiculo_herramientas')
-      .select(`
-        *,
-        empleado:usuarios (id, nombre)
-      `)
-      .eq('vehiculo_id', vehiculoId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { rows } = await pool.query(`
+      SELECT c.*, json_build_object('id', u.id, 'nombre', u.nombre) as empleado
+      FROM checklists_vehiculo_herramientas c
+      LEFT JOIN usuarios u ON c.empleado_id = u.id
+      WHERE c.vehiculo_id = $1
+      ORDER BY c.created_at DESC
+      LIMIT 1
+    `, [vehiculoId]);
 
-    if (error) throw error;
-    return res.json(data || null);
+    return res.json(rows[0] || null);
   } catch (error: any) {
     console.error('[Herramientas] Error in getUltimoChecklistVehiculo:', error);
     return res.status(500).json({ error: error.message });
@@ -854,40 +803,47 @@ export const getTrazabilidadHerramienta = async (req: Request, res: Response) =>
   try {
     const { id } = req.params;
     const { company, env } = req.tenant!;
-    const supabase = getSupabaseClient(company, env);
+    const pool = getDbPool(company, env);
 
     // 1. Obtener la herramienta
-    const { data: herramienta, error: toolErr } = await supabase
-      .from('herramientas')
-      .select('*')
-      .eq('id', id)
-      .single();
+    const { rows: toolRows } = await pool.query('SELECT * FROM herramientas WHERE id = $1', [id]);
+    const herramienta = toolRows[0];
 
-    if (toolErr || !herramienta) {
+    if (!herramienta) {
       return res.status(404).json({ error: 'Herramienta no encontrada' });
     }
 
     // 2. Obtener asignación actual de empleado
-    const { data: empAssign } = await supabase
-      .from('inventario_herramientas_empleado')
-      .select('id, empleado_id, cantidad, condicion, notas, fecha_asignacion, updated_at, empleado:usuarios!empleado_id(id, nombre, email, rol)')
-      .eq('herramienta_id', id)
-      .maybeSingle();
+    const { rows: empRows } = await pool.query(`
+      SELECT i.id, i.empleado_id, i.cantidad, i.condicion, i.notas, i.fecha_asignacion, i.updated_at,
+             json_build_object('id', u.id, 'nombre', u.nombre, 'email', u.email, 'rol', u.rol) as empleado
+      FROM inventario_herramientas_empleado i
+      LEFT JOIN usuarios u ON i.empleado_id = u.id
+      WHERE i.herramienta_id = $1 LIMIT 1
+    `, [id]);
+    const empAssign = empRows[0];
 
     // 3. Obtener asignación actual de vehículo
-    const { data: vehAssign } = await supabase
-      .from('inventario_herramientas_vehiculo')
-      .select('id, vehiculo_id, cantidad, condicion, notas, fecha_asignacion, updated_at, vehiculo:vehiculos!vehiculo_id(id, marca, modelo, placas, numero_economico)')
-      .eq('herramienta_id', id)
-      .maybeSingle();
+    const { rows: vehRows } = await pool.query(`
+      SELECT i.id, i.vehiculo_id, i.cantidad, i.condicion, i.notas, i.fecha_asignacion, i.updated_at,
+             json_build_object('id', v.id, 'marca', v.marca, 'modelo', v.modelo, 'placas', v.placas, 'numero_economico', v.numero_economico) as vehiculo
+      FROM inventario_herramientas_vehiculo i
+      LEFT JOIN vehiculos v ON i.vehiculo_id = v.id
+      WHERE i.herramienta_id = $1 LIMIT 1
+    `, [id]);
+    const vehAssign = vehRows[0];
 
-    // 4. Obtener todos los checklists donde aparece esta herramienta
-    const { data: allChecklists } = await supabase
-      .from('checklists_vehiculo_herramientas')
-      .select('id, vehiculo_id, empleado_id, fecha, hora, items, observaciones_generales, ubicacion_gps, created_at, empleado:usuarios!empleado_id(id, nombre, email), vehiculo:vehiculos!vehiculo_id(id, marca, modelo, placas)')
-      .order('fecha', { ascending: false })
-      .order('hora', { ascending: false })
-      .limit(60);
+    // 4. Obtener todos los checklists
+    const { rows: allChecklists } = await pool.query(`
+      SELECT c.id, c.vehiculo_id, c.empleado_id, c.fecha, c.hora, c.items, c.observaciones_generales, c.ubicacion_gps, c.created_at,
+             json_build_object('id', u.id, 'nombre', u.nombre, 'email', u.email) as empleado,
+             json_build_object('id', v.id, 'marca', v.marca, 'modelo', v.modelo, 'placas', v.placas) as vehiculo
+      FROM checklists_vehiculo_herramientas c
+      LEFT JOIN usuarios u ON c.empleado_id = u.id
+      LEFT JOIN vehiculos v ON c.vehiculo_id = v.id
+      ORDER BY c.fecha DESC, c.hora DESC
+      LIMIT 60
+    `);
 
     const checklistEvents = (allChecklists || [])
       .filter((c: any) => Array.isArray(c.items) && c.items.some((it: any) => it.herramienta_id === id))
@@ -909,7 +865,7 @@ export const getTrazabilidadHerramienta = async (req: Request, res: Response) =>
 
     return res.json({
       herramienta,
-      custodia_actual: empAssign
+      custodia_actual: empAssign && empAssign.empleado && empAssign.empleado.id
         ? {
             tipo: 'EMPLEADO',
             nombre: (empAssign.empleado as any)?.nombre,
@@ -918,7 +874,7 @@ export const getTrazabilidadHerramienta = async (req: Request, res: Response) =>
             condicion: empAssign.condicion,
             notas: empAssign.notas,
           }
-        : vehAssign
+        : vehAssign && vehAssign.vehiculo && vehAssign.vehiculo.id
         ? {
             tipo: 'VEHICULO',
             vehiculo: vehAssign.vehiculo,
@@ -948,8 +904,8 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
     const { company: activeCompany, env } = req.tenant!;
     const secondaryCompany = activeCompany === 'inttec' ? 'daravisa' : 'inttec';
 
-    const primaryClient = getSupabaseClient(activeCompany, env);
-    const secondaryClient = getSupabaseClient(secondaryCompany, env);
+    const primaryPool = getDbPool(activeCompany, env);
+    const secondaryPool = getDbPool(secondaryCompany, env);
 
     const { fileBase64, previewOnly, overwriteExisting = true } = req.body;
 
@@ -972,7 +928,7 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
     }
 
     // 1. Obtener herramientas existentes para detectar duplicados por código o nombre
-    const { data: existingTools } = await primaryClient.from('herramientas').select('id, codigo, nombre');
+    const { rows: existingTools } = await primaryPool.query('SELECT id, codigo, nombre FROM herramientas');
     const existingByCode = new Map<string, any>((existingTools || []).map((t: any) => [String(t.codigo || '').trim().toUpperCase(), t]));
     const existingByName = new Map<string, any>((existingTools || []).map((t: any) => [String(t.nombre || '').trim().toLowerCase(), t]));
 
@@ -1032,7 +988,6 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
         }
       }
 
-      // Si no encontró el nombre por header, pero la fila tiene valores
       if (!rawName) {
         const firstVal = Object.values(row).find((v: any) => v && typeof v === 'string' && v.trim().length > 1);
         if (firstVal) {
@@ -1044,7 +999,6 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
         continue;
       }
 
-      // Normalizar Categoría
       const normCatLower = rawCat.toLowerCase();
       let finalCat = 'Manual';
       if (normCatLower.includes('elec')) finalCat = 'Eléctrica';
@@ -1055,7 +1009,6 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
       else if (normCatLower.includes('gen')) finalCat = 'General';
       else if (rawCat.trim()) finalCat = rawCat.trim();
 
-      // Normalizar Estado
       const normEstadoLower = rawEstado.toLowerCase();
       let finalEstado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO' | 'EN_REPARACION' | 'BAJA' = 'BUENO';
       if (normEstadoLower.includes('nuev') || normEstadoLower.includes('new')) finalEstado = 'NUEVO';
@@ -1066,7 +1019,6 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
       else if (normEstadoLower.includes('repar') || normEstadoLower.includes('tall')) finalEstado = 'EN_REPARACION';
       else if (normEstadoLower.includes('baj') || normEstadoLower.includes('desech')) finalEstado = 'BAJA';
 
-      // Normalizar Activo
       let finalActivo = true;
       if (typeof rawActivo === 'string') {
         const aLow = rawActivo.toLowerCase();
@@ -1077,7 +1029,6 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
         finalActivo = false;
       }
 
-      // Código
       let finalCode = rawCode ? rawCode.toUpperCase() : '';
       let isExisting = false;
       let existingId = '';
@@ -1130,7 +1081,6 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
       });
     }
 
-    // Guardar en Base de Datos
     let insertCount = 0;
     let updateCount = 0;
 
@@ -1147,31 +1097,38 @@ export const importarHerramientasExcel = async (req: Request, res: Response) => 
 
       if (tool.es_existente && tool.id) {
         if (overwriteExisting) {
-          const { error: upErr } = await primaryClient
-            .from('herramientas')
-            .update(payload)
-            .eq('id', tool.id);
-          if (!upErr) {
+          const keys = Object.keys(payload);
+          const values = Object.values(payload);
+          const setClause = keys.map((k, idx) => `${k} = $${idx + 1}`).join(', ');
+          const params = [...values, tool.id];
+
+          try {
+            await primaryPool.query(`UPDATE herramientas SET ${setClause} WHERE id = $${params.length}`, params);
             updateCount++;
             try {
-              await secondaryClient.from('herramientas').update(payload).eq('id', tool.id);
+              await secondaryPool.query(`UPDATE herramientas SET ${setClause} WHERE id = $${params.length}`, params);
             } catch (_) {}
-          } else {
+          } catch (upErr: any) {
             errors.push(`Fila ${tool.fila} (${tool.nombre}): Error al actualizar - ${upErr.message}`);
           }
         }
       } else {
-        const { data: insData, error: insErr } = await primaryClient
-          .from('herramientas')
-          .insert([payload])
-          .select()
-          .single();
-        if (!insErr) {
+        const keys = Object.keys(payload);
+        const values = Object.values(payload);
+        const placeholders = values.map((_, idx) => `$${idx + 1}`).join(', ');
+        try {
+          const { rows } = await primaryPool.query(`INSERT INTO herramientas (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`, values);
           insertCount++;
           try {
-            if (insData) await secondaryClient.from('herramientas').upsert([insData]);
+            if (rows[0]) {
+              const updateSet = keys.map((c) => `${c} = EXCLUDED.${c}`).join(', ');
+              await secondaryPool.query(
+                `INSERT INTO herramientas (${keys.join(', ')}) VALUES (${placeholders}) ON CONFLICT (id) DO UPDATE SET ${updateSet}`,
+                values
+              );
+            }
           } catch (_) {}
-        } else {
+        } catch (insErr: any) {
           errors.push(`Fila ${tool.fila} (${tool.nombre}): Error al insertar - ${insErr.message}`);
         }
       }

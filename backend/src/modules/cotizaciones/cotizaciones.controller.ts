@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { getSupabaseClient } from '../../config/supabase';
+import { getDbPool } from '../../config/database';
 
 // Helper para adaptar el payload si la columna 'notas_observaciones' no existe en la BDD
 const prepareFallbackPayload = (payload: any) => {
@@ -35,19 +35,14 @@ export const searchClientes = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
     
     const { q } = req.query;
     if (!q || typeof q !== 'string' || q.length < 2) return res.json({ clientes: [] });
 
-    const { data, error } = await client
-      .from('clientes')
-      .select('*')
-      .ilike('nombre', `%${q}%`)
-      .limit(5);
-
-    if (error) throw error;
-    return res.json({ clientes: data || [] });
+    const query = 'SELECT * FROM clientes WHERE nombre ILIKE $1 LIMIT 5';
+    const result = await pool.query(query, [`%${q}%`]);
+    return res.json({ clientes: result.rows });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -58,27 +53,27 @@ export const searchProductos = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
     
     const { q } = req.query;
-    let query = client.from('productos').select('*').limit(15);
+    let queryText = 'SELECT * FROM productos LIMIT 15';
+    let queryParams: any[] = [];
     
     if (q && typeof q === 'string' && q.trim().length > 0) {
-      query = query.ilike('nombre_oficial', `%${q}%`);
+      queryText = 'SELECT * FROM productos WHERE nombre_oficial ILIKE $1 LIMIT 15';
+      queryParams = [`%${q}%`];
     }
 
-    const { data, error } = await query;
-    if (error) {
-      let fbQuery = client.from('productos').select('*').limit(15);
+    try {
+      const result = await pool.query(queryText, queryParams);
+      return res.json({ productos: result.rows });
+    } catch (error) {
       if (q && typeof q === 'string' && q.trim().length > 0) {
-        fbQuery = fbQuery.ilike('nombre', `%${q}%`);
+        const fbResult = await pool.query('SELECT * FROM productos WHERE nombre ILIKE $1 LIMIT 15', [`%${q}%`]);
+        return res.json({ productos: fbResult.rows });
       }
-      const fbData = await fbQuery;
-      if (fbData.error) throw fbData.error;
-      return res.json({ productos: fbData.data || [] });
+      throw error;
     }
-    
-    return res.json({ productos: data || [] });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -89,15 +84,10 @@ export const getCotizaciones = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
-    const { data, error } = await client
-      .from('cotizaciones')
-      .select('*')
-      .order('creado_en', { ascending: false });
-
-    if (error) throw error;
-    const formatted = (data || []).map(formatCotizacionResponse);
+    const result = await pool.query('SELECT * FROM cotizaciones ORDER BY creado_en DESC');
+    const formatted = result.rows.map(formatCotizacionResponse);
     return res.json({ cotizaciones: formatted });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -109,35 +99,22 @@ export const getCotizacion = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { id } = req.params;
 
-    const { data: cotizacion, error } = await client
-      .from('cotizaciones')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) throw error;
+    const cotizacionRes = await pool.query('SELECT * FROM cotizaciones WHERE id = $1', [id]);
+    if (cotizacionRes.rows.length === 0) throw new Error('Cotización no encontrada');
+    const cotizacion = cotizacionRes.rows[0];
 
     let clientData = null;
-    let sucursales = [];
+    let sucursales: any[] = [];
     if (cotizacion.cliente_nombre) {
-      const { data: cData } = await client
-        .from('clientes')
-        .select('*')
-        .eq('nombre', cotizacion.cliente_nombre)
-        .single();
-      
-      clientData = cData || null;
-
-      if (clientData) {
-        const { data: sData } = await client
-          .from('sucursales_cliente')
-          .select('*')
-          .eq('cliente_id', clientData.id);
-        sucursales = sData || [];
+      const cDataRes = await pool.query('SELECT * FROM clientes WHERE nombre = $1', [cotizacion.cliente_nombre]);
+      if (cDataRes.rows.length > 0) {
+        clientData = cDataRes.rows[0];
+        const sDataRes = await pool.query('SELECT * FROM sucursales_cliente WHERE cliente_id = $1', [clientData.id]);
+        sucursales = sDataRes.rows;
       }
     }
 
@@ -152,26 +129,20 @@ export const getPdfData = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { id } = req.params;
 
-    const { data: cotizacion, error } = await client
-      .from('cotizaciones')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) throw error;
+    const cotizacionRes = await pool.query('SELECT * FROM cotizaciones WHERE id = $1', [id]);
+    if (cotizacionRes.rows.length === 0) throw new Error('Cotización no encontrada');
+    const cotizacion = cotizacionRes.rows[0];
 
     let clientData = null;
     if (cotizacion.cliente_nombre) {
-      const { data: cData } = await client
-        .from('clientes')
-        .select('*')
-        .eq('nombre', cotizacion.cliente_nombre)
-        .single();
-      clientData = cData || null;
+      const cDataRes = await pool.query('SELECT * FROM clientes WHERE nombre = $1', [cotizacion.cliente_nombre]);
+      if (cDataRes.rows.length > 0) {
+        clientData = cDataRes.rows[0];
+      }
     }
 
     return res.json({ cotizacion: formatCotizacionResponse(cotizacion), clientData });
@@ -237,7 +208,7 @@ export const getLastFolio = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const today = new Date();
     const yy = String(today.getFullYear()).slice(-2);
@@ -249,16 +220,8 @@ export const getLastFolio = async (req: Request, res: Response) => {
       ? req.query.prefix.trim()
       : defaultPrefix;
 
-    let query = client
-      .from('cotizaciones')
-      .select('folio')
-      .ilike('folio', `${prefix}%`);
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-
-    const existingFolios = (data || []).map((row: any) => String(row.folio || '').trim());
+    const result = await pool.query('SELECT folio FROM cotizaciones WHERE folio ILIKE $1', [`${prefix}%`]);
+    const existingFolios = result.rows.map((row: any) => String(row.folio || '').trim());
     const nextFolio = calculateNextFolio(prefix, existingFolios);
 
     let highestFolio = null;
@@ -285,16 +248,12 @@ export const deleteCotizacion = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { id } = req.params;
 
-    const { error } = await client
-      .from('cotizaciones')
-      .delete()
-      .eq('id', id);
+    await pool.query('DELETE FROM cotizaciones WHERE id = $1', [id]);
 
-    if (error) throw error;
     return res.json({ success: true });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -306,17 +265,13 @@ export const duplicateCotizacion = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { id } = req.params;
 
-    const { data: original, error: origError } = await client
-      .from('cotizaciones')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (origError) throw origError;
+    const origRes = await pool.query('SELECT * FROM cotizaciones WHERE id = $1', [id]);
+    if (origRes.rows.length === 0) throw new Error('Cotización original no encontrada');
+    const original = origRes.rows[0];
 
     const today = new Date();
     const yy = String(today.getFullYear()).slice(-2);
@@ -324,14 +279,8 @@ export const duplicateCotizacion = async (req: Request, res: Response) => {
     const dd = String(today.getDate()).padStart(2, '0');
     const datePrefix = `${yy}${mm}${dd}`;
 
-    const { data: allFolios, error: foliosErr } = await client
-      .from('cotizaciones')
-      .select('folio')
-      .ilike('folio', `${datePrefix}%`);
-
-    if (foliosErr) throw foliosErr;
-
-    const existingFolios = (allFolios || []).map((r: any) => String(r.folio || '').trim());
+    const foliosRes = await pool.query('SELECT folio FROM cotizaciones WHERE folio ILIKE $1', [`${datePrefix}%`]);
+    const existingFolios = foliosRes.rows.map((r: any) => String(r.folio || '').trim());
     const newFolio = calculateNextFolio(datePrefix, existingFolios);
 
     const payload = {
@@ -343,23 +292,31 @@ export const duplicateCotizacion = async (req: Request, res: Response) => {
       subtotal: original.subtotal || 0,
       iva: original.iva || 0,
       total: original.total || 0,
-      lineas: original.lineas || [],
+      lineas: original.lineas ? JSON.stringify(original.lineas) : '[]',
       terminos_condiciones: original.terminos_condiciones,
       notas_observaciones: original.notas_observaciones || null,
       estado: 'Borrador'
     };
 
-    let { error: insError } = await client
-      .from('cotizaciones')
-      .insert([payload]);
-
-    if (insError && (insError.message?.includes('notas_observaciones') || insError.message?.includes('schema cache'))) {
-      const fbPayload = prepareFallbackPayload(payload);
-      const fbRes = await client.from('cotizaciones').insert([fbPayload]);
-      insError = fbRes.error;
+    const cols = Object.keys(payload);
+    const vals = Object.values(payload);
+    const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ');
+    let qry = `INSERT INTO cotizaciones (${cols.join(', ')}) VALUES (${placeholders})`;
+    
+    try {
+      await pool.query(qry, vals);
+    } catch (insError: any) {
+      if (insError.message?.includes('notas_observaciones')) {
+        const fbPayload = prepareFallbackPayload(payload);
+        const fbCols = Object.keys(fbPayload);
+        const fbVals = Object.values(fbPayload);
+        const fbPlaceholders = fbVals.map((_, i) => `$${i + 1}`).join(', ');
+        await pool.query(`INSERT INTO cotizaciones (${fbCols.join(', ')}) VALUES (${fbPlaceholders})`, fbVals);
+      } else {
+        throw insError;
+      }
     }
 
-    if (insError) throw insError;
     return res.json({ success: true, newFolio });
   } catch (error: any) {
     console.error('Error in duplicateCotizacion:', error);
@@ -372,12 +329,19 @@ export const createCotizacion = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { payload, clientData, updateProducts } = req.body;
 
     if (clientData) {
-      await client.from('clientes').upsert(clientData, { onConflict: 'nombre' });
+      const keys = Object.keys(clientData).filter(k => k !== 'id');
+      const vals = keys.map(k => clientData[k]);
+      const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ');
+      const updates = keys.map(k => `${k} = EXCLUDED.${k}`).join(', ');
+      await pool.query(
+        `INSERT INTO clientes (${keys.join(', ')}) VALUES (${placeholders}) ON CONFLICT (nombre) DO UPDATE SET ${updates}`,
+        vals
+      );
     }
 
     if (updateProducts && updateProducts.length > 0) {
@@ -385,33 +349,33 @@ export const createCotizacion = async (req: Request, res: Response) => {
         if (!linea.productoNombre) continue;
 
         if (linea.productoId) {
-          await client.from('productos').update({ 
-            precio_unitario: linea.precioUnitario,
-            impuesto_porcentaje: linea.impuestoPorcentaje,
-            clave_facturacion: linea.claveFacturacion || null
-          }).eq('id', linea.productoId);
+          await pool.query(
+            'UPDATE productos SET precio_unitario = $1, impuesto_porcentaje = $2, clave_facturacion = $3 WHERE id = $4',
+            [linea.precioUnitario, linea.impuestoPorcentaje, linea.claveFacturacion || null, linea.productoId]
+          );
         } else {
           let catId = null;
-          const { data: catData } = await client.from('categorias_productos').select('id').limit(1);
-          if (catData && catData.length > 0) {
-            catId = catData[0].id;
+          const catRes = await pool.query('SELECT id FROM categorias_productos LIMIT 1');
+          if (catRes.rows.length > 0) {
+            catId = catRes.rows[0].id;
           } else {
-            const { data: newCat } = await client.from('categorias_productos').insert({ nombre: 'General' }).select('id').single();
-            if (newCat) catId = newCat.id;
+            const newCatRes = await pool.query("INSERT INTO categorias_productos (nombre) VALUES ('General') RETURNING id");
+            if (newCatRes.rows.length > 0) catId = newCatRes.rows[0].id;
           }
 
           if (catId) {
             const tempSku = `TEMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            const { data: newProd, error: prodErr } = await client.from('productos').insert({
-              nombre_oficial: linea.productoNombre.trim(),
-              sku_interno: tempSku,
-              categoria_id: catId,
-              precio_unitario: linea.precioUnitario,
-              impuesto_porcentaje: linea.impuestoPorcentaje,
-              clave_facturacion: linea.claveFacturacion || null,
-              activo: true,
-              stock_actual: 0
-            }).select('id').single();
+            let newProd = null;
+            let prodErr = null;
+            try {
+              const pRes = await pool.query(
+                'INSERT INTO productos (nombre_oficial, sku_interno, categoria_id, precio_unitario, impuesto_porcentaje, clave_facturacion, activo, stock_actual) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
+                [linea.productoNombre.trim(), tempSku, catId, linea.precioUnitario, linea.impuestoPorcentaje, linea.claveFacturacion || null, true, 0]
+              );
+              newProd = pRes.rows[0];
+            } catch (err: any) {
+              prodErr = err;
+            }
             
             if (newProd && !prodErr) {
               const matchedLinea = payload.lineas.find((l: any) => l.id === linea.id);
@@ -424,24 +388,30 @@ export const createCotizacion = async (req: Request, res: Response) => {
       }
     }
 
-    let { data: result, error } = await client
-      .from('cotizaciones')
-      .insert([payload])
-      .select()
-      .single();
+    if (payload.lineas) payload.lineas = JSON.stringify(payload.lineas);
 
-    if (error && (error.message?.includes('notas_observaciones') || error.message?.includes('schema cache'))) {
-      const fbPayload = prepareFallbackPayload(payload);
-      const fbRes = await client
-        .from('cotizaciones')
-        .insert([fbPayload])
-        .select()
-        .single();
-      result = fbRes.data;
-      error = fbRes.error;
+    const cols = Object.keys(payload);
+    const vals = Object.values(payload);
+    const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ');
+    let qry = `INSERT INTO cotizaciones (${cols.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+    
+    let result: any;
+    try {
+      const resInsert = await pool.query(qry, vals);
+      result = resInsert.rows[0];
+    } catch (err: any) {
+      if (err.message?.includes('notas_observaciones')) {
+        const fbPayload = prepareFallbackPayload(payload);
+        const fbCols = Object.keys(fbPayload);
+        const fbVals = Object.values(fbPayload);
+        const fbPlaceholders = fbVals.map((_, i) => `$${i + 1}`).join(', ');
+        const resInsert = await pool.query(`INSERT INTO cotizaciones (${fbCols.join(', ')}) VALUES (${fbPlaceholders}) RETURNING *`, fbVals);
+        result = resInsert.rows[0];
+      } else {
+        throw err;
+      }
     }
 
-    if (error) throw error;
     return res.json({ success: true, cotizacion: formatCotizacionResponse(result) });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -453,13 +423,20 @@ export const updateCotizacion = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const client = getSupabaseClient(tenant.company, tenant.env);
+    const pool = getDbPool(tenant.company, tenant.env);
 
     const { id } = req.params;
     const { payload, clientData, updateProducts } = req.body;
 
     if (clientData) {
-      await client.from('clientes').upsert(clientData, { onConflict: 'nombre' });
+      const keys = Object.keys(clientData).filter(k => k !== 'id');
+      const vals = keys.map(k => clientData[k]);
+      const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ');
+      const updates = keys.map(k => `${k} = EXCLUDED.${k}`).join(', ');
+      await pool.query(
+        `INSERT INTO clientes (${keys.join(', ')}) VALUES (${placeholders}) ON CONFLICT (nombre) DO UPDATE SET ${updates}`,
+        vals
+      );
     }
 
     if (updateProducts && updateProducts.length > 0) {
@@ -467,33 +444,33 @@ export const updateCotizacion = async (req: Request, res: Response) => {
         if (!linea.productoNombre) continue;
 
         if (linea.productoId) {
-          await client.from('productos').update({ 
-            precio_unitario: linea.precioUnitario,
-            impuesto_porcentaje: linea.impuestoPorcentaje,
-            clave_facturacion: linea.claveFacturacion || null
-          }).eq('id', linea.productoId);
+          await pool.query(
+            'UPDATE productos SET precio_unitario = $1, impuesto_porcentaje = $2, clave_facturacion = $3 WHERE id = $4',
+            [linea.precioUnitario, linea.impuestoPorcentaje, linea.claveFacturacion || null, linea.productoId]
+          );
         } else {
           let catId = null;
-          const { data: catData } = await client.from('categorias_productos').select('id').limit(1);
-          if (catData && catData.length > 0) {
-            catId = catData[0].id;
+          const catRes = await pool.query('SELECT id FROM categorias_productos LIMIT 1');
+          if (catRes.rows.length > 0) {
+            catId = catRes.rows[0].id;
           } else {
-            const { data: newCat } = await client.from('categorias_productos').insert({ nombre: 'General' }).select('id').single();
-            if (newCat) catId = newCat.id;
+            const newCatRes = await pool.query("INSERT INTO categorias_productos (nombre) VALUES ('General') RETURNING id");
+            if (newCatRes.rows.length > 0) catId = newCatRes.rows[0].id;
           }
 
           if (catId) {
             const tempSku = `TEMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            const { data: newProd, error: prodErr } = await client.from('productos').insert({
-              nombre_oficial: linea.productoNombre.trim(),
-              sku_interno: tempSku,
-              categoria_id: catId,
-              precio_unitario: linea.precioUnitario,
-              impuesto_porcentaje: linea.impuestoPorcentaje,
-              clave_facturacion: linea.claveFacturacion || null,
-              activo: true,
-              stock_actual: 0
-            }).select('id').single();
+            let newProd = null;
+            let prodErr = null;
+            try {
+              const pRes = await pool.query(
+                'INSERT INTO productos (nombre_oficial, sku_interno, categoria_id, precio_unitario, impuesto_porcentaje, clave_facturacion, activo, stock_actual) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
+                [linea.productoNombre.trim(), tempSku, catId, linea.precioUnitario, linea.impuestoPorcentaje, linea.claveFacturacion || null, true, 0]
+              );
+              newProd = pRes.rows[0];
+            } catch (err: any) {
+              prodErr = err;
+            }
             
             if (newProd && !prodErr) {
               const matchedLinea = payload.lineas.find((l: any) => l.id === linea.id);
@@ -506,24 +483,31 @@ export const updateCotizacion = async (req: Request, res: Response) => {
       }
     }
 
-    let { error } = await client
-      .from('cotizaciones')
-      .update(payload)
-      .eq('id', id);
+    if (payload.lineas) payload.lineas = JSON.stringify(payload.lineas);
 
-    if (error && (error.message?.includes('notas_observaciones') || error.message?.includes('schema cache'))) {
-      const fbPayload = prepareFallbackPayload(payload);
-      const fbRes = await client
-        .from('cotizaciones')
-        .update(fbPayload)
-        .eq('id', id);
-      error = fbRes.error;
+    const keys = Object.keys(payload);
+    const vals = Object.values(payload);
+    const updates = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+    vals.push(id);
+    let qry = `UPDATE cotizaciones SET ${updates} WHERE id = $${vals.length}`;
+
+    try {
+      await pool.query(qry, vals);
+    } catch (err: any) {
+      if (err.message?.includes('notas_observaciones')) {
+        const fbPayload = prepareFallbackPayload(payload);
+        const fbKeys = Object.keys(fbPayload);
+        const fbVals = Object.values(fbPayload);
+        const fbUpdates = fbKeys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+        fbVals.push(id);
+        await pool.query(`UPDATE cotizaciones SET ${fbUpdates} WHERE id = $${fbVals.length}`, fbVals);
+      } else {
+        throw err;
+      }
     }
 
-    if (error) throw error;
     return res.json({ success: true });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
 };
-

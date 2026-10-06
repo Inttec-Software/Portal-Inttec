@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { getSupabaseClient } from '../../config/supabase';
+import bcrypt from 'bcryptjs';
+import { getDbPool } from '../../config/database';
 
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -11,42 +12,35 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Obtenemos el tenant del request (inyectado por tenantMiddleware)
-    const { company, env } = req.tenant!;
-    
-    // Obtenemos el cliente de Supabase adecuado
-    const supabase = getSupabaseClient(company, env);
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
 
-    // Llamamos al RPC custom que ya existía en la BD para validar credenciales
-    let { data: usuario, error } = await supabase
-      .rpc('login_usuario', {
-        email_param: email.trim().toLowerCase(),
-        password_param: password,
-      })
-      .maybeSingle();
+    const emailParam = email.trim().toLowerCase();
 
-    if (error) {
-      console.error('[Auth Controller] Error de Supabase RPC:', error.message);
-      // No devolvemos error 500 aquí para intentar el fallback manual
-    }
+    // 1. Buscamos el usuario por correo electrónico
+    const { rows } = await pool.query(
+      'SELECT id, nombre, email, password, rol, telefono, created_at FROM usuarios WHERE email = $1',
+      [emailParam]
+    );
 
-    // Fallback manual si el RPC falla o retorna null (problema detectado en la BD de Daravisa)
-    if (!usuario) {
-      const { data: manualUser, error: manualError } = await supabase
-        .from('usuarios')
-        .select('id, nombre, email, rol, telefono, created_at')
-        .eq('email', email.trim().toLowerCase())
-        .eq('password', password)
-        .maybeSingle();
+    let usuario = null;
 
-      if (manualError) {
-        console.error('[Auth Controller] Error de Supabase Fallback:', manualError.message);
-        res.status(500).json({ message: 'Error de conexión con la base de datos.' });
-        return;
-      }
-
-      if (manualUser) {
-        usuario = manualUser;
+    if (rows.length > 0) {
+      const dbUser = rows[0];
+      
+      // 2. Comparamos la contraseña en Node.js, usando bcryptjs (compatible con pgcrypto de Supabase)
+      const isMatch = await bcrypt.compare(password, dbUser.password);
+      
+      if (isMatch) {
+        // Quitamos la contraseña del objeto usuario por seguridad
+        const { password: _, ...userWithoutPassword } = dbUser;
+        usuario = userWithoutPassword;
+      } else {
+        // Fallback por si en algún ambiente local se usó texto plano temporalmente
+        if (password === dbUser.password) {
+          const { password: _, ...userWithoutPassword } = dbUser;
+          usuario = userWithoutPassword;
+        }
       }
     }
 
@@ -55,23 +49,19 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Generar el Token JWT
     const secret = process.env.JWT_SECRET || 'super_secret_jwt_key_cambiar_en_produccion';
     
-    // Firmamos el token con los datos básicos del usuario
-    // Recomendable que el token expire, por ejemplo, en 7 días
     const token = jwt.sign(
       { 
-        id: (usuario as any).id, 
-        email: (usuario as any).email, 
-        rol: (usuario as any).rol, 
-        nombre: (usuario as any).nombre 
+        id: usuario.id, 
+        email: usuario.email, 
+        rol: usuario.rol, 
+        nombre: usuario.nombre 
       },
       secret,
       { expiresIn: '7d' }
     );
 
-    // Retornamos el usuario (para mantener compatibilidad con el front temporalmente) y el token
     res.json({
       usuario,
       token
@@ -83,11 +73,9 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// Ruta de prueba para verificar que el JWT funciona
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
-  // Si llegamos aquí, el middleware verifyToken ya extrajo el req.user
   res.json({
     message: 'Ruta protegida accedida con éxito.',
-    user: req.user
+    user: (req as any).user
   });
 };

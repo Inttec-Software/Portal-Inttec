@@ -23,7 +23,7 @@ import * as Sharing from 'expo-sharing';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { supabase, Gasto, GastoHelper, AuditoriaService, AuditoriaTarjeta } from '@/services/supabase';
+import { Gasto, GastoHelper, AuditoriaService, AuditoriaTarjeta, supabase } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { GeminiService, CardTransaction, CardStatementResult } from '@/services/gemini';
 import ImageViewerModal from '@/components/ImageViewerModal';
@@ -2194,4 +2194,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
 

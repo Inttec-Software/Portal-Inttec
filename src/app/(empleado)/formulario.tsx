@@ -23,18 +23,7 @@ import * as FileSystem from 'expo-file-system';
 import NetInfo from '@react-native-community/netinfo';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import {
-  supabase,
-  CatalogoItem,
-  SubcategoriaItem,
-  ProveedorItem,
-  Usuario,
-  Vehiculo,
-  VehiculoService,
-  ClienteItem,
-  SucursalCliente,
-  AuthService,
-} from '@/services/supabase';
+import { CatalogoItem, SubcategoriaItem, ProveedorItem, Usuario, Vehiculo, VehiculoService, ClienteItem, SucursalCliente, AuthService, supabase, Documento } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import { SyncService, base64ToArrayBuffer } from '@/services/sync';
 import { PushNotificationService } from '@/services/pushNotifications';
@@ -3396,3 +3385,4 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+

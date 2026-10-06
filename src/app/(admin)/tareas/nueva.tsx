@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -20,7 +21,7 @@ import { useAuth } from '@/context/AuthContext';
 import SelectDropdown from '@/components/SelectDropdown';
 import VentaSelectModal from '@/components/VentaSelectModal';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { supabase } from '@/services/supabase';
+import {} from '@/services/supabase';
 import { TareasService } from '@/services/tareasService';
 
 export default function NuevaTareaScreen() {
@@ -499,3 +500,4 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.four,
   }
 });
+

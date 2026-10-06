@@ -1,3 +1,4 @@
+import { supabase } from '@/services/supabase';
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Platform, TextInput, Alert, useWindowDimensions, Modal, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -5,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '@/services/supabase';
+import {} from '@/services/supabase';
 import CustomInput from '@/components/CustomInput';
 import { normalizeText } from '@/utils/helpers';
 
@@ -453,3 +454,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   }
 });
+
