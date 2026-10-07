@@ -91,14 +91,18 @@ export default function AdminHerramientasScreen() {
   const [formDescripcion, setFormDescripcion] = useState('');
   const [formNumeroSerie, setFormNumeroSerie] = useState('');
   const [formEstado, setFormEstado] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE'>('NUEVO');
+  const [formCantidad, setFormCantidad] = useState('1');
+  const [formUnidadesEstado, setFormUnidadesEstado] = useState<Record<string, number>>({ BUENO: 1 });
   const [isSavingTool, setIsSavingTool] = useState(false);
 
   // Empleados y Kits
   const [empleadosList, setEmpleadosList] = useState<Usuario[]>([]);
   const [selectedEmpleadoId, setSelectedEmpleadoId] = useState<string>('');
+  const [searchEmpleadoKit, setSearchEmpleadoKit] = useState('');
   const [kitsEmpleado, setKitsEmpleado] = useState<HerramientaEmpleado[]>([]);
   const [assignEmpModalVisible, setAssignEmpModalVisible] = useState(false);
-  const [selectedToolToAssignEmp, setSelectedToolToAssignEmp] = useState<string>('');
+  const [selectedToolsToAssignEmp, setSelectedToolsToAssignEmp] = useState<string[]>([]);
+  const [searchEmpAssignTool, setSearchEmpAssignTool] = useState('');
   const [assignEmpQty, setAssignEmpQty] = useState('1');
   const [assignEmpCondicion, setAssignEmpCondicion] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO'>('NUEVO');
   const [assignEmpNotas, setAssignEmpNotas] = useState('');
@@ -373,6 +377,8 @@ export default function AdminHerramientasScreen() {
       setFormDescripcion(tool.descripcion || '');
       setFormNumeroSerie(tool.numero_serie || '');
       setFormEstado(tool.estado || 'BUENO');
+      setFormCantidad(String(tool.cantidad || 1));
+      setFormUnidadesEstado(tool.unidades_estado || { [tool.estado || 'BUENO']: tool.cantidad || 1 });
     } else {
       setEditingTool(null);
       setFormCodigo(getNextToolCode());
@@ -381,6 +387,8 @@ export default function AdminHerramientasScreen() {
       setFormDescripcion('');
       setFormNumeroSerie('');
       setFormEstado('NUEVO');
+      setFormCantidad('1');
+      setFormUnidadesEstado({ NUEVO: 1 });
     }
     setToolModalVisible(true);
   };
@@ -393,13 +401,16 @@ export default function AdminHerramientasScreen() {
 
     setIsSavingTool(true);
     try {
-      const payload = {
+      const qtyNum = Math.max(1, parseInt(formCantidad, 10) || 1);
+      const payload: any = {
         codigo: formCodigo.trim().toUpperCase(),
         nombre: formNombre.trim(),
         categoria: formCategoria,
         descripcion: formDescripcion.trim() || null,
         numero_serie: formNumeroSerie.trim() || null,
         estado: formEstado,
+        cantidad: qtyNum,
+        unidades_estado: formUnidadesEstado && Object.keys(formUnidadesEstado).length > 0 ? formUnidadesEstado : { [formEstado]: qtyNum },
         activo: true,
       };
 
@@ -445,26 +456,50 @@ export default function AdminHerramientasScreen() {
     }
   };
 
-  // Asignar Herramienta a Empleado
+  // Toggle selección de herramienta para empleado
+  const toggleSelectToolForEmp = (toolId: string) => {
+    setSelectedToolsToAssignEmp((prev) =>
+      prev.includes(toolId) ? prev.filter((id) => id !== toolId) : [...prev, toolId]
+    );
+  };
+
+  const handleSelectAllToolsForEmp = (toolList: Herramienta[]) => {
+    if (selectedToolsToAssignEmp.length === toolList.length) {
+      setSelectedToolsToAssignEmp([]);
+    } else {
+      setSelectedToolsToAssignEmp(toolList.map((t) => t.id));
+    }
+  };
+
+  // Asignar Herramientas a Empleado (con Soporte Multi-Selección y Buscador)
   const handleAssignToEmployee = async () => {
-    if (!selectedEmpleadoId || !selectedToolToAssignEmp) {
-      showAlert('Validación', 'Selecciona una herramienta para asignar.');
+    if (!selectedEmpleadoId || selectedToolsToAssignEmp.length === 0) {
+      showAlert('Validación', 'Selecciona al menos una herramienta para asignar.');
       return;
     }
 
     setIsSavingAssignEmp(true);
     try {
-      await HerramientasService.asignarHerramientaEmpleado({
-        empleado_id: selectedEmpleadoId,
-        herramienta_id: selectedToolToAssignEmp,
-        cantidad: parseInt(assignEmpQty, 10) || 1,
-        condicion: assignEmpCondicion,
-        notas: assignEmpNotas.trim(),
-      });
-      showAlert('Asignación Exitosa', 'La herramienta fue añadida al kit personal del empleado.');
+      const qty = parseInt(assignEmpQty, 10) || 1;
+      const promises = selectedToolsToAssignEmp.map((toolId) =>
+        HerramientasService.asignarHerramientaEmpleado({
+          empleado_id: selectedEmpleadoId,
+          herramienta_id: toolId,
+          cantidad: qty,
+          condicion: assignEmpCondicion,
+          notas: assignEmpNotas.trim(),
+        })
+      );
+
+      await Promise.all(promises);
+      showAlert(
+        'Asignación Exitosa',
+        `Se ${selectedToolsToAssignEmp.length === 1 ? 'añadió 1 herramienta' : `añadieron ${selectedToolsToAssignEmp.length} herramientas`} al kit personal del empleado.`
+      );
       setAssignEmpModalVisible(false);
-      setSelectedToolToAssignEmp('');
+      setSelectedToolsToAssignEmp([]);
       setAssignEmpNotas('');
+      setSearchEmpAssignTool('');
       const updated = await HerramientasService.getKitsEmpleados(selectedEmpleadoId);
       setKitsEmpleado(updated);
     } catch (err: any) {
@@ -786,6 +821,37 @@ export default function AdminHerramientasScreen() {
                       {getStatusBadge(tool.estado)}
                     </View>
 
+                    {/* Badge de Cantidad y Desglose de Estados Nativo */}
+                    {((tool.cantidad && tool.cantidad > 1) || (tool.unidades_estado && Object.keys(tool.unidades_estado).length > 0)) && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginVertical: 4 }}>
+                        <View style={{ backgroundColor: themeColors.primary + '20', borderColor: themeColors.primary + '50', borderWidth: 1, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: themeColors.primary }}>
+                            📦 {tool.cantidad || 1} {(tool.cantidad || 1) === 1 ? 'Unidad' : 'Unidades'}
+                          </Text>
+                        </View>
+                        {tool.unidades_estado && Object.entries(tool.unidades_estado).map(([stKey, stCount]) => {
+                          const conf = ESTADOS_HERRAMIENTA.find((e) => e.value === stKey);
+                          return (
+                            <View
+                              key={stKey}
+                              style={{
+                                backgroundColor: (conf?.color || '#7f8c8d') + '20',
+                                borderColor: (conf?.color || '#7f8c8d') + '60',
+                                borderWidth: 1,
+                                paddingHorizontal: 6,
+                                paddingVertical: 2,
+                                borderRadius: 6,
+                              }}
+                            >
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: conf?.color || '#7f8c8d' }}>
+                                {stCount} {conf?.label || stKey}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+
                     {tool.descripcion ? (
                       <Text style={[styles.toolDesc, { color: themeColors.textSecondary }]} numberOfLines={2}>
                         {tool.descripcion}
@@ -872,11 +938,41 @@ export default function AdminHerramientasScreen() {
         {/* ========================================================================= */}
         {activeTab === 'empleados' && (
           <View>
-            {/* Selector de Empleado */}
+            {/* Selector de Empleado con Buscador */}
             <View style={[styles.selectionCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-              <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Seleccionar Empleado Técnico</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.two }}>
-                {empleadosList.map((emp) => (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={[styles.sectionTitle, { color: themeColors.text, marginBottom: 0 }]}>Seleccionar Empleado Técnico</Text>
+                {empleadosList.length > 5 && (
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                    {empleadosList.length} empleados disponibles
+                  </Text>
+                )}
+              </View>
+
+              {/* Buscador rápido de empleado */}
+              <View style={[styles.searchBox, { backgroundColor: themeColors.background, borderColor: themeColors.border, marginBottom: 8, paddingHorizontal: 10, height: 38 }]}>
+                <Ionicons name="search" size={16} color={themeColors.textSecondary} style={{ marginRight: 6 }} />
+                <TextInput
+                  style={[styles.searchInput, { color: themeColors.text, paddingVertical: 4, fontSize: 13 }]}
+                  placeholder="Buscar empleado técnico por nombre o correo..."
+                  placeholderTextColor={themeColors.textSecondary}
+                  value={searchEmpleadoKit}
+                  onChangeText={setSearchEmpleadoKit}
+                />
+                {searchEmpleadoKit.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchEmpleadoKit('')}>
+                    <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
+                {empleadosList
+                  .filter((emp) => {
+                    const q = normalizeText(searchEmpleadoKit);
+                    return !q || normalizeText(emp.nombre).includes(q) || (emp.email && normalizeText(emp.email).includes(q));
+                  })
+                  .map((emp) => (
                   <TouchableOpacity
                     key={emp.id}
                     style={[
@@ -928,12 +1024,13 @@ export default function AdminHerramientasScreen() {
                     showAlert('Aviso', 'Primero registra herramientas en el Catálogo Maestro.');
                     return;
                   }
-                  setSelectedToolToAssignEmp(herramientas[0]?.id || '');
+                  setSelectedToolsToAssignEmp([]);
+                  setSearchEmpAssignTool('');
                   setAssignEmpModalVisible(true);
                 }}
               >
                 <Ionicons name="add-circle" size={18} color="#fff" style={{ marginRight: 6 }} />
-                <Text style={styles.btnPrimaryText}>Asignar Herramienta</Text>
+                <Text style={styles.btnPrimaryText}>Asignar Herramientas</Text>
               </TouchableOpacity>
             </View>
 
@@ -1308,7 +1405,22 @@ export default function AdminHerramientasScreen() {
                 placeholder="Ej. SN-8839201"
               />
 
-              <Text style={[styles.inputLabel, { color: themeColors.text }]}>Estado Inicial</Text>
+              <CustomInput
+                label="Cantidad Total de Unidades (Stock)"
+                value={formCantidad}
+                onChangeText={(val) => {
+                  setFormCantidad(val);
+                  const n = parseInt(val, 10) || 1;
+                  setFormUnidadesEstado((prev) => ({
+                    ...prev,
+                    [formEstado]: n,
+                  }));
+                }}
+                keyboardType="numeric"
+                placeholder="1"
+              />
+
+              <Text style={[styles.inputLabel, { color: themeColors.text }]}>Estado Principal</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: Spacing.two }}>
                 {ESTADOS_HERRAMIENTA.map((st) => (
                   <TouchableOpacity
@@ -1320,7 +1432,11 @@ export default function AdminHerramientasScreen() {
                         borderColor: themeColors.border,
                       },
                     ]}
-                    onPress={() => setFormEstado(st.value as any)}
+                    onPress={() => {
+                      setFormEstado(st.value as any);
+                      const n = parseInt(formCantidad, 10) || 1;
+                      setFormUnidadesEstado({ [st.value]: n });
+                    }}
                   >
                     <Text style={{ color: formEstado === st.value ? '#fff' : themeColors.text, fontSize: 12, fontWeight: '600' }}>
                       {st.label}
@@ -1359,54 +1475,125 @@ export default function AdminHerramientasScreen() {
       </Modal>
 
       {/* ========================================================================= */}
-      {/* MODAL: ASIGNAR HERRAMIENTA A EMPLEADO */}
+      {/* MODAL: ASIGNAR HERRAMIENTA A EMPLEADO CON BUSCADOR Y MULTI-SELECCIÓN */}
       {/* ========================================================================= */}
       <Modal visible={assignEmpModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+          <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: themeColors.text }]}>
-                Asignar al Kit de {empleadosList.find((e) => e.id === selectedEmpleadoId)?.nombre}
-              </Text>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                  Asignar al Kit de {empleadosList.find((e) => e.id === selectedEmpleadoId)?.nombre}
+                </Text>
+                <Text style={{ fontSize: 12, color: themeColors.primary, fontWeight: '600', marginTop: 2 }}>
+                  Selecciona una o varias herramientas del catálogo
+                </Text>
+              </View>
               <TouchableOpacity onPress={() => setAssignEmpModalVisible(false)}>
                 <Ionicons name="close" size={24} color={themeColors.text} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 420 }}>
-              <Text style={[styles.inputLabel, { color: themeColors.text }]}>Seleccionar Herramienta del Catálogo</Text>
-              <View style={{ gap: 6, marginBottom: Spacing.two }}>
-                {herramientas.map((tool) => (
+            <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={false}>
+              {/* Sección de Selección con Buscador */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <Text style={[styles.inputLabel, { color: themeColors.text, marginBottom: 0 }]}>
+                    Herramientas ({selectedToolsToAssignEmp.length} seleccionadas)
+                  </Text>
                   <TouchableOpacity
-                    key={tool.id}
-                    style={[
-                      styles.toolSelectOption,
-                      {
-                        backgroundColor: selectedToolToAssignEmp === tool.id ? themeColors.primary + '20' : themeColors.background,
-                        borderColor: selectedToolToAssignEmp === tool.id ? themeColors.primary : themeColors.border,
-                      },
-                    ]}
-                    onPress={() => setSelectedToolToAssignEmp(tool.id)}
+                    onPress={() => {
+                      const q = normalizeText(searchEmpAssignTool);
+                      const filtered = herramientas.filter((t) =>
+                        !q ||
+                        normalizeText(t.nombre).includes(q) ||
+                        normalizeText(t.codigo).includes(q) ||
+                        (t.categoria && normalizeText(t.categoria).includes(q)) ||
+                        (t.numero_serie && normalizeText(t.numero_serie).includes(q))
+                      );
+                      handleSelectAllToolsForEmp(filtered);
+                    }}
+                    style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: themeColors.primary + '15' }}
                   >
-                    <Ionicons
-                      name={selectedToolToAssignEmp === tool.id ? 'radio-button-on' : 'radio-button-off'}
-                      size={18}
-                      color={selectedToolToAssignEmp === tool.id ? themeColors.primary : themeColors.textSecondary}
-                    />
-                    <View style={{ flex: 1, marginLeft: 8 }}>
-                      <Text style={{ fontWeight: '700', color: themeColors.text, fontSize: 13 }}>
-                        [{tool.codigo}] {tool.nombre}
-                      </Text>
-                      <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                        {tool.categoria} {tool.numero_serie ? `• N/S: ${tool.numero_serie}` : ''}
-                      </Text>
-                    </View>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.primary }}>
+                      {selectedToolsToAssignEmp.length > 0 ? 'Desmarcar Todas' : 'Marcar Todas'}
+                    </Text>
                   </TouchableOpacity>
-                ))}
+                </View>
+
+                {/* Filtro rápido / Buscador dentro del modal */}
+                <View style={[styles.searchBox, { backgroundColor: themeColors.background, borderColor: themeColors.border, marginBottom: 8, paddingHorizontal: 8, height: 38 }]}>
+                  <Ionicons name="search" size={16} color={themeColors.textSecondary} style={{ marginRight: 6 }} />
+                  <TextInput
+                    style={[styles.searchInput, { color: themeColors.text, paddingVertical: 4, fontSize: 12 }]}
+                    placeholder="Buscar por código, nombre, serie o categoría..."
+                    placeholderTextColor={themeColors.textSecondary}
+                    value={searchEmpAssignTool}
+                    onChangeText={setSearchEmpAssignTool}
+                  />
+                  {searchEmpAssignTool.length > 0 && (
+                    <TouchableOpacity onPress={() => setSearchEmpAssignTool('')}>
+                      <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Lista de Herramientas Filtradas con Checkboxes */}
+                <View style={{ gap: 6, maxHeight: 220 }}>
+                  <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>
+                    {herramientas
+                      .filter((t) => {
+                        const q = normalizeText(searchEmpAssignTool);
+                        return (
+                          !q ||
+                          normalizeText(t.nombre).includes(q) ||
+                          normalizeText(t.codigo).includes(q) ||
+                          (t.categoria && normalizeText(t.categoria).includes(q)) ||
+                          (t.numero_serie && normalizeText(t.numero_serie).includes(q))
+                        );
+                      })
+                      .map((tool) => {
+                        const isSelected = selectedToolsToAssignEmp.includes(tool.id);
+                        return (
+                          <TouchableOpacity
+                            key={tool.id}
+                            style={[
+                              styles.toolSelectOption,
+                              {
+                                backgroundColor: isSelected ? themeColors.primary + '20' : themeColors.background,
+                                borderColor: isSelected ? themeColors.primary : themeColors.border,
+                                marginBottom: 6,
+                              },
+                            ]}
+                            onPress={() => toggleSelectToolForEmp(tool.id)}
+                          >
+                            <Ionicons
+                              name={isSelected ? 'checkbox' : 'square-outline'}
+                              size={20}
+                              color={isSelected ? themeColors.primary : themeColors.textSecondary}
+                            />
+                            <View style={{ flex: 1, marginLeft: 8 }}>
+                              <Text style={{ fontWeight: '700', color: themeColors.text, fontSize: 13 }}>
+                                [{tool.codigo}] {tool.nombre}
+                              </Text>
+                              <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                                {tool.categoria} {tool.numero_serie ? `• N/S: ${tool.numero_serie}` : ''}
+                              </Text>
+                            </View>
+                            {isSelected && (
+                              <View style={{ backgroundColor: themeColors.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>SELECCIONADA</Text>
+                              </View>
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                  </ScrollView>
+                </View>
               </View>
 
               <CustomInput
-                label="Cantidad"
+                label="Cantidad por cada Herramienta"
                 value={assignEmpQty}
                 onChangeText={setAssignEmpQty}
                 keyboardType="numeric"

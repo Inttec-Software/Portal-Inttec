@@ -1469,7 +1469,16 @@ export default function InventarioDashboard() {
 
   const handleUpdateConsumoItemQty = (id: string, qty: number) => {
     setConsumoItems(prev =>
-      prev.map(item => (item.id === id ? { ...item, cantidad: qty } : item))
+      prev.map(item => {
+        if (item.id !== id) return item;
+        const prod = productos.find(p => p.id === item.productoId);
+        const maxStock = prod ? (Number(prod.stock_actual) || 0) : 0;
+        if (qty > maxStock) {
+          Alert.alert('Stock Insuficiente', `No puedes consumir más de ${maxStock} ${prod?.unidad || 'unidades'} disponibles.`);
+        }
+        const clamped = Math.min(Math.max(0, qty), maxStock);
+        return { ...item, cantidad: clamped };
+      })
     );
   };
 
@@ -1601,7 +1610,16 @@ export default function InventarioDashboard() {
   };
 
   const handleUpdateAsignarItemQty = (id: string, qty: number) => {
-    setAsignarItems(prev => prev.map(item => item.id === id ? { ...item, cantidad: qty } : item));
+    setAsignarItems(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      const prod = productos.find(p => p.id === item.productoId);
+      const maxStock = prod ? (Number(prod.stock_actual) || 0) : 0;
+      if (qty > maxStock) {
+        Alert.alert('Stock Insuficiente', `No puedes agregar más de ${maxStock} ${prod?.unidad || 'unidades'} disponibles en almacén.`);
+      }
+      const clamped = Math.min(Math.max(0, qty), maxStock);
+      return { ...item, cantidad: clamped };
+    }));
   };
 
   const handleConfirmAsignacion = async () => {
@@ -4181,6 +4199,7 @@ export default function InventarioDashboard() {
                               />
 
                               <TouchableOpacity
+                                disabled={item.cantidad >= maxStock}
                                 onPress={() => handleUpdateAsignarItemQty(item.id, item.cantidad + 1)}
                                 style={{
                                   width: 32,
@@ -4190,10 +4209,11 @@ export default function InventarioDashboard() {
                                   borderWidth: 1,
                                   borderColor: themeColors.border,
                                   justifyContent: 'center',
-                                  alignItems: 'center'
+                                  alignItems: 'center',
+                                  opacity: item.cantidad >= maxStock ? 0.35 : 1
                                 }}
                               >
-                                <Ionicons name="add" size={16} color={themeColors.text} />
+                                <Ionicons name="add" size={16} color={item.cantidad >= maxStock ? themeColors.textSecondary : themeColors.text} />
                               </TouchableOpacity>
 
                               <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '600', marginLeft: 2 }}>
@@ -4245,7 +4265,16 @@ export default function InventarioDashboard() {
                 title={isSubmittingAsignacion ? "Transfiriendo..." : `Transferir (${asignarItems.length})`}
                 onPress={handleConfirmAsignacion}
                 loading={isSubmittingAsignacion}
-                disabled={isSubmittingAsignacion || asignarItems.length === 0 || !asignarEmpleadoId}
+                disabled={
+                  isSubmittingAsignacion ||
+                  asignarItems.length === 0 ||
+                  !asignarEmpleadoId ||
+                  asignarItems.some(it => {
+                    const p = productos.find(prod => prod.id === it.productoId);
+                    const max = p ? (Number(p.stock_actual) || 0) : 0;
+                    return it.cantidad <= 0 || it.cantidad > max;
+                  })
+                }
                 style={{ flex: 1.6, backgroundColor: '#2563EB' }}
               />
             </View>

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, ScrollView, TouchableOpacity, Alert, StyleSheet, useWindowDimensions, TextInput, KeyboardAvoidingView, Platform, Keyboard, Pressable } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet, useWindowDimensions, TextInput, KeyboardAvoidingView, Platform, Keyboard, Pressable } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import CustomInput from '@/components/CustomInput';
+import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
 import { Cotizacion, CotizacionLinea } from '@/types/ventas';
 import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { ThemedText } from '@/components/themed-text';
@@ -12,6 +13,49 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
+
+function TableTooltipButton({
+  icon,
+  color,
+  bgColor,
+  borderColor,
+  tooltip,
+  onPress,
+}: {
+  icon: any;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  tooltip: string;
+  onPress: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <View style={{ position: 'relative', alignItems: 'center', zIndex: hovered ? 9999 : 1 }}>
+      <Pressable
+        onPress={(e) => {
+          e.stopPropagation();
+          onPress();
+        }}
+        onHoverIn={() => setHovered(true)}
+        onHoverOut={() => setHovered(false)}
+        style={({ hovered: isHover }: any) => [
+          styles.tableActionIconBtn,
+          {
+            borderColor: isHover || hovered ? color : borderColor,
+            backgroundColor: isHover || hovered ? color + '28' : bgColor,
+            transform: [{ scale: isHover || hovered ? 1.1 : 1 }],
+          },
+        ]}
+        {...(Platform.OS === 'web' ? ({ title: tooltip } as any) : {})}
+        accessibilityLabel={tooltip}
+      >
+        <Ionicons name={icon} size={15} color={color} />
+      </Pressable>
+    </View>
+  );
+}
 
 export default function NuevaCotizacionScreen() {
   const router = useRouter();
@@ -141,13 +185,18 @@ export default function NuevaCotizacionScreen() {
     setCotizacion(prev => {
       const newLineas = prev.lineas.map(linea => {
         if (linea.id === lineId) {
+          const pu = product.precio_unitario || product.precio || linea.precioUnitario || 0;
+          const cant = linea.cantidad || 1;
           return {
             ...linea,
-            productoNombre: product.nombre_oficial,
+            productoNombre: product.nombre_oficial || product.nombre || '',
             productoId: product.id,
-            claveFacturacion: product.clave_facturacion || '',
-            precioUnitario: product.precio_unitario || 0,
-            impuestoPorcentaje: product.impuesto_porcentaje !== null ? product.impuesto_porcentaje : 16
+            claveFacturacion: product.sat_code || product.clave_sat || product.clave_facturacion || linea.claveFacturacion || '',
+            unidad: product.clave_unidad || product.unidad || linea.unidad || 'H87',
+            precioUnitario: pu,
+            precioUnitarioStr: pu > 0 ? String(pu) : linea.precioUnitarioStr,
+            impuestoPorcentaje: product.impuesto_porcentaje !== null && product.impuesto_porcentaje !== undefined ? product.impuesto_porcentaje : 16,
+            importe: cant * pu
           };
         }
         return linea;
@@ -307,6 +356,18 @@ export default function NuevaCotizacionScreen() {
     });
   };
 
+  const handleDuplicateLine = (index: number) => {
+    const item = cotizacion.lineas[index];
+    if (!item) return;
+    const duplicated: CotizacionLinea = {
+      ...item,
+      id: Math.random().toString(),
+    };
+    const newLineas = [...cotizacion.lineas];
+    newLineas.splice(index + 1, 0, duplicated);
+    setCotizacion(prev => ({ ...prev, lineas: newLineas }));
+  };
+
   const handleRemoveLine = (id: string) => {
     setCotizacion(prev => ({
       ...prev,
@@ -374,14 +435,14 @@ export default function NuevaCotizacionScreen() {
         throw new Error(errorData.error || 'Error en la API');
       }
       
-      showAlert('Éxito', editId ? 'Cotización actualizada exitosamente.' : 'Cotización guardada y cliente registrado.');
+      showAlert('Éxito', editId ? 'Cotización actualizada exitosamente.' : 'Cotización guardada exitosamente.');
       setTimeout(() => {
         router.push('/(admin)/cotizaciones');
       }, 1500);
     } catch (error: any) {
       console.error('Error al guardar:', error);
       if (error.message?.includes('duplicate key value')) {
-        showAlert('Éxito', 'Cotización actualizada y guardada.');
+        showAlert('Éxito', 'Cotización guardada exitosamente.');
         setTimeout(() => {
           router.push('/(admin)/cotizaciones');
         }, 1500);
@@ -645,15 +706,18 @@ export default function NuevaCotizacionScreen() {
           </View>
         </View>
 
-        {/* Partidas / Líneas */}
-        <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+        {/* Partidas / Líneas (Estilo Facturación con campo Entrega) */}
+        <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, overflow: 'visible' }]}>
           <View style={styles.cardHeader}>
-            <ThemedText style={[styles.cardTitle, { color: themeColors.primary, marginBottom: 0 }]}>
-              Partidas y Productos
-            </ThemedText>
-            <TouchableOpacity onPress={handleAddLine} style={[styles.addBtn, { backgroundColor: themeColors.primary + '15' }]}>
-              <Ionicons name="add" size={16} color={themeColors.primary} />
-              <ThemedText style={[styles.addBtnText, { color: themeColors.primary }]}>Agregar Línea</ThemedText>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="cart" size={18} color="#0284c7" />
+              <ThemedText style={[styles.cardTitle, { color: themeColors.text, marginBottom: 0 }]}>
+                Partidas y Productos ({cotizacion.lineas.length})
+              </ThemedText>
+            </View>
+            <TouchableOpacity onPress={handleAddLine} style={[styles.addBtn, { backgroundColor: '#0284c715', borderColor: '#0284c730', borderWidth: 1 }]}>
+              <Ionicons name="add" size={16} color="#0284c7" />
+              <ThemedText style={[styles.addBtnText, { color: '#0284c7' }]}>Agregar Línea</ThemedText>
             </TouchableOpacity>
           </View>
 
@@ -665,128 +729,322 @@ export default function NuevaCotizacionScreen() {
               </ThemedText>
             </View>
           ) : (
-            cotizacion.lineas.map((linea, index) => (
-              <View key={linea.id} style={[styles.lineItemContainer, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}>
-                <View style={styles.lineHeader}>
-                  <ThemedText style={[styles.lineIndex, { color: themeColors.textSecondary }]}>
-                    #{index + 1}
-                  </ThemedText>
-                  <TouchableOpacity onPress={() => handleRemoveLine(linea.id)} style={styles.deleteBtn}>
-                    <Ionicons name="trash-outline" size={18} color="#d32f2f" />
+            <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: isMobile ? 880 : '100%' }}>
+              <View style={{ flex: 1, overflow: 'visible' }}>
+                {/* Encabezado de la Tabla de Partidas */}
+                <View
+                  style={[
+                    styles.partidasTableHeader,
+                    {
+                      backgroundColor: themeColors.backgroundElement,
+                      borderBottomColor: themeColors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.partidasColHeader, { width: 32, textAlign: 'center' }]}>#</Text>
+                  <Text style={[styles.partidasColHeader, { flex: 1, minWidth: 200 }]}>Producto / Concepto</Text>
+                  <Text style={[styles.partidasColHeader, { width: 120 }]}>Clave SAT</Text>
+                  <Text style={[styles.partidasColHeader, { width: 110 }]}>Unidad SAT</Text>
+                  <Text style={[styles.partidasColHeader, { width: 100 }]}>Entrega</Text>
+                  <Text style={[styles.partidasColHeader, { width: 70, textAlign: 'right' }]}>Cant.</Text>
+                  <Text style={[styles.partidasColHeader, { width: 95, textAlign: 'right' }]}>Precio Unit.</Text>
+                  <Text style={[styles.partidasColHeader, { width: 65, textAlign: 'right' }]}>IVA (%)</Text>
+                  <Text style={[styles.partidasColHeader, { width: 105, textAlign: 'center' }]}>Importe</Text>
+                  <Text style={[styles.partidasColHeader, { width: 65, textAlign: 'center' }]}>Acciones</Text>
+                </View>
+
+                {/* Filas de Partidas */}
+                <View style={{ position: 'relative', zIndex: activeProductLineId !== null ? 9999 : 1, overflow: 'visible' }}>
+                  {cotizacion.lineas.map((linea, index) => {
+                    const cant = Number(linea.cantidad) || 0;
+                    const pu = Number(linea.precioUnitario) || 0;
+                    const subtotalLinea = cant * pu;
+                    const ivaLinea = subtotalLinea * ((linea.impuestoPorcentaje || 0) / 100);
+
+                    return (
+                      <View
+                        key={linea.id || index}
+                        style={[
+                          styles.partidasTableRow,
+                          {
+                            borderColor: themeColors.border,
+                            backgroundColor: themeColors.background,
+                            position: 'relative',
+                            zIndex: activeProductLineId === linea.id ? 99999 : cotizacion.lineas.length - index,
+                            overflow: 'visible',
+                          },
+                        ]}
+                      >
+                        {/* 1. Consecutivo # */}
+                        <View style={{ width: 32, alignItems: 'center', justifyContent: 'center', paddingTop: 6 }}>
+                          <View style={[styles.partidaNumBadge, { backgroundColor: '#0284c7' }]}>
+                            <Text style={{ color: '#fff', fontSize: 11, fontWeight: 'bold' }}>{index + 1}</Text>
+                          </View>
+                        </View>
+
+                        {/* 2. Producto / Concepto (Línea 1: Nombre + Autocompletado, Línea 2: Descripción adicional) */}
+                        <View style={{ flex: 1, minWidth: 200, paddingRight: 8, position: 'relative', zIndex: activeProductLineId === linea.id ? 99999 : 1, overflow: 'visible' }}>
+                          <View style={[styles.cascadeInputContainer, { backgroundColor: themeColors.backgroundElement, borderColor: activeProductLineId === linea.id ? '#0284c7' : themeColors.border, height: 36, borderRadius: 6, paddingHorizontal: 8 }]}>
+                            <TextInput
+                              style={[styles.cascadeTextInput, { color: themeColors.text }]}
+                              value={linea.productoNombre}
+                              onChangeText={(t) => {
+                                handleUpdateLine(linea.id, 'productoNombre', t);
+                                searchProducts(linea.id, t);
+                              }}
+                              onFocus={() => searchProducts(linea.id, linea.productoNombre)}
+                              onBlur={() => {
+                                setTimeout(() => {
+                                  setActiveProductLineId((curr) => curr === linea.id ? null : curr);
+                                }, 250);
+                              }}
+                              placeholder="Ej. Cilindro Hidráulico 10T..."
+                              placeholderTextColor={themeColors.textSecondary}
+                            />
+                            {!!linea.productoNombre && (
+                              <TouchableOpacity
+                                onPress={() => {
+                                  handleUpdateLine(linea.id, 'productoNombre', '');
+                                  searchProducts(linea.id, '');
+                                }}
+                                style={{ padding: 4 }}
+                              >
+                                <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
+                              </TouchableOpacity>
+                            )}
+                          </View>
+
+                          {/* Autocomplete Dropdown */}
+                          {activeProductLineId === linea.id && productSearchResults.length > 0 && (
+                            <View style={[styles.autocompleteContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, top: 40, zIndex: 99999 }]}>
+                              <ScrollView nestedScrollEnabled={true} keyboardShouldPersistTaps="handled" style={{ maxHeight: 200 }}>
+                                {productSearchResults.map((prod) => (
+                                  <TouchableOpacity 
+                                    key={prod.id} 
+                                    style={[styles.autocompleteItem, { borderBottomColor: themeColors.border }]}
+                                    onPress={() => handleSelectProduct(linea.id, prod)}
+                                  >
+                                    <ThemedText style={{ color: themeColors.text, fontWeight: 'bold' }}>{prod.nombre_oficial}</ThemedText>
+                                    <ThemedText style={{ color: themeColors.textSecondary, fontSize: 12 }}>
+                                      SKU: {prod.sku_interno || 'N/A'} {prod.precio_unitario ? `• $${prod.precio_unitario}` : ''}
+                                    </ThemedText>
+                                  </TouchableOpacity>
+                                ))}
+                              </ScrollView>
+                            </View>
+                          )}
+
+                          {/* Línea 2: Campo Descripción / Detalles Opcional */}
+                          <View style={{ marginTop: 4 }}>
+                            <TextInput
+                              style={[
+                                styles.partidaDescDetalladaInput,
+                                {
+                                  color: themeColors.text,
+                                  backgroundColor: themeColors.backgroundElement + '80',
+                                  borderColor: themeColors.border + '60',
+                                },
+                              ]}
+                              value={linea.productoDescripcion || ''}
+                              onChangeText={t => handleUpdateLine(linea.id, 'productoDescripcion', t)}
+                              placeholder="Describe los detalles (qué incluye, opcional)..."
+                              placeholderTextColor={themeColors.textSecondary + '70'}
+                            />
+                          </View>
+                        </View>
+
+                        {/* 3. Clave SAT */}
+                        <View style={{ width: 120, paddingRight: 8, paddingTop: 1 }}>
+                          <SatCatalogAutocomplete
+                            tipo="producto"
+                            value={linea.claveFacturacion || ''}
+                            onChangeValue={val => handleUpdateLine(linea.id, 'claveFacturacion', val)}
+                            style={{ flex: 0 }}
+                            hideSearchIcon={true}
+                          />
+                        </View>
+
+                        {/* 4. Unidad SAT */}
+                        <View style={{ width: 110, paddingRight: 8, paddingTop: 1 }}>
+                          <SatCatalogAutocomplete
+                            tipo="unidad"
+                            value={linea.unidad || ''}
+                            onChangeValue={val => handleUpdateLine(linea.id, 'unidad', val)}
+                            style={{ flex: 0 }}
+                            hideSearchIcon={true}
+                          />
+                        </View>
+
+                        {/* 5. Entrega */}
+                        <View style={{ width: 100, paddingRight: 8, paddingTop: 1 }}>
+                          <TextInput
+                            style={[
+                              styles.tableFieldInput,
+                              {
+                                color: themeColors.text,
+                                borderColor: themeColors.border,
+                                backgroundColor: themeColors.backgroundElement,
+                                height: 36,
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: '600',
+                                paddingHorizontal: 8,
+                                minWidth: 0,
+                                ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+                              },
+                            ]}
+                            value={linea.tiempoEntrega || ''}
+                            onChangeText={val => handleUpdateLine(linea.id, 'tiempoEntrega', val)}
+                            placeholder="Ej. 8 días"
+                            placeholderTextColor={themeColors.textSecondary}
+                          />
+                        </View>
+
+                        {/* 6. Cantidad */}
+                        <View style={{ width: 70, paddingRight: 8, paddingTop: 1 }}>
+                          <TextInput
+                            style={[
+                              styles.tableFieldInput,
+                              {
+                                color: themeColors.text,
+                                borderColor: themeColors.border,
+                                backgroundColor: themeColors.backgroundElement,
+                                textAlign: 'right',
+                                height: 36,
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: '600',
+                                paddingHorizontal: 6,
+                                minWidth: 0,
+                                ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+                              },
+                            ]}
+                            value={linea.cantidadStr !== undefined ? linea.cantidadStr : (linea.cantidad ? linea.cantidad.toString() : '')}
+                            onChangeText={val => handleUpdateLineNumericText(linea.id, 'cantidad', val)}
+                            keyboardType="numeric"
+                          />
+                        </View>
+
+                        {/* 7. Precio Unitario */}
+                        <View style={{ width: 95, paddingRight: 8, paddingTop: 1 }}>
+                          <View
+                            style={[
+                              styles.tableCurrencyContainer,
+                              {
+                                borderColor: themeColors.border,
+                                backgroundColor: themeColors.backgroundElement,
+                                height: 36,
+                                borderRadius: 6,
+                                paddingHorizontal: 6,
+                                overflow: 'hidden',
+                              },
+                            ]}
+                          >
+                            <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginRight: 2 }}>$</Text>
+                            <TextInput
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                color: themeColors.text,
+                                fontSize: 12,
+                                fontWeight: '600',
+                                textAlign: 'right',
+                                paddingVertical: 0,
+                                height: '100%',
+                                ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+                              }}
+                              value={linea.precioUnitarioStr !== undefined ? linea.precioUnitarioStr : (linea.precioUnitario ? linea.precioUnitario.toString() : '')}
+                              onChangeText={val => handleUpdateLineNumericText(linea.id, 'precioUnitario', val)}
+                              keyboardType="numeric"
+                            />
+                          </View>
+                        </View>
+
+                        {/* 8. IVA (%) */}
+                        <View style={{ width: 65, paddingRight: 8, paddingTop: 1 }}>
+                          <TextInput
+                            style={[
+                              styles.tableFieldInput,
+                              {
+                                color: themeColors.text,
+                                borderColor: themeColors.border,
+                                backgroundColor: themeColors.backgroundElement,
+                                textAlign: 'right',
+                                height: 36,
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: '600',
+                                paddingHorizontal: 6,
+                                minWidth: 0,
+                                ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+                              },
+                            ]}
+                            value={linea.impuestoPorcentajeStr !== undefined ? linea.impuestoPorcentajeStr : (linea.impuestoPorcentaje !== undefined ? linea.impuestoPorcentaje.toString() : '16')}
+                            onChangeText={val => handleUpdateLineNumericText(linea.id, 'impuestoPorcentaje', val)}
+                            keyboardType="numeric"
+                          />
+                        </View>
+
+                        {/* 9. Importe */}
+                        <View style={{ width: 105, paddingHorizontal: 4, paddingTop: 4, alignItems: 'center', justifyContent: 'center' }}>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#10b981', textAlign: 'center' }}>
+                            ${linea.importe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </Text>
+                          <Text style={{ fontSize: 9, color: themeColors.textSecondary, marginTop: 1, textAlign: 'center' }}>
+                            ${ivaLinea.toFixed(2)} IVA
+                          </Text>
+                        </View>
+
+                        {/* 10. Acciones */}
+                        <View style={{ width: 65, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 4 }}>
+                          <TableTooltipButton
+                            icon="copy-outline"
+                            color="#0284c7"
+                            bgColor="#0284c715"
+                            borderColor="#0284c730"
+                            tooltip="Duplicar partida"
+                            onPress={() => handleDuplicateLine(index)}
+                          />
+                          <TableTooltipButton
+                            icon="trash-outline"
+                            color="#ef4444"
+                            bgColor="#ef444415"
+                            borderColor="#ef444430"
+                            tooltip="Eliminar partida"
+                            onPress={() => handleRemoveLine(linea.id)}
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {/* Botón "+ Agregar una línea" al pie de la tabla */}
+                <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: themeColors.border + '50', paddingTop: 8 }}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={handleAddLine}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
+                      paddingVertical: 6,
+                      paddingHorizontal: 10,
+                      alignSelf: 'flex-start',
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: '#0284c740',
+                      backgroundColor: '#0284c710',
+                    }}
+                  >
+                    <Ionicons name="add-circle" size={16} color="#0284c7" />
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#0284c7' }}>
+                      + Agregar una línea
+                    </Text>
                   </TouchableOpacity>
                 </View>
-
-                {/* Inputs Producto (Nombre y Descripcion) */}
-                  <View style={{ position: 'relative', zIndex: activeProductLineId === linea.id ? 9999 : 1 }}>
-                    <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Nombre del producto</ThemedText>
-                    <TextInput
-                      style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                      placeholder="Ej. Cilindro Hidraulico 10T..."
-                      placeholderTextColor={themeColors.textSecondary}
-                      value={linea.productoNombre}
-                      onChangeText={(t) => searchProducts(linea.id, t)}
-                      onFocus={() => searchProducts(linea.id, linea.productoNombre)}
-                      onBlur={() => {
-                        setTimeout(() => {
-                          setActiveProductLineId((current) => current === linea.id ? null : current);
-                        }, 200);
-                      }}
-                    />
-                    {activeProductLineId === linea.id && productSearchResults.length > 0 && (
-                      <View style={[styles.autocompleteContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, top: 75, zIndex: 9999 }]}>
-                        <ScrollView nestedScrollEnabled={true} keyboardShouldPersistTaps="handled" style={{ maxHeight: 200 }}>
-                          {productSearchResults.map((prod) => (
-                            <TouchableOpacity 
-                              key={prod.id} 
-                              style={[styles.autocompleteItem, { borderBottomColor: themeColors.border }]}
-                              onPress={() => handleSelectProduct(linea.id, prod)}
-                            >
-                              <ThemedText style={{ color: themeColors.text, fontWeight: 'bold' }}>{prod.nombre_oficial}</ThemedText>
-                              <ThemedText style={{ color: themeColors.textSecondary, fontSize: 12 }}>
-                                SKU: {prod.sku_interno}
-                              </ThemedText>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      </View>
-                    )}
-                  </View>
-                <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Detalles o descripción (Qué incluye)</ThemedText>
-                  <TextInput
-                    style={[styles.inputMultiline, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                    multiline
-                    numberOfLines={3}
-                    placeholder="Describe los detalles (puedes usar saltos de línea)..."
-                    placeholderTextColor={themeColors.textSecondary}
-                    value={linea.productoDescripcion}
-                    onChangeText={(t) => handleUpdateLine(linea.id, 'productoDescripcion', t)}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Clave de Facturación / SAT (Uso Interno)</ThemedText>
-                  <TextInput
-                    style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                    placeholder="Ej. 43211500"
-                    placeholderTextColor={themeColors.textSecondary}
-                    value={linea.claveFacturacion || ''}
-                    onChangeText={(t) => handleUpdateLine(linea.id, 'claveFacturacion', t)}
-                  />
-                </View>
-
-                {/* Input Entrega y Precios */}
-                <View style={[styles.grid, isMobile && styles.gridMobile, { marginTop: Spacing.two }]}>
-                  <View style={[styles.column, isMobile && styles.columnMobile, { flex: 1.5 }]}>
-                    <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Entrega</ThemedText>
-                    <TextInput
-                      style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                      placeholder="Ej. 8 días"
-                      placeholderTextColor={themeColors.textSecondary}
-                      value={linea.tiempoEntrega}
-                      onChangeText={(t) => handleUpdateLine(linea.id, 'tiempoEntrega', t)}
-                    />
-                  </View>
-                  <View style={[styles.column, isMobile && styles.columnMobile, { flex: 1 }]}>
-                    <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Cant.</ThemedText>
-                    <TextInput
-                      style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                      keyboardType="numeric"
-                      value={linea.cantidadStr !== undefined ? linea.cantidadStr : (linea.cantidad ? linea.cantidad.toString() : '')}
-                      onChangeText={(t) => handleUpdateLineNumericText(linea.id, 'cantidad', t)}
-                    />
-                  </View>
-                  <View style={[styles.column, isMobile && styles.columnMobile, { flex: 1.5 }]}>
-                    <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>Precio U. ($)</ThemedText>
-                    <TextInput
-                      style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                      keyboardType="numeric"
-                      value={linea.precioUnitarioStr !== undefined ? linea.precioUnitarioStr : (linea.precioUnitario ? linea.precioUnitario.toString() : '')}
-                      onChangeText={(t) => handleUpdateLineNumericText(linea.id, 'precioUnitario', t)}
-                    />
-                  </View>
-                  <View style={[styles.column, isMobile && styles.columnMobile, { flex: 1 }]}>
-                    <ThemedText style={[styles.label, { color: themeColors.textSecondary }]}>IVA (%)</ThemedText>
-                    <TextInput
-                      style={[styles.input, { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}
-                      keyboardType="numeric"
-                      value={linea.impuestoPorcentajeStr !== undefined ? linea.impuestoPorcentajeStr : (linea.impuestoPorcentaje ? linea.impuestoPorcentaje.toString() : '')}
-                      onChangeText={(t) => handleUpdateLineNumericText(linea.id, 'impuestoPorcentaje', t)}
-                    />
-                  </View>
-                </View>
-
-                {/* Importe Linea */}
-                <View style={styles.lineFooter}>
-                  <ThemedText style={{ color: themeColors.textSecondary, fontSize: 13 }}>
-                    Importe de partida:
-                  </ThemedText>
-                  <ThemedText style={{ color: themeColors.text, fontWeight: '700', fontSize: 15 }}>
-                    ${Number(linea.importe || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </ThemedText>
-                </View>
               </View>
-            ))
+            </ScrollView>
           )}
         </View>
 
@@ -855,8 +1113,8 @@ export default function NuevaCotizacionScreen() {
               style={[styles.bottomBtnPrimary, { backgroundColor: '#2196F3' }]}
               onPress={handleEnviar}
             >
-              <Ionicons name="send" size={18} color="#ffffff" />
-              <ThemedText style={{ color: '#ffffff', fontWeight: 'bold', marginLeft: 8 }}>Guardar y Enviar</ThemedText>
+              <Ionicons name="save-outline" size={18} color="#ffffff" />
+              <ThemedText style={{ color: '#ffffff', fontWeight: 'bold', marginLeft: 8 }}>Guardar</ThemedText>
             </TouchableOpacity>
           </View>
         </View>

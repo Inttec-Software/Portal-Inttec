@@ -1170,6 +1170,8 @@ export interface Herramienta {
   numero_serie?: string | null;
   foto_url?: string | null;
   estado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE';
+  cantidad?: number;
+  unidades_estado?: Record<string, number>;
   activo: boolean;
   created_at?: string;
   custodia_actual?: {

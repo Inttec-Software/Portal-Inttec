@@ -40,12 +40,14 @@ const PORT = process.env.PORT || 10000;
 // Compresión de respuestas HTTP (Gzip/Brotli) para respuestas 80-90% más ligeras
 app.use(compression());
 
-// Logging exhaustivo para debug
+// Logging exhaustivo para debug (ignora pings automáticos de Hikvision para no saturar la consola)
 app.use((req, res, next) => {
-  console.log(`\n[REQ] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
-  res.on('finish', () => {
-    console.log(`[RES] ${req.method} ${req.url} - Status: ${res.statusCode}`);
-  });
+  if (!req.url.includes('/asistencias/hikvision')) {
+    console.log(`\n[REQ] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+    res.on('finish', () => {
+      console.log(`[RES] ${req.method} ${req.url} - Status: ${res.statusCode}`);
+    });
+  }
   next();
 });
 
@@ -77,8 +79,10 @@ const corsOptions: cors.CorsOptions = {
 
 app.use(cors(corsOptions));
 
-// Parsear JSON
+// Parsear JSON, URL-Encoded y Texto plano/XML para compatibilidad con checadores
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.text({ type: ['text/plain', 'application/xml', 'text/xml'], limit: '10mb' }));
 
 // Middleware para inyectar configuración multi-tenant en req
 app.use(tenantMiddleware);
