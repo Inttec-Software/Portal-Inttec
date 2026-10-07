@@ -24,7 +24,14 @@ export const tenantMiddleware = (req: Request, res: Response, next: NextFunction
     company = 'daravisa';
   }
 
-  if (envHeader === 'test') {
+  // Si el proceso del backend está configurado con APP_ENV (ej. en Lightsail test),
+  // se fuerza ese entorno para evitar cualquier fuga de datos accidental entre test y prod.
+  const processEnv = process.env.APP_ENV;
+  if (processEnv === 'test') {
+    env = 'test';
+  } else if (processEnv === 'prod' || processEnv === 'cloud') {
+    env = 'cloud';
+  } else if (envHeader === 'test') {
     env = 'test';
   }
 
