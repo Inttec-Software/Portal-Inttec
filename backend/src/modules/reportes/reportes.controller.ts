@@ -31,6 +31,7 @@ const formatGasto = (g: any) => {
     cliente_nombre: cli,
     sucursal_nombre: suc,
     categoria_rel: catRel,
+    venta_rel: g.venta_rel || null,
   };
 };
 
@@ -47,7 +48,8 @@ export const getAdminReportes = async (req: Request, res: Response) => {
       subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
       proveedor_rel:proveedores(id, nombre),
       cliente_rel:clientes(id, nombre),
-      sucursal_rel:sucursales_cliente(id, nombre)
+      sucursal_rel:sucursales_cliente(id, nombre),
+      venta_rel:ventas(id, cliente, fecha, sucursal, tipo_proyecto, factura_referencia, precio_total_facturado)
     `).order('created_at', { ascending: false });
 
     if (limitQuery && !isNaN(limitQuery) && limitQuery > 0) {
@@ -138,14 +140,16 @@ export const getGastoById = async (req: Request, res: Response) => {
         subcategoria_rel:subcategorias(id, nombre, categoria_id, categorias(id, nombre)),
         proveedor_rel:proveedores(id, nombre),
         cliente_rel:clientes(id, nombre),
-        sucursal_rel:sucursales_cliente(id, nombre)
+        sucursal_rel:sucursales_cliente(id, nombre),
+        venta_rel:ventas(id, cliente, fecha, sucursal, tipo_proyecto, factura_referencia, precio_total_facturado)
       `)
       .eq('id', id)
       .single();
 
     if (error) throw error;
 
-    return res.json({ gasto: data });
+    const formatted = data ? formatGasto(data) : null;
+    return res.json({ gasto: formatted });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -366,11 +370,121 @@ export const updateGasto = async (req: Request, res: Response) => {
       }
     }
 
-    if (oldGasto && oldGasto.venta_id) {
+    if (payload.venta_id !== undefined && payload.venta_id !== oldGasto?.venta_id) {
+      if (oldGasto && oldGasto.venta_id) {
+        await recalculateVentaTotalsInternal(client, oldGasto.venta_id);
+      }
+      if (payload.venta_id) {
+        await recalculateVentaTotalsInternal(client, payload.venta_id);
+      }
+    } else if (oldGasto && oldGasto.venta_id) {
       await recalculateVentaTotalsInternal(client, oldGasto.venta_id);
     }
 
     return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const relinkGastoVenta = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+
+    const { id } = req.params;
+    const { venta_id, actor_id } = req.body;
+    const newVentaId = (venta_id && typeof venta_id === 'string' && venta_id.trim()) ? venta_id.trim() : null;
+
+    // Obtener el gasto actual
+    const { data: gasto, error: gastoErr } = await client
+      .from('gastos')
+      .select('id, venta_id, monto, status')
+      .eq('id', id)
+      .single();
+
+    if (gastoErr || !gasto) {
+      return res.status(404).json({ error: 'Gasto no encontrado' });
+    }
+
+    const oldVentaId = gasto.venta_id;
+
+    if (oldVentaId === newVentaId) {
+      return res.json({ 
+        success: true, 
+        message: newVentaId ? 'El gasto ya está vinculado a esa venta' : 'El gasto ya se encuentra desvinculado',
+        old_venta_id: oldVentaId,
+        new_venta_id: newVentaId,
+      });
+    }
+
+    let targetVenta: any = null;
+    if (newVentaId) {
+      const { data: vData, error: vErr } = await client
+        .from('ventas')
+        .select('id, cliente, fecha, sucursal, tipo_proyecto, factura_referencia, precio_total_facturado')
+        .eq('id', newVentaId)
+        .single();
+      if (vErr || !vData) {
+        return res.status(404).json({ error: 'La venta seleccionada no existe' });
+      }
+      targetVenta = vData;
+    }
+
+    // Actualizar el venta_id del gasto
+    const { error: updateErr } = await client
+      .from('gastos')
+      .update({ venta_id: newVentaId })
+      .eq('id', id);
+
+    if (updateErr) throw updateErr;
+
+    // Recalcular venta anterior si existía
+    if (oldVentaId) {
+      try {
+        await recalculateVentaTotalsInternal(client, oldVentaId);
+      } catch (e: any) {
+        console.warn(`[relinkGastoVenta] Error recalculando venta previa ${oldVentaId}:`, e.message);
+      }
+    }
+
+    // Recalcular nueva venta asignada
+    if (newVentaId) {
+      try {
+        await recalculateVentaTotalsInternal(client, newVentaId);
+      } catch (e: any) {
+        console.warn(`[relinkGastoVenta] Error recalculando nueva venta ${newVentaId}:`, e.message);
+      }
+    }
+
+    // Auditoría
+    const actor = req.user?.id || actor_id;
+    const details = newVentaId
+      ? (oldVentaId 
+          ? `Gasto reasignado de la venta ${oldVentaId} a la venta ${newVentaId} (${targetVenta?.cliente || ''}).` 
+          : `Gasto vinculado a la venta ${newVentaId} (${targetVenta?.cliente || ''}).`)
+      : `Gasto desvinculado de la venta ${oldVentaId}.`;
+
+    try {
+      await client.from('audit_logs').insert([{
+        action: 'UPDATE',
+        actor_id: actor,
+        target_id: id,
+        details,
+      }]);
+    } catch (auditErr: any) {
+      console.warn('[relinkGastoVenta] Error en audit log:', auditErr.message);
+    }
+
+    return res.json({
+      success: true,
+      old_venta_id: oldVentaId,
+      new_venta_id: newVentaId,
+      venta_rel: targetVenta,
+      message: newVentaId ? 'Gasto vinculado correctamente' : 'Gasto desvinculado correctamente',
+    });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

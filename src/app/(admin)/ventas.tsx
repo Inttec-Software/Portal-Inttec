@@ -509,6 +509,82 @@ export default function VentasScreen() {
     }
   };
 
+  // Desvincular un gasto operativo de la venta actual
+  const handleUnlinkGastoFromVenta = async (gasto: any) => {
+    if (!gasto?.id) return;
+
+    const doUnlink = async () => {
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${gasto.id}/relink-venta`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({
+            venta_id: null,
+            actor_id: currentUser?.id,
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Error al desvincular el gasto');
+        }
+
+        // Remover gasto de la lista local
+        const updatedGastos = selectedVentaGastos.filter(g => g.id !== gasto.id);
+        setSelectedVentaGastos(updatedGastos);
+
+        // Recalcular y actualizar totales en la vista
+        if (selectedVenta) {
+          const costoPartidas = (selectedVentaPartidas || []).reduce(
+            (sum, p) => sum + (Number(p.costo_total_proveedor) || 0), 0
+          );
+          const costoGastosRestantes = updatedGastos.reduce(
+            (sum, g) => sum + (Number(g.monto) || 0), 0
+          );
+          const nuevoCostoTotal = Math.round((costoPartidas + costoGastosRestantes) * 100) / 100;
+          const precioTotal = Number(selectedVenta.precio_total_facturado) || 0;
+          const nuevaUtilidad = Math.round((precioTotal - nuevoCostoTotal) * 100) / 100;
+          const nuevoMargen = precioTotal > 0 ? Math.round((nuevaUtilidad / precioTotal) * 10000) / 10000 : 0;
+
+          const updatedVenta = {
+            ...selectedVenta,
+            costo_total: nuevoCostoTotal,
+            utilidad_bruta: nuevaUtilidad,
+            margen_porcentual: nuevoMargen,
+          };
+          setSelectedVenta(updatedVenta);
+          setVentasHistorial(prev => prev.map(v => v.id === selectedVenta.id ? updatedVenta : v));
+        }
+
+        showAlert('Éxito', 'El gasto ha sido desvinculado de esta venta y los costos se han actualizado.');
+        ModuleCache.invalidate('ventas_historial');
+        loadHistorial(true);
+      } catch (err: any) {
+        showAlert('Error', err.message || 'No se pudo desvincular el gasto.');
+      }
+    };
+
+    const gastoDesc = gasto.justificacion || 'Gasto operativo';
+    const gastoMonto = formatCurrency(Number(gasto.monto) || 0);
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        `¿Deseas desvincular este gasto (${gastoDesc} por ${gastoMonto}) de esta venta?\n\nLos costos y utilidad de la venta se recalcularán automáticamente.`
+      );
+      if (confirmed) doUnlink();
+    } else {
+      Alert.alert(
+        'Desvincular Gasto',
+        `¿Deseas desvincular este gasto (${gastoDesc} por ${gastoMonto}) de esta venta?\n\nLos costos y utilidad de la venta se recalcularán automáticamente.`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Desvincular', style: 'destructive', onPress: doUnlink }
+        ]
+      );
+    }
+  };
+
   const handleRegistrarPago = async () => {
     if (!selectedVenta) return;
     const montoNum = parseFloat(pagoMonto);
@@ -2886,13 +2962,39 @@ export default function VentasScreen() {
                     <View style={{ gap: Spacing.two }}>
                       {selectedVentaGastos.map((gasto, idx) => (
                         <View key={gasto.id || idx} style={[styles.modalPartidaItem, { borderColor: themeColors.border }]}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>
-                              {idx + 1}. {gasto.justificacion || 'Gasto operativo'}
-                            </Text>
-                            <Text style={{ color: themeColors.danger, fontSize: 13, fontWeight: '700' }}>
-                              {formatCurrency(Number(gasto.monto) || 0)}
-                            </Text>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <View style={{ flex: 1, marginRight: 8 }}>
+                              <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }}>
+                                {idx + 1}. {gasto.justificacion || 'Gasto operativo'}
+                              </Text>
+                              {GastoHelper.getProveedor(gasto) ? (
+                                <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                                  Proveedor: {GastoHelper.getProveedor(gasto)}
+                                </Text>
+                              ) : null}
+                            </View>
+                            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                              <Text style={{ color: themeColors.danger, fontSize: 13, fontWeight: '700' }}>
+                                {formatCurrency(Number(gasto.monto) || 0)}
+                              </Text>
+                              <TouchableOpacity
+                                onPress={() => handleUnlinkGastoFromVenta(gasto)}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  backgroundColor: themeColors.danger + '15',
+                                  paddingVertical: 3,
+                                  paddingHorizontal: 8,
+                                  borderRadius: BorderRadius.small,
+                                  borderWidth: 1,
+                                  borderColor: themeColors.danger + '40',
+                                }}
+                              >
+                                <Ionicons name="link-outline" size={13} color={themeColors.danger} />
+                                <Text style={{ color: themeColors.danger, fontSize: 11, fontWeight: '700' }}>Desvincular</Text>
+                              </TouchableOpacity>
+                            </View>
                           </View>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
                             <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>

@@ -207,6 +207,7 @@ export default function AdminGastosScreen() {
 
   // === Vinculación con Ventas al Aprobar ===
   const [isLinkSaleModalVisible, setIsLinkSaleModalVisible] = useState(false);
+  const [isRelinkingSaleMode, setIsRelinkingSaleMode] = useState(false);
   const [salesForLinking, setSalesForLinking] = useState<Venta[]>([]);
   const [isLoadingSalesForLinking, setIsLoadingSalesForLinking] = useState(false);
   const [linkSaleSearch, setLinkSaleSearch] = useState('');
@@ -543,10 +544,100 @@ export default function AdminGastosScreen() {
       );
       return;
     }
+    setIsRelinkingSaleMode(false);
     setLinkSaleSearch('');
     setIsQuickSaleFormVisible(false);
     setIsLinkSaleModalVisible(true);
     loadSalesForLinking();
+  };
+
+  // Abrir modal para Vincular o Cambiar Venta de un gasto
+  const handleOpenRelinkSaleModal = (gasto: Gasto | null) => {
+    if (!gasto) return;
+    setSelectedGasto(gasto);
+    setIsRelinkingSaleMode(true);
+    setLinkSaleSearch('');
+    setIsQuickSaleFormVisible(false);
+    setIsLinkSaleModalVisible(true);
+    loadSalesForLinking();
+  };
+
+  // Ejecutar cambio de vinculación con venta (o desvinculación si newVentaId es null)
+  const executeRelinkGastoVenta = async (newVentaId: string | null) => {
+    if (!selectedGasto || !adminUser) return;
+    setIsProcessingAction(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}/relink-venta`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          venta_id: newVentaId,
+          actor_id: adminUser.id,
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al reasignar venta');
+      }
+
+      const resData = await res.json();
+      const foundVenta = newVentaId ? salesForLinking.find(v => v.id === newVentaId) : null;
+      const updatedGasto: Gasto = {
+        ...selectedGasto,
+        venta_id: newVentaId,
+        venta_rel: foundVenta ? {
+          id: foundVenta.id,
+          cliente: foundVenta.cliente,
+          fecha: foundVenta.fecha,
+          sucursal: foundVenta.sucursal,
+          tipo_proyecto: foundVenta.tipo_proyecto,
+          factura_referencia: foundVenta.factura_referencia,
+          precio_total_facturado: foundVenta.precio_total_facturado,
+        } : (resData.venta_rel || null)
+      };
+
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
+
+      showAlert(
+        'Éxito',
+        newVentaId
+          ? `Gasto vinculado exitosamente a la venta de ${foundVenta?.cliente || 'la venta seleccionada'}.`
+          : 'Gasto desvinculado de la venta exitosamente. Los costos se han recalculado.'
+      );
+      setIsLinkSaleModalVisible(false);
+      setIsRelinkingSaleMode(false);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo vincular/desvincular el gasto.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Desvincular de venta directamente con confirmación
+  const handleDirectUnlinkSale = (gasto: Gasto | null) => {
+    if (!gasto) return;
+    const doUnlink = () => {
+      executeRelinkGastoVenta(null);
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        '¿Estás seguro de que deseas desvincular este gasto de la venta actual? El costo y utilidad de la venta se recalcularán automáticamente.'
+      );
+      if (confirmed) doUnlink();
+    } else {
+      Alert.alert(
+        'Desvincular Venta',
+        '¿Estás seguro de que deseas desvincular este gasto de la venta actual? El costo y utilidad de la venta se recalcularán automáticamente.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Desvincular', style: 'destructive', onPress: doUnlink }
+        ]
+      );
+    }
   };
 
   const executeApproveGasto = async (ventaId: string | null) => {
@@ -1299,10 +1390,14 @@ export default function AdminGastosScreen() {
       const data = await res.json();
       const ventaId = data.ventaId;
 
-      // 3. Aprobar y vincular gasto
+      // 3. Vincular o aprobar gasto
       setIsQuickSaleFormVisible(false);
       setIsLinkSaleModalVisible(false);
-      await executeApproveGasto(ventaId);
+      if (isRelinkingSaleMode) {
+        await executeRelinkGastoVenta(ventaId);
+      } else {
+        await executeApproveGasto(ventaId);
+      }
     } catch (err: any) {
       showAlert('Error al guardar venta rápida', err.message || 'No se pudo crear la venta.');
     } finally {
@@ -3127,6 +3222,56 @@ export default function AdminGastosScreen() {
                       </View>
                     </View>
                   )}
+
+                  {/* Venta / Proyecto Vinculado */}
+                  <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                    <View style={{ flex: 1, marginRight: Spacing.two }}>
+                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Venta / Proyecto Vinculado</Text>
+                      {selectedGasto.venta_rel || selectedGasto.venta_id ? (
+                        <View style={{ marginTop: 2 }}>
+                          <Text style={[styles.detailValue, { color: themeColors.primary, fontWeight: '700' }]}>
+                            {selectedGasto.venta_rel?.cliente 
+                              ? `${selectedGasto.venta_rel.cliente} (${selectedGasto.venta_rel.fecha || 'Sin fecha'})` 
+                              : `Venta ID: ${selectedGasto.venta_id}`}
+                          </Text>
+                          {selectedGasto.venta_rel?.tipo_proyecto ? (
+                            <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 1 }}>
+                              Proyecto: {selectedGasto.venta_rel.tipo_proyecto} {selectedGasto.venta_rel.sucursal ? `| ${selectedGasto.venta_rel.sucursal}` : ''}
+                            </Text>
+                          ) : null}
+                          {selectedGasto.venta_rel?.precio_total_facturado ? (
+                            <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '600', marginTop: 1 }}>
+                              Total Venta: {formatCurrency(selectedGasto.venta_rel.precio_total_facturado)}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ) : (
+                        <Text style={[styles.detailValue, { color: themeColors.textSecondary, fontStyle: 'italic', marginTop: 2 }]}>
+                          Sin venta vinculada (Gasto general no asignado)
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                      <TouchableOpacity
+                        onPress={() => handleOpenRelinkSaleModal(selectedGasto)}
+                        style={styles.quickFieldBtn}
+                      >
+                        <Ionicons name="swap-horizontal-outline" size={14} color={themeColors.accent} />
+                        <Text style={styles.quickFieldBtnText}>
+                          {selectedGasto.venta_id ? 'Cambiar' : 'Vincular'}
+                        </Text>
+                      </TouchableOpacity>
+                      {selectedGasto.venta_id ? (
+                        <TouchableOpacity
+                          onPress={() => handleDirectUnlinkSale(selectedGasto)}
+                          style={[styles.quickFieldBtn, { borderColor: themeColors.danger + '40', backgroundColor: themeColors.danger + '10' }]}
+                        >
+                          <Ionicons name="link-outline" size={14} color={themeColors.danger} />
+                          <Text style={[styles.quickFieldBtnText, { color: themeColors.danger }]}>Desvincular</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
 
                   {/* Cliente / Sucursal */}
                   <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
@@ -5028,7 +5173,11 @@ export default function AdminGastosScreen() {
                    </TouchableOpacity>
                  )}
                  <Text style={[styles.modalTitle, { color: themeColors.text }]}>
-                   {isQuickSaleFormVisible ? 'Crear Venta Rápida' : '¿Vincular Gasto a Venta?'}
+                   {isQuickSaleFormVisible 
+                     ? 'Crear Venta Rápida' 
+                     : isRelinkingSaleMode 
+                       ? 'Vincular o Cambiar Venta' 
+                       : '¿Vincular Gasto a Venta?'}
                  </Text>
                </View>
                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
@@ -5082,8 +5231,12 @@ export default function AdminGastosScreen() {
                       renderItem={({ item }) => (
                         <TouchableOpacity
                           onPress={() => {
-                            setIsLinkSaleModalVisible(false);
-                            executeApproveGasto(item.id);
+                            if (isRelinkingSaleMode) {
+                              executeRelinkGastoVenta(item.id);
+                            } else {
+                              setIsLinkSaleModalVisible(false);
+                              executeApproveGasto(item.id);
+                            }
                           }}
                           style={[
                             styles.linkSaleItem,
@@ -5123,17 +5276,24 @@ export default function AdminGastosScreen() {
                 {/* Footer con opciones */}
                 <View style={{ gap: Spacing.two, paddingTop: Spacing.two, borderTopWidth: 1, borderTopColor: themeColors.border }}>
                   <CustomButton
-                    title="Aprobar sin vincular"
+                    title={isRelinkingSaleMode ? "Desvincular de venta" : "Aprobar sin vincular"}
                     onPress={() => {
-                      setIsLinkSaleModalVisible(false);
-                      executeApproveGasto(null);
+                      if (isRelinkingSaleMode) {
+                        executeRelinkGastoVenta(null);
+                      } else {
+                        setIsLinkSaleModalVisible(false);
+                        executeApproveGasto(null);
+                      }
                     }}
-                    variant="primary"
+                    variant={isRelinkingSaleMode ? "danger" : "primary"}
                     style={{ width: '100%' }}
                   />
                   <CustomButton
                     title="Cancelar"
-                    onPress={() => setIsLinkSaleModalVisible(false)}
+                    onPress={() => {
+                      setIsLinkSaleModalVisible(false);
+                      setIsRelinkingSaleMode(false);
+                    }}
                     variant="secondary"
                     style={{ width: '100%' }}
                   />

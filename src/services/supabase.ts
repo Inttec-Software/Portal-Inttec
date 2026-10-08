@@ -230,6 +230,15 @@ export interface Gasto {
   tipo_servicio_proyecto?: string | null;
   detalle_servicio_proyecto?: string | null;
   venta_id?: string | null;
+  venta_rel?: {
+    id: string;
+    cliente?: string;
+    fecha?: string;
+    sucursal?: string;
+    tipo_proyecto?: string;
+    factura_referencia?: string;
+    precio_total_facturado?: number;
+  } | null;
   // Relaciones Joins normalizadas
   categoria_rel?: { id: string; nombre: string } | null;
   subcategoria_rel?: { 
@@ -244,6 +253,13 @@ export interface Gasto {
 }
 
 export const GastoHelper = {
+  getVentaInfo: (g: Gasto | null | undefined): string => {
+    if (!g) return '';
+    if (g.venta_rel?.cliente) {
+      return `${g.venta_rel.cliente}${g.venta_rel.fecha ? ` (${g.venta_rel.fecha})` : ''}`;
+    }
+    return g.venta_id ? `Venta ID: ${g.venta_id.slice(0, 8)}...` : '';
+  },
   getCategoria: (g: Gasto | null | undefined): string => {
     if (!g) return '';
     return (

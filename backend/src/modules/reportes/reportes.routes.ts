@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAdminReportes, updateGastoStatus, getSalesForLinking, getExportData, updateGasto, recalculateVentaTotals, deleteGasto, saveQuickSale, getFormCatalogs, createGastos, getEmpleadoGastos, getGastoById } from './reportes.controller';
+import { getAdminReportes, updateGastoStatus, getSalesForLinking, getExportData, updateGasto, recalculateVentaTotals, deleteGasto, saveQuickSale, getFormCatalogs, createGastos, getEmpleadoGastos, getGastoById, relinkGastoVenta } from './reportes.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
 
@@ -12,6 +12,7 @@ router.use(tenantMiddleware);
 
 const reportesMutate = (req: any, res: any, next: any) => {
   invalidateCache('reportes');
+  invalidateCache('ventas');
   next();
 };
 
@@ -22,6 +23,7 @@ router.get('/empleado', cacheMiddleware(20), getEmpleadoGastos);
 router.get('/gastos/:id', getGastoById);
 router.post('/ventas/quick', reportesMutate, saveQuickSale);
 router.put('/gastos/:id/status', reportesMutate, updateGastoStatus);
+router.put('/gastos/:id/relink-venta', reportesMutate, relinkGastoVenta);
 router.put('/gastos/:id', reportesMutate, updateGasto);
 router.post('/gastos', reportesMutate, createGastos);
 router.delete('/gastos/:id', reportesMutate, deleteGasto);
