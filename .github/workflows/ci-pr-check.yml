@@ -1,0 +1,63 @@
+name: CI Pull Request Check
+
+on:
+  pull_request:
+    branches: [ lightsail/test, lightsail/prod ]
+
+jobs:
+  test-and-verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Crear Bases de Datos (Test o Prod según la rama)
+        run: |
+          sudo apt-get install -y postgresql-client
+          
+          # github.base_ref es la rama hacia la cual se dirige el PR
+          if [[ "${{ github.base_ref }}" == "lightsail/prod" ]]; then
+            echo "El PR va hacia producción. Creando BDDs inttec_prod y daravisa_prod..."
+            PGPASSWORD=test_password psql -h localhost -U postgres -c "CREATE DATABASE inttec_prod;"
+            PGPASSWORD=test_password psql -h localhost -U postgres -c "CREATE DATABASE daravisa_prod;"
+          else
+            echo "El PR va hacia staging. Creando BDDs inttec_test y daravisa_test..."
+            PGPASSWORD=test_password psql -h localhost -U postgres -c "CREATE DATABASE inttec_test;"
+            PGPASSWORD=test_password psql -h localhost -U postgres -c "CREATE DATABASE daravisa_test;"
+          fi
+
+      - name: Instalar y Compilar Backend
+        run: |
+          cd backend
+          npm ci
+          npm run build
+
+      - name: Instalar Frontend y Validar Tipos
+        run: |
+          npm ci
+          npx tsc --noEmit
+
+      - name: Probar Export Web de Expo
+        run: |
+          EXPO_PUBLIC_API_URL=http://localhost:10000 npx expo export -p web

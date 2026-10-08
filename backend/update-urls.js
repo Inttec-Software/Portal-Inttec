@@ -12,10 +12,10 @@ async function updateDbUrls() {
   console.log('Buscando y actualizando URLs de Supabase a AWS...');
   
   const query = `
-    SELECT table_name, column_name 
+    SELECT table_name, column_name, data_type
     FROM information_schema.columns 
     WHERE (column_name LIKE '%url%' OR column_name LIKE '%comprobante%' OR column_name LIKE '%archivo%' OR column_name LIKE '%ticket%' OR column_name LIKE '%factura%' OR column_name LIKE '%foto%')
-      AND data_type IN ('character varying', 'text')
+      AND data_type IN ('character varying', 'text', 'ARRAY')
   `;
   
   const res = await pool.query(query);
@@ -27,13 +27,19 @@ async function updateDbUrls() {
   for (const row of res.rows) {
     const table = row.table_name;
     const col = row.column_name;
+    const isArray = row.data_type === 'ARRAY';
     
-    const updateSql = `UPDATE ${table} SET ${col} = REPLACE(${col}, '${SUPA}', '${AWS}') WHERE ${col} LIKE '${SUPA}%';`;
+    let updateSql;
+    if (isArray) {
+      updateSql = `UPDATE ${table} SET ${col} = (REPLACE(${col}::text, '${SUPA}', '${AWS}'))::text[] WHERE ${col}::text LIKE '%${SUPA}%';`;
+    } else {
+      updateSql = `UPDATE ${table} SET ${col} = REPLACE(${col}, '${SUPA}', '${AWS}') WHERE ${col} LIKE '%${SUPA}%';`;
+    }
     
     try {
       const uRes = await pool.query(updateSql);
       if (uRes.rowCount > 0) {
-        console.log(` -> Actualizadas ${uRes.rowCount} filas en [${table}.${col}]`);
+        console.log(` -> Actualizadas ${uRes.rowCount} filas en [${table}.${col}] ${isArray ? '(Array)' : ''}`);
         totalUpdated += uRes.rowCount;
       }
     } catch(e) {
