@@ -248,7 +248,6 @@ export const EvidenceReportGenerator = {
                 ${textToBulletPoints(t.materiales.replace(/Sobrante.*?(?=\n|$)/g, '').replace(/Retirado.*?(?=\n|$)/g, ''))}
               </div>
               ` : ''}
-            </div>
             
             ${fotosHtml}
           </div>
@@ -271,7 +270,7 @@ export const EvidenceReportGenerator = {
             font-family: 'Calibri', 'Helvetica Neue', Helvetica, Arial, sans-serif;
             color: #000000;
             margin: 0;
-            padding: 15mm 15mm 25mm 15mm;
+            padding: 0;
             line-height: 1.4;
             background-color: #ffffff;
             -webkit-print-color-adjust: exact;
@@ -279,7 +278,22 @@ export const EvidenceReportGenerator = {
           }
           @page {
             size: letter;
-            margin: 0;
+            margin: 12mm 15mm 18mm 15mm;
+            @bottom-left {
+              content: "";
+            }
+            @bottom-center {
+              content: "Integración de Tecnologías";
+              font-family: 'Calibri', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+              font-size: 11px;
+              color: #666;
+            }
+            @bottom-right {
+              content: counter(page);
+              font-family: 'Calibri', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+              font-size: 11px;
+              color: #666;
+            }
           }
           table.report-container {
             width: 100%;
@@ -319,17 +333,6 @@ export const EvidenceReportGenerator = {
             text-align: right;
             min-width: 150px;
           }
-          .footer-inner {
-            display: flex;
-            justify-content: space-between;
-            padding-top: 10px;
-            margin-top: 20px;
-            font-size: 12px;
-            color: #666;
-          }
-          .page-number:after {
-            content: counter(page);
-          }
           ul {
             margin: 0;
             padding-left: 20px;
@@ -355,13 +358,7 @@ export const EvidenceReportGenerator = {
           
           <tfoot class="report-footer">
             <tr>
-              <td>
-                <div class="footer-inner">
-                  <span></span>
-                  <span>Integración de Tecnologías</span>
-                  <span class="page-number"></span>
-                </div>
-              </td>
+              <td style="height: 1px; border: none; padding: 0;"></td>
             </tr>
           </tfoot>
 

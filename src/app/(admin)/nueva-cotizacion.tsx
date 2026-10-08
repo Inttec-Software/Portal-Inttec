@@ -782,7 +782,7 @@ export default function NuevaCotizacionScreen() {
                     Importe de partida:
                   </ThemedText>
                   <ThemedText style={{ color: themeColors.text, fontWeight: '700', fontSize: 15 }}>
-                    ${linea.importe.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                    ${Number(linea.importe || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </ThemedText>
                 </View>
               </View>
@@ -830,15 +830,15 @@ export default function NuevaCotizacionScreen() {
           <View style={[styles.totalsCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
             <View style={styles.totalsRow}>
               <ThemedText style={[styles.totalLabel, { color: themeColors.textSecondary }]}>Subtotal:</ThemedText>
-              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
+              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${subtotal.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</ThemedText>
             </View>
             <View style={styles.totalsRow}>
               <ThemedText style={[styles.totalLabel, { color: themeColors.textSecondary }]}>IVA (Calculado):</ThemedText>
-              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
+              <ThemedText style={[styles.totalValue, { color: themeColors.text }]}>${iva.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</ThemedText>
             </View>
             <View style={[styles.totalsRow, styles.totalFinalRow, { borderTopColor: themeColors.border }]}>
               <ThemedText style={[styles.totalFinalLabel, { color: themeColors.text }]}>Total a Cobrar:</ThemedText>
-              <ThemedText style={[styles.totalFinalValue, { color: themeColors.primary }]}>${total.toLocaleString(undefined, {minimumFractionDigits: 2})}</ThemedText>
+              <ThemedText style={[styles.totalFinalValue, { color: themeColors.primary }]}>${total.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</ThemedText>
             </View>
           </View>
           

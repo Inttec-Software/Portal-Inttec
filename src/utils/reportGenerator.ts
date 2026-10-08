@@ -3476,6 +3476,9 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
   const titleStr = tipoDocumento === 'venta' ? 'Orden de venta' : 'Cotizacion';
   const title = `${titleStr} - ${folioPDF}`;
   
+  const formatMoney = (val: any) =>
+    Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   const renderDescription = (name: string, description: string) => {
     const fullText = (name || '') + (description ? '\n' + description : '');
     const parts = fullText.split('\n');
@@ -3682,13 +3685,13 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
                               ${linea.tiempoEntrega || ''}
                           </td>
                           <td class="text-center">${linea.cantidad.toFixed(1)}</td>
-                          <td class="text-end">$ ${linea.precioUnitario.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          <td class="text-end">$ ${formatMoney(linea.precioUnitario)}</td>
                           
                           <td class="text-center">
                               ${linea.impuestoPorcentaje}%
                           </td>
 
-                          <td class="text-end">$ ${linea.importe.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          <td class="text-end">$ ${formatMoney(linea.importe)}</td>
                       </tr>
                   `).join('')}
               </tbody>
@@ -3712,11 +3715,11 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
               </div>
               <div class="col-5">
                   <table class="table-totals">
-                      <tr><td>Subtotal</td><td class="text-end">$ ${cotizacion.subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
-                      <tr><td>IVA 16%</td><td class="text-end">$ ${cotizacion.iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
+                      <tr><td>Subtotal</td><td class="text-end">$ ${formatMoney(cotizacion.subtotal)}</td></tr>
+                      <tr><td>IVA 16%</td><td class="text-end">$ ${formatMoney(cotizacion.iva)}</td></tr>
                       <tr>
                           <td>TOTAL</td>
-                          <td class="text-end">$ ${cotizacion.total.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          <td class="text-end">$ ${formatMoney(cotizacion.total)}</td>
                       </tr>
                   </table>
               </div>
