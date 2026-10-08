@@ -1,0 +1,55 @@
+name: CD Deploy a AWS Lightsail
+
+on:
+  push:
+    branches:
+      - lightsail/staging
+      - lightsail/prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determinar Entorno y Puertos
+        id: env_select
+        run: |
+          if [[ "${{ github.ref_name }}" == "lightsail/prod" ]]; then
+            echo "TARGET_ENV=production" >> $GITHUB_OUTPUT
+            echo "PORT=10000" >> $GITHUB_OUTPUT
+            echo "WEB_DIR=/var/www/portal-prod-web" >> $GITHUB_OUTPUT
+            echo "PM2_NAME=backend-prod" >> $GITHUB_OUTPUT
+          else
+            echo "TARGET_ENV=staging" >> $GITHUB_OUTPUT
+            echo "PORT=10001" >> $GITHUB_OUTPUT
+            echo "WEB_DIR=/var/www/portal-test-web" >> $GITHUB_OUTPUT
+            echo "PM2_NAME=backend-staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Desplegar en Lightsail vía SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_IP }}
+          username: ubuntu
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            APP_DIR="/home/ubuntu/apps/portal-${{ steps.env_select.outputs.TARGET_ENV }}"
+            echo "===> Iniciando despliegue en $APP_DIR..."
+            
+            cd $APP_DIR
+            git fetch origin
+            git checkout ${{ github.ref_name }}
+            git pull origin ${{ github.ref_name }}
+            
+            # 1. Actualizar y reiniciar Backend
+            cd $APP_DIR/backend
+            npm install --production=false
+            npm run build
+            pm2 restart ${{ steps.env_select.outputs.PM2_NAME }}
+            
+            # 2. Actualizar y exportar Frontend Web
+            cd $APP_DIR
+            npm install
+            EXPO_PUBLIC_API_URL="http://${{ secrets.LIGHTSAIL_IP }}:${{ steps.env_select.outputs.PORT }}" npx expo export -p web
+            cp -r dist/* ${{ steps.env_select.outputs.WEB_DIR }}/
+            
+            echo "===> ¡Despliegue finalizado con éxito!"
