@@ -97,7 +97,7 @@ export async function processSatSync(company: string, env: string, options: any 
             `UPDATE sat_descarga_solicitudes 
              SET estado_sat = 'TERMINADA', paquetes_ids = $1, total_facturas_procesadas = $2, mensaje_sat = $3, updated_at = NOW()
              WHERE id = $4`,
-            [JSON.stringify(paquetes), facturasEnSolicitud, verifResult.mensaje || 'Descarga completada', sol.id]
+            [paquetes, facturasEnSolicitud, verifResult.mensaje || 'Descarga completada', sol.id]
           );
         } else if (estadoNum === '4' || estadoNum === '5') {
           await pool.query(
