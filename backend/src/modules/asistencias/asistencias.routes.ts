@@ -1,5 +1,13 @@
 import { Router } from 'express';
-import { getAsistenciaHoy, registrarEntrada, registrarSalida, getHistorial, handleHikvisionWebhook } from './asistencias.controller';
+import {
+  getAsistenciaHoy,
+  registrarEntrada,
+  registrarSalida,
+  getHistorial,
+  handleHikvisionWebhook,
+  editarHorasAsistencia,
+  eliminarAsistencia,
+} from './asistencias.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
 
@@ -23,6 +31,10 @@ router.get('/hoy/:empleado_id', getAsistenciaHoy);
 router.post('/entrada', registrarEntrada);
 router.put('/salida', registrarSalida);
 router.get('/historial/:empleado_id', getHistorial);
+
+// Rutas protegidas exclusivamente para usuarios con rol DEV
+router.put('/admin/editar-horas/:id', editarHorasAsistencia);
+router.delete('/admin/eliminar/:id', eliminarAsistencia);
 
 export default router;
 
