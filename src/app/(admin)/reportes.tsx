@@ -5197,6 +5197,11 @@ export default function ReportesScreen() {
                   asistencias={asistencias}
                   empleadoNombre={asistenciaEmpleado?.nombre || 'Empleado'}
                   isLoading={isLoadingAsistencias}
+                  onRefresh={() => {
+                    if (asistenciaEmpleado) {
+                      handleOpenAsistencia(asistenciaEmpleado, asistenciaSelectedMonday);
+                    }
+                  }}
                   selectedMonday={asistenciaSelectedMonday}
                   onChangeWeek={(newMonday) => {
                     setAsistenciaSelectedMonday(newMonday);

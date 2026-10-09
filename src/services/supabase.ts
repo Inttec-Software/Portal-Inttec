@@ -736,6 +736,52 @@ export const AsistenciaService = {
       throw err;
     }
   },
+
+  /**
+   * Edita las horas de entrada y/o salida de un registro de asistencia (Exclusivo para usuarios con rol DEV).
+   */
+  async editarHorasAsistencia(
+    asistenciaId: string,
+    horaEntrada: string,
+    horaSalida: string | null,
+    observaciones?: string,
+    fecha?: string
+  ): Promise<{ success: boolean; message: string; data: any }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/editar-horas/${asistenciaId}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        hora_entrada: horaEntrada,
+        hora_salida: horaSalida,
+        observaciones,
+        fecha,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Error al actualizar horas de asistencia');
+    }
+    return data;
+  },
+
+  /**
+   * Elimina un registro de asistencia (Exclusivo para usuarios con rol DEV).
+   */
+  async eliminarAsistencia(
+    asistenciaId: string
+  ): Promise<{ success: boolean; message: string }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/eliminar/${asistenciaId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Error al eliminar el registro de asistencia');
+    }
+    return data;
+  },
 };
 
 export interface Venta {

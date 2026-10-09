@@ -33,6 +33,7 @@ import {
 import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import CustomButton from '@/components/CustomButton';
 import {
   getWeekRange,
@@ -56,8 +57,10 @@ export default function AdminAsistencia() {
   const [isLoadingPersonal, setIsLoadingPersonal] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Semana seleccionada
+  // Semana y Día seleccionado
   const [selectedMonday, setSelectedMonday] = useState<Date>(() => getWeekRange().mondayDate);
+  const [selectedDayStr, setSelectedDayStr] = useState<string | null>(null);
+  const [periodoModalVisible, setPeriodoModalVisible] = useState(false);
   const [allAsistenciasSemana, setAllAsistenciasSemana] = useState<Asistencia[]>([]);
   const [isLoadingAsistencias, setIsLoadingAsistencias] = useState(false);
 
@@ -228,9 +231,33 @@ export default function AdminAsistencia() {
   };
 
   // ==========================================
-  // PROCESAMIENTO DE ESTADOS POR EMPLEADO HOY
+  // PROCESAMIENTO DE ESTADOS POR EMPLEADO Y DÍAS
   // ==========================================
   const fechaHoyJornada = useMemo(() => AsistenciaService.getFechaJornada(), []);
+
+  const rangeSemana = useMemo(() => getWeekRange(selectedMonday), [selectedMonday]);
+
+  const isCurrentWeek = useMemo(() => {
+    const currentMon = getWeekRange().mondayDate;
+    return (
+      selectedMonday.getFullYear() === currentMon.getFullYear() &&
+      selectedMonday.getMonth() === currentMon.getMonth() &&
+      selectedMonday.getDate() === currentMon.getDate()
+    );
+  }, [selectedMonday]);
+
+  const formatWeekTitle = useCallback((range: typeof rangeSemana) => {
+    const m = range.mondayDate;
+    const s = range.sundayDate;
+    const mesM = m.toLocaleDateString('es-MX', { month: 'short' }).replace('.', '');
+    const mesS = s.toLocaleDateString('es-MX', { month: 'short' }).replace('.', '');
+    const anio = s.getFullYear();
+
+    if (m.getMonth() === s.getMonth()) {
+      return `${String(m.getDate()).padStart(2, '0')} - ${String(s.getDate()).padStart(2, '0')} ${mesM.toUpperCase()} ${anio}`;
+    }
+    return `${String(m.getDate()).padStart(2, '0')} ${mesM.toUpperCase()} - ${String(s.getDate()).padStart(2, '0')} ${mesS.toUpperCase()} ${anio}`;
+  }, []);
 
   // Mapear asistencias por empleado
   const asistenciasPorEmpleado = useMemo(() => {
@@ -245,50 +272,78 @@ export default function AdminAsistencia() {
     return map;
   }, [allAsistenciasSemana]);
 
-  // Información calculada para cada empleado (estado hoy, horas semana, etc.)
+  // Información calculada para cada día de la semana (para la barra interactiva)
+  const diasSemanaInfo = useMemo(() => {
+    return rangeSemana.days.map((day) => {
+      const asistenciasDelDia = allAsistenciasSemana.filter((a) => a.fecha === day.dateStr);
+      const uniqueEmpleadosCount = new Set(asistenciasDelDia.map((a) => a.empleado_id)).size;
+      const enTurnoCount = asistenciasDelDia.filter((a) => a.hora_entrada && !a.hora_salida).length;
+      const cerradosCount = asistenciasDelDia.filter((a) => a.hora_entrada && a.hora_salida).length;
+
+      return {
+        ...day,
+        totalAsistencias: asistenciasDelDia.length,
+        empleadosCount: uniqueEmpleadosCount,
+        enTurnoCount,
+        cerradosCount,
+        hasActivity: asistenciasDelDia.length > 0,
+      };
+    });
+  }, [rangeSemana, allAsistenciasSemana]);
+
+  const selectedDayInfo = useMemo(() => {
+    if (!selectedDayStr) return null;
+    return diasSemanaInfo.find((d) => d.dateStr === selectedDayStr) || null;
+  }, [selectedDayStr, diasSemanaInfo]);
+
+  // Información calculada para cada empleado (según día seleccionado o hoy)
   const empleadosData = useMemo(() => {
+    const targetFecha = selectedDayStr || fechaHoyJornada;
+    const isViewingToday = targetFecha === fechaHoyJornada;
+
     return personal.map((emp) => {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
       const semanaProcesada = processAsistenciasSemana(asistenciasEmp, selectedMonday);
 
-      // Buscar asistencias del día de hoy
-      const asistenciasHoy = asistenciasEmp.filter((a) => a.fecha === fechaHoyJornada);
+      // Buscar asistencias del día objetivo (hoy o el seleccionado)
+      const asistenciasTargetDia = asistenciasEmp.filter((a) => a.fecha === targetFecha);
 
-      // Determinar estado de hoy
-      let estadoHoy: 'EN_TURNO' | 'COMPLETADO' | 'SIN_REGISTRO' = 'SIN_REGISTRO';
+      let estadoDia: 'EN_TURNO' | 'COMPLETADO' | 'SIN_REGISTRO' = 'SIN_REGISTRO';
       let ultimaEntrada: string | null = null;
       let ultimaSalida: string | null = null;
-      let direccionHoy: string | null = null;
-      let fotoEntradaHoy: string | null = null;
+      let direccionDia: string | null = null;
+      let fotoEntradaDia: string | null = null;
 
-      if (asistenciasHoy.length > 0) {
-        // Ordenar por hora de entrada
-        const sorted = [...asistenciasHoy].sort((a, b) =>
+      if (asistenciasTargetDia.length > 0) {
+        const sorted = [...asistenciasTargetDia].sort((a, b) =>
           (b.hora_entrada || '').localeCompare(a.hora_entrada || '')
         );
         const lastReg = sorted[0];
 
         if (lastReg.hora_entrada && !lastReg.hora_salida) {
-          estadoHoy = 'EN_TURNO';
+          estadoDia = 'EN_TURNO';
           ultimaEntrada = lastReg.hora_entrada;
-          direccionHoy = lastReg.direccion_entrada || null;
-          fotoEntradaHoy = lastReg.foto_entrada_url || null;
+          direccionDia = lastReg.direccion_entrada || null;
+          fotoEntradaDia = lastReg.foto_entrada_url || null;
         } else if (lastReg.hora_entrada && lastReg.hora_salida) {
-          estadoHoy = 'COMPLETADO';
+          estadoDia = 'COMPLETADO';
           ultimaEntrada = lastReg.hora_entrada;
           ultimaSalida = lastReg.hora_salida;
-          direccionHoy = lastReg.direccion_salida || lastReg.direccion_entrada || null;
-          fotoEntradaHoy = lastReg.foto_salida_url || lastReg.foto_entrada_url || null;
+          direccionDia = lastReg.direccion_salida || lastReg.direccion_entrada || null;
+          fotoEntradaDia = lastReg.foto_salida_url || lastReg.foto_entrada_url || null;
         }
       }
 
       return {
         ...emp,
-        estadoHoy,
+        estadoHoy: estadoDia,
+        estadoDia,
         ultimaEntrada,
         ultimaSalida,
-        direccionHoy,
-        fotoEntradaHoy,
+        direccionHoy: direccionDia,
+        fotoEntradaHoy: fotoEntradaDia,
+        isViewingToday,
+        targetFecha,
         totalMinutosSemana: semanaProcesada.totalMinutosSemana,
         totalHorasFormateadas: semanaProcesada.totalHorasSemanaStr,
         totalMinutosRegulares: semanaProcesada.totalMinutosRegulares,
@@ -299,9 +354,9 @@ export default function AdminAsistencia() {
         asistenciasCount: asistenciasEmp.length,
       };
     });
-  }, [personal, asistenciasPorEmpleado, selectedMonday, fechaHoyJornada]);
+  }, [personal, asistenciasPorEmpleado, selectedMonday, fechaHoyJornada, selectedDayStr]);
 
-  // Estadísticas del día
+  // Estadísticas del día o de la semana
   const statsHoy = useMemo(() => {
     let enTurno = 0;
     let completados = 0;
@@ -568,8 +623,6 @@ export default function AdminAsistencia() {
     return date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   };
 
-  const rangeSemana = useMemo(() => getWeekRange(selectedMonday), [selectedMonday]);
-
   const isAdminInActiveShift = !!(adminRegistroHoy?.hora_entrada && !adminRegistroHoy?.hora_salida);
 
   // ==========================================
@@ -695,6 +748,20 @@ export default function AdminAsistencia() {
           }}
         />
 
+        {/* Modal Selector de Período y Calendario */}
+        <PeriodoPickerModal
+          visible={periodoModalVisible}
+          onClose={() => setPeriodoModalVisible(false)}
+          selectedMonday={selectedMonday}
+          onSelectMonday={(newMonday) => {
+            setSelectedMonday(newMonday);
+            setSelectedDayStr(null);
+            if (selectedEmpleado) {
+              cargarAsistenciasEmpleado(selectedEmpleado.id, newMonday);
+            }
+          }}
+        />
+
         {/* Modales de checador del admin */}
         {renderModalesChecadorAdmin()}
       </View>
@@ -710,38 +777,62 @@ export default function AdminAsistencia() {
       <View style={[styles.headerToolbar, { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border }]}>
         {/* Fila superior: Navegador de Semanas + Acciones Principales */}
         <View style={styles.headerTopRow}>
-          {/* Navegador de Semanas Compacto */}
+          {/* Navegador de Semanas Moderno */}
           <View style={styles.weekNavCompact}>
             <TouchableOpacity
               style={[styles.weekNavBtnMini, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
-              onPress={() => setSelectedMonday(getPreviousWeekMonday(selectedMonday))}
+              onPress={() => {
+                const prevMonday = getPreviousWeekMonday(selectedMonday);
+                setSelectedMonday(prevMonday);
+                setSelectedDayStr(null);
+              }}
               activeOpacity={0.7}
             >
               <Ionicons name="chevron-back" size={16} color={themeColors.text} />
             </TouchableOpacity>
 
-            <View style={[styles.weekNavCenterBadge, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
-              <Ionicons name="calendar-outline" size={14} color={themeColors.textSecondary} style={{ marginRight: 5 }} />
+            <TouchableOpacity
+              style={[styles.weekNavCenterBadge, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
+              onPress={() => setPeriodoModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="calendar" size={15} color={themeColors.accent} style={{ marginRight: 6 }} />
               <Text style={[styles.weekNavCurrentText, { color: themeColors.text }]}>
-                {rangeSemana.label}
+                {formatWeekTitle(rangeSemana)}
               </Text>
-            </View>
+              {isCurrentWeek && (
+                <View style={[styles.currentWeekTag, { backgroundColor: themeColors.accent + '20' }]}>
+                  <Text style={[styles.currentWeekTagText, { color: themeColors.accent }]}>Actual</Text>
+                </View>
+              )}
+              <Ionicons name="chevron-down" size={13} color={themeColors.textSecondary} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.weekNavBtnMini, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
-              onPress={() => setSelectedMonday(getNextWeekMonday(selectedMonday))}
+              onPress={() => {
+                const nextMonday = getNextWeekMonday(selectedMonday);
+                setSelectedMonday(nextMonday);
+                setSelectedDayStr(null);
+              }}
               activeOpacity={0.7}
             >
               <Ionicons name="chevron-forward" size={16} color={themeColors.text} />
             </TouchableOpacity>
 
-            <TouchableOpacity
-              onPress={() => setSelectedMonday(getWeekRange().mondayDate)}
-              style={[styles.todayChipBtn, { backgroundColor: themeColors.accent + '20', borderColor: themeColors.accent + '40' }]}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.todayChipBtnText, { color: themeColors.accent }]}>Hoy</Text>
-            </TouchableOpacity>
+            {!isCurrentWeek && (
+              <TouchableOpacity
+                onPress={() => {
+                  setSelectedMonday(getWeekRange().mondayDate);
+                  setSelectedDayStr(null);
+                }}
+                style={[styles.todayChipBtn, { backgroundColor: themeColors.accent + '20', borderColor: themeColors.accent + '40' }]}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="today-outline" size={13} color={themeColors.accent} style={{ marginRight: 4 }} />
+                <Text style={[styles.todayChipBtnText, { color: themeColors.accent }]}>Hoy</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Botones de Acción: Checar Asistencia + Exportar PDF / Excel */}
@@ -778,6 +869,174 @@ export default function AdminAsistencia() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* 2. Barra Interactiva de Días de la Semana (Weekly Day Strip) */}
+        <View style={styles.weeklyStripWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.weeklyStripContainer}
+          >
+            {/* Opción para Ver Semana Completa */}
+            <TouchableOpacity
+              style={[
+                styles.dayStripPill,
+                selectedDayStr === null
+                  ? { backgroundColor: themeColors.primary, borderColor: themeColors.primary }
+                  : { backgroundColor: themeColors.background, borderColor: themeColors.border },
+              ]}
+              onPress={() => setSelectedDayStr(null)}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="calendar"
+                size={13}
+                color={selectedDayStr === null ? '#fff' : themeColors.textSecondary}
+              />
+              <Text
+                style={[
+                  styles.dayStripPillText,
+                  { color: selectedDayStr === null ? '#fff' : themeColors.text },
+                ]}
+              >
+                Toda la semana
+              </Text>
+              <View
+                style={[
+                  styles.dayStripPillHoursBadge,
+                  { backgroundColor: selectedDayStr === null ? 'rgba(255,255,255,0.25)' : themeColors.border },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.dayStripPillHoursText,
+                    { color: selectedDayStr === null ? '#fff' : themeColors.textSecondary },
+                  ]}
+                >
+                  {statsHoy.totalHorasSemana}
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Los 7 Días de la Semana */}
+            {diasSemanaInfo.map((day) => {
+              const isSelected = selectedDayStr === day.dateStr;
+              const isToday = day.isToday;
+
+              return (
+                <TouchableOpacity
+                  key={day.dateStr}
+                  style={[
+                    styles.dayStripCard,
+                    isSelected
+                      ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+                      : {
+                          backgroundColor: themeColors.background,
+                          borderColor: isToday ? themeColors.accent : themeColors.border,
+                          borderWidth: isToday ? 2 : 1,
+                        },
+                  ]}
+                  onPress={() => setSelectedDayStr(isSelected ? null : day.dateStr)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.dayStripCardHeader}>
+                    <Text
+                      style={[
+                        styles.dayStripCardName,
+                        {
+                          color: isSelected
+                            ? '#fff'
+                            : isToday
+                            ? themeColors.accent
+                            : themeColors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {day.dayName.slice(0, 3).toUpperCase()}
+                    </Text>
+                    {isToday && (
+                      <View
+                        style={[
+                          styles.dayStripTodayBadge,
+                          { backgroundColor: isSelected ? 'rgba(255,255,255,0.3)' : themeColors.accent + '25' },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dayStripTodayText,
+                            { color: isSelected ? '#fff' : themeColors.accent },
+                          ]}
+                        >
+                          HOY
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.dayStripCardNum,
+                      { color: isSelected ? '#fff' : themeColors.text },
+                    ]}
+                  >
+                    {String(day.date.getDate()).padStart(2, '0')}
+                  </Text>
+
+                  <View style={styles.dayStripFooter}>
+                    <View
+                      style={[
+                        styles.dayStripStatusDot,
+                        {
+                          backgroundColor: isSelected
+                            ? '#fff'
+                            : day.enTurnoCount > 0
+                            ? '#eab308'
+                            : day.empleadosCount > 0
+                            ? '#16a34a'
+                            : themeColors.border,
+                        },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.dayStripCountText,
+                        {
+                          color: isSelected
+                            ? 'rgba(255,255,255,0.95)'
+                            : day.empleadosCount > 0
+                            ? themeColors.text
+                            : themeColors.textSecondary + '70',
+                          fontWeight: day.empleadosCount > 0 ? '700' : '500',
+                        },
+                      ]}
+                    >
+                      {day.empleadosCount > 0 ? `${day.empleadosCount} asis.` : '0'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Banner informativo de día seleccionado */}
+        {selectedDayInfo && (
+          <View style={[styles.dayFilterBanner, { backgroundColor: themeColors.accent + '15', borderColor: themeColors.accent + '40' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+              <Ionicons name="filter" size={14} color={themeColors.accent} />
+              <Text style={[styles.dayFilterBannerText, { color: themeColors.text }]}>
+                Mostrando asistencia del <Text style={{ fontWeight: '800', color: themeColors.accent }}>{selectedDayInfo.dayName} {selectedDayInfo.shortDate}</Text> ({selectedDayInfo.empleadosCount} empleados checaron)
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setSelectedDayStr(null)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.dayFilterBannerClose}
+            >
+              <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Fila Inferior: Buscador y Filtros de Estado */}
         <View style={styles.headerFilterRow}>
@@ -928,7 +1187,7 @@ export default function AdminAsistencia() {
                       </View>
                     </View>
 
-                    {/* Badge de estado de hoy */}
+                    {/* Badge de estado del día o de hoy */}
                     <View
                       style={[
                         styles.todayStatusBadge,
@@ -970,17 +1229,23 @@ export default function AdminAsistencia() {
                           },
                         ]}
                       >
-                        {isEnTurno ? 'EN TURNO' : isCompletado ? 'SALIDA REGISTRADA' : 'SIN CHECADA'}
+                        {isEnTurno
+                          ? 'EN TURNO'
+                          : isCompletado
+                          ? (selectedDayInfo ? 'ASISTENCIA' : 'SALIDA REGISTRADA')
+                          : 'SIN CHECADA'}
                       </Text>
                     </View>
                   </View>
 
-                  {/* Horarios de Hoy */}
+                  {/* Horarios del Día / Hoy */}
                   <View style={[styles.horariosHoyBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
                     <View style={styles.horarioRow}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Ionicons name="log-in-outline" size={16} color="#16a34a" />
-                        <Text style={[styles.horarioLabel, { color: themeColors.textSecondary }]}>Entrada Hoy:</Text>
+                        <Text style={[styles.horarioLabel, { color: themeColors.textSecondary }]}>
+                          {selectedDayInfo ? `Entrada (${selectedDayInfo.dayName.slice(0, 3)}):` : 'Entrada Hoy:'}
+                        </Text>
                       </View>
                       <Text style={[styles.horarioVal, { color: emp.ultimaEntrada ? '#16a34a' : themeColors.textSecondary }]}>
                         {emp.ultimaEntrada ? formatHoraDisplay(emp.ultimaEntrada) : 'Pendiente'}
@@ -990,7 +1255,9 @@ export default function AdminAsistencia() {
                     <View style={styles.horarioRow}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Ionicons name="log-out-outline" size={16} color="#ef4444" />
-                        <Text style={[styles.horarioLabel, { color: themeColors.textSecondary }]}>Salida Hoy:</Text>
+                        <Text style={[styles.horarioLabel, { color: themeColors.textSecondary }]}>
+                          {selectedDayInfo ? `Salida (${selectedDayInfo.dayName.slice(0, 3)}):` : 'Salida Hoy:'}
+                        </Text>
                       </View>
                       <Text style={[styles.horarioVal, { color: emp.ultimaSalida ? '#ef4444' : themeColors.textSecondary }]}>
                         {emp.ultimaSalida ? formatHoraDisplay(emp.ultimaSalida) : isEnTurno ? 'En curso...' : 'Sin registro'}
@@ -1044,6 +1311,17 @@ export default function AdminAsistencia() {
           setViewerVisible(false);
           setActivePreviewUrl(null);
           setSelectedAsistenciaInfo(null);
+        }}
+      />
+
+      {/* Modal Selector de Período y Calendario */}
+      <PeriodoPickerModal
+        visible={periodoModalVisible}
+        onClose={() => setPeriodoModalVisible(false)}
+        selectedMonday={selectedMonday}
+        onSelectMonday={(newMonday) => {
+          setSelectedMonday(newMonday);
+          setSelectedDayStr(null);
         }}
       />
 
@@ -1299,12 +1577,13 @@ const styles = StyleSheet.create({
   weekNavCompact: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
+    flexWrap: 'wrap',
   },
   weekNavBtnMini: {
     width: 32,
     height: 32,
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
@@ -1312,24 +1591,143 @@ const styles = StyleSheet.create({
   weekNavCenterBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1,
+    gap: 4,
   },
   weekNavCurrentText: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  currentWeekTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 4,
+  },
+  currentWeekTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
   todayChipBtn: {
-    paddingHorizontal: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1,
   },
   todayChipBtnText: {
     fontSize: 11,
     fontWeight: '800',
+  },
+  weeklyStripWrapper: {
+    marginVertical: 4,
+  },
+  weeklyStripContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 2,
+  },
+  dayStripPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    minHeight: 52,
+  },
+  dayStripPillText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  dayStripPillHoursBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  dayStripPillHoursText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  dayStripCard: {
+    width: 62,
+    minHeight: 56,
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  dayStripCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    width: '100%',
+  },
+  dayStripCardName: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  dayStripTodayBadge: {
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  dayStripTodayText: {
+    fontSize: 7.5,
+    fontWeight: '900',
+  },
+  dayStripCardNum: {
+    fontSize: 15,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+  dayStripFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    justifyContent: 'center',
+    width: '100%',
+  },
+  dayStripStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  dayStripCountText: {
+    fontSize: 9.5,
+  },
+  dayFilterBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 2,
+  },
+  dayFilterBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  dayFilterBannerClose: {
+    padding: 2,
   },
   topRightActions: {
     flexDirection: 'row',
