@@ -87,8 +87,10 @@ export default function AdminDashboardGrid() {
           } else {
             setHasNewTasks(false);
           }
-        } catch (error) {
-          console.error('Error fetching tasks for badge', error);
+        } catch (error: any) {
+          // Si el backend local no está corriendo, registrar como warn sin romper el dashboard
+          console.warn('No se pudieron obtener tareas para el badge (backend offline o inaccesible):', error?.message || error);
+          setPendingTasksCount(0);
         }
       };
       fetchPendingTasks();
