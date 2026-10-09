@@ -855,11 +855,9 @@ export default function GastoForm() {
                 const ext = tf.ext || 'jpg';
                 const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
                 const fileName = `${currentUser.id}/ticket_${Date.now()}_${i}.${ext}`;
-                const arrayBuffer = base64ToArrayBuffer(tf.base64);
-
                 const { error: uploadError } = await supabase.storage
                   .from('tickets')
-                  .upload(fileName, arrayBuffer, { contentType, upsert: true });
+                  .upload(fileName, tf.base64, { contentType, upsert: true });
 
                 if (!uploadError) {
                   const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
@@ -882,11 +880,9 @@ export default function GastoForm() {
             try {
               const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
               const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
-              const arrayBuffer = base64ToArrayBuffer(imageBase64);
-
               const { error: uploadError } = await supabase.storage
                 .from('tickets')
-                .upload(fileName, arrayBuffer, { contentType, upsert: true });
+                .upload(fileName, imageBase64, { contentType, upsert: true });
 
               if (!uploadError) {
                 const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
@@ -914,11 +910,9 @@ export default function GastoForm() {
               const ext = f.ext || 'jpg';
               const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
               const fileName = `${currentUser.id}/factura_${Date.now()}_${i}.${ext}`;
-              const arrayBuffer = base64ToArrayBuffer(f.base64);
-
               const { data: uploadData, error: uploadError } = await supabase.storage
                 .from('tickets')
-                .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
+                .upload(fileName, f.base64, { contentType: contentType, upsert: true });
 
               if (!uploadError) {
                 const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);

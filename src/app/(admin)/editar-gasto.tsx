@@ -906,7 +906,7 @@ export default function EditarGastoForm() {
             const ext = tf.ext || 'jpg';
             const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
             const fileName = `${currentUser.id}/${Date.now()}_ticket_${i}.${ext}`;
-            const arrayBuffer = base64ToArrayBuffer(tf.base64);
+            const arrayBuffer = tf.base64;
 
             const { error: uploadError } = await supabase.storage
               .from('tickets')
@@ -924,7 +924,7 @@ export default function EditarGastoForm() {
         if (imageBase64) {
           const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
           const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
-          const arrayBuffer = base64ToArrayBuffer(imageBase64);
+          const arrayBuffer = imageBase64;
 
           const { error: uploadError } = await supabase.storage
             .from('tickets')
@@ -953,7 +953,7 @@ export default function EditarGastoForm() {
               const ext = f.ext || 'jpg';
               const contentType = ext === 'pdf' ? 'application/pdf' : (ext === 'xml' ? 'text/xml' : 'image/jpeg');
               const fileName = `${currentUser.id}/factura_${Date.now()}_${i}.${ext}`;
-              const arrayBuffer = base64ToArrayBuffer(f.base64);
+              const arrayBuffer = f.base64;
 
               const { error: uploadError } = await supabase.storage
                 .from('tickets')

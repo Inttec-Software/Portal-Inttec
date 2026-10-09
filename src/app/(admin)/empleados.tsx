@@ -570,7 +570,7 @@ export default function AdminEmpleadosScreen() {
     try {
       const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
       const fileName = `admin_uploads/factura_${selectedGasto.id}_${Date.now()}.${ext}`;
-      const arrayBuffer = base64ToArrayBuffer(base64Data);
+      const arrayBuffer = base64Data;
 
       const { error: uploadError } = await supabase.storage
         .from('tickets')

@@ -23,7 +23,7 @@ export default function EmpleadoLayout() {
     setIsHoveringHeader(false);
   }, [pathname]);
 
-  if (!user || (user.rol !== 'EMPLEADO' && user.rol !== 'DEV')) {
+  if (!user || (user.rol?.toUpperCase() !== 'EMPLEADO' && user.rol?.toUpperCase() !== 'DEV')) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors.background }}>
         <ActivityIndicator size="large" color={themeColors.accent} />

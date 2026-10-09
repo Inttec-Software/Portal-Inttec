@@ -797,7 +797,7 @@ export default function EvidenciaForm() {
 
       // Helper to convert base64 to arraybuffer and upload
       const uploadPhoto = async (base64Data: string, prefix: string) => {
-        const arrayBuffer = base64ToArrayBuffer(base64Data);
+        const arrayBuffer = base64Data;
         const randId = Math.random().toString(36).substring(2, 7);
         const fileName = `${currentUser.id}/evidencia_${prefix}_${Date.now()}_${randId}.jpg`;
         const { error: uploadError } = await supabase.storage

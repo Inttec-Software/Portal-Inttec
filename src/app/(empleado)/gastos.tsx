@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+﻿import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -40,9 +40,8 @@ export default function EmpleadoGastos() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { setUser: setAuthUser, company, changeCompany, env, changeEnv } = useAuth();
+  const { user, company, changeCompany, env, changeEnv } = useAuth();
 
-  const [user, setUser] = useState<Usuario | null>(null);
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [offlineGastos, setOfflineGastos] = useState<OfflineGastoItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -428,32 +427,20 @@ export default function EmpleadoGastos() {
   };
 
   useEffect(() => {
-    // Cargar usuario
-    const loadUserAndData = async () => {
-      const currentUser = await AuthService.getCurrentUser();
-      if (!currentUser) {
-        router.replace('/');
-        return;
-      }
-      setUser(currentUser);
-      await refreshData(currentUser.id);
-    };
+    if (user?.id) {
+      refreshData(user.id);
+    }
 
-    loadUserAndData();
-
-    // Registrar Listener de Sincronización Automática Offline
+    // Registrar Listener de Sincronizacion Automatica Offline
     const unsubscribe = SyncService.initNetworkSyncListener((count) => {
-      Alert.alert('Sincronización Exitosa', `Se han sincronizado ${count} gastos guardados offline.`);
-      if (user) refreshData(user.id);
+      Alert.alert('Sincronizacion Exitosa', `Se han sincronizado ${count} gastos guardados offline.`);
+      if (user?.id) refreshData(user.id);
     });
 
     return () => unsubscribe();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [company, env]);
+  }, [company, env, user?.id]);
 
-    useEffect(() => {
-      if (!user) return;
-    }, [user]);
 
   async function refreshData(userId: string, silent = false) {
     if (!silent && gastos.length === 0) {
@@ -2104,4 +2091,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+
 

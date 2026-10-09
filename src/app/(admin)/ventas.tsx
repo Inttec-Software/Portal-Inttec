@@ -1082,7 +1082,7 @@ export default function VentasScreen() {
         const ext = fileMimeType.includes('pdf') ? 'pdf' : 'jpg';
         const contentType = fileMimeType.includes('pdf') ? 'application/pdf' : 'image/jpeg';
         const fileName = getTimestampFileName(currentUser.id, ext);
-        const arrayBuffer = base64ToArrayBuffer(fileBase64);
+        const arrayBuffer = fileBase64;
 
         const { error: uploadError } = await supabase.storage
           .from('tickets')

@@ -4,7 +4,8 @@ import { getApiHeaders, getApiUrl, invalidateHeaderCache } from './apiHelper';
 import { apiClient } from './apiClient';
 import { Platform } from 'react-native';
 
-const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+// Permitir Storage en dispositivos nativos (iOS/Android) o en el navegador (Web)
+const isBrowser = Platform.OS !== 'web' || (typeof window !== 'undefined' && typeof window.document !== 'undefined');
 
 
 let activeCompany: 'inttec' | 'daravisa' = 'inttec';
