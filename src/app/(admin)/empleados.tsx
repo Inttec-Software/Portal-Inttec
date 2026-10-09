@@ -477,7 +477,7 @@ export default function AdminEmpleadosScreen() {
     setIsLoadingSalesForLinking(true);
     try {
       const [ventasRes, cliRes, sucRes] = await Promise.all([
-        supabase.from('ventas').select('*').order('created_at', { ascending: false }).limit(500),
+        supabase.from('ventas').select('*').order('fecha', { ascending: false }).limit(1000),
         supabase.from('clientes').select('*').order('nombre'),
         supabase.from('sucursales_cliente').select('*').order('nombre'),
       ]);

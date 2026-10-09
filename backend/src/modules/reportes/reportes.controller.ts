@@ -199,8 +199,17 @@ export const getSalesForLinking = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const client = getSupabaseClient(company, env);
 
+    const limitQuery = req.query.limit !== undefined
+      ? parseInt(req.query.limit as string, 10)
+      : 1000;
+
+    let query = client.from('ventas').select('*').order('fecha', { ascending: false });
+    if (limitQuery && !isNaN(limitQuery) && limitQuery > 0) {
+      query = query.limit(limitQuery);
+    }
+
     const [ventasRes, cliRes, sucRes] = await Promise.all([
-      client.from('ventas').select('*').order('fecha', { ascending: false }).limit(50),
+      query,
       client.from('clientes').select('*').order('nombre'),
       client.from('sucursales_cliente').select('*').order('nombre'),
     ]);

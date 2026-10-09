@@ -978,7 +978,7 @@ export default function FacturacionScreen() {
       setPreviewFacturaData(fakeDraftData);
       setPreviewXmlText('');
       setPreviewIsDraft(true);
-      setPreviewTitle(`Borrador: Factura ${serieVal}${folioVal}`);
+      setPreviewTitle(`Prefactura: Factura ${serieVal}${folioVal}`);
       setPreviewModalVisible(true);
     } catch (err: any) {
       showAlert('Error al Ver Borrador', err.message);

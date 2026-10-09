@@ -3937,7 +3937,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
   const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   const fullFileName = `${clienteSanitized}_${displayFolio}`;
-  const title = isDraft ? `[BORRADOR] ${fullFileName}` : fullFileName;
+  const title = isDraft ? `[PREFACTURA] ${fullFileName}` : fullFileName;
   
   // Formatters de Dinero y Fecha
   const formatMoney = (val: any) => `$ ${Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -4484,6 +4484,26 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           font-weight: normal;
         }
 
+        .prefactura-watermark {
+          position: fixed;
+          top: 38%;
+          left: 50%;
+          transform: translate(-50%, -50%) rotate(-30deg);
+          width: 90%;
+          text-align: center;
+          font-size: 86px;
+          font-weight: 900;
+          color: rgba(220, 38, 38, 0.14);
+          letter-spacing: 16px;
+          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+          text-transform: uppercase;
+          pointer-events: none;
+          z-index: 9999;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          user-select: none;
+        }
+
         @media print {
           @page { size: letter; margin: 0; }
           body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: #fff !important; }
@@ -4491,16 +4511,22 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           .invoice-body { padding: 10px 45px 30px 45px !important; }
           .sat-block { page-break-inside: avoid !important; break-inside: avoid !important; }
           .invoice-footer { page-break-inside: avoid !important; break-inside: avoid !important; }
+          .prefactura-watermark {
+            display: block !important;
+            color: rgba(220, 38, 38, 0.16) !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
         }
       </style>
     </head>
     <body>
       ${isDraft ? `
         <div style="background-color: #fef3c7; border-bottom: 2px solid #f59e0b; color: #b45309; text-align: center; padding: 8px 16px; font-weight: 800; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; z-index: 100; position: relative;">
-          ⚠️ VISTA PREVIA / BORRADOR — DOCUMENTO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
+          ⚠️ PREFACTURA / BORRADOR — DOCUMENTO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
         </div>
-        <div style="position: fixed; top: 38%; left: 0; width: 100%; text-align: center; font-size: 80px; font-weight: 900; color: rgba(220, 38, 38, 0.08); transform: rotate(-30deg); pointer-events: none; z-index: 999; letter-spacing: 12px; font-family: sans-serif;">
-          BORRADOR
+        <div class="prefactura-watermark">
+          PREFACTURA
         </div>
       ` : ''}
 
@@ -4529,10 +4555,10 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           <!-- Title & Folio -->
           <div class="title-block">
             <div class="title-block-inner">
-              <h1 class="factura-title">FACTURA</h1>
+              <h1 class="factura-title">${isDraft ? 'PREFACTURA' : 'FACTURA'}</h1>
               <div class="factura-folio">${displayFolio}</div>
               <div class="uuid-label">FOLIO FISCAL (UUID):</div>
-              <div class="uuid-value">${effectiveUuid || (isDraft ? 'PENDIENTE DE ASIGNACIÓN (BORRADOR)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
+              <div class="uuid-value">${effectiveUuid || (isDraft ? 'PENDIENTE DE ASIGNACIÓN (PREFACTURA)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
             </div>
           </div>
 
@@ -4629,7 +4655,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
                 <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(satVerificationUrl || effectiveUuid)}" class="sat-qr-img" alt="QR SAT" />
               ` : `
                 <div style="width: 95px; height: 95px; border: 1px dashed #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #94a3b8; font-weight: bold; padding: 4px;">
-                  QR SAT<br>(Borrador)
+                  QR SAT<br>(${isDraft ? 'Prefactura' : 'Borrador'})
                 </div>
               `}
             </div>
@@ -4672,9 +4698,10 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   return htmlContent;
 }
 
-export async function exportarFacturaOdooPDF(venta: any, facturaData: any, action: any = 'view') {
+export async function exportarFacturaOdooPDF(venta: any, facturaData: any, action: any = 'view', isDraft: boolean = false) {
   try {
-    const htmlContent = await generarFacturaHTML(venta, facturaData, false);
+    const effectiveDraft = isDraft || Boolean(venta?.es_borrador || venta?.cfdi_estado === 'BORRADOR' || facturaData?.is_draft || facturaData?.es_borrador);
+    const htmlContent = await generarFacturaHTML(venta, facturaData, effectiveDraft);
 
     const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
     const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
@@ -4688,7 +4715,9 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
     } else if (!folioNum) {
       folioNum = '0001';
     }
-    const fullFileName = `${clienteSanitized}_${serie}${folioNum}`;
+    const fullFileName = effectiveDraft 
+      ? `PREFACTURA_${clienteSanitized}_${serie}${folioNum}` 
+      : `${clienteSanitized}_${serie}${folioNum}`;
 
     if (Platform.OS === 'web') {
       const prevDocTitle = document.title;

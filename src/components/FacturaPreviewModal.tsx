@@ -103,7 +103,12 @@ export default function FacturaPreviewModal({
       folioNum = '0001';
     }
     const fullFolio = `${serie}${folioNum}`;
-    const prefix = isPago ? `${clienteSanitized}_Pago_${fullFolio}` : `${clienteSanitized}_${fullFolio}`;
+    const isDraftInvoice = isDraft && !isPago;
+    const prefix = isPago
+      ? `${clienteSanitized}_Pago_${fullFolio}`
+      : isDraftInvoice
+        ? `PREFACTURA_${clienteSanitized}_${fullFolio}`
+        : `${clienteSanitized}_${fullFolio}`;
     return `${prefix}.${ext}`;
   };
 
@@ -157,7 +162,7 @@ export default function FacturaPreviewModal({
       }
       const safeVenta = venta || { cliente: 'Cliente' };
       const safeFacturaData = facturaData || { folio_number: '1' };
-      await exportarFacturaOdooPDF(safeVenta, safeFacturaData, 'download');
+      await exportarFacturaOdooPDF(safeVenta, safeFacturaData, 'download', isDraft);
     } catch (err: any) {
       console.error('Error descargando PDF:', err);
     } finally {
@@ -198,7 +203,7 @@ export default function FacturaPreviewModal({
   const isCanceled = venta?.cfdi_estado === 'CANCELADA' || facturaData?.status === 'canceled';
   const displayTitle = title || (
     isDraft
-      ? 'Vista Previa (Borrador)'
+      ? 'Vista Previa (Prefactura)'
       : `Factura: ${facturaData?.folio_number || venta?.folio || facturaData?.uuid?.slice(0, 8) || 'CFDI'}`
   );
 
@@ -240,7 +245,7 @@ export default function FacturaPreviewModal({
                   </Text>
                   {isDraft ? (
                     <View style={[styles.badge, { backgroundColor: '#f59e0b25', borderColor: '#f59e0b' }]}>
-                      <Text style={[styles.badgeText, { color: '#b45309' }]}>BORRADOR PRE-TIMBRADO</Text>
+                      <Text style={[styles.badgeText, { color: '#b45309' }]}>PREFACTURA (BORRADOR)</Text>
                     </View>
                   ) : isCanceled ? (
                     <View style={[styles.badge, { backgroundColor: '#ef444425', borderColor: '#ef4444' }]}>
