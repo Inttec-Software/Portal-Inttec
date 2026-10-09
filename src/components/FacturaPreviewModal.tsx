@@ -52,13 +52,26 @@ export default function FacturaPreviewModal({
   const [isActionLoading, setIsActionLoading] = useState<boolean>(false);
   const iframeRef = useRef<any>(null);
 
+  const effectiveIsDraft = Boolean(
+    isDraft ||
+    venta?.es_borrador ||
+    venta?.cfdi_estado === 'BORRADOR' ||
+    facturaData?.is_draft ||
+    facturaData?.es_borrador ||
+    !venta?.cfdi_uuid ||
+    String(venta?.cfdi_uuid).startsWith('BORRADOR') ||
+    !facturaData?.uuid ||
+    String(facturaData?.uuid).startsWith('BORRADOR') ||
+    String(facturaData?.stamp?.uuid).startsWith('BORRADOR')
+  );
+
   useEffect(() => {
     if (visible && (customHtml || venta || facturaData)) {
       loadHTML();
     } else {
       setHtmlContent('');
     }
-  }, [visible, venta, facturaData, isDraft, customHtml]);
+  }, [visible, venta, facturaData, isDraft, customHtml, effectiveIsDraft]);
 
   const loadHTML = async () => {
     try {
@@ -76,7 +89,7 @@ export default function FacturaPreviewModal({
         total: safeVenta?.precio_total_facturado || 0,
       };
 
-      const html = await generarFacturaHTML(safeVenta, safeFacturaData, isDraft);
+      const html = await generarFacturaHTML(safeVenta, safeFacturaData, effectiveIsDraft);
       setHtmlContent(html);
     } catch (err) {
       console.error('Error generando HTML de factura:', err);
@@ -86,7 +99,7 @@ export default function FacturaPreviewModal({
   };
 
   const getCleanFileName = (ext: string) => {
-    const isPago = isDraft
+    const isPago = effectiveIsDraft
       ? (title?.includes('Pago') || title?.includes('Recibo'))
       : (facturaData?.serie === 'P' || title?.includes('Pago') || title?.includes('Recibo') || Boolean(facturaData?.complementos_pago_doctos));
     const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || facturaData?.cliente_nombre || 'Cliente';
@@ -103,7 +116,7 @@ export default function FacturaPreviewModal({
       folioNum = '0001';
     }
     const fullFolio = `${serie}${folioNum}`;
-    const isDraftInvoice = isDraft && !isPago;
+    const isDraftInvoice = effectiveIsDraft && !isPago;
     const prefix = isPago
       ? `${clienteSanitized}_Pago_${fullFolio}`
       : isDraftInvoice
@@ -162,7 +175,7 @@ export default function FacturaPreviewModal({
       }
       const safeVenta = venta || { cliente: 'Cliente' };
       const safeFacturaData = facturaData || { folio_number: '1' };
-      await exportarFacturaOdooPDF(safeVenta, safeFacturaData, 'download', isDraft);
+      await exportarFacturaOdooPDF(safeVenta, safeFacturaData, 'download', effectiveIsDraft);
     } catch (err: any) {
       console.error('Error descargando PDF:', err);
     } finally {
@@ -202,7 +215,7 @@ export default function FacturaPreviewModal({
 
   const isCanceled = venta?.cfdi_estado === 'CANCELADA' || facturaData?.status === 'canceled';
   const displayTitle = title || (
-    isDraft
+    effectiveIsDraft
       ? 'Vista Previa (Prefactura)'
       : `Factura: ${facturaData?.folio_number || venta?.folio || facturaData?.uuid?.slice(0, 8) || 'CFDI'}`
   );
@@ -231,11 +244,11 @@ export default function FacturaPreviewModal({
           {/* Top Bar Header */}
           <View style={[styles.header, { borderBottomColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-              <View style={[styles.iconCircle, { backgroundColor: isDraft ? '#f59e0b20' : isCanceled ? '#ef444420' : '#10b98120' }]}>
+              <View style={[styles.iconCircle, { backgroundColor: effectiveIsDraft ? '#f59e0b20' : isCanceled ? '#ef444420' : '#10b98120' }]}>
                 <Ionicons
-                  name={isDraft ? 'document-text-outline' : isCanceled ? 'close-circle-outline' : 'receipt-outline'}
+                  name={effectiveIsDraft ? 'document-text-outline' : isCanceled ? 'close-circle-outline' : 'receipt-outline'}
                   size={20}
-                  color={isDraft ? '#d97706' : isCanceled ? '#ef4444' : '#10b981'}
+                  color={effectiveIsDraft ? '#d97706' : isCanceled ? '#ef4444' : '#10b981'}
                 />
               </View>
               <View style={{ flex: 1 }}>
@@ -243,7 +256,7 @@ export default function FacturaPreviewModal({
                   <Text style={[styles.title, { color: themeColors.text }]} numberOfLines={1}>
                     {displayTitle}
                   </Text>
-                  {isDraft ? (
+                  {effectiveIsDraft ? (
                     <View style={[styles.badge, { backgroundColor: '#f59e0b25', borderColor: '#f59e0b' }]}>
                       <Text style={[styles.badgeText, { color: '#b45309' }]}>PREFACTURA (BORRADOR)</Text>
                     </View>
@@ -298,7 +311,7 @@ export default function FacturaPreviewModal({
                 </TouchableOpacity>
               )}
 
-              {isDraft && onConfirmTimbrar && (
+              {effectiveIsDraft && onConfirmTimbrar && (
                 <TouchableOpacity
                   onPress={onConfirmTimbrar}
                   disabled={isLoading || isActionLoading}

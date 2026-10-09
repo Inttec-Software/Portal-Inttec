@@ -3933,6 +3933,19 @@ export function cleanFolio(rawFolio?: any): string {
 export async function generarFacturaHTML(venta: any, facturaData: any, isDraft = false): Promise<string> {
   const branding = await getCompanyBranding();
 
+  const effectiveDraft = Boolean(
+    isDraft ||
+    venta?.es_borrador ||
+    venta?.cfdi_estado === 'BORRADOR' ||
+    facturaData?.is_draft ||
+    facturaData?.es_borrador ||
+    !venta?.cfdi_uuid ||
+    String(venta?.cfdi_uuid).startsWith('BORRADOR') ||
+    !facturaData?.uuid ||
+    String(facturaData?.uuid).startsWith('BORRADOR') ||
+    String(facturaData?.stamp?.uuid).startsWith('BORRADOR')
+  );
+
   // Diccionarios de mapeo para SAT
   const formatRegimenFiscal = (val: any) => {
     if (!val) return '612 - Personas físicas con actividades empresariales y profesionales';
@@ -4034,7 +4047,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
   const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   const fullFileName = `${clienteSanitized}_${displayFolio}`;
-  const title = isDraft ? `[PREFACTURA] ${fullFileName}` : fullFileName;
+  const title = effectiveDraft ? `[PREFACTURA] ${fullFileName}` : fullFileName;
   
   // Formatters de Dinero y Fecha
   const formatMoney = (val: any) => `$ ${Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -4586,23 +4599,23 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
         }
 
         .prefactura-watermark {
-          position: absolute;
-          top: 40%;
-          left: 50%;
-          transform: translate(-50%, -50%) rotate(-30deg);
-          width: 90%;
-          text-align: center;
-          font-size: 86px;
-          font-weight: 900;
-          color: rgba(220, 38, 38, 0.18);
-          letter-spacing: 16px;
-          font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-          text-transform: uppercase;
-          pointer-events: none;
-          z-index: 99999;
+          position: fixed !important;
+          top: 50% !important;
+          left: 50% !important;
+          transform: translate(-50%, -50%) rotate(-35deg) !important;
+          width: 100% !important;
+          text-align: center !important;
+          font-size: 92px !important;
+          font-weight: 900 !important;
+          color: rgba(220, 38, 38, 0.22) !important;
+          letter-spacing: 16px !important;
+          font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+          text-transform: uppercase !important;
+          pointer-events: none !important;
+          z-index: 999999 !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
-          user-select: none;
+          user-select: none !important;
         }
 
         @media print {
@@ -4614,22 +4627,27 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           .invoice-footer { page-break-inside: avoid !important; break-inside: avoid !important; }
           .prefactura-watermark {
             display: block !important;
-            color: rgba(220, 38, 38, 0.20) !important;
+            position: fixed !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) rotate(-35deg) !important;
+            color: rgba(220, 38, 38, 0.25) !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            z-index: 999999 !important;
           }
         }
       </style>
     </head>
     <body>
-      ${isDraft ? `
+      ${effectiveDraft ? `
         <div style="background-color: #fef3c7; border-bottom: 2px solid #f59e0b; color: #b45309; text-align: center; padding: 8px 16px; font-weight: 800; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; z-index: 100; position: relative;">
           ⚠️ PREFACTURA / BORRADOR — DOCUMENTO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
         </div>
       ` : ''}
 
       <div class="page-container">
-        ${isDraft ? `
+        ${effectiveDraft ? `
           <div class="prefactura-watermark">
             PREFACTURA
           </div>
@@ -4659,10 +4677,10 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           <!-- Title & Folio -->
           <div class="title-block">
             <div class="title-block-inner">
-              <h1 class="factura-title">${isDraft ? 'PREFACTURA' : 'FACTURA'}</h1>
+              <h1 class="factura-title">${effectiveDraft ? 'PREFACTURA' : 'FACTURA'}</h1>
               <div class="factura-folio">${displayFolio}</div>
               <div class="uuid-label">FOLIO FISCAL (UUID):</div>
-              <div class="uuid-value">${effectiveUuid || (isDraft ? 'PENDIENTE DE ASIGNACIÓN (PREFACTURA)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
+              <div class="uuid-value">${effectiveUuid || (effectiveDraft ? 'PENDIENTE DE ASIGNACIÓN (PREFACTURA)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
             </div>
           </div>
 
@@ -4759,7 +4777,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
                 <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(satVerificationUrl || effectiveUuid)}" class="sat-qr-img" alt="QR SAT" />
               ` : `
                 <div style="width: 95px; height: 95px; border: 1px dashed #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #94a3b8; font-weight: bold; padding: 4px;">
-                  QR SAT<br>(${isDraft ? 'Prefactura' : 'Borrador'})
+                  QR SAT<br>(${effectiveDraft ? 'Prefactura' : 'Borrador'})
                 </div>
               `}
             </div>
