@@ -35,7 +35,7 @@ const syncStatusMap: Record<string, CompanySyncStatus> = {
 const SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutos
 
 export class SatSyncService {
-  private static timer: NodeJS.Timeout | null = null;
+  private static timer: ReturnType<typeof setInterval> | null = null;
   private static isRunning = false;
 
   /**
