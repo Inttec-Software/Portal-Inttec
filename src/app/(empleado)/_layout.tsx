@@ -116,8 +116,12 @@ function EmpleadoLayoutContent() {
             style={styles.headerTitleContainer}
             onPress={() => {
               setIsMenuOpen(false);
-              if (router.canGoBack()) {
-                router.back();
+              if (pathname.includes('agregar-evidencia')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(empleado)/evidencia');
+              } else if (pathname.includes('formulario') || pathname.includes('editar-gasto')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(empleado)/gastos');
               } else {
                 router.replace('/(empleado)/gastos');
               }

@@ -186,7 +186,10 @@ export default function ProductosScreen() {
         {/* HEADER */}
         <View style={[styles.header, { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <TouchableOpacity onPress={() => router.back()} style={{ paddingRight: Spacing.two }}>
+            <TouchableOpacity 
+              onPress={() => router.canGoBack() ? router.back() : router.replace('/(admin)/dashboard')} 
+              style={{ paddingRight: Spacing.two }}
+            >
               <Ionicons name="arrow-back" size={24} color={themeColors.text} />
             </TouchableOpacity>
             <Text style={[styles.headerTitle, { color: themeColors.text }]}>Catálogo de Productos</Text>

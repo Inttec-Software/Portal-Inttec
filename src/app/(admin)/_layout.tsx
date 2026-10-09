@@ -114,11 +114,20 @@ function AdminLayoutContent() {
             style={styles.headerTitleContainer}
             onPress={() => {
               setIsMenuOpen(false);
-              if (pathname.includes('editar-gasto') || pathname.includes('formulario') || pathname.includes('nueva-cotizacion')) {
-                router.back();
-              } else if (router.canGoBack()) {
-                router.back();
+              if (pathname.includes('nueva-cotizacion')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/cotizaciones');
+              } else if (pathname.includes('editar-gasto') || pathname.includes('formulario')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/gastos');
+              } else if (pathname.includes('nuevo-documento') || pathname.includes('editar-documento')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/documentos');
+              } else if (pathname.includes('agregar-evidencia') || pathname.includes('editar-evidencia')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/evidencias');
               } else {
+                // En cualquier pantalla de módulo principal (cotizaciones, gastos, inventario, etc.), volver directamente al Inicio
                 router.replace('/(admin)/dashboard');
               }
             }}

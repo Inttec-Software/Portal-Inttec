@@ -3601,13 +3601,20 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     <head>
       <meta charset="utf-8" />
       <title>${title}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap');
         @page {
           size: letter;
           margin: 0;
         }
+        * {
+          box-sizing: border-box;
+        }
         body {
-          font-family: 'Helvetica', Arial, sans-serif;
+          font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
           color: #333;
           margin: 0;
           padding: 0;
@@ -4240,11 +4247,15 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
     <head>
       <meta charset="utf-8" />
       <title>${title}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap');
         @page { size: letter; margin: 0; }
         * { box-sizing: border-box; }
         body {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
           color: #1e293b;
           margin: 0;
           padding: 0;
@@ -4341,7 +4352,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           margin-top: 8px;
         }
         .uuid-value {
-          font-family: 'Courier New', Courier, monospace;
+          font-family: 'Roboto Mono', 'Courier New', Courier, monospace;
           font-size: 8.5px;
           color: #1e293b;
           font-weight: 600;
@@ -4537,7 +4548,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           margin-bottom: 1px;
         }
         .sat-stamp {
-          font-family: 'Courier New', Courier, monospace;
+          font-family: 'Roboto Mono', 'Courier New', Courier, monospace;
           font-size: 6px;
           line-height: 1.25;
           color: #334155;

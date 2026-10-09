@@ -1105,5 +1105,5 @@ CREATE INDEX IF NOT EXISTS idx_fact_emit_venta ON public.facturas_emitidas(venta
 CREATE INDEX IF NOT EXISTS idx_fact_partidas_factura ON public.facturas_emitidas_partidas(factura_id);
 CREATE INDEX IF NOT EXISTS idx_facturas_emitidas_etiqueta ON public.facturas_emitidas (etiqueta);
 
-
-
+-- Colaboradores en evidencias
+ALTER TABLE public.evidencias ADD COLUMN IF NOT EXISTS colaboradores JSONB DEFAULT '[]'::jsonb;
