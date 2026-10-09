@@ -52,15 +52,15 @@ const cleanJustificacion = (text: string | null | undefined): string => {
   if (!text) return '';
   let cleaned = text;
   // Strip ALERTA IA prefix
-  cleaned = cleaned.replace(/^\[ALERTA IA:[^\]]*\]\n\n/, '');
+  cleaned = cleaned.replace(/^\[ALERTA IA:[^\]]*\]\s*/i, '');
   // Strip Consumo compartido
-  cleaned = cleaned.replace(/\n\n\[Consumo compartido con:[^\]]*\]/g, '');
+  cleaned = cleaned.replace(/\s*\[Consumo compartido con:[^\]]*\]/gi, '');
   // Strip Propina incluida
-  cleaned = cleaned.replace(/\n\n\[Propina incluida en ticket:[^\]]*\]/g, '');
+  cleaned = cleaned.replace(/\s*\[Propina incluida en ticket:[^\]]*\]/gi, '');
   // Strip Monto de propina dejado aparte
-  cleaned = cleaned.replace(/\n\n\[Monto de propina dejado aparte:[^\]]*\]/g, '');
+  cleaned = cleaned.replace(/\s*\[Monto de propina dejado aparte:[^\]]*\]/gi, '');
   // Strip Proveedor a agregar
-  cleaned = cleaned.replace(/\[Proveedor a agregar:[^\]]*\]\n\n?/g, '');
+  cleaned = cleaned.replace(/\s*\[Proveedor a agregar:[^\]]*\]/gi, '');
   return cleaned.trim();
 };
 
@@ -184,10 +184,18 @@ export default function EditarGastoForm() {
 
       const cantidadPersonas = 1 + selectedEmpleados.length;
       const limiteCalculado = 280 * cantidadPersonas;
-      const totalGasto = valMonto + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
+      const propinaExtra = (esComida && incluyePropina === false && montoPropina && !isNaN(Number(montoPropina)))
+        ? Number(montoPropina)
+        : 0;
+      const totalGasto = valMonto + propinaExtra;
 
       if (isAlimentos && totalGasto > limiteCalculado) {
-        alerts.push(`Límite de alimentos excedido: el límite general por comida es de $${limiteCalculado} MXN para ${cantidadPersonas} personas (Total con Propina: $${totalGasto} MXN)`);
+        const labelTotal = propinaExtra > 0
+          ? `(Total con Propina: $${totalGasto} MXN)`
+          : incluyePropina === true
+            ? `(Total con Propina Incluida: $${totalGasto} MXN)`
+            : `(Total: $${totalGasto} MXN)`;
+        alerts.push(`Límite de alimentos excedido: el límite general por comida es de $${limiteCalculado} MXN para ${cantidadPersonas} personas ${labelTotal}`);
       }
     }
 
@@ -384,14 +392,16 @@ export default function EditarGastoForm() {
               const propinaMatch = data.justificacion.match(/\[Propina incluida en ticket:\s*(Sí|Si|No)\]/i);
               if (propinaMatch) {
                 setIncluyePropina(propinaMatch[1].toLowerCase().startsWith('s'));
+              } else if (isMeal) {
+                setIncluyePropina(null);
               }
               const montoPropinaMatch = data.justificacion.match(/\[Monto de propina dejado aparte:\s*\$?([0-9.]+)/i);
               if (montoPropinaMatch) {
                 setMontoPropina(montoPropinaMatch[1]);
               }
+            } else if (isMeal) {
+              setIncluyePropina(null);
             }
-
-            setIncluyePropina(true); 
           }
         } catch (err: any) {
           console.error('Error al cargar gasto:', err);
@@ -851,7 +861,10 @@ export default function EditarGastoForm() {
     
     const dbFecha = formatFriendlyToDb(fechaComprobante);
     
-    const totalGasto = Number(monto) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
+    const extraPropina = (esComida && incluyePropina === false && montoPropina && !isNaN(Number(montoPropina)))
+      ? Number(montoPropina)
+      : 0;
+    const totalGasto = Number(monto) + extraPropina;
     
     let finalJustificacion = justificacion.trim();
     if (!proveedor.trim() && comentarioProveedor.trim()) {
@@ -863,8 +876,9 @@ export default function EditarGastoForm() {
     }
     if (esComida && incluyePropina !== null) {
       finalJustificacion = `${finalJustificacion}\n\n[Propina incluida en ticket: ${incluyePropina ? 'Sí' : 'No'}]`;
-      if (incluyePropina === false && montoPropina) {
-        finalJustificacion = `${finalJustificacion}\n\n[Monto de propina dejado aparte: $${montoPropina} MXN]`;
+      const numMontoPropina = Number(montoPropina || 0);
+      if (incluyePropina === false && numMontoPropina > 0) {
+        finalJustificacion = `${finalJustificacion}\n\n[Monto de propina dejado aparte: $${numMontoPropina} MXN]`;
       }
     }
     const combinedAlert = [alertaPolitica, alertaLocal].filter(Boolean).join(' | ');
@@ -1031,8 +1045,8 @@ export default function EditarGastoForm() {
           showAlert('Validación', 'Por favor especifica si el ticket incluye propina.');
           return;
         }
-        if (incluyePropina === false && (!montoPropina || isNaN(Number(montoPropina)) || Number(montoPropina) < 0)) {
-          showAlert('Validación', 'Por favor ingresa un monto de propina válido.');
+        if (incluyePropina === false && montoPropina && montoPropina.trim() && (isNaN(Number(montoPropina)) || Number(montoPropina) < 0)) {
+          showAlert('Validación', 'Por favor ingresa un monto de propina válido (o 0 si no se dejó propina).');
           return;
         }
       }
@@ -1437,7 +1451,7 @@ export default function EditarGastoForm() {
                           ]}
                         >
                           <Text style={[styles.paymentOptionText, { color: incluyePropina === true ? '#ffffff' : themeColors.text, fontSize: 12 }]}>
-                            No
+                            Sí
                           </Text>
                         </TouchableOpacity>
 
@@ -1457,7 +1471,7 @@ export default function EditarGastoForm() {
                           ]}
                         >
                           <Text style={[styles.paymentOptionText, { color: incluyePropina === false ? '#ffffff' : themeColors.text, fontSize: 12 }]}>
-                            Sí
+                            No
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -1465,8 +1479,8 @@ export default function EditarGastoForm() {
                       {incluyePropina === false && (
                         <View style={{ marginTop: Spacing.two }}>
                           <CustomInput
-                            label="¿Cuánto se dejó de propina? ($ MXN) *"
-                            placeholder="Monto de la propina"
+                            label="¿Cuánto se dejó de propina adicional/aparte? ($ MXN)"
+                            placeholder="0.00 (dejar en 0 si no se dejó propina)"
                             keyboardType="decimal-pad"
                             value={montoPropina}
                             onChangeText={(val) => setMontoPropina(val.replace(',', '.'))}

@@ -190,15 +190,21 @@ export default function GastoForm() {
         totalGasto = splits.reduce((sum, s) => sum + (Number(s.monto) || 0), 0);
       }
 
-      if (incluyePropina === false) {
-        totalGasto += Number(montoPropina || 0);
-      }
+      const propinaExtra = (incluyePropina === false && montoPropina && !isNaN(Number(montoPropina)))
+        ? Number(montoPropina)
+        : 0;
+      totalGasto += propinaExtra;
 
       const cantidadPersonas = 1 + selectedEmpleados.length;
       const limiteCalculado = 280 * cantidadPersonas;
 
       if (totalGasto > limiteCalculado) {
-        alerts.push(`Límite de alimentos excedido: el límite general por comida es de $${limiteCalculado} MXN para ${cantidadPersonas} persona(s) (Total con Propina/División: $${totalGasto.toFixed(2)} MXN)`);
+        const labelTotal = propinaExtra > 0
+          ? `(Total con Propina/División: $${totalGasto.toFixed(2)} MXN)`
+          : incluyePropina === true
+            ? `(Total con Propina Incluida/División: $${totalGasto.toFixed(2)} MXN)`
+            : `(Total/División: $${totalGasto.toFixed(2)} MXN)`;
+        alerts.push(`Límite de alimentos excedido: el límite general por comida es de $${limiteCalculado} MXN para ${cantidadPersonas} persona(s) ${labelTotal}`);
       }
     }
 
@@ -836,8 +842,9 @@ export default function GastoForm() {
     }
     if (esComida && incluyePropina !== null) {
       finalJustificacion = `${finalJustificacion}\n\n[Propina incluida en ticket: ${incluyePropina ? 'Sí' : 'No'}]`;
-      if (incluyePropina === false && montoPropina) {
-        finalJustificacion = `${finalJustificacion}\n\n[Monto de propina dejado aparte: $${montoPropina} MXN]`;
+      const numMontoPropina = Number(montoPropina || 0);
+      if (incluyePropina === false && numMontoPropina > 0) {
+        finalJustificacion = `${finalJustificacion}\n\n[Monto de propina dejado aparte: $${numMontoPropina} MXN]`;
       }
     }
     const combinedAlert = [alertaPolitica, alertaLocal].filter(Boolean).join(' | ');
@@ -1091,8 +1098,8 @@ export default function GastoForm() {
           showAlert('Validación', 'Por favor especifica si el ticket incluye propina.');
           return;
         }
-        if (incluyePropina === false && (!montoPropina || isNaN(Number(montoPropina)) || Number(montoPropina) < 0)) {
-          showAlert('Validación', 'Por favor ingresa un monto de propina válido.');
+        if (incluyePropina === false && montoPropina && montoPropina.trim() && (isNaN(Number(montoPropina)) || Number(montoPropina) < 0)) {
+          showAlert('Validación', 'Por favor ingresa un monto de propina válido (o 0 si no se dejó propina).');
           return;
         }
       }
@@ -1488,7 +1495,7 @@ export default function GastoForm() {
                           ]}
                         >
                           <Text style={[styles.paymentOptionText, { color: incluyePropina === true ? '#ffffff' : themeColors.text, fontSize: 12 }]}>
-                            No
+                            Sí
                           </Text>
                         </TouchableOpacity>
 
@@ -1508,7 +1515,7 @@ export default function GastoForm() {
                           ]}
                         >
                           <Text style={[styles.paymentOptionText, { color: incluyePropina === false ? '#ffffff' : themeColors.text, fontSize: 12 }]}>
-                            Sí
+                            No
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -1516,8 +1523,8 @@ export default function GastoForm() {
                       {incluyePropina === false && (
                         <View style={{ marginTop: Spacing.two }}>
                           <CustomInput
-                            label="¿Cuánto se dejó de propina? ($ MXN) *"
-                            placeholder="0.00"
+                            label="¿Cuánto se dejó de propina adicional/aparte? ($ MXN)"
+                            placeholder="0.00 (dejar en 0 si no se dejó propina)"
                             keyboardType="decimal-pad"
                             value={montoPropina}
                             onChangeText={(val) => setMontoPropina(val.replace(',', '.').replace(/[^0-9.]/g, ''))}
