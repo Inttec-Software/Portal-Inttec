@@ -19,10 +19,10 @@ jobs:
             echo "WEB_DIR=/var/www/portal-prod-web" >> $GITHUB_OUTPUT
             echo "PM2_NAME=backend-prod" >> $GITHUB_OUTPUT
           else
-            echo "TARGET_ENV=staging" >> $GITHUB_OUTPUT
+            echo "TARGET_ENV=test" >> $GITHUB_OUTPUT
             echo "PORT=10001" >> $GITHUB_OUTPUT
             echo "WEB_DIR=/var/www/portal-test-web" >> $GITHUB_OUTPUT
-            echo "PM2_NAME=backend-staging" >> $GITHUB_OUTPUT
+            echo "PM2_NAME=backend-test" >> $GITHUB_OUTPUT
           fi
 
       - name: Desplegar en Lightsail vía SSH
@@ -49,7 +49,7 @@ jobs:
             # 2. Actualizar y exportar Frontend Web
             cd $APP_DIR
             npm install
-            EXPO_PUBLIC_API_URL="http://${{ secrets.LIGHTSAIL_IP }}:${{ steps.env_select.outputs.PORT }}" npx expo export -p web
+            EXPO_PUBLIC_API_URL="http://${{ secrets.LIGHTSAIL_IP }}:${{ steps.env_select.outputs.PORT }}" npx expo export -p web -c
             cp -r dist/* ${{ steps.env_select.outputs.WEB_DIR }}/
             
             echo "===> ¡Despliegue finalizado con éxito!"

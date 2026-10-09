@@ -234,7 +234,7 @@ export default function FacturacionScreen() {
   const [clientSuggestions, setClientSuggestions] = useState<ClienteCatalogo[]>([]);
   const [isSearchingClients, setIsSearchingClients] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
-  const searchTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const searchTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Catálogo de Productos / Inventario
   const [productos, setProductos] = useState<ProductoCatalogo[]>([]);

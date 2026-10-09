@@ -148,7 +148,7 @@ export default function AdminDashboardGrid() {
               </View>
               <View style={{ flexShrink: 1 }}>
                 <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                  Bienvenido,
+                  Bienvenido:
                 </Text>
                 <Text style={[styles.userName, { color: scheme === 'dark' ? '#fff' : '#0f172a' }]} numberOfLines={1}>
                   {user?.nombre || 'Administrador'}
