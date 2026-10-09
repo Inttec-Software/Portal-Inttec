@@ -199,15 +199,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } else if (user) {
       // If user is authenticated and is not in a protected group (e.g. login screen)
       if (!inAuthGroup) {
-        if (user.rol === 'ADMIN' || user.rol === 'DEV') {
+        if (user.rol?.toUpperCase() === 'ADMIN' || user.rol?.toUpperCase() === 'DEV') {
           router.replace('/(admin)/dashboard');
         } else {
           router.replace('/(empleado)/gastos');
         }
-      } else if (rootSegment === '(admin)' && user.rol !== 'ADMIN' && user.rol !== 'DEV') {
+      } else if (rootSegment === '(admin)' && user.rol?.toUpperCase() !== 'ADMIN' && user.rol?.toUpperCase() !== 'DEV') {
          // Redirect to their actual role if they try to access wrong group
          router.replace('/(empleado)/gastos');
-      } else if (rootSegment === '(empleado)' && user.rol === 'ADMIN') {
+      } else if (rootSegment === '(empleado)' && user.rol?.toUpperCase() === 'ADMIN') {
          router.replace('/(admin)/dashboard');
       }
     }
