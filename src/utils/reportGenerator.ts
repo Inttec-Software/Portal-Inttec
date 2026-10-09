@@ -4586,20 +4586,20 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
         }
 
         .prefactura-watermark {
-          position: fixed;
-          top: 38%;
+          position: absolute;
+          top: 40%;
           left: 50%;
           transform: translate(-50%, -50%) rotate(-30deg);
           width: 90%;
           text-align: center;
           font-size: 86px;
           font-weight: 900;
-          color: rgba(220, 38, 38, 0.14);
+          color: rgba(220, 38, 38, 0.18);
           letter-spacing: 16px;
-          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+          font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
           text-transform: uppercase;
           pointer-events: none;
-          z-index: 9999;
+          z-index: 99999;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
           user-select: none;
@@ -4614,7 +4614,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           .invoice-footer { page-break-inside: avoid !important; break-inside: avoid !important; }
           .prefactura-watermark {
             display: block !important;
-            color: rgba(220, 38, 38, 0.16) !important;
+            color: rgba(220, 38, 38, 0.20) !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
@@ -4626,12 +4626,15 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
         <div style="background-color: #fef3c7; border-bottom: 2px solid #f59e0b; color: #b45309; text-align: center; padding: 8px 16px; font-weight: 800; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; z-index: 100; position: relative;">
           ⚠️ PREFACTURA / BORRADOR — DOCUMENTO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
         </div>
-        <div class="prefactura-watermark">
-          PREFACTURA
-        </div>
       ` : ''}
 
       <div class="page-container">
+        ${isDraft ? `
+          <div class="prefactura-watermark">
+            PREFACTURA
+          </div>
+        ` : ''}
+
         <!-- Top wave banner -->
         <div class="top-banner">
           <svg viewBox="0 0 1000 160" preserveAspectRatio="none" style="width: 100%; height: 160px; display: block;">
@@ -4801,7 +4804,16 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
 
 export async function exportarFacturaOdooPDF(venta: any, facturaData: any, action: any = 'view', isDraft: boolean = false) {
   try {
-    const effectiveDraft = isDraft || Boolean(venta?.es_borrador || venta?.cfdi_estado === 'BORRADOR' || facturaData?.is_draft || facturaData?.es_borrador);
+    const effectiveDraft = isDraft || Boolean(
+      venta?.es_borrador || 
+      venta?.cfdi_estado === 'BORRADOR' || 
+      facturaData?.is_draft || 
+      facturaData?.es_borrador ||
+      !venta?.cfdi_uuid ||
+      String(venta?.cfdi_uuid).startsWith('BORRADOR') ||
+      !facturaData?.uuid ||
+      String(facturaData?.uuid).startsWith('BORRADOR')
+    );
     const htmlContent = await generarFacturaHTML(venta, facturaData, effectiveDraft);
 
     const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';

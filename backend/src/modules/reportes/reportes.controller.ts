@@ -201,9 +201,9 @@ export const getSalesForLinking = async (req: Request, res: Response) => {
 
     const limitQuery = req.query.limit !== undefined
       ? parseInt(req.query.limit as string, 10)
-      : 1000;
+      : 5000;
 
-    let query = client.from('ventas').select('*').order('fecha', { ascending: false });
+    let query = client.from('ventas').select('*').order('created_at', { ascending: false });
     if (limitQuery && !isNaN(limitQuery) && limitQuery > 0) {
       query = query.limit(limitQuery);
     }
@@ -211,13 +211,19 @@ export const getSalesForLinking = async (req: Request, res: Response) => {
     const [ventasRes, cliRes, sucRes] = await Promise.all([
       query,
       client.from('clientes').select('*').order('nombre'),
-      client.from('sucursales_cliente').select('*').order('nombre'),
+      client.from('sucursales').select('*').order('nombre'),
     ]);
+
+    let sucursalesData = sucRes?.data || [];
+    if (!sucursalesData || sucursalesData.length === 0) {
+      const { data: altSuc } = await client.from('sucursales_cliente').select('*').order('nombre');
+      if (altSuc) sucursalesData = altSuc;
+    }
 
     return res.json({
       ventas: ventasRes.data || [],
       clientes: cliRes.data || [],
-      sucursales: sucRes.data || [],
+      sucursales: sucursalesData,
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });

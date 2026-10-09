@@ -325,7 +325,7 @@ export default function VentasScreen() {
 
   // === Historial ===
   const cachedVentas = ModuleCache.get<VentaConPago[]>('ventas_historial');
-  const [activeTab, setActiveTab] = useState<'registrar' | 'historial'>('registrar');
+  const [activeTab, setActiveTab] = useState<'registrar' | 'historial'>('historial');
   const [ventasHistorial, setVentasHistorial] = useState<VentaConPago[]>(() => cachedVentas || []);
   const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
   const [historialSearch, setHistorialSearch] = useState('');
@@ -375,6 +375,9 @@ export default function VentasScreen() {
         return;
       }
       setCurrentUser(user);
+
+      // Cargar historial de ventas inicialmente
+      loadHistorial(true);
 
       // Cargar catálogo de clientes y sucursales
       try {
@@ -580,6 +583,77 @@ export default function VentasScreen() {
   };
 
 
+  const handleFacturarVenta = async (venta: VentaConPago, partidasList: VentaPartida[] = []) => {
+    try {
+      let targetPartidas = partidasList;
+      if (!targetPartidas || targetPartidas.length === 0) {
+        const { data: dbPartidas } = await supabase
+          .from('ventas_partidas')
+          .select('*')
+          .eq('venta_id', venta.id);
+        if (dbPartidas && dbPartidas.length > 0) {
+          targetPartidas = dbPartidas;
+        }
+      }
+
+      const matchedCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === venta.cliente?.trim().toLowerCase());
+      const ventaAny = venta as any;
+
+      const payload = {
+        ventaId: venta.id,
+        folioVenta: venta.folio || `VTA-${venta.id.toString().slice(0, 8)}`,
+        clienteNombre: venta.cliente,
+        clienteRfc: matchedCliente?.rfc || ventaAny.cliente_rfc || 'XAXX010101000',
+        clienteCp: matchedCliente?.codigo_postal || ventaAny.cliente_cp || '32690',
+        clienteDireccion: matchedCliente?.direccion || ventaAny.direccion || '',
+        clienteRegimen: matchedCliente?.regimen_fiscal || '601',
+        ordenCompra: venta.factura_referencia || ventaAny.orden_compra || '',
+        sucursal: venta.sucursal || '',
+        fecha: venta.fecha || venta.created_at || new Date().toISOString(),
+        subtotal: Number(ventaAny.subtotal_venta || ventaAny.total || venta.precio_total_facturado || 0),
+        total: Number(venta.precio_total_facturado || ventaAny.total || 0),
+        partidas: (targetPartidas && targetPartidas.length > 0)
+          ? targetPartidas.map(p => {
+              const descParts = (p.descripcion || '').split(' - ');
+              return {
+                productoNombre: descParts[0] || p.descripcion || 'Venta de productos / servicios',
+                productoDescripcion: descParts.slice(1).join(' - ') || '',
+                cantidad: Number(p.cantidad) || 1,
+                unidad: p.unidad || 'PZA',
+                precioUnitario: Number(p.precio_unitario_venta) || 0,
+                claveSat: (p as any).clave_sat || '43211500',
+                claveUnidad: (p as any).clave_unidad || 'H87',
+                impuestoPorcentaje: 16,
+                importe: (Number(p.cantidad) || 1) * (Number(p.precio_unitario_venta) || 0)
+              };
+            })
+          : [
+              {
+                productoNombre: venta.descripcion || 'Venta de productos y servicios',
+                productoDescripcion: venta.factura_referencia ? `Ref: ${venta.factura_referencia}` : '',
+                cantidad: 1,
+                unidad: 'PZA',
+                precioUnitario: Number(ventaAny.subtotal_venta || venta.precio_total_facturado || ventaAny.total || 0),
+                claveSat: '43211500',
+                claveUnidad: 'H87',
+                impuestoPorcentaje: 16,
+                importe: Number(ventaAny.subtotal_venta || venta.precio_total_facturado || ventaAny.total || 0)
+              }
+            ]
+      };
+
+      router.push({
+        pathname: '/(admin)/facturacion',
+        params: {
+          fromVenta: 'true',
+          ventaData: JSON.stringify(payload)
+        }
+      });
+    } catch (err: any) {
+      showAlert('Error', 'No se pudo iniciar el proceso de facturación: ' + err.message);
+    }
+  };
+
   const handleSelectVenta = async (venta: VentaConPago) => {
     setSelectedVenta(venta);
     setIsDetailModalVisible(true);
@@ -595,19 +669,35 @@ export default function VentasScreen() {
     setPagoReferencia('');
 
     try {
-      const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/ventas/${venta.id}/detalle`, { headers });
-      if (!res.ok) throw new Error('Error fetching details from API');
-      const data = await res.json();
-      
-      setSelectedVentaPartidas(data.partidas || []);
-      setSelectedVentaGastos(data.gastos || []);
+      let partidasLoaded: VentaPartida[] = [];
+      let gastosLoaded: any[] = [];
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${venta.id}/detalle`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          partidasLoaded = data.partidas || [];
+          gastosLoaded = data.gastos || [];
+        }
+      } catch (_) {}
 
-      // 3. Cargar pagos
+      // Fallback a Supabase si fue necesario
+      if (partidasLoaded.length === 0) {
+        const { data: dbPartidas } = await supabase.from('ventas_partidas').select('*').eq('venta_id', venta.id);
+        if (dbPartidas) partidasLoaded = dbPartidas;
+      }
+      if (gastosLoaded.length === 0) {
+        const { data: dbGastos } = await supabase.from('gastos').select('*').eq('venta_id', venta.id).order('fecha', { ascending: false });
+        if (dbGastos) gastosLoaded = dbGastos;
+      }
+
+      setSelectedVentaPartidas(partidasLoaded);
+      setSelectedVentaGastos(gastosLoaded);
+
+      // Cargar pagos
       await loadPagosForSelectedVenta(venta.id, venta);
     } catch (err: any) {
       console.error('Error fetching venta details:', err);
-      showAlert('Error', 'No se pudieron cargar los detalles de la venta.');
     } finally {
       setIsLoadingPartidas(false);
     }
@@ -2105,12 +2195,60 @@ export default function VentasScreen() {
   const renderScreenHeader = () => (
     <View>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        
+      <View style={[styles.header, { borderBottomColor: themeColors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>
-          {editingVentaId ? 'Editar Venta' : 'Registro de Ventas'}
+          {editingVentaId ? 'Editar Venta' : (activeTab === 'historial' ? 'Historial de Ventas' : 'Registrar Venta')}
         </Text>
-        <View style={{ width: 40 }} />
+        
+        {/* Botón arriba a la derecha */}
+        {!editingVentaId && (
+          activeTab === 'historial' ? (
+            <TouchableOpacity
+              onPress={() => {
+                cancelEditing();
+                setActiveTab('registrar');
+              }}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: themeColors.primary,
+                paddingVertical: 7,
+                paddingHorizontal: 12,
+                borderRadius: 8,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.15,
+                shadowRadius: 2,
+                elevation: 2,
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={17} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>+ Nueva Venta</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={() => {
+                setActiveTab('historial');
+                loadHistorial();
+              }}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: themeColors.backgroundElement,
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                paddingVertical: 7,
+                paddingHorizontal: 12,
+                borderRadius: 8,
+              }}
+            >
+              <Ionicons name="list-outline" size={17} color={themeColors.text} />
+              <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }}>Ver Historial</Text>
+            </TouchableOpacity>
+          )
+        )}
       </View>
 
       {/* Tabs / Banner de edición */}
@@ -2132,26 +2270,6 @@ export default function VentasScreen() {
       ) : (
         <View style={[styles.tabsContainer, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
           <TouchableOpacity
-            onPress={() => setActiveTab('registrar')}
-            style={[
-              styles.tab,
-              activeTab === 'registrar'
-                ? {
-                    backgroundColor: themeColors.accent,
-                    ...Platform.select({
-                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-                      android: { elevation: 2 },
-                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
-                    })
-                  }
-                : { backgroundColor: 'transparent' },
-            ]}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'registrar' ? '#fff' : themeColors.textSecondary }]}>
-              Registrar Venta
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
             onPress={() => {
               setActiveTab('historial');
               loadHistorial();
@@ -2172,6 +2290,26 @@ export default function VentasScreen() {
           >
             <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#fff' : themeColors.textSecondary }]}>
               Historial
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveTab('registrar')}
+            style={[
+              styles.tab,
+              activeTab === 'registrar'
+                ? {
+                    backgroundColor: themeColors.accent,
+                    ...Platform.select({
+                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                      android: { elevation: 2 },
+                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                    })
+                  }
+                : { backgroundColor: 'transparent' },
+            ]}
+          >
+            <Text style={[styles.tabText, { color: activeTab === 'registrar' ? '#fff' : themeColors.textSecondary }]}>
+              Registrar Venta
             </Text>
           </TouchableOpacity>
         </View>
@@ -2313,16 +2451,16 @@ export default function VentasScreen() {
           {renderScreenHeader()}
           <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
             <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Cliente</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Cliente</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Sucursal</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Fecha</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Referencia</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Proyecto</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Estado Pago</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Proyecto</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Estado Pago</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Total Venta</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
-              <View style={{ width: '8%', alignItems: 'center' }}>
+              <View style={{ width: '12%', alignItems: 'center' }}>
                 <Text style={{ fontSize: 11, fontWeight: 'bold', color: themeColors.text }}>Acciones</Text>
               </View>
             </View>
@@ -2345,11 +2483,11 @@ export default function VentasScreen() {
                       hovered && { backgroundColor: themeColors.backgroundSelected }
                     ] as any}
                   >
-                    <Text style={[styles.tableCell, { color: themeColors.text, width: '14%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
                     <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%' }]} numberOfLines={1}>{item.sucursal || '--'}</Text>
                     <Text style={[styles.tableCell, { color: themeColors.text, width: '8%' }]}>{item.fecha}</Text>
                     <Text style={[styles.tableCell, { width: '9%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
-                    <View style={{ width: '9%' }}>
+                    <View style={{ width: '8%' }}>
                       {item.tipo_proyecto ? (
                         <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }]}>
                           <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
@@ -2358,7 +2496,7 @@ export default function VentasScreen() {
                     </View>
 
                     {/* Badge Estado de Pago */}
-                    <View style={{ width: '11%', justifyContent: 'center' }}>
+                    <View style={{ width: '10%', justifyContent: 'center' }}>
                       <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                         <Text style={{ color: styleCfg.text, fontSize: 9, fontWeight: '800' }}>{estadoPago}</Text>
                       </View>
@@ -2367,7 +2505,7 @@ export default function VentasScreen() {
                     <Text style={[styles.tableCell, { width: '11%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]} numberOfLines={1}>{formatCurrency(item.precio_total_facturado)}</Text>
                     
                     {/* Pagado / Saldo Pendiente */}
-                    <View style={{ width: '12%', alignItems: 'flex-end', justifyContent: 'center' }}>
+                    <View style={{ width: '11%', alignItems: 'flex-end', justifyContent: 'center' }}>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.success }} numberOfLines={1}>
                         {formatCurrency(totalPag)}
                       </Text>
@@ -2379,7 +2517,20 @@ export default function VentasScreen() {
                     <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]} numberOfLines={1}>{formatCurrency(item.utilidad_bruta)}</Text>
                     
                     {/* Acciones */}
-                    <View style={{ width: '8%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 4, overflow: 'visible', zIndex: 10 }}>
+                    <View style={{ width: '12%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 4, overflow: 'visible', zIndex: 10 }}>
+                      <HoverTooltip text={item.cfdi_uuid ? "Ver factura emitida en SAT" : "Facturar venta (CFDI 4.0)"} position="top">
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleFacturarVenta(item);
+                          }}
+                          style={{ padding: 4, backgroundColor: '#7c3aed15', borderColor: '#7c3aed40', borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }}
+                          accessibilityLabel="Facturar venta"
+                        >
+                          <Ionicons name="receipt-outline" size={14} color="#7c3aed" />
+                        </TouchableOpacity>
+                      </HoverTooltip>
+
                       <HoverTooltip text="Registrar o consultar abonos / pagos" position="top">
                         <TouchableOpacity
                           onPress={(e) => {
@@ -2542,6 +2693,31 @@ export default function VentasScreen() {
 
                 {/* 5. Botones de Acción */}
                 <View style={{ flexDirection: 'row', gap: 6, overflow: 'visible', zIndex: 10 }}>
+                  <HoverTooltip text={item.cfdi_uuid ? "Ver factura emitida en SAT" : "Facturar venta (CFDI 4.0)"} position="top" style={{ flex: 1 }}>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleFacturarVenta(item);
+                      }}
+                      style={{
+                        width: '100%',
+                        backgroundColor: '#7c3aed15',
+                        borderColor: '#7c3aed40',
+                        borderWidth: 1,
+                        borderRadius: 8,
+                        paddingVertical: 8,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'row',
+                        gap: 4
+                      }}
+                      accessibilityLabel="Facturar esta venta"
+                    >
+                      <Ionicons name="receipt-outline" size={14} color="#7c3aed" />
+                      <Text style={{ color: '#7c3aed', fontWeight: '700', fontSize: 11 }}>Facturar</Text>
+                    </TouchableOpacity>
+                  </HoverTooltip>
+
                   <HoverTooltip text="Crear una copia de esta venta como nueva" position="top" style={{ flex: 1 }}>
                     <TouchableOpacity
                       onPress={(e) => {
@@ -2563,7 +2739,7 @@ export default function VentasScreen() {
                       accessibilityLabel="Duplicar esta venta como nueva"
                     >
                       <Ionicons name="copy-outline" size={14} color={themeColors.primary} />
-                      <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 12 }}>Duplicar</Text>
+                      <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 11 }}>Duplicar</Text>
                     </TouchableOpacity>
                   </HoverTooltip>
 
@@ -2588,7 +2764,7 @@ export default function VentasScreen() {
                       accessibilityLabel="Registrar un pago o abono"
                     >
                       <Ionicons name="cash-outline" size={14} color={themeColors.success} />
-                      <Text style={{ color: themeColors.success, fontWeight: '700', fontSize: 12 }}>+ Reg. Pago</Text>
+                      <Text style={{ color: themeColors.success, fontWeight: '700', fontSize: 11 }}>+ Pago</Text>
                     </TouchableOpacity>
                   </HoverTooltip>
                 </View>
@@ -3101,7 +3277,37 @@ export default function VentasScreen() {
                 {/* Lista de Gastos Vinculados */}
                 {selectedVentaGastos.length > 0 && (
                   <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                    <Text style={[styles.modalSectionTitle, { color: themeColors.danger }]}>Gastos Operativos Vinculados ({selectedVentaGastos.length})</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <Text style={[styles.modalSectionTitle, { color: themeColors.danger, marginBottom: 0 }]}>
+                        Gastos Operativos Vinculados ({selectedVentaGastos.length})
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (selectedVenta) {
+                            setIsDetailModalVisible(false);
+                            router.push({
+                              pathname: '/(admin)/gastos',
+                              params: { search: selectedVenta.cliente || selectedVenta.folio || '' }
+                            });
+                          }
+                        }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: themeColors.danger + '15',
+                          paddingVertical: 3,
+                          paddingHorizontal: 8,
+                          borderRadius: BorderRadius.small,
+                          borderWidth: 1,
+                          borderColor: themeColors.danger + '40',
+                        }}
+                      >
+                        <Ionicons name="open-outline" size={13} color={themeColors.danger} />
+                        <Text style={{ color: themeColors.danger, fontSize: 11, fontWeight: '700' }}>Ir a Gastos</Text>
+                      </TouchableOpacity>
+                    </View>
+
                     <View style={{ gap: Spacing.two }}>
                       {selectedVentaGastos.map((gasto, idx) => (
                         <View key={gasto.id || idx} style={[styles.modalPartidaItem, { borderColor: themeColors.border }]}>
@@ -3120,23 +3326,52 @@ export default function VentasScreen() {
                               <Text style={{ color: themeColors.danger, fontSize: 13, fontWeight: '700' }}>
                                 {formatCurrency(Number(gasto.monto) || 0)}
                               </Text>
-                              <TouchableOpacity
-                                onPress={() => handleUnlinkGastoFromVenta(gasto)}
-                                style={{
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  gap: 4,
-                                  backgroundColor: themeColors.danger + '15',
-                                  paddingVertical: 3,
-                                  paddingHorizontal: 8,
-                                  borderRadius: BorderRadius.small,
-                                  borderWidth: 1,
-                                  borderColor: themeColors.danger + '40',
-                                }}
-                              >
-                                <Ionicons name="link-outline" size={13} color={themeColors.danger} />
-                                <Text style={{ color: themeColors.danger, fontSize: 11, fontWeight: '700' }}>Desvincular</Text>
-                              </TouchableOpacity>
+                              <View style={{ flexDirection: 'row', gap: 6 }}>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setIsDetailModalVisible(false);
+                                    router.push({
+                                      pathname: '/(admin)/gastos',
+                                      params: {
+                                        gastoId: gasto.id,
+                                        search: GastoHelper.getProveedor(gasto) || gasto.justificacion || ''
+                                      }
+                                    });
+                                  }}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    backgroundColor: themeColors.accent + '15',
+                                    paddingVertical: 3,
+                                    paddingHorizontal: 8,
+                                    borderRadius: BorderRadius.small,
+                                    borderWidth: 1,
+                                    borderColor: themeColors.accent + '40',
+                                  }}
+                                >
+                                  <Ionicons name="search-outline" size={13} color={themeColors.accent} />
+                                  <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '700' }}>Ver Gasto</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  onPress={() => handleUnlinkGastoFromVenta(gasto)}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    backgroundColor: themeColors.danger + '15',
+                                    paddingVertical: 3,
+                                    paddingHorizontal: 8,
+                                    borderRadius: BorderRadius.small,
+                                    borderWidth: 1,
+                                    borderColor: themeColors.danger + '40',
+                                  }}
+                                >
+                                  <Ionicons name="link-outline" size={13} color={themeColors.danger} />
+                                  <Text style={{ color: themeColors.danger, fontSize: 11, fontWeight: '700' }}>Desvincular</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
                           </View>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
@@ -3163,8 +3398,26 @@ export default function VentasScreen() {
 
             {/* Acciones del Modal */}
             <View style={[styles.modalFooter, { borderTopColor: themeColors.border, flexDirection: 'column', gap: 12 }]}>
-              {/* FILA 1: Documentos y Descargas */}
+              {/* FILA 1: Documentos, Facturación y Pagos */}
               <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (selectedVenta) {
+                      setIsDetailModalVisible(false);
+                      handleFacturarVenta(selectedVenta, selectedVentaPartidas);
+                    }
+                  }}
+                  style={[styles.modalActionBtn, { backgroundColor: '#7c3aed15', borderColor: '#7c3aed' }]}
+                  // @ts-ignore
+                  title={selectedVenta?.cfdi_uuid ? "Ver Factura Emitida en SAT" : "Emitir Factura CFDI 4.0 desde esta venta"}
+                  accessibilityLabel="Facturar Venta"
+                >
+                  <Ionicons name="receipt-outline" size={18} color="#7c3aed" />
+                  <Text style={[styles.modalActionText, { color: '#7c3aed', fontSize: 12 }]}>
+                    {selectedVenta?.cfdi_uuid ? 'Factura SAT' : 'Facturar Venta'}
+                  </Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   onPress={async () => {
                     if (selectedVenta) {
