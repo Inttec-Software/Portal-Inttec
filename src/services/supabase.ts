@@ -736,6 +736,52 @@ export const AsistenciaService = {
       throw err;
     }
   },
+
+  /**
+   * Edita las horas de entrada y/o salida de un registro de asistencia (Exclusivo para usuarios con rol DEV).
+   */
+  async editarHorasAsistencia(
+    asistenciaId: string,
+    horaEntrada: string,
+    horaSalida: string | null,
+    observaciones?: string,
+    fecha?: string
+  ): Promise<{ success: boolean; message: string; data: any }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/editar-horas/${asistenciaId}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        hora_entrada: horaEntrada,
+        hora_salida: horaSalida,
+        observaciones,
+        fecha,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Error al actualizar horas de asistencia');
+    }
+    return data;
+  },
+
+  /**
+   * Elimina un registro de asistencia (Exclusivo para usuarios con rol DEV).
+   */
+  async eliminarAsistencia(
+    asistenciaId: string
+  ): Promise<{ success: boolean; message: string }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/eliminar/${asistenciaId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Error al eliminar el registro de asistencia');
+    }
+    return data;
+  },
 };
 
 export interface Venta {
@@ -793,13 +839,15 @@ export interface VentaPago {
   created_at?: string;
 }
 
-export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO';
+export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO' | 'SIN PRECIO';
 
 export function calcularEstadoPago(precioTotalFacturado: number, totalPagado: number): EstadoPagoVenta {
-  if (totalPagado >= precioTotalFacturado && precioTotalFacturado > 0) {
+  if (precioTotalFacturado > 0 && totalPagado >= precioTotalFacturado - 0.01) {
     return 'PAGADO';
-  } else if (totalPagado > 0) {
+  } else if (totalPagado > 0 && totalPagado < precioTotalFacturado - 0.01) {
     return 'PAGO PARCIAL';
+  } else if (precioTotalFacturado <= 0 && totalPagado <= 0) {
+    return 'SIN PRECIO';
   } else {
     return 'PENDIENTE DE PAGO';
   }
@@ -1168,6 +1216,8 @@ export interface Herramienta {
   numero_serie?: string | null;
   foto_url?: string | null;
   estado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE';
+  cantidad?: number;
+  unidades_estado?: Record<string, number>;
   activo: boolean;
   created_at?: string;
   custodia_actual?: {

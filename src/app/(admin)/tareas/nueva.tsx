@@ -157,7 +157,7 @@ export default function NuevaTareaScreen() {
   const ventasDisponibles = ventas.filter(v => v.cliente === selectedClienteNombre);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['bottom', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* HEADER */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -382,7 +382,7 @@ export default function NuevaTareaScreen() {
         )}
 
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

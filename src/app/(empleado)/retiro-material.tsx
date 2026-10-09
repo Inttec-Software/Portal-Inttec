@@ -27,6 +27,7 @@ import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import SignatureCanvasModal from '@/components/SignatureCanvasModal';
 import { normalizeText } from '@/utils/helpers';
+import { useHeaderAction } from '@/context/HeaderActionContext';
 
 interface Producto {
   id: string;
@@ -102,6 +103,8 @@ export default function RetiroMaterialScreen() {
   const [motivoRetiro, setMotivoRetiro] = useState('');
   const [signatureModalVisible, setSignatureModalVisible] = useState(false);
   const [pendingWithdrawPayload, setPendingWithdrawPayload] = useState<any>(null);
+
+  const { setHeaderRight } = useHeaderAction();
 
   // Catálogos
   const [clientes, setClientes] = useState<CatalogoItem[]>([]);
@@ -538,24 +541,29 @@ export default function RetiroMaterialScreen() {
 
   const totalItems = cart.reduce((sum, item) => sum + (typeof item.cantidad === 'number' ? item.cantidad : 0), 0);
 
+  useEffect(() => {
+    setHeaderRight(
+      <TouchableOpacity 
+        style={{ position: 'relative', padding: 8, marginRight: 4 }}
+        onPress={() => setCartModalVisible(true)}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="cart-outline" size={26} color={themeColors.text} />
+        {totalItems > 0 && (
+          <View style={{ position: 'absolute', top: 2, right: 2, backgroundColor: themeColors.danger, borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 3 }}>
+            <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{totalItems}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+
+    return () => {
+      setHeaderRight(null);
+    };
+  }, [totalItems, themeColors]);
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
-      <View style={{ padding: Spacing.three, backgroundColor: themeColors.backgroundElement, borderBottomWidth: 1, borderBottomColor: themeColors.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text }}>Retiro de Material</Text>
-        </View>
-        <TouchableOpacity 
-          style={{ position: 'relative', padding: 4 }}
-          onPress={() => setCartModalVisible(true)}
-        >
-          <Ionicons name="cart-outline" size={26} color={themeColors.primary} />
-          {totalItems > 0 && (
-            <View style={{ position: 'absolute', top: 0, right: 0, backgroundColor: themeColors.danger, borderRadius: 10, width: 18, height: 18, justifyContent: 'center', alignItems: 'center' }}>
-              <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{totalItems}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
 
       {/* Buscador */}
       <View style={{ padding: Spacing.three, borderBottomWidth: 1, borderBottomColor: themeColors.border, backgroundColor: themeColors.background }}>
@@ -1342,7 +1350,7 @@ export default function RetiroMaterialScreen() {
         subtitulo="Compromiso de custodia: Al firmar, manifiesto recibir los materiales en buen estado y asumo la responsabilidad de su resguardo, uso debido y devolución conforme a las políticas de la empresa."
       />
 
-    </SafeAreaView>
+    </View>
   );
 }
 

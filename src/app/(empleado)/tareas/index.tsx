@@ -310,7 +310,7 @@ export default function TareasScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['bottom', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* HEADER & SEARCH */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
         <View style={styles.searchContainer}>
@@ -524,7 +524,7 @@ export default function TareasScreen() {
           task={editingTaskModal}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

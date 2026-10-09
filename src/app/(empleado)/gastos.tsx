@@ -617,7 +617,7 @@ export default function EmpleadoGastos() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header Card Premium */}
       <View style={[
         styles.headerCard, 
@@ -627,7 +627,7 @@ export default function EmpleadoGastos() {
           shadowColor: themeColors.text
         }
       ]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: Spacing.two }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0, gap: 10 }}>
           <TouchableOpacity 
             onPress={handleOpenProfile} 
             style={[styles.headerAvatar, { backgroundColor: themeColors.primary + '15' }]}
@@ -637,9 +637,14 @@ export default function EmpleadoGastos() {
               {user?.nombre ? user.nombre.charAt(0).toUpperCase() : 'E'}
             </Text>
           </TouchableOpacity>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary }]}>¡Hola de nuevo!</Text>
-            <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
+            <Text 
+              style={[styles.headerTitle, { color: themeColors.text }]} 
+              numberOfLines={1}
+              adjustsFontSizeToFit={true}
+              minimumFontScale={0.8}
+            >
               {user?.nombre || 'Empleado'}
             </Text>
           </View>
@@ -651,25 +656,25 @@ export default function EmpleadoGastos() {
             onPress={() => router.push('/(empleado)/asistencia')}
             style={[
               styles.headerIconBtn,
-              { backgroundColor: scheme === 'dark' ? 'rgba(29, 209, 161, 0.15)' : 'rgba(29, 209, 161, 0.1)', marginRight: 8 }
+              { backgroundColor: scheme === 'dark' ? 'rgba(29, 209, 161, 0.15)' : 'rgba(29, 209, 161, 0.1)' }
             ]}
           >
-            <Ionicons name="finger-print" size={20} color={themeColors.success || '#1dd1a1'} />
+            <Ionicons name="finger-print" size={18} color={themeColors.success || '#1dd1a1'} />
           </TouchableOpacity>
 
           <TouchableOpacity
             onPress={handleOpenTasksPopover}
             style={[styles.headerIconBtn, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,119,182,0.1)', position: 'relative' }]}
           >
-            <Ionicons name="notifications-outline" size={20} color={themeColors.text} />
+            <Ionicons name="notifications-outline" size={18} color={themeColors.text} />
             {pendingTasksCount > 0 && (
               <View style={{
                 position: 'absolute',
                 top: 2,
-                right: 4,
-                width: 10,
-                height: 10,
-                borderRadius: 5,
+                right: 3,
+                width: 8,
+                height: 8,
+                borderRadius: 4,
                 backgroundColor: hasNewTasks ? themeColors.danger : themeColors.warning,
                 borderWidth: 1,
                 borderColor: scheme === 'dark' ? '#0f172a' : '#f8fafc'
@@ -678,18 +683,18 @@ export default function EmpleadoGastos() {
           </TouchableOpacity>
 
           {user?.rol === 'DEV' && (
-            <View style={{ flexDirection: 'row', gap: 8, marginRight: 8 }}>
+            <View style={{ flexDirection: 'row', gap: 6 }}>
               <TouchableOpacity
                 onPress={() => changeEnv(env === 'cloud' ? 'test' : 'cloud')}
                 style={[styles.headerIconBtn, { backgroundColor: env === 'cloud' ? themeColors.primary + '15' : Colors.light.danger + '15' }]}
               >
-                <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={20} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
+                <Ionicons name={env === 'cloud' ? "cloud-outline" : "server-outline"} size={17} color={env === 'cloud' ? themeColors.primary : Colors.light.danger} />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => router.replace('/(admin)/dashboard')}
                 style={[styles.headerIconBtn, { backgroundColor: themeColors.primary + '15' }]}
               >
-                <Ionicons name="swap-horizontal-outline" size={20} color={themeColors.primary} />
+                <Ionicons name="swap-horizontal-outline" size={17} color={themeColors.primary} />
               </TouchableOpacity>
             </View>
           )}
@@ -703,7 +708,7 @@ export default function EmpleadoGastos() {
               {isSyncing ? (
                 <ActivityIndicator size="small" color={themeColors.warning} />
               ) : (
-                <Ionicons name="cloud-upload" size={20} color={themeColors.warning} />
+                <Ionicons name="cloud-upload" size={17} color={themeColors.warning} />
               )}
             </TouchableOpacity>
           )}
@@ -1623,7 +1628,7 @@ export default function EmpleadoGastos() {
           setSelectedAsistenciaInfo(null);
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -1636,8 +1641,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
-    marginHorizontal: Spacing.four,
+    paddingVertical: 10,
+    marginHorizontal: Spacing.three,
     marginTop: Spacing.two,
     marginBottom: Spacing.two,
     borderRadius: BorderRadius.large,
@@ -1648,35 +1653,35 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   headerAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerAvatarText: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '800',
   },
   headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: -0.5,
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '500',
     marginBottom: 2,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.one,
+    gap: 6,
   },
   headerIconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     justifyContent: 'center',
     alignItems: 'center',
   },

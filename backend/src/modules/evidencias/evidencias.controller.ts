@@ -10,23 +10,66 @@ export const getCatalogos = async (req: Request, res: Response) => {
     const user = req.user;
     const client = getSupabaseClient(company, env);
 
-    const [cliRes, sucRes, prodRes] = await Promise.all([
+    const [cliRes, sucRes, prodRes, usersRes] = await Promise.all([
       client.from('clientes').select('*').order('nombre'),
       client.from('sucursales_cliente').select('*').order('nombre'),
-      user?.id ? client.from('inventario_empleados').select('cantidad_disponible, producto_id, productos(sku_interno, nombre_oficial)').eq('empleado_id', user.id).gt('cantidad_disponible', 0) : Promise.resolve({ data: [], error: null }),
+      user?.id ? client.from('inventario_empleados')
+        .select('id, cantidad_disponible, producto_id, empleado_id, productos(id, sku_interno, nombre_oficial, unidad)')
+        .eq('empleado_id', user.id)
+        .gt('cantidad_disponible', 0) : Promise.resolve({ data: [], error: null }),
+      client.from('usuarios').select('id, nombre, email, rol').order('nombre'),
     ]);
 
     if (cliRes.error) throw cliRes.error;
     if (sucRes.error) throw sucRes.error;
     if (prodRes.error) throw prodRes.error;
+    if (usersRes.error) throw usersRes.error;
+
+    const allUsers = usersRes.data || [];
+    const colaboradoresDisponibles = allUsers.filter((u: any) => u.id !== user?.id);
 
     return res.json({
       clientes: cliRes.data || [],
       sucursales: sucRes.data || [],
-      inventario: prodRes.data || []
+      inventario: prodRes.data || [],
+      empleados: colaboradoresDisponibles,
+      todosLosEmpleados: allUsers,
     });
 
   } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// 1.1 GET /api/evidencias/inventario-colaboradores?ids=id1,id2
+export const getInventarioColaboradores = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const client = getSupabaseClient(company, env);
+
+    const { ids } = req.query;
+    if (!ids) {
+      return res.json({ inventario: [] });
+    }
+
+    const idList = (typeof ids === 'string' ? ids.split(',') : (ids as string[])).map((s: string) => s.trim()).filter(Boolean);
+    if (idList.length === 0) {
+      return res.json({ inventario: [] });
+    }
+
+    const { data, error } = await client
+      .from('inventario_empleados')
+      .select('id, cantidad_disponible, producto_id, empleado_id, productos(id, sku_interno, nombre_oficial, unidad)')
+      .in('empleado_id', idList)
+      .gt('cantidad_disponible', 0);
+
+    if (error) throw error;
+
+    return res.json({ inventario: data || [] });
+  } catch (error: any) {
+    console.error('Error en getInventarioColaboradores:', error);
     return res.status(500).json({ error: error.message });
   }
 };
@@ -48,6 +91,7 @@ export const crearEvidencia = async (req: Request, res: Response) => {
       foto_antes_url,
       foto_despues_url,
       fotos_adicionales_urls,
+      colaboradores,
     } = req.body;
 
     if (!user) {
@@ -62,66 +106,110 @@ export const crearEvidencia = async (req: Request, res: Response) => {
       }
     } catch (e) {}
 
-    // 1. Agrupar y calcular uso total por material para evitar inconsistencias y validar antes
-    const materialUsage: Record<string, { usado: number; nombre: string; dbId?: string; currentStock?: number; motivos: string[] }> = {};
+    // 1. Agrupar y calcular uso total por (empleado_id + material) para soportar múltiples colaboradores
+    const materialUsage: Record<string, { 
+      empleadoId: string;
+      empleadoNombre: string;
+      productoId: string;
+      usado: number;
+      nombre: string;
+      dbId?: string;
+      currentStock?: number;
+      motivos: string[];
+    }> = {};
+
     for (const t of trabajosPayload) {
       for (const m of (t.materiales_usados || [])) {
         if (m.usado > 0) {
-          if (!materialUsage[m.productoId]) {
-            materialUsage[m.productoId] = { usado: 0, nombre: m.nombre, motivos: [] };
+          const targetEmpleadoId = m.empleadoId || user.id;
+          const targetEmpleadoNombre = m.empleadoNombre || (targetEmpleadoId === user.id ? user.nombre : 'Colaborador');
+          const compositeKey = `${targetEmpleadoId}___${m.productoId}`;
+
+          if (!materialUsage[compositeKey]) {
+            materialUsage[compositeKey] = {
+              empleadoId: targetEmpleadoId,
+              empleadoNombre: targetEmpleadoNombre,
+              productoId: m.productoId,
+              usado: 0,
+              nombre: m.nombre,
+              motivos: []
+            };
           }
-          materialUsage[m.productoId].usado += m.usado;
+          materialUsage[compositeKey].usado += m.usado;
           if (t.descripcion) {
-            materialUsage[m.productoId].motivos.push(`Trabajo: ${t.descripcion.substring(0, 50)}`);
+            materialUsage[compositeKey].motivos.push(`Trabajo: ${t.descripcion.substring(0, 50)}`);
           }
         }
       }
     }
 
-    // 2. Validar que exista suficiente stock en el inventario del empleado para todos los materiales
-    for (const prodId of Object.keys(materialUsage)) {
-      const item = materialUsage[prodId];
+    // 2. Validar que exista suficiente stock en el inventario del empleado correspondiente para cada material
+    for (const key of Object.keys(materialUsage)) {
+      const item = materialUsage[key];
       const { data: invEmp, error: invError } = await client
         .from('inventario_empleados')
         .select('id, cantidad_disponible')
-        .eq('empleado_id', user.id)
-        .eq('producto_id', prodId)
+        .eq('empleado_id', item.empleadoId)
+        .eq('producto_id', item.productoId)
         .maybeSingle();
 
       if (invError || !invEmp) {
-        return res.status(400).json({ error: `No se encontró inventario para el material: ${item.nombre}` });
+        return res.status(400).json({ 
+          error: `No se encontró inventario para el material: ${item.nombre} en el stock de ${item.empleadoNombre}` 
+        });
       }
 
       if (invEmp.cantidad_disponible < item.usado) {
-        return res.status(400).json({ error: `Stock insuficiente para: ${item.nombre}. Disponible: ${invEmp.cantidad_disponible}, Requerido: ${item.usado}` });
+        return res.status(400).json({ 
+          error: `Stock insuficiente para: ${item.nombre} (${item.empleadoNombre}). Disponible: ${invEmp.cantidad_disponible}, Requerido: ${item.usado}` 
+        });
       }
       
       item.dbId = invEmp.id;
       item.currentStock = invEmp.cantidad_disponible;
     }
 
-    // 3. Insertar Evidencia
-    const { data: evidenciaData, error: evidenciaError } = await client.from('evidencias').insert([
-      {
-        empleado_id: user.id,
-        empleado_nombre: user.nombre,
-        cliente,
-        descripcion_trabajo,
-        materiales_usados,
-        observaciones,
-        foto_antes_url,
-        foto_despues_url,
-        fotos_adicionales_urls,
+    // 3. Insertar Evidencia con colaboradores
+    let insertPayload: any = {
+      empleado_id: user.id,
+      empleado_nombre: user.nombre,
+      cliente,
+      descripcion_trabajo,
+      materiales_usados,
+      observaciones,
+      foto_antes_url,
+      foto_despues_url,
+      fotos_adicionales_urls,
+    };
+
+    if (colaboradores !== undefined && colaboradores !== null) {
+      insertPayload.colaboradores = typeof colaboradores === 'object' ? colaboradores : JSON.parse(colaboradores);
+    }
+
+    let { data: evidenciaData, error: evidenciaError } = await client
+      .from('evidencias')
+      .insert([insertPayload])
+      .select()
+      .single();
+
+    if (evidenciaError) {
+      // Si la columna colaboradores no existe en la base de datos, reintentar sin ella
+      if (evidenciaError.message?.includes('colaboradores') || (evidenciaError as any).code === 'PGRST204') {
+        console.warn('Columna colaboradores no detectada en tabla evidencias, guardando sin columna dedicada.');
+        delete insertPayload.colaboradores;
+        const fallbackRes = await client.from('evidencias').insert([insertPayload]).select().single();
+        if (fallbackRes.error) throw fallbackRes.error;
+        evidenciaData = fallbackRes.data;
+      } else {
+        throw evidenciaError;
       }
-    ]).select().single();
+    }
 
-    if (evidenciaError) throw evidenciaError;
-
-    // 4. Descontar del inventario y registrar movimientos de forma consistente
-    for (const prodId of Object.keys(materialUsage)) {
-      const item = materialUsage[prodId];
+    // 4. Descontar del inventario y registrar movimientos de forma individual para cada empleado
+    for (const key of Object.keys(materialUsage)) {
+      const item = materialUsage[key];
       if (item.dbId && item.currentStock !== undefined) {
-        // Actualizar inventario
+        // Actualizar inventario de quien aportó el material
         await client
           .from('inventario_empleados')
           .update({ 
@@ -130,13 +218,18 @@ export const crearEvidencia = async (req: Request, res: Response) => {
           })
           .eq('id', item.dbId);
           
-        // Crear log de movimiento
+        // Crear log de movimiento detallado
+        const esPropio = item.empleadoId === user.id;
+        const motivoDetalle = esPropio
+          ? `Utilizado en evidencia (${cliente || 'Sin cliente'}). ${item.motivos.join(' | ')}`
+          : `Utilizado como colaborador en reporte de ${user.nombre} (${cliente || 'Sin cliente'}). ${item.motivos.join(' | ')}`;
+
         await client.from('movimientos_inventario').insert({
-          producto_id: prodId,
-          empleado_id: user.id,
+          producto_id: item.productoId,
+          empleado_id: item.empleadoId,
           cantidad: item.usado,
           tipo: 'USO_EVIDENCIA',
-          motivo: `Utilizado en evidencia. ${item.motivos.join(' | ')}`,
+          motivo: motivoDetalle,
           empresa: company
         });
       }
@@ -225,24 +318,40 @@ export const actualizarEvidencia = async (req: Request, res: Response) => {
       foto_antes_url,
       foto_despues_url,
       fotos_adicionales_urls,
+      colaboradores,
     } = req.body;
 
-    const { data, error } = await client
+    const updatePayload: any = {
+      cliente,
+      descripcion_trabajo,
+      materiales_usados,
+      observaciones,
+      foto_antes_url,
+      foto_despues_url,
+      fotos_adicionales_urls,
+    };
+
+    if (colaboradores !== undefined) {
+      updatePayload.colaboradores = typeof colaboradores === 'object' ? colaboradores : JSON.parse(colaboradores);
+    }
+
+    let { data, error } = await client
       .from('evidencias')
-      .update({
-        cliente,
-        descripcion_trabajo,
-        materiales_usados,
-        observaciones,
-        foto_antes_url,
-        foto_despues_url,
-        fotos_adicionales_urls,
-      })
+      .update(updatePayload)
       .eq('id', id)
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (error.message?.includes('colaboradores') || (error as any).code === 'PGRST204') {
+        delete updatePayload.colaboradores;
+        const retry = await client.from('evidencias').update(updatePayload).eq('id', id).select().single();
+        if (retry.error) throw retry.error;
+        data = retry.data;
+      } else {
+        throw error;
+      }
+    }
 
     return res.json(data);
   } catch (error: any) {

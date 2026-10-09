@@ -17,6 +17,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase, CompanyService, inttecClient, daravisaClient } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
@@ -220,6 +221,8 @@ function TableTooltipButton({
 }
 
 export default function FacturacionScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
@@ -350,6 +353,112 @@ export default function FacturacionScreen() {
     fetchComplementosList();
     fetchSiguienteFolioPago('P');
   }, []);
+
+  // === Recibir parámetros de Cotización o Venta para Facturación ===
+  useEffect(() => {
+    const isFromCotizacion = params.fromCotizacion === 'true' && params.cotizacionData;
+    const isFromVenta = params.fromVenta === 'true' && params.ventaData;
+
+    if (isFromCotizacion || isFromVenta) {
+      setTimeout(() => {
+        try {
+          const rawData = isFromVenta ? params.ventaData : params.cotizacionData;
+          const data = typeof rawData === 'string'
+            ? JSON.parse(rawData)
+            : rawData;
+
+          if (data.clienteNombre || data.cliente_nombre) {
+            setClienteNombre(data.clienteNombre || data.cliente_nombre);
+          }
+          if (data.clienteRfc || data.cliente_rfc) {
+            setClienteRfc(data.clienteRfc || data.cliente_rfc);
+          }
+          if (data.clienteCp || data.cliente_cp) {
+            setClienteCp(data.clienteCp || data.cliente_cp);
+          }
+          if (data.clienteDireccion || data.cliente_direccion) {
+            setClienteDireccion(data.clienteDireccion || data.cliente_direccion);
+          }
+          if (data.clienteRegimen || data.cliente_regimen) {
+            setClienteRegimen(data.clienteRegimen || data.cliente_regimen);
+          }
+          if (data.clienteUso || data.cliente_uso) {
+            setClienteUso(data.clienteUso || data.cliente_uso);
+          }
+          if (data.clienteId || data.cliente_id) {
+            setSelectedClientId(data.clienteId || data.cliente_id);
+          }
+          if (data.formaPago) {
+            setFormaPago(data.formaPago);
+          }
+          if (data.metodoPago) {
+            setMetodoPago(data.metodoPago);
+          }
+          if (data.moneda) {
+            setMoneda(data.moneda);
+          }
+          if (data.ordenCompra) {
+            setOrdenCompra(data.ordenCompra);
+          } else if (data.folioVenta) {
+            setOrdenCompra(`Venta ${data.folioVenta}`);
+          } else if (data.cotizacionFolio) {
+            setOrdenCompra(`Cotización ${data.cotizacionFolio}`);
+          }
+          if (data.etiqueta) {
+            setEtiqueta(data.etiqueta);
+          } else if (data.folioVenta) {
+            setEtiqueta(`Venta ${data.folioVenta}`);
+          } else if (data.cotizacionFolio) {
+            setEtiqueta(`Cotización ${data.cotizacionFolio}`);
+          }
+
+          const rawPartidas = data.partidas || data.lineas || [];
+          if (Array.isArray(rawPartidas) && rawPartidas.length > 0) {
+            const mappedPartidas: FacturaPartida[] = rawPartidas.map((l: any, idx: number) => {
+              const uStr = (l.unidad || 'Pieza').trim();
+              const isServ = uStr.toLowerCase().includes('serv') || uStr.toLowerCase().includes('obra');
+              return {
+                id: String(l.id || Date.now() + idx),
+                descripcion: l.descripcion || l.productoNombre || 'Concepto sin descripción',
+                descripcion_detallada: l.descripcion_detallada || l.productoDescripcion || '',
+                cantidad: String(l.cantidad !== undefined && l.cantidad !== null ? l.cantidad : 1),
+                precio_unitario: String(
+                  l.precio_unitario !== undefined && l.precio_unitario !== null
+                    ? l.precio_unitario
+                    : (l.precioUnitario || 0)
+                ),
+                clave_sat: l.clave_sat || l.claveSat || l.claveFacturacion || '01010101',
+                clave_unidad: l.clave_unidad || l.claveUnidad || (isServ ? 'E48' : 'H87'),
+                unidad: uStr,
+                objeto_imp: l.objeto_imp || (l.impuestoPorcentaje === 0 ? '01' : '02'),
+              };
+            });
+            setPartidas(mappedPartidas);
+          }
+
+          if (data.ventaId) {
+            setCurrentDraftId(data.ventaId);
+          } else {
+            setCurrentDraftId(null);
+          }
+
+          setActiveTab('emitir');
+          fetchSiguienteFolio('A');
+
+          // Limpiar parámetros para evitar re-ejecución involuntaria
+          router.setParams({ fromCotizacion: 'false', cotizacionData: '', fromVenta: 'false', ventaData: '' });
+        } catch (e) {
+          console.error('Error al cargar datos para facturación:', e);
+        }
+      }, 50);
+    } else if (params.tab === 'historial') {
+      setActiveTab('historial');
+      if (params.search && typeof params.search === 'string') {
+        setHistorialSearch(params.search);
+      }
+      router.setParams({ tab: '', search: '' });
+    }
+  }, [params.fromCotizacion, params.cotizacionData, params.fromVenta, params.ventaData, params.tab, params.search]);
 
   const fetchSiguienteFolio = async (serieTarget = 'A') => {
     try {
@@ -1649,11 +1758,12 @@ export default function FacturacionScreen() {
         (factura as any).cliente_direccion = clientDir;
       }
 
+      const isDraftFactura = !factura.cfdi_uuid || factura.cfdi_estado === 'BORRADOR' || (factura as any).es_borrador || String(factura.cfdi_uuid).startsWith('BORRADOR');
       setPreviewVenta(factura);
       setPreviewFacturaData(parsed);
       setPreviewXmlText(xmlText);
-      setPreviewIsDraft(false);
-      setPreviewTitle(`Factura: ${factura.folio || parsed.folio_number || factura.cfdi_uuid?.slice(0, 8)}`);
+      setPreviewIsDraft(isDraftFactura);
+      setPreviewTitle(isDraftFactura ? `Prefactura: ${factura.folio || parsed.folio_number || 'Borrador'}` : `Factura: ${factura.folio || parsed.folio_number || factura.cfdi_uuid?.slice(0, 8)}`);
       setPreviewModalVisible(true);
     } catch (err: any) {
       showAlert('Error en PDF', err.message);
@@ -2231,17 +2341,17 @@ export default function FacturacionScreen() {
   }, [categorias]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: themeColors.background }} edges={['bottom', 'left', 'right']}>
+    <View style={{ flex: 1, backgroundColor: themeColors.background }}>
       {/* Header y Selector de Pestañas */}
       <View style={[styles.headerContainer, { borderBottomColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}>
         <View style={styles.titleRow}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
             <View style={[styles.headerIconCircle, { backgroundColor: '#0284c7' + '20' }]}>
               <Ionicons name="receipt" size={24} color="#0284c7" />
             </View>
-            <View>
-              <Text style={[styles.screenTitle, { color: themeColors.text }]}>Módulo de Facturación CFDI 4.0</Text>
-              <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Emisión, timbrado oficial ante el SAT y gestión de comprobantes</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.screenTitle, { color: themeColors.text }]} numberOfLines={1}>Módulo de Facturación CFDI 4.0</Text>
+              <Text style={{ fontSize: 11, color: themeColors.textSecondary }} numberOfLines={2}>Emisión, timbrado oficial ante el SAT y gestión de comprobantes</Text>
             </View>
           </View>
         </View>
@@ -3191,8 +3301,16 @@ export default function FacturacionScreen() {
         /* HISTORIAL DE FACTURAS EMITIDAS */
         <View style={{ flex: 1, padding: Spacing.three, maxWidth: 1200, alignSelf: 'center', width: '100%' }}>
           {/* Header del Listado con Botón Nueva Factura */}
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <View>
+          <View
+            style={{
+              flexDirection: isDesktop ? 'row' : 'column',
+              justifyContent: 'space-between',
+              alignItems: isDesktop ? 'center' : 'stretch',
+              gap: isDesktop ? 0 : 10,
+              marginBottom: 14,
+            }}
+          >
+            <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 18, fontWeight: 'bold', color: themeColors.text }}>Comprobantes y Facturas</Text>
               <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Facturas timbradas y borradores con folio reservado</Text>
             </View>
@@ -3209,6 +3327,8 @@ export default function FacturacionScreen() {
                   paddingHorizontal: 16,
                   paddingVertical: 10,
                   borderRadius: 8,
+                  alignSelf: isDesktop ? 'auto' : 'stretch',
+                  justifyContent: 'center',
                 }
               ]}
             >
@@ -3312,180 +3432,377 @@ export default function FacturacionScreen() {
             </View>
           ) : (
             <ScrollView style={{ flex: 1 }}>
-              <ScrollView
-                horizontal={true}
-                showsHorizontalScrollIndicator={true}
-                style={{ width: '100%' }}
-                contentContainerStyle={{ minWidth: isDesktop ? '100%' : 970 }}
-              >
-                <View style={{ flex: 1 }}>
-                  {/* Encabezado de la Tabla */}
-                  <View
-                    style={[
-                      styles.facturasTableHeader,
-                      {
+              {isDesktop ? (
+                /* VISTA ESCRITORIO: TABLA ERP COMPLETA */
+                <ScrollView
+                  horizontal={true}
+                  showsHorizontalScrollIndicator={true}
+                  style={{ width: '100%' }}
+                  contentContainerStyle={{ minWidth: '100%' }}
+                >
+                  <View style={{ flex: 1 }}>
+                    {/* Encabezado de la Tabla */}
+                    <View
+                      style={[
+                        styles.facturasTableHeader,
+                        {
+                          backgroundColor: themeColors.backgroundElement,
+                          borderBottomColor: themeColors.border,
+                          borderColor: themeColors.border,
+                        },
+                      ]}
+                    >
+                      <TouchableOpacity
+                        onPress={handleToggleSelectAll}
+                        style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Ionicons
+                          name={areAllOnPageSelected ? "checkbox" : "square-outline"}
+                          size={18}
+                          color={areAllOnPageSelected ? "#0284c7" : themeColors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                      <Text style={[styles.facturasTableHeaderCell, { width: 110, color: themeColors.textSecondary }]}>Número</Text>
+                      <Text style={[styles.facturasTableHeaderCell, { flex: 1, minWidth: 200, color: themeColors.textSecondary }]}>Cliente</Text>
+                      <Text style={[styles.facturasTableHeaderCell, { width: 130, color: themeColors.textSecondary }]}>Etiqueta</Text>
+                      <Text style={[styles.facturasTableHeaderCell, { width: 125, color: themeColors.textSecondary }]}>Fecha de factura</Text>
+                      <Text style={[styles.facturasTableHeaderCell, { width: 135, textAlign: 'right', paddingRight: 10, color: themeColors.textSecondary }]}>Total</Text>
+                      <Text style={[styles.facturasTableHeaderCell, { width: 110, textAlign: 'center', color: themeColors.textSecondary }]}>Estado</Text>
+                      <Text style={[styles.facturasTableHeaderCell, { width: 140, textAlign: 'center', color: themeColors.textSecondary }]}>Acciones</Text>
+                    </View>
+
+                    {/* Filas de la Tabla */}
+                    <View
+                      style={{
                         backgroundColor: themeColors.backgroundElement,
-                        borderBottomColor: themeColors.border,
+                        borderBottomLeftRadius: 10,
+                        borderBottomRightRadius: 10,
+                        borderWidth: 1,
                         borderColor: themeColors.border,
-                      },
-                    ]}
-                  >
+                        borderTopWidth: 0,
+                      }}
+                    >
+                      {facturasPaginadas.map((factura) => {
+                        const isCanceled = factura.cfdi_estado === 'CANCELADA';
+                        const isDraft = factura.cfdi_estado === 'BORRADOR' || factura.es_borrador;
+                        const isSelected = !!selectedFacturasIds[factura.id];
+                        const folioDisplay = cleanFolio(factura.folio || factura.factura_referencia) || '--';
+
+                        return (
+                          <Pressable
+                            key={factura.id}
+                            onPress={() => (isDraft ? handleVerBorrador(factura) : handleVerPDF(factura))}
+                            style={({ hovered }: any) => [
+                              styles.facturasTableRow,
+                              {
+                                borderBottomColor: themeColors.border,
+                                backgroundColor: isSelected ? '#0284c715' : 'transparent',
+                              },
+                              hovered && { backgroundColor: (themeColors as any).backgroundSelected || '#0284c715' },
+                            ] as any}
+                          >
+                            {/* Selector Checkbox */}
+                            <TouchableOpacity
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                handleToggleSelectOne(factura.id);
+                              }}
+                              style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <Ionicons
+                                name={isSelected ? "checkbox" : "square-outline"}
+                                size={18}
+                                color={isSelected ? "#0284c7" : themeColors.textSecondary}
+                              />
+                            </TouchableOpacity>
+
+                            {/* Número (Folio en azul clickeable) */}
+                            <View style={{ width: 110, justifyContent: 'center' }}>
+                              <TouchableOpacity
+                                onPress={() => (isDraft ? handleVerBorrador(factura) : handleVerPDF(factura))}
+                                style={{ alignSelf: 'flex-start' }}
+                              >
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: '#0284c7' }}>
+                                  {folioDisplay}
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+
+                            {/* Cliente */}
+                            <View style={{ flex: 1, minWidth: 220, justifyContent: 'center', paddingRight: 8 }}>
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text }} numberOfLines={1}>
+                                {factura.cliente || 'Cliente General'}
+                              </Text>
+                              {factura.cfdi_uuid ? (
+                                <Text
+                                  style={{
+                                    fontSize: 10,
+                                    color: themeColors.textSecondary,
+                                    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                                    marginTop: 1,
+                                  }}
+                                  numberOfLines={1}
+                                >
+                                  {factura.cfdi_uuid}
+                                </Text>
+                              ) : null}
+                            </View>
+
+                            {/* Etiqueta */}
+                            <View style={{ width: 130, justifyContent: 'center', paddingRight: 8 }}>
+                              {factura.etiqueta ? (
+                                <View
+                                  style={{
+                                    backgroundColor: themeColors.border + '60',
+                                    paddingHorizontal: 8,
+                                    paddingVertical: 3,
+                                    borderRadius: 6,
+                                    alignSelf: 'flex-start',
+                                    maxWidth: 122,
+                                  }}
+                                >
+                                  <Text
+                                    numberOfLines={1}
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: '600',
+                                      color: themeColors.text,
+                                    }}
+                                  >
+                                    {factura.etiqueta}
+                                  </Text>
+                                </View>
+                              ) : (
+                                <Text style={{ fontSize: 11, color: themeColors.textSecondary + '70' }}>--</Text>
+                              )}
+                            </View>
+
+                            {/* Fecha de factura */}
+                            <View style={{ width: 125, justifyContent: 'center' }}>
+                              <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                                {formatFechaFactura(factura.fecha || factura.created_at)}
+                              </Text>
+                            </View>
+
+                            {/* Total */}
+                            <View style={{ width: 135, justifyContent: 'center', alignItems: 'flex-end', paddingRight: 10 }}>
+                              <Text
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: 'bold',
+                                  color: isDraft ? '#0284c7' : isCanceled ? themeColors.textSecondary : themeColors.text,
+                                }}
+                              >
+                                ${(factura.precio_total_facturado || 0).toLocaleString('es-MX', {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </Text>
+                            </View>
+
+                            {/* Estado (Pill badge como en view.jpeg) */}
+                            <View style={{ width: 110, alignItems: 'center', justifyContent: 'center' }}>
+                              <View
+                                style={[
+                                  styles.statusPill,
+                                  {
+                                    backgroundColor: isDraft ? '#0284c718' : isCanceled ? '#ef444418' : '#10b98118',
+                                    borderColor: isDraft ? '#0284c760' : isCanceled ? '#ef444460' : '#10b98160',
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={{
+                                    fontSize: 10,
+                                    fontWeight: '800',
+                                    color: isDraft ? '#0284c7' : isCanceled ? '#ef4444' : '#10b981',
+                                  }}
+                                >
+                                  {isDraft ? 'Borrador' : isCanceled ? 'Cancelada' : 'Timbrada'}
+                                </Text>
+                              </View>
+                            </View>
+
+                            {/* Acciones */}
+                            <View
+                              style={{
+                                width: 140,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 6,
+                              }}
+                              onStartShouldSetResponder={() => true}
+                            >
+                              {isDraft ? (
+                                <>
+                                  <TableTooltipButton
+                                    icon="eye-outline"
+                                    color="#0284c7"
+                                    bgColor="#0284c712"
+                                    borderColor="#0284c750"
+                                    tooltip="Ver Borrador"
+                                    onPress={() => handleVerBorrador(factura)}
+                                  />
+
+                                  <TableTooltipButton
+                                    icon="create-outline"
+                                    color="#d97706"
+                                    bgColor="#fef3c720"
+                                    borderColor="#f59e0b50"
+                                    tooltip="Modificar Borrador"
+                                    onPress={() => handleModificarBorrador(factura)}
+                                  />
+
+                                  <TableTooltipButton
+                                    icon="receipt-outline"
+                                    color="#10b981"
+                                    bgColor="#10b98118"
+                                    borderColor="#10b98150"
+                                    tooltip="Timbrar Factura SAT"
+                                    onPress={() => handleTimbrarFacturaBorrador(factura)}
+                                  />
+
+                                  <TableTooltipButton
+                                    icon="trash-outline"
+                                    color="#ef4444"
+                                    bgColor="#ef444415"
+                                    borderColor="#ef444450"
+                                    tooltip="Eliminar Borrador"
+                                    onPress={() => handleEliminarBorrador(factura)}
+                                  />
+                                </>
+                              ) : (
+                                <>
+                                  <TableTooltipButton
+                                    icon="eye-outline"
+                                    color="#0284c7"
+                                    bgColor="#0284c712"
+                                    borderColor="#0284c750"
+                                    tooltip="Ver Factura PDF"
+                                    onPress={() => handleVerPDF(factura)}
+                                  />
+
+                                  <TableTooltipButton
+                                    icon="code-download-outline"
+                                    color="#10b981"
+                                    bgColor="#10b98115"
+                                    borderColor="#10b98150"
+                                    tooltip="Descargar XML"
+                                    onPress={() => handleDescargarXML(factura)}
+                                  />
+
+                                  {!isCanceled && (
+                                    <TableTooltipButton
+                                      icon="cash-outline"
+                                      color="#801c1d"
+                                      bgColor="#801c1d15"
+                                      borderColor="#801c1d50"
+                                      tooltip="Cobrar / Emitir REP"
+                                      onPress={() => handleIniciarCobroREP(factura)}
+                                    />
+                                  )}
+
+                                  {!isCanceled && (
+                                    <TableTooltipButton
+                                      icon="close-circle-outline"
+                                      color="#ef4444"
+                                      bgColor="#ef444415"
+                                      borderColor="#ef444450"
+                                      tooltip="Cancelar ante el SAT"
+                                      onPress={() => handleCancelarFacturaSAT(factura)}
+                                    />
+                                  )}
+                                </>
+                              )}
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </ScrollView>
+              ) : (
+                /* VISTA MÓVIL: TARJETAS TOUCH CON BOTONES COMPLETOS */
+                <View style={{ gap: 10 }}>
+                  {/* Fila de Selección Masiva en Móvil */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 4, paddingBottom: 2 }}>
                     <TouchableOpacity
                       onPress={handleToggleSelectAll}
-                      style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
                     >
                       <Ionicons
                         name={areAllOnPageSelected ? "checkbox" : "square-outline"}
                         size={18}
                         color={areAllOnPageSelected ? "#0284c7" : themeColors.textSecondary}
                       />
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.textSecondary }}>
+                        {areAllOnPageSelected ? 'Deseleccionar todos' : 'Seleccionar página'}
+                      </Text>
                     </TouchableOpacity>
-                    <Text style={[styles.facturasTableHeaderCell, { width: 110, color: themeColors.textSecondary }]}>Número</Text>
-                    <Text style={[styles.facturasTableHeaderCell, { flex: 1, minWidth: 200, color: themeColors.textSecondary }]}>Cliente</Text>
-                    <Text style={[styles.facturasTableHeaderCell, { width: 130, color: themeColors.textSecondary }]}>Etiqueta</Text>
-                    <Text style={[styles.facturasTableHeaderCell, { width: 125, color: themeColors.textSecondary }]}>Fecha de factura</Text>
-                    <Text style={[styles.facturasTableHeaderCell, { width: 135, textAlign: 'right', paddingRight: 10, color: themeColors.textSecondary }]}>Total</Text>
-                    <Text style={[styles.facturasTableHeaderCell, { width: 110, textAlign: 'center', color: themeColors.textSecondary }]}>Estado</Text>
-                    <Text style={[styles.facturasTableHeaderCell, { width: 140, textAlign: 'center', color: themeColors.textSecondary }]}>Acciones</Text>
                   </View>
 
-                  {/* Filas de la Tabla */}
-                  <View
-                    style={{
-                      backgroundColor: themeColors.backgroundElement,
-                      borderBottomLeftRadius: 10,
-                      borderBottomRightRadius: 10,
-                      borderWidth: 1,
-                      borderColor: themeColors.border,
-                      borderTopWidth: 0,
-                    }}
-                  >
-                    {facturasPaginadas.map((factura) => {
-                      const isCanceled = factura.cfdi_estado === 'CANCELADA';
-                      const isDraft = factura.cfdi_estado === 'BORRADOR' || factura.es_borrador;
-                      const isSelected = !!selectedFacturasIds[factura.id];
-                      const folioDisplay = cleanFolio(factura.folio || factura.factura_referencia) || '--';
+                  {facturasPaginadas.map((factura) => {
+                    const isCanceled = factura.cfdi_estado === 'CANCELADA';
+                    const isDraft = factura.cfdi_estado === 'BORRADOR' || factura.es_borrador;
+                    const isSelected = !!selectedFacturasIds[factura.id];
+                    const folioDisplay = cleanFolio(factura.folio || factura.factura_referencia) || '--';
 
-                      return (
-                        <Pressable
-                          key={factura.id}
-                          onPress={() => (isDraft ? handleVerBorrador(factura) : handleVerPDF(factura))}
-                          style={({ hovered }: any) => [
-                            styles.facturasTableRow,
-                            {
-                              borderBottomColor: themeColors.border,
-                              backgroundColor: isSelected ? '#0284c715' : 'transparent',
-                            },
-                            hovered && { backgroundColor: (themeColors as any).backgroundSelected || '#0284c715' },
-                          ] as any}
-                        >
-                          {/* Selector Checkbox */}
-                          <TouchableOpacity
-                            onPress={(e) => {
-                              e.stopPropagation();
-                              handleToggleSelectOne(factura.id);
-                            }}
-                            style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
-                          >
-                            <Ionicons
-                              name={isSelected ? "checkbox" : "square-outline"}
-                              size={18}
-                              color={isSelected ? "#0284c7" : themeColors.textSecondary}
-                            />
-                          </TouchableOpacity>
+                    return (
+                      <View
+                        key={factura.id}
+                        style={[
+                          styles.facturaRowCard,
+                          {
+                            backgroundColor: themeColors.backgroundElement,
+                            borderColor: isSelected ? '#0284c7' : isCanceled ? '#ef444460' : themeColors.border,
+                            borderWidth: isSelected ? 1.5 : 1,
+                            flexDirection: 'column',
+                            alignItems: 'stretch',
+                            gap: 10,
+                            padding: 12,
+                          },
+                        ]}
+                      >
+                        {/* Cabecera de la Tarjeta */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                            <TouchableOpacity
+                              onPress={() => handleToggleSelectOne(factura.id)}
+                              style={{ padding: 2 }}
+                            >
+                              <Ionicons
+                                name={isSelected ? "checkbox" : "square-outline"}
+                                size={20}
+                                color={isSelected ? "#0284c7" : themeColors.textSecondary}
+                              />
+                            </TouchableOpacity>
 
-                          {/* Número (Folio en azul clickeable) */}
-                          <View style={{ width: 110, justifyContent: 'center' }}>
                             <TouchableOpacity
                               onPress={() => (isDraft ? handleVerBorrador(factura) : handleVerPDF(factura))}
-                              style={{ alignSelf: 'flex-start' }}
+                              style={{
+                                backgroundColor: '#0284c718',
+                                paddingHorizontal: 8,
+                                paddingVertical: 3,
+                                borderRadius: 6,
+                                borderWidth: 1,
+                                borderColor: '#0284c740',
+                              }}
                             >
-                              <Text style={{ fontSize: 13, fontWeight: '700', color: '#0284c7' }}>
+                              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#0284c7' }}>
                                 {folioDisplay}
                               </Text>
                             </TouchableOpacity>
-                          </View>
 
-                          {/* Cliente */}
-                          <View style={{ flex: 1, minWidth: 220, justifyContent: 'center', paddingRight: 8 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text }} numberOfLines={1}>
-                              {factura.cliente || 'Cliente General'}
-                            </Text>
-                            {factura.cfdi_uuid ? (
-                              <Text
-                                style={{
-                                  fontSize: 10,
-                                  color: themeColors.textSecondary,
-                                  fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-                                  marginTop: 1,
-                                }}
-                                numberOfLines={1}
-                              >
-                                {factura.cfdi_uuid}
-                              </Text>
-                            ) : null}
-                          </View>
-
-                          {/* Etiqueta */}
-                          <View style={{ width: 130, justifyContent: 'center', paddingRight: 8 }}>
-                            {factura.etiqueta ? (
-                              <View
-                                style={{
-                                  backgroundColor: themeColors.border + '60',
-                                  paddingHorizontal: 8,
-                                  paddingVertical: 3,
-                                  borderRadius: 6,
-                                  alignSelf: 'flex-start',
-                                  maxWidth: 122,
-                                }}
-                              >
-                                <Text
-                                  numberOfLines={1}
-                                  style={{
-                                    fontSize: 11,
-                                    fontWeight: '600',
-                                    color: themeColors.text,
-                                  }}
-                                >
-                                  {factura.etiqueta}
-                                </Text>
-                              </View>
-                            ) : (
-                              <Text style={{ fontSize: 11, color: themeColors.textSecondary + '70' }}>--</Text>
-                            )}
-                          </View>
-
-                          {/* Fecha de factura */}
-                          <View style={{ width: 125, justifyContent: 'center' }}>
-                            <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
-                              {formatFechaFactura(factura.fecha || factura.created_at)}
-                            </Text>
-                          </View>
-
-                          {/* Total */}
-                          <View style={{ width: 135, justifyContent: 'center', alignItems: 'flex-end', paddingRight: 10 }}>
-                            <Text
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 'bold',
-                                color: isDraft ? '#0284c7' : isCanceled ? themeColors.textSecondary : themeColors.text,
-                              }}
-                            >
-                              ${(factura.precio_total_facturado || 0).toLocaleString('es-MX', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </Text>
-                          </View>
-
-                          {/* Estado (Pill badge como en view.jpeg) */}
-                          <View style={{ width: 110, alignItems: 'center', justifyContent: 'center' }}>
                             <View
                               style={[
                                 styles.statusPill,
                                 {
                                   backgroundColor: isDraft ? '#0284c718' : isCanceled ? '#ef444418' : '#10b98118',
                                   borderColor: isDraft ? '#0284c760' : isCanceled ? '#ef444460' : '#10b98160',
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  minWidth: 65,
                                 },
                               ]}
                             >
@@ -3501,105 +3818,150 @@ export default function FacturacionScreen() {
                             </View>
                           </View>
 
-                          {/* Acciones */}
-                          <View
+                          {/* Monto Total */}
+                          <Text
                             style={{
-                              width: 140,
-                              flexDirection: 'row',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: 6,
+                              fontSize: 15,
+                              fontWeight: 'bold',
+                              color: isDraft ? '#0284c7' : isCanceled ? themeColors.textSecondary : themeColors.text,
                             }}
-                            onStartShouldSetResponder={() => true}
                           >
-                            {isDraft ? (
-                              <>
-                                <TableTooltipButton
-                                  icon="eye-outline"
-                                  color="#0284c7"
-                                  bgColor="#0284c712"
-                                  borderColor="#0284c750"
-                                  tooltip="Ver Borrador"
-                                  onPress={() => handleVerBorrador(factura)}
-                                />
+                            ${(factura.precio_total_facturado || 0).toLocaleString('es-MX', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </Text>
+                        </View>
 
-                                <TableTooltipButton
-                                  icon="create-outline"
-                                  color="#d97706"
-                                  bgColor="#fef3c720"
-                                  borderColor="#f59e0b50"
-                                  tooltip="Modificar Borrador"
-                                  onPress={() => handleModificarBorrador(factura)}
-                                />
+                        {/* Detalles del Cliente, UUID y Fecha */}
+                        <View style={{ gap: 3 }}>
+                          <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.text }} numberOfLines={1}>
+                            {factura.cliente || 'Cliente General'}
+                          </Text>
 
-                                <TableTooltipButton
-                                  icon="receipt-outline"
-                                  color="#10b981"
-                                  bgColor="#10b98118"
-                                  borderColor="#10b98150"
-                                  tooltip="Timbrar Factura SAT"
-                                  onPress={() => handleTimbrarFacturaBorrador(factura)}
-                                />
+                          {factura.cfdi_uuid ? (
+                            <Text
+                              style={{
+                                fontSize: 10,
+                                color: themeColors.textSecondary,
+                                fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                              }}
+                              numberOfLines={1}
+                            >
+                              UUID: {factura.cfdi_uuid}
+                            </Text>
+                          ) : null}
 
-                                <TableTooltipButton
-                                  icon="trash-outline"
-                                  color="#ef4444"
-                                  bgColor="#ef444415"
-                                  borderColor="#ef444450"
-                                  tooltip="Eliminar Borrador"
-                                  onPress={() => handleEliminarBorrador(factura)}
-                                />
-                              </>
-                            ) : (
-                              <>
-                                <TableTooltipButton
-                                  icon="eye-outline"
-                                  color="#0284c7"
-                                  bgColor="#0284c712"
-                                  borderColor="#0284c750"
-                                  tooltip="Ver Factura PDF"
-                                  onPress={() => handleVerPDF(factura)}
-                                />
-
-                                <TableTooltipButton
-                                  icon="code-download-outline"
-                                  color="#10b981"
-                                  bgColor="#10b98115"
-                                  borderColor="#10b98150"
-                                  tooltip="Descargar XML"
-                                  onPress={() => handleDescargarXML(factura)}
-                                />
-
-                                {!isCanceled && (
-                                  <TableTooltipButton
-                                    icon="cash-outline"
-                                    color="#801c1d"
-                                    bgColor="#801c1d15"
-                                    borderColor="#801c1d50"
-                                    tooltip="Cobrar / Emitir REP"
-                                    onPress={() => handleIniciarCobroREP(factura)}
-                                  />
-                                )}
-
-                                {!isCanceled && (
-                                  <TableTooltipButton
-                                    icon="close-circle-outline"
-                                    color="#ef4444"
-                                    bgColor="#ef444415"
-                                    borderColor="#ef444450"
-                                    tooltip="Cancelar ante el SAT"
-                                    onPress={() => handleCancelarFacturaSAT(factura)}
-                                  />
-                                )}
-                              </>
-                            )}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                              📅 {formatFechaFactura(factura.fecha || factura.created_at)}
+                            </Text>
+                            {factura.etiqueta ? (
+                              <View
+                                style={{
+                                  backgroundColor: themeColors.border + '60',
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '600', color: themeColors.text }}>
+                                  🏷️ {factura.etiqueta}
+                                </Text>
+                              </View>
+                            ) : null}
                           </View>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
+                        </View>
+
+                        {/* Barra de Acciones Móvil Táctil */}
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            flexWrap: 'wrap',
+                            gap: 6,
+                            borderTopWidth: 1,
+                            borderTopColor: themeColors.border,
+                            paddingTop: 8,
+                            marginTop: 2,
+                          }}
+                        >
+                          {isDraft ? (
+                            <>
+                              <TouchableOpacity
+                                onPress={() => handleVerBorrador(factura)}
+                                style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c715', paddingHorizontal: 10, paddingVertical: 7, flex: 1, minWidth: 80, justifyContent: 'center' }]}
+                              >
+                                <Ionicons name="eye-outline" size={14} color="#0284c7" />
+                                <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Ver</Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                onPress={() => handleModificarBorrador(factura)}
+                                style={[styles.smallActionBtn, { borderColor: '#d97706', backgroundColor: '#fef3c720', paddingHorizontal: 10, paddingVertical: 7, flex: 1, minWidth: 80, justifyContent: 'center' }]}
+                              >
+                                <Ionicons name="create-outline" size={14} color="#d97706" />
+                                <Text style={{ color: '#d97706', fontSize: 11, fontWeight: '700' }}>Editar</Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                onPress={() => handleTimbrarFacturaBorrador(factura)}
+                                style={[styles.smallActionBtn, { borderColor: '#10b981', backgroundColor: '#10b98118', paddingHorizontal: 10, paddingVertical: 7, flex: 1, minWidth: 95, justifyContent: 'center' }]}
+                              >
+                                <Ionicons name="receipt-outline" size={14} color="#10b981" />
+                                <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>Timbrar</Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                onPress={() => handleEliminarBorrador(factura)}
+                                style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415', paddingHorizontal: 10, paddingVertical: 7, justifyContent: 'center' }]}
+                              >
+                                <Ionicons name="trash-outline" size={14} color="#ef4444" />
+                              </TouchableOpacity>
+                            </>
+                          ) : (
+                            <>
+                              <TouchableOpacity
+                                onPress={() => handleVerPDF(factura)}
+                                style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c715', paddingHorizontal: 10, paddingVertical: 7, flex: 1, minWidth: 85, justifyContent: 'center' }]}
+                              >
+                                <Ionicons name="eye-outline" size={14} color="#0284c7" />
+                                <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Ver PDF</Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                onPress={() => handleDescargarXML(factura)}
+                                style={[styles.smallActionBtn, { borderColor: '#10b981', backgroundColor: '#10b98115', paddingHorizontal: 10, paddingVertical: 7, flex: 1, minWidth: 70, justifyContent: 'center' }]}
+                              >
+                                <Ionicons name="code-download-outline" size={14} color="#10b981" />
+                                <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>XML</Text>
+                              </TouchableOpacity>
+
+                              {!isCanceled && (
+                                <TouchableOpacity
+                                  onPress={() => handleIniciarCobroREP(factura)}
+                                  style={[styles.smallActionBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d15', paddingHorizontal: 10, paddingVertical: 7, flex: 1, minWidth: 95, justifyContent: 'center' }]}
+                                >
+                                  <Ionicons name="cash-outline" size={14} color="#801c1d" />
+                                  <Text style={{ color: '#801c1d', fontSize: 11, fontWeight: '700' }}>Cobrar REP</Text>
+                                </TouchableOpacity>
+                              )}
+
+                              {!isCanceled && (
+                                <TouchableOpacity
+                                  onPress={() => handleCancelarFacturaSAT(factura)}
+                                  style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415', paddingHorizontal: 10, paddingVertical: 7, justifyContent: 'center' }]}
+                                >
+                                  <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
+                                </TouchableOpacity>
+                              )}
+                            </>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
                 </View>
-              </ScrollView>
+              )}
 
               {/* Paginación Inferior */}
               {facturasFiltradas.length > registrosPorPagina && (
@@ -3833,26 +4195,26 @@ export default function FacturacionScreen() {
                       )}
 
                       {/* Barra de Acciones */}
-                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: 8 }}>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: isDesktop ? 'flex-end' : 'flex-start', gap: 8, borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: 8 }}>
                         <TouchableOpacity
                           onPress={() => handleVerReciboPagoPDF(comp)}
-                          style={[styles.smallActionBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d15', paddingHorizontal: 10 }]}
+                          style={[styles.smallActionBtn, { borderColor: '#801c1d', backgroundColor: '#801c1d15', paddingHorizontal: 10, paddingVertical: 7, flex: isDesktop ? undefined : 1, minWidth: 110, justifyContent: 'center' }]}
                         >
                           <Ionicons name="eye-outline" size={16} color="#801c1d" />
-                          <Text style={{ color: '#801c1d', fontSize: 11, fontWeight: '700' }}>Ver Recibo PDF</Text>
+                          <Text style={{ color: '#801c1d', fontSize: 11, fontWeight: '700' }}>Ver Recibo</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity
                           onPress={() => handleDescargarReciboPagoPDF(comp)}
-                          style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c715' }]}
+                          style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c715', paddingHorizontal: 10, paddingVertical: 7, flex: isDesktop ? undefined : 1, minWidth: 105, justifyContent: 'center' }]}
                         >
                           <Ionicons name="download-outline" size={16} color="#0284c7" />
-                          <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Descargar PDF</Text>
+                          <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Descargar</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity
                           onPress={() => handleDescargarReciboXML(comp)}
-                          style={[styles.smallActionBtn, { borderColor: '#10b981', backgroundColor: '#10b98115' }]}
+                          style={[styles.smallActionBtn, { borderColor: '#10b981', backgroundColor: '#10b98115', paddingHorizontal: 10, paddingVertical: 7, flex: isDesktop ? undefined : 1, minWidth: 70, justifyContent: 'center' }]}
                         >
                           <Ionicons name="code-download" size={16} color="#10b981" />
                           <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>XML</Text>
@@ -3861,7 +4223,7 @@ export default function FacturacionScreen() {
                         {!isCanceled && (
                           <TouchableOpacity
                             onPress={() => handleCancelarReciboPago(comp)}
-                            style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415' }]}
+                            style={[styles.smallActionBtn, { borderColor: '#ef4444', backgroundColor: '#ef444415', paddingHorizontal: 10, paddingVertical: 7, flex: isDesktop ? undefined : 1, minWidth: 85, justifyContent: 'center' }]}
                           >
                             <Ionicons name="close-circle" size={16} color="#ef4444" />
                             <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700' }}>Cancelar</Text>
@@ -4472,7 +4834,7 @@ export default function FacturacionScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

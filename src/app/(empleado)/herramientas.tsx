@@ -250,21 +250,21 @@ export default function EmpleadoHerramientasScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]}>
+      <View style={[styles.container, { backgroundColor: themeColors.background }]}>
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color={themeColors.primary} />
           <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.two }}>
             Cargando mis herramientas...
           </Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   const selectedVeh = vehiculos.find((v) => v.id === selectedVehiculoId);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'bottom']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header */}
       <View style={[styles.headerContainer, { borderBottomColor: themeColors.border }]}>
         <View style={{ flex: 1 }}>
@@ -754,7 +754,7 @@ export default function EmpleadoHerramientasScreen() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -1469,7 +1469,16 @@ export default function InventarioDashboard() {
 
   const handleUpdateConsumoItemQty = (id: string, qty: number) => {
     setConsumoItems(prev =>
-      prev.map(item => (item.id === id ? { ...item, cantidad: qty } : item))
+      prev.map(item => {
+        if (item.id !== id) return item;
+        const prod = productos.find(p => p.id === item.productoId);
+        const maxStock = prod ? (Number(prod.stock_actual) || 0) : 0;
+        if (qty > maxStock) {
+          Alert.alert('Stock Insuficiente', `No puedes consumir más de ${maxStock} ${prod?.unidad || 'unidades'} disponibles.`);
+        }
+        const clamped = Math.min(Math.max(0, qty), maxStock);
+        return { ...item, cantidad: clamped };
+      })
     );
   };
 
@@ -1601,7 +1610,16 @@ export default function InventarioDashboard() {
   };
 
   const handleUpdateAsignarItemQty = (id: string, qty: number) => {
-    setAsignarItems(prev => prev.map(item => item.id === id ? { ...item, cantidad: qty } : item));
+    setAsignarItems(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      const prod = productos.find(p => p.id === item.productoId);
+      const maxStock = prod ? (Number(prod.stock_actual) || 0) : 0;
+      if (qty > maxStock) {
+        Alert.alert('Stock Insuficiente', `No puedes agregar más de ${maxStock} ${prod?.unidad || 'unidades'} disponibles en almacén.`);
+      }
+      const clamped = Math.min(Math.max(0, qty), maxStock);
+      return { ...item, cantidad: clamped };
+    }));
   };
 
   const handleConfirmAsignacion = async () => {
@@ -2017,25 +2035,77 @@ export default function InventarioDashboard() {
       </View>
 
       {/* Tabs */}
-      <View style={[styles.selectorsContainer, { paddingHorizontal: isMobile ? Spacing.two : Spacing.four, gap: isMobile ? 6 : Spacing.one }]}>
-        <TouchableOpacity onPress={() => setActiveTab('importacion')} style={[styles.selectorBtn, activeTab === 'importacion' ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent } : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.selectorText, { color: activeTab === 'importacion' ? '#ffffff' : themeColors.textSecondary, fontSize: isMobile ? 9.5 : 11 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>Importación y Catálogo</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingHorizontal: Spacing.four,
+          gap: 8,
+          paddingBottom: Spacing.two,
+        }}
+      >
+        <TouchableOpacity
+          onPress={() => setActiveTab('importacion')}
+          style={[
+            styles.selectorBtn,
+            { paddingHorizontal: 14, minWidth: 100 },
+            activeTab === 'importacion'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }
+          ]}
+        >
+          <Text style={[styles.selectorText, { color: activeTab === 'importacion' ? '#ffffff' : themeColors.textSecondary }]}>
+            Importación y Catálogo
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setActiveTab('categorias')} style={[styles.selectorBtn, activeTab === 'categorias' ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent } : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.selectorText, { color: activeTab === 'categorias' ? '#ffffff' : themeColors.textSecondary, fontSize: isMobile ? 9.5 : 11 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>Categorías</Text>
+        <TouchableOpacity
+          onPress={() => setActiveTab('categorias')}
+          style={[
+            styles.selectorBtn,
+            { paddingHorizontal: 14, minWidth: 90 },
+            activeTab === 'categorias'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }
+          ]}
+        >
+          <Text style={[styles.selectorText, { color: activeTab === 'categorias' ? '#ffffff' : themeColors.textSecondary }]}>
+            Categorías
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setActiveTab('retribuciones')} style={[styles.selectorBtn, activeTab === 'retribuciones' ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent } : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.selectorText, { color: activeTab === 'retribuciones' ? '#ffffff' : themeColors.textSecondary, fontSize: isMobile ? 9.5 : 11 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>Retribuciones</Text>
+        <TouchableOpacity
+          onPress={() => setActiveTab('retribuciones')}
+          style={[
+            styles.selectorBtn,
+            { paddingHorizontal: 14, minWidth: 100 },
+            activeTab === 'retribuciones'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }
+          ]}
+        >
+          <Text style={[styles.selectorText, { color: activeTab === 'retribuciones' ? '#ffffff' : themeColors.textSecondary }]}>
+            Retribuciones
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => { setActiveTab('movimientos'); loadMovimientos(); }} style={[styles.selectorBtn, activeTab === 'movimientos' ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent } : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <Text style={[styles.selectorText, { color: activeTab === 'movimientos' ? '#ffffff' : themeColors.textSecondary, fontSize: isMobile ? 9.5 : 11 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>Movimientos</Text>
+        <TouchableOpacity
+          onPress={() => { setActiveTab('movimientos'); loadMovimientos(); }}
+          style={[
+            styles.selectorBtn,
+            { paddingHorizontal: 14, minWidth: 100 },
+            activeTab === 'movimientos'
+              ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+              : { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }
+          ]}
+        >
+          <Text style={[styles.selectorText, { color: activeTab === 'movimientos' ? '#ffffff' : themeColors.textSecondary }]}>
+            Movimientos
+          </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </View>
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={{ flex: 1 }}>
         {renderScreenHeader()}
       {/* VISTA 1 & 2 COMBINED: IMPORTACIÓN Y CATÁLOGO */}
@@ -2443,135 +2513,298 @@ export default function InventarioDashboard() {
                           : themeColors.backgroundElement,
                         borderColor: isSelected ? themeColors.primary : themeColors.border,
                         borderWidth: isSelected ? 1.5 : 1,
+                        flexDirection: isMobile ? 'column' : 'row',
+                        alignItems: isMobile ? 'stretch' : 'center',
+                        padding: isMobile ? 12 : Spacing.three,
+                        gap: isMobile ? 8 : 0,
                       }
                     ]}
                   >
-                    {/* Checkbox de Selección */}
-                    <TouchableOpacity
-                      style={styles.checkboxContainer}
-                      onPress={() => toggleSelectProduct(item.id)}
-                      activeOpacity={0.7}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <Ionicons
-                        name={isSelected ? 'checkbox' : 'square-outline'}
-                        size={22}
-                        color={isSelected ? themeColors.primary : themeColors.textSecondary}
-                      />
-                    </TouchableOpacity>
+                    {isMobile ? (
+                      /* VISTA MÓVIL: TARJETA ESTRUCTURADA SIN EMPALMAMIENTO */
+                      <>
+                        {/* Fila 1: Checkbox + SKU + Inactivo + Precio */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                            <TouchableOpacity
+                              onPress={() => toggleSelectProduct(item.id)}
+                              activeOpacity={0.7}
+                              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                              style={{ padding: 2 }}
+                            >
+                              <Ionicons
+                                name={isSelected ? 'checkbox' : 'square-outline'}
+                                size={22}
+                                color={isSelected ? themeColors.primary : themeColors.textSecondary}
+                              />
+                            </TouchableOpacity>
 
-                    <View style={{ flex: 1, gap: 2, marginLeft: 8 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <Text style={styles.skuText}>{item.sku_interno}</Text>
-                        {!item.activo && (
-                          <View style={{ backgroundColor: '#FF980020', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1, borderWidth: 1, borderColor: '#FF9800' }}>
-                            <Text style={{ color: '#FF9800', fontSize: 10, fontWeight: 'bold' }}>INACTIVO</Text>
+                            <View style={{ backgroundColor: '#ffc10718', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#ffc10740' }}>
+                              <Text style={styles.skuText}>{item.sku_interno}</Text>
+                            </View>
+
+                            {!item.activo && (
+                              <View style={{ backgroundColor: '#FF980020', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1, borderWidth: 1, borderColor: '#FF9800' }}>
+                                <Text style={{ color: '#FF9800', fontSize: 10, fontWeight: 'bold' }}>INACTIVO</Text>
+                              </View>
+                            )}
                           </View>
-                        )}
-                      </View>
-                      <Text style={[styles.itemText, { color: themeColors.text, opacity: item.activo ? 1 : 0.6 }]}>{item.nombre_oficial}</Text>
-                      <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>
-                        {cat ? cat.nombre : 'Sin Categoría'}
-                      </Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
-                        <Text
-                          style={[
-                            styles.stockText,
-                            { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success },
-                          ]}
-                        >
-                          Stock Total: {item.stock_actual} {item.unidad || 'pzas'}
-                        </Text>
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>
-                          • {precioFmt}
-                        </Text>
-                      </View>
 
-                      {/* Desglose de Stock por Condición */}
-                      {(() => {
-                        const nuevo = item.stock_nuevo !== undefined ? item.stock_nuevo : (item.stock_usado || item.stock_por_revisar ? 0 : item.stock_actual);
-                        const usado = item.stock_usado || 0;
-                        const porRevisar = item.stock_por_revisar || 0;
-                        const tieneDesglose = usado > 0 || porRevisar > 0;
-                        
-                        return (
-                          <View style={{ flexDirection: 'row', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
-                            <View style={[styles.stateBadge, { backgroundColor: '#10B98115', borderColor: '#10B98140' }]}>
-                              <Text style={[styles.stateBadgeText, { color: '#059669' }]}>
-                                🟢 {nuevo} {item.unidad || 'pzas'} nuevas
+                          <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.primary }}>
+                            {precioFmt}
+                          </Text>
+                        </View>
+
+                        {/* Fila 2: Nombre del Producto completo a todo el ancho */}
+                        <View style={{ gap: 4 }}>
+                          <Text style={[styles.itemText, { color: themeColors.text, opacity: item.activo ? 1 : 0.6, fontSize: 13.5, lineHeight: 19 }]}>
+                            {item.nombre_oficial}
+                          </Text>
+
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                            <View style={{ backgroundColor: themeColors.border + '60', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 11, color: themeColors.textSecondary, fontWeight: '600' }}>
+                                📁 {cat ? cat.nombre : 'Sin Categoría'}
                               </Text>
                             </View>
-                            {tieneDesglose ? (
-                              <>
-                                <View style={[styles.stateBadge, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B40' }]}>
-                                  <Text style={[styles.stateBadgeText, { color: '#D97706' }]}>
-                                    🟡 {usado} usadas
-                                  </Text>
-                                </View>
-                                <View style={[styles.stateBadge, { backgroundColor: '#EF444415', borderColor: '#EF444440' }]}>
-                                  <Text style={[styles.stateBadgeText, { color: '#DC2626' }]}>
-                                    🔴 {porRevisar} dañado/incompleto
-                                  </Text>
-                                </View>
-                              </>
-                            ) : null}
-                          </View>
-                        );
-                      })()}
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: Spacing.two, alignItems: 'center' }}>
-                      {/* Ajuste rápido de stock */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 4, gap: 4 }}>
-                        <TextInput
-                          style={[
-                            styles.quickStockInput,
-                            { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background },
-                          ]}
-                          placeholder="+"
-                          placeholderTextColor={themeColors.textSecondary}
-                          keyboardType="decimal-pad"
-                          value={quickStockAdjustments[item.id] || ''}
-                          onChangeText={txt => setQuickStockAdjustments(prev => ({ ...prev, [item.id]: txt.replace(/[^0-9.]/g, '') }))}
-                        />
-                        <TouchableOpacity
-                          activeOpacity={0.7}
-                          onPress={() => handleQuickAddStock(item)}
-                          style={[styles.quickStockBtn, { backgroundColor: themeColors.success }]}
-                        >
-                          <Ionicons name="add" size={14} color="#ffffff" />
-                        </TouchableOpacity>
-                      </View>
 
-                      <TouchableOpacity 
-                        onPress={() => handleOpenEditModal(item)}
-                        {...(Platform.OS === 'web' ? { title: "Editar Producto" } as any : {})}
-                      >
-                        <Ionicons name="create-outline" size={20} color={themeColors.accent} />
-                      </TouchableOpacity>
-                      
-                      {!item.activo ? (
-                        <TouchableOpacity 
-                          onPress={() => handleReactivateProduct(item)}
-                          {...(Platform.OS === 'web' ? { title: "Reactivar Producto" } as any : {})}
+                            <Text
+                              style={[
+                                styles.stockText,
+                                { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success, marginTop: 0, fontWeight: 'bold' },
+                              ]}
+                            >
+                              Stock Total: {item.stock_actual} {item.unidad || 'pzas'}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Fila 3: Desglose de Stock por Condición */}
+                        {(() => {
+                          const nuevo = item.stock_nuevo !== undefined ? item.stock_nuevo : (item.stock_usado || item.stock_por_revisar ? 0 : item.stock_actual);
+                          const usado = item.stock_usado || 0;
+                          const porRevisar = item.stock_por_revisar || 0;
+                          const tieneDesglose = usado > 0 || porRevisar > 0;
+                          
+                          return (
+                            <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                              <View style={[styles.stateBadge, { backgroundColor: '#10B98115', borderColor: '#10B98140' }]}>
+                                <Text style={[styles.stateBadgeText, { color: '#059669', fontSize: 11 }]}>
+                                  🟢 {nuevo} {item.unidad || 'pzas'} nuevas
+                                </Text>
+                              </View>
+                              {tieneDesglose ? (
+                                <>
+                                  <View style={[styles.stateBadge, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B40' }]}>
+                                    <Text style={[styles.stateBadgeText, { color: '#D97706', fontSize: 11 }]}>
+                                      🟡 {usado} usadas
+                                    </Text>
+                                  </View>
+                                  <View style={[styles.stateBadge, { backgroundColor: '#EF444415', borderColor: '#EF444440' }]}>
+                                    <Text style={[styles.stateBadgeText, { color: '#DC2626', fontSize: 11 }]}>
+                                      🔴 {porRevisar} dañado
+                                    </Text>
+                                  </View>
+                                </>
+                              ) : null}
+                            </View>
+                          );
+                        })()}
+
+                        {/* Fila 4: Barra de Acciones Móvil */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: 8, marginTop: 2 }}>
+                          {/* Ajuste rápido de stock */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, fontWeight: '600' }}>Rápido:</Text>
+                            <TextInput
+                              style={[
+                                styles.quickStockInput,
+                                { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background, width: 48, height: 30, fontSize: 12 },
+                              ]}
+                              placeholder="+1"
+                              placeholderTextColor={themeColors.textSecondary}
+                              keyboardType="decimal-pad"
+                              value={quickStockAdjustments[item.id] || ''}
+                              onChangeText={txt => setQuickStockAdjustments(prev => ({ ...prev, [item.id]: txt.replace(/[^0-9.]/g, '') }))}
+                            />
+                            <TouchableOpacity
+                              activeOpacity={0.7}
+                              onPress={() => handleQuickAddStock(item)}
+                              style={[styles.quickStockBtn, { backgroundColor: themeColors.success, width: 30, height: 30, borderRadius: 6 }]}
+                            >
+                              <Ionicons name="add" size={16} color="#ffffff" />
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Botones de acción */}
+                          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                            <TouchableOpacity 
+                              onPress={() => handleOpenEditModal(item)}
+                              style={{ padding: 6, borderRadius: 6, backgroundColor: themeColors.accent + '15' }}
+                              {...(Platform.OS === 'web' ? { title: "Editar Producto" } as any : {})}
+                            >
+                              <Ionicons name="create-outline" size={18} color={themeColors.accent} />
+                            </TouchableOpacity>
+                            
+                            {!item.activo ? (
+                              <TouchableOpacity 
+                                onPress={() => handleReactivateProduct(item)}
+                                style={{ padding: 6, borderRadius: 6, backgroundColor: themeColors.success + '15' }}
+                                {...(Platform.OS === 'web' ? { title: "Reactivar Producto" } as any : {})}
+                              >
+                                <Ionicons name="refresh-circle-outline" size={18} color={themeColors.success} />
+                              </TouchableOpacity>
+                            ) : (
+                              <TouchableOpacity 
+                                onPress={() => handleSoftDeleteProduct(item)}
+                                style={{ padding: 6, borderRadius: 6, backgroundColor: themeColors.textSecondary + '15' }}
+                                {...(Platform.OS === 'web' ? { title: "Desactivar Producto" } as any : {})}
+                              >
+                                <Ionicons name="eye-off-outline" size={18} color={themeColors.textSecondary} />
+                              </TouchableOpacity>
+                            )}
+                            
+                            <TouchableOpacity 
+                              onPress={() => handleHardDeleteProduct(item)}
+                              style={{ padding: 6, borderRadius: 6, backgroundColor: themeColors.danger + '15' }}
+                              {...(Platform.OS === 'web' ? { title: "Borrar Definitivamente" } as any : {})}
+                            >
+                              <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </>
+                    ) : (
+                      /* VISTA ESCRITORIO */
+                      <>
+                        {/* Checkbox de Selección */}
+                        <TouchableOpacity
+                          style={styles.checkboxContainer}
+                          onPress={() => toggleSelectProduct(item.id)}
+                          activeOpacity={0.7}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
-                          <Ionicons name="refresh-circle-outline" size={22} color={themeColors.success} />
+                          <Ionicons
+                            name={isSelected ? 'checkbox' : 'square-outline'}
+                            size={22}
+                            color={isSelected ? themeColors.primary : themeColors.textSecondary}
+                          />
                         </TouchableOpacity>
-                      ) : (
-                        <TouchableOpacity 
-                          onPress={() => handleSoftDeleteProduct(item)}
-                          {...(Platform.OS === 'web' ? { title: "Desactivar Producto (Soft Delete)" } as any : {})}
-                        >
-                          <Ionicons name="eye-off-outline" size={20} color={themeColors.textSecondary} />
-                        </TouchableOpacity>
-                      )}
-                      
-                      <TouchableOpacity 
-                        onPress={() => handleHardDeleteProduct(item)}
-                        {...(Platform.OS === 'web' ? { title: "Borrar Definitivamente (Hard Delete)" } as any : {})}
-                      >
-                        <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
-                      </TouchableOpacity>
-                    </View>
+
+                        <View style={{ flex: 1, gap: 2, marginLeft: 8 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Text style={styles.skuText}>{item.sku_interno}</Text>
+                            {!item.activo && (
+                              <View style={{ backgroundColor: '#FF980020', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1, borderWidth: 1, borderColor: '#FF9800' }}>
+                                <Text style={{ color: '#FF9800', fontSize: 10, fontWeight: 'bold' }}>INACTIVO</Text>
+                              </View>
+                            )}
+                          </View>
+                          <Text style={[styles.itemText, { color: themeColors.text, opacity: item.activo ? 1 : 0.6 }]}>{item.nombre_oficial}</Text>
+                          <Text style={[styles.itemSubtext, { color: themeColors.textSecondary }]}>
+                            {cat ? cat.nombre : 'Sin Categoría'}
+                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+                            <Text
+                              style={[
+                                styles.stockText,
+                                { color: item.stock_actual < 10 ? themeColors.danger : themeColors.success },
+                              ]}
+                            >
+                              Stock Total: {item.stock_actual} {item.unidad || 'pzas'}
+                            </Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>
+                              • {precioFmt}
+                            </Text>
+                          </View>
+
+                          {/* Desglose de Stock por Condición */}
+                          {(() => {
+                            const nuevo = item.stock_nuevo !== undefined ? item.stock_nuevo : (item.stock_usado || item.stock_por_revisar ? 0 : item.stock_actual);
+                            const usado = item.stock_usado || 0;
+                            const porRevisar = item.stock_por_revisar || 0;
+                            const tieneDesglose = usado > 0 || porRevisar > 0;
+                            
+                            return (
+                              <View style={{ flexDirection: 'row', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                                <View style={[styles.stateBadge, { backgroundColor: '#10B98115', borderColor: '#10B98140' }]}>
+                                  <Text style={[styles.stateBadgeText, { color: '#059669' }]}>
+                                    🟢 {nuevo} {item.unidad || 'pzas'} nuevas
+                                  </Text>
+                                </View>
+                                {tieneDesglose ? (
+                                  <>
+                                    <View style={[styles.stateBadge, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B40' }]}>
+                                      <Text style={[styles.stateBadgeText, { color: '#D97706' }]}>
+                                        🟡 {usado} usadas
+                                      </Text>
+                                    </View>
+                                    <View style={[styles.stateBadge, { backgroundColor: '#EF444415', borderColor: '#EF444440' }]}>
+                                      <Text style={[styles.stateBadgeText, { color: '#DC2626' }]}>
+                                        🔴 {porRevisar} dañado/incompleto
+                                      </Text>
+                                    </View>
+                                  </>
+                                ) : null}
+                              </View>
+                            );
+                          })()}
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: Spacing.two, alignItems: 'center' }}>
+                          {/* Ajuste rápido de stock */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 4, gap: 4 }}>
+                            <TextInput
+                              style={[
+                                styles.quickStockInput,
+                                { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.background },
+                              ]}
+                              placeholder="+"
+                              placeholderTextColor={themeColors.textSecondary}
+                              keyboardType="decimal-pad"
+                              value={quickStockAdjustments[item.id] || ''}
+                              onChangeText={txt => setQuickStockAdjustments(prev => ({ ...prev, [item.id]: txt.replace(/[^0-9.]/g, '') }))}
+                            />
+                            <TouchableOpacity
+                              activeOpacity={0.7}
+                              onPress={() => handleQuickAddStock(item)}
+                              style={[styles.quickStockBtn, { backgroundColor: themeColors.success }]}
+                            >
+                              <Ionicons name="add" size={14} color="#ffffff" />
+                            </TouchableOpacity>
+                          </View>
+
+                          <TouchableOpacity 
+                            onPress={() => handleOpenEditModal(item)}
+                            {...(Platform.OS === 'web' ? { title: "Editar Producto" } as any : {})}
+                          >
+                            <Ionicons name="create-outline" size={20} color={themeColors.accent} />
+                          </TouchableOpacity>
+                          
+                          {!item.activo ? (
+                            <TouchableOpacity 
+                              onPress={() => handleReactivateProduct(item)}
+                              {...(Platform.OS === 'web' ? { title: "Reactivar Producto" } as any : {})}
+                            >
+                              <Ionicons name="refresh-circle-outline" size={22} color={themeColors.success} />
+                            </TouchableOpacity>
+                          ) : (
+                            <TouchableOpacity 
+                              onPress={() => handleSoftDeleteProduct(item)}
+                              {...(Platform.OS === 'web' ? { title: "Desactivar Producto (Soft Delete)" } as any : {})}
+                            >
+                              <Ionicons name="eye-off-outline" size={20} color={themeColors.textSecondary} />
+                            </TouchableOpacity>
+                          )}
+                          
+                          <TouchableOpacity 
+                            onPress={() => handleHardDeleteProduct(item)}
+                            {...(Platform.OS === 'web' ? { title: "Borrar Definitivamente (Hard Delete)" } as any : {})}
+                          >
+                            <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
+                          </TouchableOpacity>
+                        </View>
+                      </>
+                    )}
                   </View>
                 );
               }}
@@ -4181,6 +4414,7 @@ export default function InventarioDashboard() {
                               />
 
                               <TouchableOpacity
+                                disabled={item.cantidad >= maxStock}
                                 onPress={() => handleUpdateAsignarItemQty(item.id, item.cantidad + 1)}
                                 style={{
                                   width: 32,
@@ -4190,10 +4424,11 @@ export default function InventarioDashboard() {
                                   borderWidth: 1,
                                   borderColor: themeColors.border,
                                   justifyContent: 'center',
-                                  alignItems: 'center'
+                                  alignItems: 'center',
+                                  opacity: item.cantidad >= maxStock ? 0.35 : 1
                                 }}
                               >
-                                <Ionicons name="add" size={16} color={themeColors.text} />
+                                <Ionicons name="add" size={16} color={item.cantidad >= maxStock ? themeColors.textSecondary : themeColors.text} />
                               </TouchableOpacity>
 
                               <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '600', marginLeft: 2 }}>
@@ -4245,7 +4480,16 @@ export default function InventarioDashboard() {
                 title={isSubmittingAsignacion ? "Transfiriendo..." : `Transferir (${asignarItems.length})`}
                 onPress={handleConfirmAsignacion}
                 loading={isSubmittingAsignacion}
-                disabled={isSubmittingAsignacion || asignarItems.length === 0 || !asignarEmpleadoId}
+                disabled={
+                  isSubmittingAsignacion ||
+                  asignarItems.length === 0 ||
+                  !asignarEmpleadoId ||
+                  asignarItems.some(it => {
+                    const p = productos.find(prod => prod.id === it.productoId);
+                    const max = p ? (Number(p.stock_actual) || 0) : 0;
+                    return it.cantidad <= 0 || it.cantidad > max;
+                  })
+                }
                 style={{ flex: 1.6, backgroundColor: '#2563EB' }}
               />
             </View>
@@ -4308,7 +4552,7 @@ export default function InventarioDashboard() {
       )}
 
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

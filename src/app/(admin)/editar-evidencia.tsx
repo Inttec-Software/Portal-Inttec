@@ -31,7 +31,7 @@ import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
-import MaterialesSelector from '@/components/MaterialesSelector';
+import MaterialesSelector, { ProductoInventario } from '@/components/MaterialesSelector';
 
 export default function EvidenciaForm() {
   const params = useLocalSearchParams<{ id?: string; draftId?: string }>();
@@ -71,13 +71,22 @@ export default function EvidenciaForm() {
   const [selectedSucursal, setSelectedSucursal] = useState<string>('');
   const [sucursalSearch, setSucursalSearch] = useState('');
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
-  const [productos, setProductos] = useState<any[]>([]);
+  const [productos, setProductos] = useState<ProductoInventario[]>([]);
 
   const [trabajos, setTrabajos] = useState<{
     descripcion: string;
     usa_materiales?: boolean;
     materiales: string;
-    materiales_usados?: { productoId: string; nombre: string; retirado: number; usado: number; sobrante: number; unidad?: string }[];
+    materiales_usados?: { 
+      productoId: string; 
+      nombre: string; 
+      retirado: number; 
+      usado: number; 
+      sobrante: number; 
+      unidad?: string;
+      empleadoId?: string;
+      empleadoNombre?: string;
+    }[];
     solucion: string;
     antesImg?: { uri: string; base64: string | null };
     despuesImg?: { uri: string; base64: string | null };
@@ -985,7 +994,7 @@ export default function EvidenciaForm() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -2108,7 +2117,7 @@ export default function EvidenciaForm() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

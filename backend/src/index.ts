@@ -37,28 +37,26 @@ initCronJobs();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Compresión de respuestas HTTP (Gzip/Brotli) para respuestas 80-90% más ligeras
-app.use(compression());
-
-// Logging exhaustivo para debug
-app.use((req, res, next) => {
-  console.log(`\n[REQ] ${req.method} ${req.url} - Origin: ${req.headers.origin}`);
-  res.on('finish', () => {
-    console.log(`[RES] ${req.method} ${req.url} - Status: ${res.statusCode}`);
-  });
+// Disable ETag and configure no-cache for fresh API data
+app.set('etag', false);
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   next();
 });
 
 // 1. HTTP Security Headers (Helmet)
 app.use(helmet());
 
-// 2. Rate Limiting (Protección contra DDoS y Brute Force)
+// 2. Rate Limiting (Protección contra DDoS y Brute Force) - Excluir checador físico Hikvision
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 1000, // Límite de 1000 peticiones por ventana por IP
   message: { error: 'Demasiadas peticiones desde esta IP. Inténtelo más tarde.' },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.url.includes('/asistencias/hikvision') || req.originalUrl.includes('/asistencias/hikvision')
 });
 app.use('/api/', apiLimiter);
 
@@ -77,8 +75,10 @@ const corsOptions: cors.CorsOptions = {
 
 app.use(cors(corsOptions));
 
-// Parsear JSON
+// Parsear JSON, URL-Encoded y Texto plano/XML para compatibilidad con checadores
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.text({ type: ['text/plain', 'application/xml', 'text/xml'], limit: '10mb' }));
 
 // Middleware para inyectar configuración multi-tenant en req
 app.use(tenantMiddleware);

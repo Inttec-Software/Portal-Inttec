@@ -55,16 +55,120 @@ export interface VentaConPago extends Venta {
   pagos_count?: number;
 }
 
-const getEstadoPagoStyle = (estado?: EstadoPagoVenta) => {
+export const getNormalizedEstadoPago = (
+  estado?: string | null,
+  totalVenta: number = 0,
+  totalPagado: number = 0
+): EstadoPagoVenta => {
+  const vTotal = Number(totalVenta) || 0;
+  const vPagado = Number(totalPagado) || 0;
+
+  // 1. Si los números de pago indican liquidación total (con tolerancia de centavos)
+  if (vTotal > 0 && vPagado >= vTotal - 0.01) {
+    return 'PAGADO';
+  }
+  // 2. Si hay abonos parciales registrados
+  if (vPagado > 0 && vPagado < vTotal - 0.01) {
+    return 'PAGO PARCIAL';
+  }
+  // 3. Si la venta no tiene precio ni pagos
+  if (vTotal <= 0 && vPagado <= 0) {
+    const raw = (estado || '').trim().toUpperCase();
+    if (raw === 'PAGADO' || raw === 'PAGADA') return 'PAGADO';
+    return 'SIN PRECIO';
+  }
+
+  // 4. Homologar texto del estado si viene explícito
+  const raw = (estado || '').trim().toUpperCase();
+  if (
+    raw === 'PAGADO' ||
+    raw === 'PAGADA' ||
+    raw === 'PAGADO (CON IVA)' ||
+    raw === 'PAGADA (CON IVA)' ||
+    raw === 'PAGADO COMPLETO' ||
+    raw === 'LIQUIDADA' ||
+    raw === 'LIQUIDADO' ||
+    raw === 'PAID'
+  ) {
+    return 'PAGADO';
+  }
+  if (
+    raw === 'PAGO PARCIAL' ||
+    raw === 'PARCIAL' ||
+    raw === 'PAGADO PARCIALMENTE' ||
+    raw === 'ABONADA' ||
+    raw === 'ABONADO'
+  ) {
+    return 'PAGO PARCIAL';
+  }
+  if (raw === 'SIN PRECIO' || raw === 'SIN MONTO' || raw === 'COTIZACION') {
+    return 'SIN PRECIO';
+  }
+
+  return 'PENDIENTE DE PAGO';
+};
+
+const getEstadoPagoStyle = (estado?: string) => {
   switch (estado) {
     case 'PAGADO':
       return { bg: 'rgba(16, 185, 129, 0.15)', text: '#10b981', border: '#10b981' };
     case 'PAGO PARCIAL':
       return { bg: 'rgba(245, 158, 11, 0.15)', text: '#f59e0b', border: '#f59e0b' };
+    case 'SIN PRECIO':
+      return { bg: 'rgba(100, 116, 139, 0.15)', text: '#64748b', border: '#94a3b8' };
     case 'PENDIENTE DE PAGO':
     default:
       return { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444', border: '#ef4444' };
   }
+};
+
+interface HoverTooltipProps {
+  text: string;
+  children: React.ReactNode;
+  position?: 'top' | 'bottom' | 'left' | 'right';
+  style?: any;
+}
+
+const HoverTooltip: React.FC<HoverTooltipProps> = ({
+  text,
+  children,
+  position = 'top',
+  style,
+}) => {
+  const [isHovered, setIsHovered] = useState(false);
+
+  if (Platform.OS !== 'web' || !text) {
+    return <View style={style}>{children}</View>;
+  }
+
+  return (
+    <View
+      style={[{ position: 'relative', overflow: 'visible', alignItems: 'center', justifyContent: 'center' }, style]}
+      // @ts-ignore
+      onMouseEnter={() => setIsHovered(true)}
+      // @ts-ignore
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {children}
+      {isHovered && (
+        <View
+          style={[
+            styles.customTooltipBox,
+            position === 'top' && styles.customTooltipTop,
+            position === 'bottom' && styles.customTooltipBottom,
+            position === 'left' && styles.customTooltipLeft,
+            position === 'right' && styles.customTooltipRight,
+          ]}
+          // @ts-ignore
+          pointerEvents="none"
+        >
+          <Text style={styles.customTooltipText} numberOfLines={2}>
+            {text}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
 };
 
 
@@ -221,7 +325,7 @@ export default function VentasScreen() {
 
   // === Historial ===
   const cachedVentas = ModuleCache.get<VentaConPago[]>('ventas_historial');
-  const [activeTab, setActiveTab] = useState<'registrar' | 'historial'>('registrar');
+  const [activeTab, setActiveTab] = useState<'registrar' | 'historial'>('historial');
   const [ventasHistorial, setVentasHistorial] = useState<VentaConPago[]>(() => cachedVentas || []);
   const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
   const [historialSearch, setHistorialSearch] = useState('');
@@ -271,6 +375,9 @@ export default function VentasScreen() {
         return;
       }
       setCurrentUser(user);
+
+      // Cargar historial de ventas inicialmente
+      loadHistorial(true);
 
       // Cargar catálogo de clientes y sucursales
       try {
@@ -476,6 +583,77 @@ export default function VentasScreen() {
   };
 
 
+  const handleFacturarVenta = async (venta: VentaConPago, partidasList: VentaPartida[] = []) => {
+    try {
+      let targetPartidas = partidasList;
+      if (!targetPartidas || targetPartidas.length === 0) {
+        const { data: dbPartidas } = await supabase
+          .from('ventas_partidas')
+          .select('*')
+          .eq('venta_id', venta.id);
+        if (dbPartidas && dbPartidas.length > 0) {
+          targetPartidas = dbPartidas;
+        }
+      }
+
+      const matchedCliente = clientes.find(c => c.nombre?.trim().toLowerCase() === venta.cliente?.trim().toLowerCase());
+      const ventaAny = venta as any;
+
+      const payload = {
+        ventaId: venta.id,
+        folioVenta: venta.folio || `VTA-${venta.id.toString().slice(0, 8)}`,
+        clienteNombre: venta.cliente,
+        clienteRfc: matchedCliente?.rfc || ventaAny.cliente_rfc || 'XAXX010101000',
+        clienteCp: matchedCliente?.codigo_postal || ventaAny.cliente_cp || '32690',
+        clienteDireccion: matchedCliente?.direccion || ventaAny.direccion || '',
+        clienteRegimen: matchedCliente?.regimen_fiscal || '601',
+        ordenCompra: venta.factura_referencia || ventaAny.orden_compra || '',
+        sucursal: venta.sucursal || '',
+        fecha: venta.fecha || venta.created_at || new Date().toISOString(),
+        subtotal: Number(ventaAny.subtotal_venta || ventaAny.total || venta.precio_total_facturado || 0),
+        total: Number(venta.precio_total_facturado || ventaAny.total || 0),
+        partidas: (targetPartidas && targetPartidas.length > 0)
+          ? targetPartidas.map(p => {
+              const descParts = (p.descripcion || '').split(' - ');
+              return {
+                productoNombre: descParts[0] || p.descripcion || 'Venta de productos / servicios',
+                productoDescripcion: descParts.slice(1).join(' - ') || '',
+                cantidad: Number(p.cantidad) || 1,
+                unidad: p.unidad || 'PZA',
+                precioUnitario: Number(p.precio_unitario_venta) || 0,
+                claveSat: (p as any).clave_sat || '43211500',
+                claveUnidad: (p as any).clave_unidad || 'H87',
+                impuestoPorcentaje: 16,
+                importe: (Number(p.cantidad) || 1) * (Number(p.precio_unitario_venta) || 0)
+              };
+            })
+          : [
+              {
+                productoNombre: venta.descripcion || 'Venta de productos y servicios',
+                productoDescripcion: venta.factura_referencia ? `Ref: ${venta.factura_referencia}` : '',
+                cantidad: 1,
+                unidad: 'PZA',
+                precioUnitario: Number(ventaAny.subtotal_venta || venta.precio_total_facturado || ventaAny.total || 0),
+                claveSat: '43211500',
+                claveUnidad: 'H87',
+                impuestoPorcentaje: 16,
+                importe: Number(ventaAny.subtotal_venta || venta.precio_total_facturado || ventaAny.total || 0)
+              }
+            ]
+      };
+
+      router.push({
+        pathname: '/(admin)/facturacion',
+        params: {
+          fromVenta: 'true',
+          ventaData: JSON.stringify(payload)
+        }
+      });
+    } catch (err: any) {
+      showAlert('Error', 'No se pudo iniciar el proceso de facturación: ' + err.message);
+    }
+  };
+
   const handleSelectVenta = async (venta: VentaConPago) => {
     setSelectedVenta(venta);
     setIsDetailModalVisible(true);
@@ -491,19 +669,35 @@ export default function VentasScreen() {
     setPagoReferencia('');
 
     try {
-      const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/ventas/${venta.id}/detalle`, { headers });
-      if (!res.ok) throw new Error('Error fetching details from API');
-      const data = await res.json();
-      
-      setSelectedVentaPartidas(data.partidas || []);
-      setSelectedVentaGastos(data.gastos || []);
+      let partidasLoaded: VentaPartida[] = [];
+      let gastosLoaded: any[] = [];
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/ventas/${venta.id}/detalle`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          partidasLoaded = data.partidas || [];
+          gastosLoaded = data.gastos || [];
+        }
+      } catch (_) {}
 
-      // 3. Cargar pagos
+      // Fallback a Supabase si fue necesario
+      if (partidasLoaded.length === 0) {
+        const { data: dbPartidas } = await supabase.from('ventas_partidas').select('*').eq('venta_id', venta.id);
+        if (dbPartidas) partidasLoaded = dbPartidas;
+      }
+      if (gastosLoaded.length === 0) {
+        const { data: dbGastos } = await supabase.from('gastos').select('*').eq('venta_id', venta.id).order('fecha', { ascending: false });
+        if (dbGastos) gastosLoaded = dbGastos;
+      }
+
+      setSelectedVentaPartidas(partidasLoaded);
+      setSelectedVentaGastos(gastosLoaded);
+
+      // Cargar pagos
       await loadPagosForSelectedVenta(venta.id, venta);
     } catch (err: any) {
       console.error('Error fetching venta details:', err);
-      showAlert('Error', 'No se pudieron cargar los detalles de la venta.');
     } finally {
       setIsLoadingPartidas(false);
     }
@@ -2001,12 +2195,60 @@ export default function VentasScreen() {
   const renderScreenHeader = () => (
     <View>
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        
+      <View style={[styles.header, { borderBottomColor: themeColors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>
-          {editingVentaId ? 'Editar Venta' : 'Registro de Ventas'}
+          {editingVentaId ? 'Editar Venta' : (activeTab === 'historial' ? 'Historial de Ventas' : 'Registrar Venta')}
         </Text>
-        <View style={{ width: 40 }} />
+        
+        {/* Botón arriba a la derecha */}
+        {!editingVentaId && (
+          activeTab === 'historial' ? (
+            <TouchableOpacity
+              onPress={() => {
+                cancelEditing();
+                setActiveTab('registrar');
+              }}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: themeColors.primary,
+                paddingVertical: 7,
+                paddingHorizontal: 12,
+                borderRadius: 8,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.15,
+                shadowRadius: 2,
+                elevation: 2,
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={17} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>+ Nueva Venta</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={() => {
+                setActiveTab('historial');
+                loadHistorial();
+              }}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: themeColors.backgroundElement,
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                paddingVertical: 7,
+                paddingHorizontal: 12,
+                borderRadius: 8,
+              }}
+            >
+              <Ionicons name="list-outline" size={17} color={themeColors.text} />
+              <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }}>Ver Historial</Text>
+            </TouchableOpacity>
+          )
+        )}
       </View>
 
       {/* Tabs / Banner de edición */}
@@ -2028,26 +2270,6 @@ export default function VentasScreen() {
       ) : (
         <View style={[styles.tabsContainer, { backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
           <TouchableOpacity
-            onPress={() => setActiveTab('registrar')}
-            style={[
-              styles.tab,
-              activeTab === 'registrar'
-                ? {
-                    backgroundColor: themeColors.accent,
-                    ...Platform.select({
-                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
-                      android: { elevation: 2 },
-                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
-                    })
-                  }
-                : { backgroundColor: 'transparent' },
-            ]}
-          >
-            <Text style={[styles.tabText, { color: activeTab === 'registrar' ? '#fff' : themeColors.textSecondary }]}>
-              Registrar Venta
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
             onPress={() => {
               setActiveTab('historial');
               loadHistorial();
@@ -2068,6 +2290,26 @@ export default function VentasScreen() {
           >
             <Text style={[styles.tabText, { color: activeTab === 'historial' ? '#fff' : themeColors.textSecondary }]}>
               Historial
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveTab('registrar')}
+            style={[
+              styles.tab,
+              activeTab === 'registrar'
+                ? {
+                    backgroundColor: themeColors.accent,
+                    ...Platform.select({
+                      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2 },
+                      android: { elevation: 2 },
+                      web: { boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }
+                    })
+                  }
+                : { backgroundColor: 'transparent' },
+            ]}
+          >
+            <Text style={[styles.tabText, { color: activeTab === 'registrar' ? '#fff' : themeColors.textSecondary }]}>
+              Registrar Venta
             </Text>
           </TouchableOpacity>
         </View>
@@ -2095,49 +2337,67 @@ export default function VentasScreen() {
           clearButtonMode="while-editing"
         />
         {historialSearch.length > 0 && (
-          <TouchableOpacity onPress={() => setHistorialSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ marginRight: 8 }}>
-            <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
-          </TouchableOpacity>
+          <HoverTooltip text="Borrar texto de búsqueda" position="bottom">
+            <TouchableOpacity
+              onPress={() => setHistorialSearch('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{ marginRight: 8 }}
+              accessibilityLabel="Borrar texto de búsqueda"
+            >
+              <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+            </TouchableOpacity>
+          </HoverTooltip>
         )}
-        <View style={{ position: 'relative' }}>
-          <TouchableOpacity
-            onPress={() => {
-              if (Platform.OS !== 'web') setShowFilterDatePicker(true);
-            }}
-            style={{ padding: 4, borderRadius: 6, backgroundColor: filterDate ? themeColors.accent + '20' : 'transparent' }}
-          >
-            <Ionicons name="calendar-outline" size={20} color={filterDate ? themeColors.accent : themeColors.textSecondary} />
-          </TouchableOpacity>
-          {Platform.OS === 'web' && createElement('input', {
-            type: 'date',
-            style: {
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              opacity: 0,
-              cursor: 'pointer',
-              zIndex: 100,
-            },
-            onClick: (e: any) => {
-              try { e.target.showPicker(); } catch (err) {}
-            },
-            onChange: (e: any) => {
-              if (e.target.value) {
-                const parts = e.target.value.split('-');
-                if (parts.length === 3) {
-                  const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-                  setFilterDate(d);
+        <HoverTooltip text="Filtrar ventas por fecha específica" position="bottom">
+          <View style={{ position: 'relative' }}>
+            <TouchableOpacity
+              onPress={() => {
+                if (Platform.OS !== 'web') setShowFilterDatePicker(true);
+              }}
+              style={{ padding: 4, borderRadius: 6, backgroundColor: filterDate ? themeColors.accent + '20' : 'transparent' }}
+              accessibilityLabel="Filtrar ventas por fecha"
+            >
+              <Ionicons name="calendar-outline" size={20} color={filterDate ? themeColors.accent : themeColors.textSecondary} />
+            </TouchableOpacity>
+            {Platform.OS === 'web' && createElement('input', {
+              type: 'date',
+              title: 'Filtrar por fecha específica',
+              style: {
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                opacity: 0,
+                cursor: 'pointer',
+                zIndex: 100,
+              },
+              onClick: (e: any) => {
+                try { e.target.showPicker(); } catch (err) {}
+              },
+              onChange: (e: any) => {
+                if (e.target.value) {
+                  const parts = e.target.value.split('-');
+                  if (parts.length === 3) {
+                    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                    setFilterDate(d);
+                  }
                 }
               }
-            }
-          })}
-        </View>
+            })}
+          </View>
+        </HoverTooltip>
         {filterDate && (
-          <TouchableOpacity onPress={() => setFilterDate(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ marginLeft: 4 }}>
-            <Ionicons name="close" size={16} color={themeColors.danger} />
-          </TouchableOpacity>
+          <HoverTooltip text="Quitar filtro de fecha y ver todas" position="bottom">
+            <TouchableOpacity
+              onPress={() => setFilterDate(null)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{ marginLeft: 4 }}
+              accessibilityLabel="Quitar filtro de fecha"
+            >
+              <Ionicons name="close" size={16} color={themeColors.danger} />
+            </TouchableOpacity>
+          </HoverTooltip>
         )}
       </View>
       
@@ -2173,31 +2433,34 @@ export default function VentasScreen() {
           <Text style={[styles.emptyText, { color: themeColors.textSecondary, marginTop: Spacing.one }]}>
             No se encontraron ventas que coincidan con los criterios de búsqueda.
           </Text>
-          <TouchableOpacity
-            onPress={() => {
-              setHistorialSearch('');
-              setFilterDate(null);
-            }}
-            style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}
-          >
-            <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>Limpiar búsqueda</Text>
-          </TouchableOpacity>
+          <HoverTooltip text="Restablecer filtros y mostrar todas las ventas" position="bottom">
+            <TouchableOpacity
+              onPress={() => {
+                setHistorialSearch('');
+                setFilterDate(null);
+              }}
+              style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}
+              accessibilityLabel="Restablecer filtros y búsqueda"
+            >
+              <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>Limpiar búsqueda</Text>
+            </TouchableOpacity>
+          </HoverTooltip>
         </View>
       ) : isDesktop ? (
         <ScrollView style={{ flex: 1 }}>
           {renderScreenHeader()}
           <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
             <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Cliente</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Cliente</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Sucursal</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Fecha</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Referencia</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Proyecto</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Estado Pago</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Proyecto</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Estado Pago</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Total Venta</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '7%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
-              <View style={{ width: '7%', alignItems: 'center' }}>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
+              <View style={{ width: '12%', alignItems: 'center' }}>
                 <Text style={{ fontSize: 11, fontWeight: 'bold', color: themeColors.text }}>Acciones</Text>
               </View>
             </View>
@@ -2207,7 +2470,7 @@ export default function VentasScreen() {
                 const margenPct = (item.margen_porcentual * 100).toFixed(1);
                 const totalPag = item.total_pagado || 0;
                 const saldoPen = item.saldo_pendiente !== undefined ? item.saldo_pendiente : Math.max(0, item.precio_total_facturado - totalPag);
-                const estadoPago = item.estado_pago || calcularEstadoPago(item.precio_total_facturado, totalPag);
+                const estadoPago = getNormalizedEstadoPago(item.estado_pago, item.precio_total_facturado, totalPag);
                 const styleCfg = getEstadoPagoStyle(estadoPago);
 
                 return (
@@ -2220,11 +2483,11 @@ export default function VentasScreen() {
                       hovered && { backgroundColor: themeColors.backgroundSelected }
                     ] as any}
                   >
-                    <Text style={[styles.tableCell, { color: themeColors.text, width: '14%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
                     <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%' }]} numberOfLines={1}>{item.sucursal || '--'}</Text>
                     <Text style={[styles.tableCell, { color: themeColors.text, width: '8%' }]}>{item.fecha}</Text>
                     <Text style={[styles.tableCell, { width: '9%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
-                    <View style={{ width: '9%' }}>
+                    <View style={{ width: '8%' }}>
                       {item.tipo_proyecto ? (
                         <View style={[styles.tipoBadge, { backgroundColor: themeColors.accent + '15', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }]}>
                           <Text style={{ color: themeColors.accent, fontSize: 10, fontWeight: '700' }}>{item.tipo_proyecto}</Text>
@@ -2233,57 +2496,79 @@ export default function VentasScreen() {
                     </View>
 
                     {/* Badge Estado de Pago */}
-                    <View style={{ width: '12%', justifyContent: 'center' }}>
+                    <View style={{ width: '10%', justifyContent: 'center' }}>
                       <View style={{ backgroundColor: styleCfg.bg, borderColor: styleCfg.border, borderWidth: 1, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
                         <Text style={{ color: styleCfg.text, fontSize: 9, fontWeight: '800' }}>{estadoPago}</Text>
                       </View>
                     </View>
 
-                    <Text style={[styles.tableCell, { width: '11%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]}>{formatCurrency(item.precio_total_facturado)}</Text>
+                    <Text style={[styles.tableCell, { width: '11%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]} numberOfLines={1}>{formatCurrency(item.precio_total_facturado)}</Text>
                     
                     {/* Pagado / Saldo Pendiente */}
-                    <View style={{ width: '13%', alignItems: 'flex-end', justifyContent: 'center' }}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.success }}>
+                    <View style={{ width: '11%', alignItems: 'flex-end', justifyContent: 'center' }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.success }} numberOfLines={1}>
                         {formatCurrency(totalPag)}
                       </Text>
-                      <Text style={{ fontSize: 10, fontWeight: '600', color: saldoPen > 0 ? themeColors.danger : themeColors.textSecondary }}>
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: saldoPen > 0 ? themeColors.danger : themeColors.textSecondary }} numberOfLines={1}>
                         Pend: {formatCurrency(saldoPen)}
                       </Text>
                     </View>
 
-                    <Text style={[styles.tableCell, { width: '7%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]}>{formatCurrency(item.utilidad_bruta)}</Text>
+                    <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]} numberOfLines={1}>{formatCurrency(item.utilidad_bruta)}</Text>
                     
                     {/* Acciones */}
-                    <View style={{ width: '9%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
-                      <TouchableOpacity
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleOpenPagoModal(item);
-                        }}
-                        style={{ padding: 5, backgroundColor: themeColors.success + '20', borderColor: themeColors.success + '40', borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }}
-                      >
-                        <Ionicons name="cash-outline" size={15} color={themeColors.success} />
-                      </TouchableOpacity>
+                    <View style={{ width: '12%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 4, overflow: 'visible', zIndex: 10 }}>
+                      <HoverTooltip text={item.cfdi_uuid ? "Ver factura emitida en SAT" : "Facturar venta (CFDI 4.0)"} position="top">
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleFacturarVenta(item);
+                          }}
+                          style={{ padding: 4, backgroundColor: '#7c3aed15', borderColor: '#7c3aed40', borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }}
+                          accessibilityLabel="Facturar venta"
+                        >
+                          <Ionicons name="receipt-outline" size={14} color="#7c3aed" />
+                        </TouchableOpacity>
+                      </HoverTooltip>
 
-                      <TouchableOpacity
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleSelectVenta(item);
-                        }}
-                        style={{ padding: 4 }}
-                      >
-                        <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
-                      </TouchableOpacity>
+                      <HoverTooltip text="Registrar o consultar abonos / pagos" position="top">
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleOpenPagoModal(item);
+                          }}
+                          style={{ padding: 4, backgroundColor: themeColors.success + '20', borderColor: themeColors.success + '40', borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }}
+                          accessibilityLabel="Registrar o consultar pagos y abonos"
+                        >
+                          <Ionicons name="cash-outline" size={14} color={themeColors.success} />
+                        </TouchableOpacity>
+                      </HoverTooltip>
 
-                      <TouchableOpacity
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleDuplicateVenta(item);
-                        }}
-                        style={{ padding: 4 }}
-                      >
-                        <Ionicons name="copy-outline" size={16} color={themeColors.primary} />
-                      </TouchableOpacity>
+                      <HoverTooltip text="Ver detalle completo de la venta" position="top">
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleSelectVenta(item);
+                          }}
+                          style={{ padding: 4 }}
+                          accessibilityLabel="Ver detalle completo de la venta"
+                        >
+                          <Ionicons name="eye-outline" size={15} color={themeColors.accent} />
+                        </TouchableOpacity>
+                      </HoverTooltip>
+
+                      <HoverTooltip text="Duplicar venta como borrador" position="top">
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleDuplicateVenta(item);
+                          }}
+                          style={{ padding: 4 }}
+                          accessibilityLabel="Duplicar venta como nueva"
+                        >
+                          <Ionicons name="copy-outline" size={15} color={themeColors.primary} />
+                        </TouchableOpacity>
+                      </HoverTooltip>
                     </View>
                   </Pressable>
                 );
@@ -2306,7 +2591,7 @@ export default function VentasScreen() {
             const margenPct = (item.margen_porcentual * 100).toFixed(1);
             const totalPag = item.total_pagado || 0;
             const saldoPen = item.saldo_pendiente !== undefined ? item.saldo_pendiente : Math.max(0, item.precio_total_facturado - totalPag);
-            const estadoPago = item.estado_pago || calcularEstadoPago(item.precio_total_facturado, totalPag);
+            const estadoPago = getNormalizedEstadoPago(item.estado_pago, item.precio_total_facturado, totalPag);
             const styleCfg = getEstadoPagoStyle(estadoPago);
 
             return (
@@ -2407,50 +2692,81 @@ export default function VentasScreen() {
                 </View>
 
                 {/* 5. Botones de Acción */}
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleDuplicateVenta(item);
-                    }}
-                    style={{
-                      flex: 1,
-                      backgroundColor: themeColors.primary + '15',
-                      borderColor: themeColors.primary + '40',
-                      borderWidth: 1,
-                      borderRadius: 8,
-                      paddingVertical: 8,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexDirection: 'row',
-                      gap: 4
-                    }}
-                  >
-                    <Ionicons name="copy-outline" size={14} color={themeColors.primary} />
-                    <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 12 }}>Duplicar</Text>
-                  </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 6, overflow: 'visible', zIndex: 10 }}>
+                  <HoverTooltip text={item.cfdi_uuid ? "Ver factura emitida en SAT" : "Facturar venta (CFDI 4.0)"} position="top" style={{ flex: 1 }}>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleFacturarVenta(item);
+                      }}
+                      style={{
+                        width: '100%',
+                        backgroundColor: '#7c3aed15',
+                        borderColor: '#7c3aed40',
+                        borderWidth: 1,
+                        borderRadius: 8,
+                        paddingVertical: 8,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'row',
+                        gap: 4
+                      }}
+                      accessibilityLabel="Facturar esta venta"
+                    >
+                      <Ionicons name="receipt-outline" size={14} color="#7c3aed" />
+                      <Text style={{ color: '#7c3aed', fontWeight: '700', fontSize: 11 }}>Facturar</Text>
+                    </TouchableOpacity>
+                  </HoverTooltip>
 
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleOpenPagoModal(item);
-                    }}
-                    style={{
-                      flex: 1,
-                      backgroundColor: themeColors.success + '15',
-                      borderColor: themeColors.success + '40',
-                      borderWidth: 1,
-                      borderRadius: 8,
-                      paddingVertical: 8,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexDirection: 'row',
-                      gap: 4
-                    }}
-                  >
-                    <Ionicons name="cash-outline" size={14} color={themeColors.success} />
-                    <Text style={{ color: themeColors.success, fontWeight: '700', fontSize: 12 }}>+ Reg. Pago</Text>
-                  </TouchableOpacity>
+                  <HoverTooltip text="Crear una copia de esta venta como nueva" position="top" style={{ flex: 1 }}>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleDuplicateVenta(item);
+                      }}
+                      style={{
+                        width: '100%',
+                        backgroundColor: themeColors.primary + '15',
+                        borderColor: themeColors.primary + '40',
+                        borderWidth: 1,
+                        borderRadius: 8,
+                        paddingVertical: 8,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'row',
+                        gap: 4
+                      }}
+                      accessibilityLabel="Duplicar esta venta como nueva"
+                    >
+                      <Ionicons name="copy-outline" size={14} color={themeColors.primary} />
+                      <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 11 }}>Duplicar</Text>
+                    </TouchableOpacity>
+                  </HoverTooltip>
+
+                  <HoverTooltip text="Registrar o consultar abonos y pagos" position="top" style={{ flex: 1 }}>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleOpenPagoModal(item);
+                      }}
+                      style={{
+                        width: '100%',
+                        backgroundColor: themeColors.success + '15',
+                        borderColor: themeColors.success + '40',
+                        borderWidth: 1,
+                        borderRadius: 8,
+                        paddingVertical: 8,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'row',
+                        gap: 4
+                      }}
+                      accessibilityLabel="Registrar un pago o abono"
+                    >
+                      <Ionicons name="cash-outline" size={14} color={themeColors.success} />
+                      <Text style={{ color: themeColors.success, fontWeight: '700', fontSize: 11 }}>+ Pago</Text>
+                    </TouchableOpacity>
+                  </HoverTooltip>
                 </View>
               </TouchableOpacity>
             );
@@ -2463,7 +2779,7 @@ export default function VentasScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: themeColors.background }]}>
+    <View style={[styles.safeArea, { backgroundColor: themeColors.background }]}>
       <View style={{ flex: 1 }}>
 
 
@@ -2559,6 +2875,9 @@ export default function VentasScreen() {
                 onPress={() => setIsDetailModalVisible(false)}
                 hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
                 style={styles.modalCloseBtn}
+                // @ts-ignore
+                title="Cerrar ventana de detalle"
+                accessibilityLabel="Cerrar ventana de detalle"
               >
                 <Ionicons name="close" size={24} color={themeColors.text} />
               </TouchableOpacity>
@@ -2681,7 +3000,7 @@ export default function VentasScreen() {
                     </Text>
                     {(() => {
                       const totalPag = selectedVentaPagos.reduce((s, p) => s + (Number(p.monto) || 0), 0);
-                      const est = selectedVenta.estado_pago || calcularEstadoPago(selectedVenta.precio_total_facturado, totalPag);
+                      const est = getNormalizedEstadoPago(selectedVenta.estado_pago, selectedVenta.precio_total_facturado, totalPag);
                       const st = getEstadoPagoStyle(est);
                       return (
                         <View style={{ backgroundColor: st.bg, borderColor: st.border, borderWidth: 1, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 12 }}>
@@ -2958,7 +3277,37 @@ export default function VentasScreen() {
                 {/* Lista de Gastos Vinculados */}
                 {selectedVentaGastos.length > 0 && (
                   <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                    <Text style={[styles.modalSectionTitle, { color: themeColors.danger }]}>Gastos Operativos Vinculados ({selectedVentaGastos.length})</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <Text style={[styles.modalSectionTitle, { color: themeColors.danger, marginBottom: 0 }]}>
+                        Gastos Operativos Vinculados ({selectedVentaGastos.length})
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (selectedVenta) {
+                            setIsDetailModalVisible(false);
+                            router.push({
+                              pathname: '/(admin)/gastos',
+                              params: { search: selectedVenta.cliente || selectedVenta.folio || '' }
+                            });
+                          }
+                        }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: themeColors.danger + '15',
+                          paddingVertical: 3,
+                          paddingHorizontal: 8,
+                          borderRadius: BorderRadius.small,
+                          borderWidth: 1,
+                          borderColor: themeColors.danger + '40',
+                        }}
+                      >
+                        <Ionicons name="open-outline" size={13} color={themeColors.danger} />
+                        <Text style={{ color: themeColors.danger, fontSize: 11, fontWeight: '700' }}>Ir a Gastos</Text>
+                      </TouchableOpacity>
+                    </View>
+
                     <View style={{ gap: Spacing.two }}>
                       {selectedVentaGastos.map((gasto, idx) => (
                         <View key={gasto.id || idx} style={[styles.modalPartidaItem, { borderColor: themeColors.border }]}>
@@ -2977,23 +3326,52 @@ export default function VentasScreen() {
                               <Text style={{ color: themeColors.danger, fontSize: 13, fontWeight: '700' }}>
                                 {formatCurrency(Number(gasto.monto) || 0)}
                               </Text>
-                              <TouchableOpacity
-                                onPress={() => handleUnlinkGastoFromVenta(gasto)}
-                                style={{
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  gap: 4,
-                                  backgroundColor: themeColors.danger + '15',
-                                  paddingVertical: 3,
-                                  paddingHorizontal: 8,
-                                  borderRadius: BorderRadius.small,
-                                  borderWidth: 1,
-                                  borderColor: themeColors.danger + '40',
-                                }}
-                              >
-                                <Ionicons name="link-outline" size={13} color={themeColors.danger} />
-                                <Text style={{ color: themeColors.danger, fontSize: 11, fontWeight: '700' }}>Desvincular</Text>
-                              </TouchableOpacity>
+                              <View style={{ flexDirection: 'row', gap: 6 }}>
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    setIsDetailModalVisible(false);
+                                    router.push({
+                                      pathname: '/(admin)/gastos',
+                                      params: {
+                                        gastoId: gasto.id,
+                                        search: GastoHelper.getProveedor(gasto) || gasto.justificacion || ''
+                                      }
+                                    });
+                                  }}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    backgroundColor: themeColors.accent + '15',
+                                    paddingVertical: 3,
+                                    paddingHorizontal: 8,
+                                    borderRadius: BorderRadius.small,
+                                    borderWidth: 1,
+                                    borderColor: themeColors.accent + '40',
+                                  }}
+                                >
+                                  <Ionicons name="search-outline" size={13} color={themeColors.accent} />
+                                  <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '700' }}>Ver Gasto</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  onPress={() => handleUnlinkGastoFromVenta(gasto)}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    backgroundColor: themeColors.danger + '15',
+                                    paddingVertical: 3,
+                                    paddingHorizontal: 8,
+                                    borderRadius: BorderRadius.small,
+                                    borderWidth: 1,
+                                    borderColor: themeColors.danger + '40',
+                                  }}
+                                >
+                                  <Ionicons name="link-outline" size={13} color={themeColors.danger} />
+                                  <Text style={{ color: themeColors.danger, fontSize: 11, fontWeight: '700' }}>Desvincular</Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
                           </View>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
@@ -3020,8 +3398,26 @@ export default function VentasScreen() {
 
             {/* Acciones del Modal */}
             <View style={[styles.modalFooter, { borderTopColor: themeColors.border, flexDirection: 'column', gap: 12 }]}>
-              {/* FILA 1: Documentos y Descargas */}
+              {/* FILA 1: Documentos, Facturación y Pagos */}
               <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (selectedVenta) {
+                      setIsDetailModalVisible(false);
+                      handleFacturarVenta(selectedVenta, selectedVentaPartidas);
+                    }
+                  }}
+                  style={[styles.modalActionBtn, { backgroundColor: '#7c3aed15', borderColor: '#7c3aed' }]}
+                  // @ts-ignore
+                  title={selectedVenta?.cfdi_uuid ? "Ver Factura Emitida en SAT" : "Emitir Factura CFDI 4.0 desde esta venta"}
+                  accessibilityLabel="Facturar Venta"
+                >
+                  <Ionicons name="receipt-outline" size={18} color="#7c3aed" />
+                  <Text style={[styles.modalActionText, { color: '#7c3aed', fontSize: 12 }]}>
+                    {selectedVenta?.cfdi_uuid ? 'Factura SAT' : 'Facturar Venta'}
+                  </Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   onPress={async () => {
                     if (selectedVenta) {
@@ -3082,6 +3478,9 @@ export default function VentasScreen() {
                     }
                   }}
                   style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
+                  // @ts-ignore
+                  title="Generar y descargar documento de venta en PDF"
+                  accessibilityLabel="Descargar PDF de Venta"
                 >
                   <Ionicons name="document-outline" size={18} color={themeColors.primary} />
                   <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>PDF Venta</Text>
@@ -3096,6 +3495,9 @@ export default function VentasScreen() {
                   }}
                   disabled={isSubmitting}
                   style={[styles.modalActionBtn, { backgroundColor: themeColors.success + '15', borderColor: themeColors.success }]}
+                  // @ts-ignore
+                  title="Registrar un nuevo abono o pago a esta venta"
+                  accessibilityLabel="Registrar Pago"
                 >
                   <Ionicons name="cash-outline" size={18} color={themeColors.success} />
                   <Text style={[styles.modalActionText, { color: themeColors.success, fontSize: 12 }]}>Registrar Pago</Text>
@@ -3108,6 +3510,9 @@ export default function VentasScreen() {
                   onPress={handleEditVenta}
                   disabled={isSubmitting}
                   style={[styles.modalActionBtn, { backgroundColor: themeColors.accent + '15', borderColor: themeColors.accent }]}
+                  // @ts-ignore
+                  title="Editar datos, partidas o costos de la venta"
+                  accessibilityLabel="Editar Venta"
                 >
                   <Ionicons name="create-outline" size={18} color={themeColors.accent} />
                   <Text style={[styles.modalActionText, { color: themeColors.accent, fontSize: 12 }]}>Editar</Text>
@@ -3117,6 +3522,9 @@ export default function VentasScreen() {
                   onPress={() => handleDuplicateVenta()}
                   disabled={isSubmitting}
                   style={[styles.modalActionBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary }]}
+                  // @ts-ignore
+                  title="Duplicar esta venta como nueva en el formulario"
+                  accessibilityLabel="Duplicar Venta"
                 >
                   <Ionicons name="copy-outline" size={18} color={themeColors.primary} />
                   <Text style={[styles.modalActionText, { color: themeColors.primary, fontSize: 12 }]}>Duplicar</Text>
@@ -3126,6 +3534,9 @@ export default function VentasScreen() {
                   onPress={handleDeleteVenta}
                   disabled={isSubmitting}
                   style={[styles.modalActionBtn, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger }]}
+                  // @ts-ignore
+                  title="Eliminar permanentemente esta venta del sistema"
+                  accessibilityLabel="Eliminar Venta"
                 >
                   <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
                   <Text style={[styles.modalActionText, { color: themeColors.danger, fontSize: 12 }]}>Eliminar</Text>
@@ -3174,7 +3585,7 @@ export default function VentasScreen() {
                     </View>
                     {(() => {
                       const totalPag = selectedVentaPagos.reduce((s, p) => s + (Number(p.monto) || 0), 0);
-                      const est = selectedVenta.estado_pago || calcularEstadoPago(selectedVenta.precio_total_facturado, totalPag);
+                      const est = getNormalizedEstadoPago(selectedVenta.estado_pago, selectedVenta.precio_total_facturado, totalPag);
                       const st = getEstadoPagoStyle(est);
                       return (
                         <View style={{ backgroundColor: st.bg, borderColor: st.border, borderWidth: 1, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 12 }}>
@@ -3410,7 +3821,7 @@ export default function VentasScreen() {
 
 
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -4027,6 +4438,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
+    overflow: 'visible',
   },
   tableCell: {
     fontSize: 13,
@@ -4039,5 +4451,56 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  customTooltipBox: {
+    position: 'absolute',
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    zIndex: 99999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 8,
+    minWidth: 80,
+    maxWidth: 240,
+    ...Platform.select({
+      web: {
+        pointerEvents: 'none',
+        whiteSpace: 'nowrap',
+        userSelect: 'none',
+        backdropFilter: 'blur(4px)',
+      } as any,
+    }),
+  },
+  customTooltipTop: {
+    bottom: '100%',
+    marginBottom: 6,
+    alignSelf: 'center',
+  },
+  customTooltipBottom: {
+    top: '100%',
+    marginTop: 6,
+    alignSelf: 'center',
+  },
+  customTooltipLeft: {
+    right: '100%',
+    marginRight: 6,
+    alignSelf: 'center',
+  },
+  customTooltipRight: {
+    left: '100%',
+    marginLeft: 6,
+    alignSelf: 'center',
+  },
+  customTooltipText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

@@ -166,7 +166,7 @@ export default function AdminVehiculosScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={styles.header}>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
           <View style={{ marginLeft: Spacing.two }}>
@@ -504,7 +504,7 @@ export default function AdminVehiculosScreen() {
           setActivePreviewUrl(null);
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

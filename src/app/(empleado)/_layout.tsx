@@ -8,19 +8,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthService } from '@/services/supabase';
 import DevToolsFAB from '@/components/DevToolsFAB';
+import { HeaderActionProvider, useHeaderAction } from '@/context/HeaderActionContext';
 
-export default function EmpleadoLayout() {
+function EmpleadoLayoutContent() {
   const { user, setUser } = useAuth();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const pathname = usePathname();
   const router = useRouter();
+  const { headerRight, setHeaderRight } = useHeaderAction();
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isHoveringHeader, setIsHoveringHeader] = useState(false);
 
   useEffect(() => {
     setIsHoveringHeader(false);
+    setHeaderRight(null);
   }, [pathname]);
 
   if (!user || (user.rol !== 'EMPLEADO' && user.rol !== 'DEV')) {
@@ -35,14 +38,29 @@ export default function EmpleadoLayout() {
     const parts = pathname.split('/');
     let lastPart = parts[parts.length - 1];
 
-    // Si el último segmento es un UUID (detalle), usar el segmento anterior
+    // Si el último segmento es un UUID (detalle), verificar segmento anterior
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (uuidRegex.test(lastPart) && parts.length > 1) {
+    const isUuid = uuidRegex.test(lastPart);
+    if (isUuid && parts.length > 1) {
       lastPart = parts[parts.length - 2];
     }
 
     if (!lastPart || lastPart === 'gastos' || lastPart === 'dashboard') return 'Gastos';
+    if (pathname.includes('/tareas/nueva')) return 'Nueva Tarea';
+    if (pathname.includes('/tareas/') && isUuid) return 'Detalle de Tarea';
+    if (lastPart === 'tareas') return 'Tareas';
+    if (lastPart === 'formulario') return 'Registrar Gasto';
+    if (lastPart === 'editar-gasto') return 'Editar Gasto';
+    if (lastPart === 'agregar-evidencia') return 'Nueva Evidencia';
+    if (lastPart === 'evidencia') return 'Evidencias';
+    if (lastPart === 'retiro-material') return 'Retiro de Material';
+    if (lastPart === 'devoluciones') return 'Devoluciones';
+    if (lastPart === 'vehiculos') return 'Vehículos';
+    if (lastPart === 'herramientas') return 'Herramientas';
+    if (lastPart === 'documentos') return 'Documentos';
     if (lastPart === 'chat-ia') return 'Chat IA';
+    if (lastPart === 'asistencia') return 'Asistencia';
+    if (lastPart === 'perfil') return 'Mi Perfil';
     return lastPart.charAt(0).toUpperCase() + lastPart.slice(1).replace(/-/g, ' ');
   };
 
@@ -50,7 +68,7 @@ export default function EmpleadoLayout() {
     { route: '/(empleado)/gastos', icon: 'cash-outline', color: '#feca57', name: 'Gastos' },
     { route: '/(empleado)/asistencia', icon: 'time-outline', color: '#1dd1a1', name: 'Asistencia' },
     { route: '/(empleado)/evidencia', icon: 'briefcase-outline', color: '#ff5252', name: 'Evidencias' },
-    { route: '/(empleado)/retiro-material', icon: 'cart-outline', color: '#ff7f50', name: 'Retiro Material' },
+    { route: '/(empleado)/retiro-material', icon: 'cart-outline', color: '#ff7f50', name: 'Retiro de Material' },
     { route: '/(empleado)/devoluciones', icon: 'return-up-back-outline', color: '#2ed573', name: 'Devoluciones' },
     { route: '/(empleado)/vehiculos', icon: 'car-outline', color: '#ff9ff3', name: 'Vehículos' },
     { route: '/(empleado)/herramientas', icon: 'build-outline', color: '#00cec9', name: 'Herramientas' },
@@ -98,7 +116,15 @@ export default function EmpleadoLayout() {
             style={styles.headerTitleContainer}
             onPress={() => {
               setIsMenuOpen(false);
-              router.replace('/(empleado)/gastos');
+              if (pathname.includes('agregar-evidencia')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(empleado)/evidencia');
+              } else if (pathname.includes('formulario') || pathname.includes('editar-gasto')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(empleado)/gastos');
+              } else {
+                router.replace('/(empleado)/gastos');
+              }
             }}
             // @ts-ignore
             onMouseEnter={() => setIsHoveringHeader(true)}
@@ -109,13 +135,16 @@ export default function EmpleadoLayout() {
             {isHoveringHeader || Platform.OS !== 'web' ? (
               <Ionicons name="arrow-back" size={24} color={themeColors.text} style={{ marginRight: 8 }} />
             ) : null}
-            <Text style={[styles.headerTitle, { color: themeColors.text }]}>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
               {isHoveringHeader && Platform.OS === 'web' ? 'Volver al Inicio' : getModuleName()}
             </Text>
           </TouchableOpacity>
         )}
 
         <View style={{ flex: 1 }} />
+
+        {/* Botón de acción personalizado (p. ej. Carrito de retiro de material) */}
+        {headerRight}
 
         {/* Botón de Menú Desplegable */}
         <TouchableOpacity 
@@ -173,6 +202,14 @@ export default function EmpleadoLayout() {
 
       <DevToolsFAB />
     </SafeAreaView>
+  );
+}
+
+export default function EmpleadoLayout() {
+  return (
+    <HeaderActionProvider>
+      <EmpleadoLayoutContent />
+    </HeaderActionProvider>
   );
 }
 

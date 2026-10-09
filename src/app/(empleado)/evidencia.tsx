@@ -169,7 +169,7 @@ export default function MisEvidenciasHistorial() {
   }, [themeColors]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: themeColors.background }} edges={['bottom', 'left', 'right']}>
+    <View style={{ flex: 1, backgroundColor: themeColors.background }}>
       {!isLoading && (
         <View style={styles.topHeader}>
           <Text style={[styles.pageTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
@@ -302,6 +302,23 @@ export default function MisEvidenciasHistorial() {
                   </View>
 
                   {(() => {
+                    let colabs = (selectedEvidencia as any).colaboradores;
+                    if (typeof colabs === 'string') {
+                      try { colabs = JSON.parse(colabs); } catch {}
+                    }
+                    if (Array.isArray(colabs) && colabs.length > 0) {
+                      const colabNames = colabs.map((c: any) => typeof c === 'string' ? c : c?.nombre).filter(Boolean).join(', ');
+                      return (
+                        <View style={styles.detailItem}>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Colaboradores / Cuadrilla</Text>
+                          <Text style={[styles.detailValue, { color: themeColors.text }]}>👥 {colabNames}</Text>
+                        </View>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  {(() => {
                     let listTrabajos = [];
                     let isJson = false;
                     try {
@@ -429,7 +446,7 @@ export default function MisEvidenciasHistorial() {
       >
         <Ionicons name="add" size={32} color="#FFFFFF" />
       </TouchableOpacity>
-    </SafeAreaView>
+    </View>
   );
 }
 

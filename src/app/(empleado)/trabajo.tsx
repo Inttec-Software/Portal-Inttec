@@ -194,7 +194,7 @@ export default function MiTrabajoScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -490,6 +490,23 @@ export default function MiTrabajoScreen() {
                   </View>
 
                   {(() => {
+                    let colabs = (selectedEvidencia as any).colaboradores;
+                    if (typeof colabs === 'string') {
+                      try { colabs = JSON.parse(colabs); } catch {}
+                    }
+                    if (Array.isArray(colabs) && colabs.length > 0) {
+                      const colabNames = colabs.map((c: any) => typeof c === 'string' ? c : c?.nombre).filter(Boolean).join(', ');
+                      return (
+                        <View style={styles.detailItem}>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Colaboradores / Cuadrilla</Text>
+                          <Text style={[styles.detailValue, { color: themeColors.text }]}>👥 {colabNames}</Text>
+                        </View>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  {(() => {
                     let listTrabajos: any[] = [];
                     let isJson = false;
                     try {
@@ -670,7 +687,7 @@ export default function MiTrabajoScreen() {
         imageUrl={selectedPhoto}
         onClose={() => setViewerVisible(false)}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

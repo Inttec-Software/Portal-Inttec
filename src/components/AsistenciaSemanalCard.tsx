@@ -12,6 +12,9 @@ import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Asistencia } from '@/services/supabase';
+import { useAuth } from '@/context/AuthContext';
+import PeriodoPickerModal from '@/components/PeriodoPickerModal';
+import EditarTurnoModal from '@/components/EditarTurnoModal';
 import {
   WeekRange,
   TurnoAsistencia,
@@ -53,6 +56,17 @@ export default function AsistenciaSemanalCard({
 }: AsistenciaSemanalCardProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { user } = useAuth();
+  const canViewOvertime = user?.rol === 'ADMIN' || user?.rol === 'DEV';
+  const isDev = user?.rol === 'DEV';
+
+  // Estado del modal de selección de período manual
+  const [periodoModalVisible, setPeriodoModalVisible] = useState(false);
+
+  // Estado del modal de edición de horas de turno (DEV ONLY)
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [turnoToEdit, setTurnoToEdit] = useState<TurnoAsistencia | null>(null);
+  const [fechaToEdit, setFechaToEdit] = useState<string>('');
 
   // Estados de días expandidos (por defecto expandir días que tengan turnos)
   const [expandedDays, setExpandedDays] = useState<{ [dateStr: string]: boolean }>({});
@@ -103,12 +117,17 @@ export default function AsistenciaSemanalCard({
             <Ionicons name="chevron-back" size={20} color={themeColors.text} />
           </TouchableOpacity>
 
-          <View style={styles.weekLabelContainer}>
+          <TouchableOpacity
+            style={[styles.weekLabelContainer, { cursor: 'pointer' } as any]}
+            onPress={() => setPeriodoModalVisible(true)}
+            activeOpacity={0.7}
+          >
             <View style={styles.weekTitleRow}>
-              <Ionicons name="calendar-outline" size={15} color={themeColors.accent} style={{ marginRight: 5 }} />
+              <Ionicons name="calendar" size={15} color={themeColors.accent} style={{ marginRight: 5 }} />
               <Text style={[styles.weekTitleText, { color: themeColors.text }]} numberOfLines={1}>
                 Semana {semanaData.range.days[0].shortDate} - {semanaData.range.days[6].shortDate}
               </Text>
+              <Ionicons name="chevron-down" size={13} color={themeColors.textSecondary} style={{ marginLeft: 3 }} />
             </View>
             <Text style={[styles.weekSubtitleText, { color: themeColors.textSecondary }]}>
               {semanaData.range.mondayDate.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }).toUpperCase()}
@@ -118,7 +137,7 @@ export default function AsistenciaSemanalCard({
                 <Text style={[styles.currentWeekBadgeText, { color: themeColors.accent }]}>Semana Actual</Text>
               </View>
             )}
-          </View>
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.navBtn, { backgroundColor: themeColors.backgroundSelected }]}
@@ -140,41 +159,80 @@ export default function AsistenciaSemanalCard({
         )}
       </View>
 
+      {/* Modal Selector de Período */}
+      <PeriodoPickerModal
+        visible={periodoModalVisible}
+        onClose={() => setPeriodoModalVisible(false)}
+        selectedMonday={selectedMonday}
+        onSelectMonday={(newMonday) => onChangeWeek(newMonday)}
+      />
+
       {/* 2. Tarjeta Resumen de Horas de la Semana */}
       <View style={[styles.summaryCard, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
         <View style={styles.summaryMetricCol}>
           <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TOTAL HORAS</Text>
           <View style={styles.hoursValueRow}>
-            <Ionicons name="time" size={17} color={themeColors.success} style={{ marginRight: 4 }} />
-            <Text style={[styles.summaryHoursText, { color: themeColors.success }]}>
+            <Ionicons name="time" size={16} color={themeColors.text} style={{ marginRight: 4 }} />
+            <Text style={[styles.summaryHoursText, { color: themeColors.text }]}>
               {semanaData.totalHorasSemanaStr}
             </Text>
           </View>
         </View>
+
+        {canViewOvertime && (
+          <>
+            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
+
+            <View style={styles.summaryMetricCol}>
+              <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>REGULARES (8-6)</Text>
+              <View style={styles.hoursValueRow}>
+                <Ionicons name="business-outline" size={14} color={themeColors.success} style={{ marginRight: 4 }} />
+                <Text style={[styles.summarySecondaryText, { color: themeColors.success, fontWeight: '800' }]}>
+                  {semanaData.totalHorasRegularesStr}
+                </Text>
+              </View>
+            </View>
+
+            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
+
+            <View style={styles.summaryMetricCol}>
+              <Text style={[styles.summaryMetricLabel, { color: semanaData.totalMinutosExtra > 0 ? '#ea580c' : themeColors.textSecondary }]}>HORAS EXTRAS</Text>
+              <View style={styles.hoursValueRow}>
+                <Ionicons name="flame" size={15} color={semanaData.totalMinutosExtra > 0 ? '#ea580c' : themeColors.textSecondary} style={{ marginRight: 4 }} />
+                <Text style={[styles.summaryHoursText, { color: semanaData.totalMinutosExtra > 0 ? '#ea580c' : themeColors.textSecondary }]}>
+                  {semanaData.totalHorasExtraStr}
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
 
         <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
 
         <View style={styles.summaryMetricCol}>
           <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>DÍAS LAB.</Text>
           <View style={styles.hoursValueRow}>
-            <Ionicons name="briefcase-outline" size={15} color={themeColors.accent} style={{ marginRight: 4 }} />
+            <Ionicons name="briefcase-outline" size={14} color={themeColors.accent} style={{ marginRight: 4 }} />
             <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
               {semanaData.diasLaborados} / 7
             </Text>
           </View>
         </View>
 
-        <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
-
-        <View style={styles.summaryMetricCol}>
-          <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TURNOS</Text>
-          <View style={styles.hoursValueRow}>
-            <Ionicons name="layers-outline" size={15} color={themeColors.warning} style={{ marginRight: 4 }} />
-            <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
-              {semanaData.turnosTotales}
-            </Text>
-          </View>
-        </View>
+        {!canViewOvertime && (
+          <>
+            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
+            <View style={styles.summaryMetricCol}>
+              <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TURNOS</Text>
+              <View style={styles.hoursValueRow}>
+                <Ionicons name="layers-outline" size={14} color={themeColors.warning} style={{ marginRight: 4 }} />
+                <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
+                  {semanaData.turnosTotales}
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
       </View>
 
       {isLoading ? (
@@ -237,6 +295,15 @@ export default function AsistenciaSemanalCard({
                 </View>
 
                 <View style={styles.dayInfoRight}>
+                  {canViewOvertime && dia.minutosExtra > 0 && (
+                    <View style={[styles.extraHoursBadge, { backgroundColor: '#ea580c18', borderColor: '#ea580c50' }]}>
+                      <Ionicons name="flame" size={11} color="#ea580c" style={{ marginRight: 2 }} />
+                      <Text style={[styles.extraHoursText, { color: '#ea580c' }]}>
+                        +{dia.horasExtraStr} extra
+                      </Text>
+                    </View>
+                  )}
+
                   <View
                     style={[
                       styles.dayHoursBadge,
@@ -304,30 +371,47 @@ export default function AsistenciaSemanalCard({
                           <View style={styles.turnoIndexBadge}>
                             <Text style={styles.turnoIndexText}>Turno #{turno.index}</Text>
                           </View>
-                          <View
-                            style={[
-                              styles.turnoDuracionBadge,
-                              {
-                                backgroundColor: turno.enCurso
-                                  ? themeColors.warning + '20'
-                                  : themeColors.success + '20',
-                              },
-                            ]}
-                          >
-                            <Ionicons
-                              name={turno.enCurso ? 'hourglass-outline' : 'stopwatch-outline'}
-                              size={12}
-                              color={turno.enCurso ? themeColors.warning : themeColors.success}
-                              style={{ marginRight: 4 }}
-                            />
-                            <Text
+                          <View style={styles.turnoHeaderRight}>
+                            {isDev && (
+                              <TouchableOpacity
+                                style={[styles.devEditBtn, { backgroundColor: '#6366f115', borderColor: '#6366f140' }]}
+                                onPress={() => {
+                                  setTurnoToEdit(turno);
+                                  setFechaToEdit(dia.dateStr);
+                                  setEditModalVisible(true);
+                                }}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons name="pencil" size={11} color="#6366f1" style={{ marginRight: 3 }} />
+                                <Text style={styles.devEditText}>Editar (DEV)</Text>
+                              </TouchableOpacity>
+                            )}
+
+                            <View
                               style={[
-                                styles.turnoDuracionText,
-                                { color: turno.enCurso ? themeColors.warning : themeColors.success },
+                                styles.turnoDuracionBadge,
+                                {
+                                  backgroundColor: turno.enCurso
+                                    ? themeColors.warning + '20'
+                                    : themeColors.success + '20',
+                                },
                               ]}
                             >
-                              {turno.duracionStr}
-                            </Text>
+                              <Ionicons
+                                name={turno.enCurso ? 'hourglass-outline' : 'stopwatch-outline'}
+                                size={12}
+                                color={turno.enCurso ? themeColors.warning : themeColors.success}
+                                style={{ marginRight: 4 }}
+                              />
+                              <Text
+                                style={[
+                                  styles.turnoDuracionText,
+                                  { color: turno.enCurso ? themeColors.warning : themeColors.success },
+                                ]}
+                              >
+                                {turno.duracionStr}
+                              </Text>
+                            </View>
                           </View>
                         </View>
 
@@ -471,6 +555,21 @@ export default function AsistenciaSemanalCard({
           );
         })}
       </View>
+
+      {/* Modal de Edición de Turnos (Exclusivo DEV) */}
+      <EditarTurnoModal
+        visible={editModalVisible}
+        onClose={() => {
+          setEditModalVisible(false);
+          setTurnoToEdit(null);
+        }}
+        turno={turnoToEdit}
+        fecha={fechaToEdit}
+        empleadoNombre={empleadoNombre}
+        onSaveSuccess={() => {
+          onRefresh?.();
+        }}
+      />
     </View>
   );
 }
@@ -721,6 +820,24 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  turnoHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  devEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  devEditText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#6366f1',
+  },
   turnoDuracionBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -799,5 +916,29 @@ const styles = StyleSheet.create({
   turnoPendingText: {
     fontSize: 9,
     fontWeight: '600',
+  },
+  extraHoursBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    marginRight: 6,
+  },
+  extraHoursText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  turnoExtraBadge: {
+    marginTop: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  turnoExtraText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
 });

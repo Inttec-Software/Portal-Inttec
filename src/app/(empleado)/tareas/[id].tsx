@@ -20,6 +20,7 @@ import { supabase } from '@/services/supabase';
 import { TareasService } from '@/services/tareasService';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import EditarTareaModal from '@/components/EditarTareaModal';
+import { useHeaderAction } from '@/context/HeaderActionContext';
 
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -27,6 +28,7 @@ export default function TaskDetailScreen() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { user } = useAuth();
+  const { setHeaderRight } = useHeaderAction();
 
   const [loading, setLoading] = useState(true);
   const [task, setTask] = useState<any>(null);
@@ -171,6 +173,36 @@ export default function TaskDetailScreen() {
     return '#e74c3c';
   };
 
+  useEffect(() => {
+    if (!task) {
+      setHeaderRight(null);
+      return;
+    }
+    setHeaderRight(
+      <TouchableOpacity
+        onPress={() => setShowEditModal(true)}
+        activeOpacity={0.7}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 5,
+          backgroundColor: themeColors.accent,
+          paddingHorizontal: 10,
+          paddingVertical: 6,
+          borderRadius: 8,
+          marginRight: 4
+        }}
+      >
+        <Ionicons name="create-outline" size={15} color="#fff" />
+        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Editar</Text>
+      </TouchableOpacity>
+    );
+
+    return () => {
+      setHeaderRight(null);
+    };
+  }, [task, themeColors]);
+
   if (loading) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: themeColors.background }]}>
@@ -187,30 +219,7 @@ export default function TaskDetailScreen() {
                       (task.corresponsables && task.corresponsables.some((c: any) => c.usuario_id === user?.id));
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['bottom', 'left', 'right']}>
-      <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: themeColors.text }]}>Detalle de Tarea</Text>
-        <TouchableOpacity
-          onPress={() => setShowEditModal(true)}
-          activeOpacity={0.7}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 5,
-            backgroundColor: themeColors.accent,
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-            borderRadius: 8
-          }}
-        >
-          <Ionicons name="create-outline" size={16} color="#fff" />
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Editar Tarea</Text>
-        </TouchableOpacity>
-      </View>
-
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Task Info Card */}
         <View style={[styles.card, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
@@ -452,7 +461,7 @@ export default function TaskDetailScreen() {
         onSuccess={fetchTaskDetails}
         task={task}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

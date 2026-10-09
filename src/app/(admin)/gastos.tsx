@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName } from '@/services/supabase';
@@ -55,6 +55,7 @@ const TIPOS_PROYECTO = ['Servicio', 'Proyecto', 'Venta', 'Operativo'];
 
 export default function AdminGastosScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const { width: windowWidth } = useWindowDimensions();
   const isMobile = windowWidth < 600;
   const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
@@ -407,6 +408,35 @@ export default function AdminGastosScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company, env]);
 
+  // Manejar navegación directa a un gasto específico o búsqueda desde Ventas u otros módulos
+  useEffect(() => {
+    if (params.search && typeof params.search === 'string') {
+      setSearchQuery(params.search);
+      setActiveTab('historial');
+    }
+    if (params.gastoId && typeof params.gastoId === 'string') {
+      setActiveTab('historial');
+      const gId = params.gastoId;
+      const found = gastos.find(g => String(g.id) === String(gId));
+      if (found) {
+        setSelectedGasto(found);
+        setReviewModalVisible(true);
+      } else {
+        (async () => {
+          try {
+            const { data } = await supabase.from('gastos').select('*').eq('id', gId).single();
+            if (data) {
+              setSelectedGasto(data);
+              setReviewModalVisible(true);
+            }
+          } catch (err) {
+            console.warn('Error loading single gasto for detail:', err);
+          }
+        })();
+      }
+    }
+  }, [params.search, params.gastoId, gastos]);
+
 
 
   const handleLogout = async () => {
@@ -520,13 +550,32 @@ export default function AdminGastosScreen() {
   const loadSalesForLinking = async () => {
     setIsLoadingSalesForLinking(true);
     try {
-      const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/admin/ventas`, { headers });
-      if (!res.ok) throw new Error('Error al cargar ventas para vinculación');
-      const data = await res.json();
-      setSalesForLinking(data.ventas || []);
-      setClientesCatalog(data.clientes || []);
-      setSucursalesCatalog(data.sucursales || []);
+      let loadedVentas: any[] = [];
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/reportes/admin/ventas?limit=5000`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.ventas) && data.ventas.length > 0) {
+            loadedVentas = data.ventas;
+            if (data.clientes) setClientesCatalog(data.clientes);
+            if (data.sucursales) setSucursalesCatalog(data.sucursales);
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Backend ventas load failed, using Supabase fallback:', apiErr);
+      }
+
+      // Fallback a Supabase para cargar TODO el registro histórico de ventas
+      if (loadedVentas.length === 0) {
+        const { data: dbVentas } = await supabase
+          .from('ventas')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (dbVentas) loadedVentas = dbVentas;
+      }
+
+      setSalesForLinking(loadedVentas);
     } catch (err) {
       logger.error('Error loading sales for linking:', err);
     } finally {
@@ -2192,7 +2241,7 @@ export default function AdminGastosScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={{ flex: 1 }}>
 
       {/* Contents based on tab */}
@@ -6035,6 +6084,11 @@ export default function AdminGastosScreen() {
                   asistencias={asistencias}
                   empleadoNombre={asistenciaEmpleado?.nombre || 'Empleado'}
                   isLoading={isLoadingAsistencias}
+                  onRefresh={() => {
+                    if (asistenciaEmpleado) {
+                      handleOpenAsistencia(asistenciaEmpleado, asistenciaSelectedMonday);
+                    }
+                  }}
                   selectedMonday={asistenciaSelectedMonday}
                   onChangeWeek={(newMonday) => {
                     setAsistenciaSelectedMonday(newMonday);
@@ -6075,7 +6129,7 @@ export default function AdminGastosScreen() {
       />
       
     </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

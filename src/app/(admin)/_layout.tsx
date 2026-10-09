@@ -8,19 +8,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DevToolsFAB from '@/components/DevToolsFAB';
 import { AuthService } from '@/services/supabase';
+import { HeaderActionProvider, useHeaderAction } from '@/context/HeaderActionContext';
 
-export default function AdminLayout() {
+function AdminLayoutContent() {
   const { user, setUser } = useAuth();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const pathname = usePathname();
   const router = useRouter();
+  const { headerRight, setHeaderRight } = useHeaderAction();
 
   const [isHoveringHeader, setIsHoveringHeader] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   useEffect(() => {
     setIsHoveringHeader(false);
+    setHeaderRight(null);
   }, [pathname]);
 
   if (!user || (user.rol !== 'ADMIN' && user.rol !== 'DEV')) {
@@ -45,6 +48,16 @@ export default function AdminLayout() {
     }
 
     if (!lastPart || lastPart === 'dashboard') return 'Inicio';
+    if (lastPart === 'ventas') return 'Ventas';
+    if (lastPart === 'cotizaciones') return 'Cotizaciones';
+    if (lastPart === 'empleados') return 'Empleados';
+    if (lastPart === 'vehiculos') return 'Vehículos';
+    if (lastPart === 'inventario') return 'Inventario';
+    if (lastPart === 'facturacion') return 'Facturación CFDI';
+    if (lastPart === 'facturas-recibidas') return 'Facturas Recibidas';
+    if (lastPart === 'asistencia') return 'Asistencia';
+    if (lastPart === 'reportes') return 'Reportes';
+    if (lastPart === 'auditoria-tarjeta') return 'Auditoría';
     return lastPart.charAt(0).toUpperCase() + lastPart.slice(1).replace(/-/g, ' ');
   };
 
@@ -101,9 +114,20 @@ export default function AdminLayout() {
             style={styles.headerTitleContainer}
             onPress={() => {
               setIsMenuOpen(false);
-              if (pathname.includes('editar-gasto') || pathname.includes('formulario') || pathname.includes('nueva-cotizacion')) {
-                router.back();
+              if (pathname.includes('nueva-cotizacion')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/cotizaciones');
+              } else if (pathname.includes('editar-gasto') || pathname.includes('formulario')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/gastos');
+              } else if (pathname.includes('nuevo-documento') || pathname.includes('editar-documento')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/documentos');
+              } else if (pathname.includes('agregar-evidencia') || pathname.includes('editar-evidencia')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/evidencias');
               } else {
+                // En cualquier pantalla de módulo principal (cotizaciones, gastos, inventario, etc.), volver directamente al Inicio
                 router.replace('/(admin)/dashboard');
               }
             }}
@@ -116,7 +140,7 @@ export default function AdminLayout() {
             {isHoveringHeader || Platform.OS !== 'web' ? (
               <Ionicons name="arrow-back" size={24} color={themeColors.text} style={{ marginRight: 8 }} />
             ) : null}
-            <Text style={[styles.headerTitle, { color: themeColors.text }]}>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
               {isHoveringHeader && Platform.OS === 'web' ? 'Volver al Inicio' : getModuleName()}
             </Text>
           </TouchableOpacity>
@@ -136,6 +160,9 @@ export default function AdminLayout() {
               <Ionicons name="ticket-outline" size={26} color={themeColors.text} />
             </TouchableOpacity>
           )}
+
+          {/* Botón de acción personalizado por pantalla */}
+          {headerRight}
 
           {/* Botón de Menú Desplegable */}
           <TouchableOpacity 
@@ -208,6 +235,14 @@ export default function AdminLayout() {
 
       <DevToolsFAB />
     </SafeAreaView>
+  );
+}
+
+export default function AdminLayout() {
+  return (
+    <HeaderActionProvider>
+      <AdminLayoutContent />
+    </HeaderActionProvider>
   );
 }
 

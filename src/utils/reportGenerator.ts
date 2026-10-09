@@ -1279,6 +1279,8 @@ export const ReportGenerator = {
     );
 
     let totalMinutosEmpresa = 0;
+    let totalMinutosRegularesEmpresa = 0;
+    let totalMinutosExtrasEmpresa = 0;
     let totalTurnosEmpresa = 0;
     let empleadosConRegistro = 0;
 
@@ -1291,6 +1293,8 @@ export const ReportGenerator = {
       if (semanaData.turnosTotales > 0) {
         empleadosConRegistro++;
         totalMinutosEmpresa += semanaData.totalMinutosSemana;
+        totalMinutosRegularesEmpresa += semanaData.totalMinutosRegulares;
+        totalMinutosExtrasEmpresa += semanaData.totalMinutosExtra;
         totalTurnosEmpresa += semanaData.turnosTotales;
       }
 
@@ -1328,8 +1332,9 @@ export const ReportGenerator = {
                   </span>
                   ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
                 </td>
-                <td style="text-align: right; font-weight: bold; color: ${turno.enCurso ? '#d97706' : '#16a34a'};">
-                  ${turno.duracionStr}
+                <td style="text-align: right; font-weight: bold;">
+                  <span style="color: ${turno.enCurso ? '#d97706' : '#16a34a'};">${turno.duracionStr}</span>
+                  ${turno.minutosExtra > 0 ? `<div style="font-size: 8.5px; color: #ea580c; font-weight: bold; margin-top: 2px;">+${turno.horasExtraStr} extra</div>` : ''}
                 </td>
               </tr>
             `;
@@ -1345,10 +1350,18 @@ export const ReportGenerator = {
               <span style="margin-left: 8px; font-size: 10px; background-color: #e2e8f0; color: #475569; padding: 2px 6px; border-radius: 4px;">${emp.rol || 'EMPLEADO'}</span>
               ${emp.sucursal ? `<span style="margin-left: 6px; font-size: 10px; color: #64748b;">(${emp.sucursal})</span>` : ''}
             </div>
-            <div style="text-align: right;">
-              <span style="font-size: 10px; color: #64748b; margin-right: 8px;">Días: <b>${semanaData.diasLaborados}/7</b></span>
-              <span style="background-color: #dcfce7; color: #15803d; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 12px;">
-                ⏱ ${semanaData.totalHorasSemanaStr}
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="font-size: 10px; color: #64748b;">Días: <b>${semanaData.diasLaborados}/7</b></span>
+              <span style="background-color: #dcfce7; color: #15803d; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
+                Regulares: ${semanaData.totalHorasRegularesStr}
+              </span>
+              ${semanaData.totalMinutosExtra > 0 ? `
+                <span style="background-color: #ffedd5; color: #c2410c; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
+                  🔥 Extras: +${semanaData.totalHorasExtraStr}
+                </span>
+              ` : ''}
+              <span style="background-color: #f1f5f9; color: #0f172a; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 12px;">
+                Total: ${semanaData.totalHorasSemanaStr}
               </span>
             </div>
           </div>
@@ -1446,7 +1459,7 @@ export const ReportGenerator = {
             <td style="vertical-align: middle; border: none; padding: 0;">
               <h1 class="title">Reporte General de Asistencia Semanal</h1>
               <p style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
-              <p style="margin: 3px 0 0 0; font-size: 10px; color: #64748b;">Generado el: ${new Date().toLocaleString('es-MX')}</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Horario laboral estándar: 08:00 AM - 06:00 PM (10h jornada)</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
@@ -1456,20 +1469,20 @@ export const ReportGenerator = {
 
         <div class="summary-grid">
           <div class="summary-card">
-            <div class="label">Total Horas Empresa</div>
-            <div class="value" style="color: #16a34a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
-          </div>
-          <div class="summary-card">
-            <div class="label">Personal con Registro</div>
+            <div class="label">Personal Activo</div>
             <div class="value">${empleadosConRegistro} de ${personalTarget.length}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Turnos Totales</div>
-            <div class="value">${totalTurnosEmpresa} turnos</div>
+            <div class="label">Total Horas Empresa</div>
+            <div class="value" style="color: #0f172a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Promedio / Empleado</div>
-            <div class="value">${empleadosConRegistro > 0 ? formatMinutesToHours(Math.round(totalMinutosEmpresa / empleadosConRegistro)) : '0h 0m'}</div>
+            <div class="label">Horas Regulares (8-6)</div>
+            <div class="value" style="color: #16a34a;">${formatMinutesToHours(totalMinutosRegularesEmpresa)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Extras Totales</div>
+            <div class="value" style="color: #ea580c;">${formatMinutesToHours(totalMinutosExtrasEmpresa)}</div>
           </div>
         </div>
 
@@ -1532,8 +1545,9 @@ export const ReportGenerator = {
                 </span>
                 ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
               </td>
-              <td style="text-align: right; font-weight: bold; color: ${turno.enCurso ? '#d97706' : '#16a34a'};">
-                ${turno.duracionStr}
+              <td style="text-align: right; font-weight: bold;">
+                <span style="color: ${turno.enCurso ? '#d97706' : '#16a34a'};">${turno.duracionStr}</span>
+                ${turno.minutosExtra > 0 ? `<div style="font-size: 8.5px; color: #ea580c; font-weight: bold; margin-top: 2px;">+${turno.horasExtraStr} extra</div>` : ''}
               </td>
             </tr>
           `;
@@ -1634,7 +1648,7 @@ export const ReportGenerator = {
               <h1 class="title">Reporte Individual de Asistencia</h1>
               <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">👤 ${empleado.nombre}</p>
               <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
-              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'}</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Horario: 08:00 - 18:00</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
@@ -1645,19 +1659,19 @@ export const ReportGenerator = {
         <div class="summary-grid">
           <div class="summary-card">
             <div class="label">Total Horas Semana</div>
-            <div class="value" style="color: #16a34a; font-size: 18px;">${semanaData.totalHorasSemanaStr}</div>
+            <div class="value" style="color: #0f172a; font-size: 17px;">${semanaData.totalHorasSemanaStr}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Regulares (8-6)</div>
+            <div class="value" style="color: #16a34a; font-size: 17px;">${semanaData.totalHorasRegularesStr}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Extras</div>
+            <div class="value" style="color: #ea580c; font-size: 17px;">${semanaData.totalHorasExtraStr}</div>
           </div>
           <div class="summary-card">
             <div class="label">Días Laborados</div>
             <div class="value">${semanaData.diasLaborados} de 7</div>
-          </div>
-          <div class="summary-card">
-            <div class="label">Turnos Totales</div>
-            <div class="value">${semanaData.turnosTotales} turnos</div>
-          </div>
-          <div class="summary-card">
-            <div class="label">Promedio Diario</div>
-            <div class="value">${semanaData.diasLaborados > 0 ? formatMinutesToHours(Math.round(semanaData.totalMinutosSemana / semanaData.diasLaborados)) : '0h 0m'}</div>
           </div>
         </div>
 
@@ -2837,52 +2851,55 @@ export const ReportGenerator = {
 
     const branding = await getCompanyBranding();
 
-    const totalFacturado = ventas.reduce((sum, v) => sum + Number(v.precio_total_facturado || 0), 0);
-    const totalCosto = ventas.reduce((sum, v) => sum + Number(v.costo_total || 0), 0);
-    const totalUtilidad = totalFacturado - totalCosto;
-    const margenConsolidado = totalFacturado > 0 ? (totalUtilidad / totalFacturado) * 100 : 0;
+    const formatCurr = (val: number) =>
+      new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val);
+
+    const totalFacturado = ventas.reduce((sum, v) => sum + Number(v.precio_total_facturado || v.total || 0), 0);
+    const totalCostoPartidas = ventas.reduce((sum, v) => sum + Number(v.costo_total || 0), 0);
+    const totalGastosVinculados = ventas.reduce((sum, v) => sum + Number(v.gastos_vinculados_total || 0), 0);
+    const totalCostoReal = totalCostoPartidas + totalGastosVinculados;
+    const totalUtilidadReal = totalFacturado - totalCostoReal;
+    const margenRealConsolidado = totalFacturado > 0 ? (totalUtilidadReal / totalFacturado) * 100 : 0;
 
     let tableRows = '';
     ventas.forEach((v) => {
-      const fecha = v.fecha || '';
-      const facturadoFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(v.precio_total_facturado || 0));
+      const fecha = v.fecha || (v.created_at ? v.created_at.split('T')[0] : '');
+      const precioFacturado = Number(v.precio_total_facturado || v.total || 0);
+      const costoPartidas = Number(v.costo_total || 0);
+      const gastosVinc = Number(v.gastos_vinculados_total || 0);
+      const costoTotalReal = v.costo_total_real !== undefined ? Number(v.costo_total_real) : (costoPartidas + gastosVinc);
+      const utilidadReal = v.utilidad_real !== undefined ? Number(v.utilidad_real) : (precioFacturado - costoTotalReal);
+      const margenReal = v.margen_real_porcentual !== undefined 
+        ? Number(v.margen_real_porcentual) 
+        : (precioFacturado > 0 ? (utilidadReal / precioFacturado) : 0);
 
-      const costoFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(v.costo_total || 0));
-
-      const utilidadFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(v.utilidad_bruta || 0));
-
-      const margenPercent = ((v.margen_porcentual || 0) * 100).toFixed(1) + '%';
-      const isProfit = Number(v.utilidad_bruta || 0) >= 0;
+      const facturadoFormatted = formatCurr(precioFacturado);
+      const costoPartidasFormatted = formatCurr(costoPartidas);
+      const gastosVincFormatted = formatCurr(gastosVinc);
+      const costoTotalRealFormatted = formatCurr(costoTotalReal);
+      const utilidadRealFormatted = formatCurr(utilidadReal);
+      const margenPercent = (margenReal * 100).toFixed(1) + '%';
+      const isProfit = utilidadReal >= 0;
 
       tableRows += `
         <tr>
           <td>${fecha}</td>
           <td>
-            <div style="font-weight: bold;">${v.cliente || 'N/A'}</div>
+            <div style="font-weight: bold;">${v.cliente_nombre || v.cliente || 'N/A'}</div>
             ${v.factura_referencia ? `<span style="font-size: 9px; color: #777;">Ref: ${v.factura_referencia}</span>` : ''}
           </td>
           <td>${v.tipo_proyecto || 'N/A'}</td>
           <td>${v.sucursal || 'N/A'}</td>
           <td>${v.proveedor || 'N/A'}</td>
           <td style="text-align: right; color: #0d1b2a; font-weight: bold;">${facturadoFormatted}</td>
-          <td style="text-align: right; color: #f44336;">${costoFormatted}</td>
-          <td style="text-align: right; color: ${isProfit ? '#4CAF50' : '#F44336'}; font-weight: bold;">${utilidadFormatted}</td>
-          <td style="text-align: right; color: ${isProfit ? '#4CAF50' : '#F44336'}; font-weight: bold;">${margenPercent}</td>
+          <td style="text-align: right; color: #64748b;">${costoPartidasFormatted}</td>
+          <td style="text-align: right; color: ${gastosVinc > 0 ? '#d97706' : '#94a3b8'}; font-weight: ${gastosVinc > 0 ? 'bold' : 'normal'};">${gastosVincFormatted}</td>
+          <td style="text-align: right; color: #ef4444; font-weight: 600;">${costoTotalRealFormatted}</td>
+          <td style="text-align: right; color: ${isProfit ? '#10b981' : '#ef4444'}; font-weight: bold;">${utilidadRealFormatted}</td>
+          <td style="text-align: right; color: ${isProfit ? '#10b981' : '#ef4444'}; font-weight: bold;">${margenPercent}</td>
         </tr>
       `;
     });
-
-    const formatCurr = (val: number) =>
-      new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val);
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -2905,8 +2922,8 @@ export const ReportGenerator = {
               print-color-adjust: exact;
             }
             @page {
-              size: letter;
-              margin: 15mm;
+              size: letter landscape;
+              margin: 10mm;
             }
           }
           .title {
@@ -2924,21 +2941,21 @@ export const ReportGenerator = {
             display: flex;
             justify-content: space-between;
             margin-bottom: 25px;
-            gap: 15px;
+            gap: 12px;
           }
           .summary-card {
             flex: 1;
             background-color: #f8f9fa;
             border: 1px solid #e9ecef;
             border-radius: 8px;
-            padding: 12px;
+            padding: 10px;
             text-align: center;
           }
           .summary-card .value {
-            font-size: 16px;
+            font-size: 15px;
             font-weight: bold;
             color: #0d1b2a;
-            margin-top: 5px;
+            margin-top: 4px;
           }
           .summary-card .label {
             font-size: 9px;
@@ -2950,17 +2967,17 @@ export const ReportGenerator = {
             width: 100%;
             border-collapse: collapse;
             margin-top: 10px;
-            font-size: 11px;
+            font-size: 10.5px;
           }
           th {
             background-color: #0d1b2a;
             color: white;
             text-align: left;
-            padding: 10px 8px;
+            padding: 8px 6px;
             font-weight: 600;
           }
           td {
-            padding: 10px 8px;
+            padding: 8px 6px;
             border-bottom: 1px solid #e9ecef;
           }
           tr:nth-child(even) {
@@ -2996,31 +3013,41 @@ export const ReportGenerator = {
             <div class="value" style="color: #0d1b2a;">${formatCurr(totalFacturado)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Costo Proveedores</div>
-            <div class="value" style="color: #f44336;">${formatCurr(totalCosto)}</div>
+            <div class="label">Costo Insumos</div>
+            <div class="value" style="color: #64748b;">${formatCurr(totalCostoPartidas)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Utilidad Consolidada</div>
-            <div class="value" style="color: ${totalUtilidad >= 0 ? '#4CAF50' : '#f44336'};">${formatCurr(totalUtilidad)}</div>
+            <div class="label">Gastos Vinculados</div>
+            <div class="value" style="color: #d97706;">${formatCurr(totalGastosVinculados)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Margen Consolidado</div>
-            <div class="value" style="color: ${totalUtilidad >= 0 ? '#4CAF50' : '#f44336'};">${margenConsolidado.toFixed(1)}%</div>
+            <div class="label">Costo Total Real</div>
+            <div class="value" style="color: #ef4444;">${formatCurr(totalCostoReal)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Utilidad Real</div>
+            <div class="value" style="color: ${totalUtilidadReal >= 0 ? '#10b981' : '#ef4444'};">${formatCurr(totalUtilidadReal)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Margen Real</div>
+            <div class="value" style="color: ${totalUtilidadReal >= 0 ? '#10b981' : '#ef4444'};">${margenRealConsolidado.toFixed(1)}%</div>
           </div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th style="width: 10%">Fecha</th>
-              <th style="width: 18%">Cliente / Ref</th>
-              <th style="width: 12%">Tipo</th>
-              <th style="width: 12%">Sucursal</th>
-              <th style="width: 13%">Proveedor</th>
-              <th style="width: 10%; text-align: right;">Venta</th>
-              <th style="width: 9%; text-align: right;">Costo</th>
-              <th style="width: 9%; text-align: right;">Utilidad</th>
-              <th style="width: 7%; text-align: right;">Margen</th>
+              <th style="width: 8%">Fecha</th>
+              <th style="width: 15%">Cliente / Ref</th>
+              <th style="width: 8%">Tipo</th>
+              <th style="width: 8%">Sucursal</th>
+              <th style="width: 9%">Proveedor</th>
+              <th style="width: 9%; text-align: right;">Venta</th>
+              <th style="width: 8%; text-align: right;">Insumos</th>
+              <th style="width: 9%; text-align: right;">Gastos Vinc.</th>
+              <th style="width: 9%; text-align: right;">Costo Real</th>
+              <th style="width: 9%; text-align: right;">Util. Real</th>
+              <th style="width: 8%; text-align: right;">Margen</th>
             </tr>
           </thead>
           <tbody>
@@ -3113,7 +3140,7 @@ export const ReportGenerator = {
             if (gastos.length === 0) {
               throw new Error('No hay gastos para exportar.');
             }
-            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Estado Reembolso','Comentarios'];
+            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Venta Vinculada','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Estado Reembolso','Comentarios'];
             const rows = gastos.map(g => {
               const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
               let estadoFactura = 'No Facturado';
@@ -3121,7 +3148,8 @@ export const ReportGenerator = {
               else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) estadoFactura = 'Pendiente de Entregar';
               const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
               const estadoReembolso = g.estado_reembolso === 'REEMBOLSADO' ? 'Reembolsado' : 'No';
-              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, estadoReembolso, commentText ];
+              const ventaVinc = g.venta_id ? `Venta #${String(g.venta_id).slice(0, 8)}` : 'Sin Venta';
+              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), ventaVinc, g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, estadoReembolso, commentText ];
             });
             await ReportGenerator._exportArrayToXLSX('Gastos', headers, rows, fileName);
     },
@@ -3198,8 +3226,13 @@ export const ReportGenerator = {
         'Hora Salida',
         'Dirección Salida',
         'Duración Turno',
+        'Regulares Turno',
+        'Extras Turno',
         'Total Horas Día',
-        'Total Horas Semana Empleado'
+        'Extras Día',
+        'Total Horas Semana',
+        'Total Regulares Semana',
+        'Total Extras Semana'
       ];
 
       const rows: any[][] = [];
@@ -3226,8 +3259,13 @@ export const ReportGenerator = {
                 turno.hora_salida || 'Pendiente',
                 turno.direccion_salida || '',
                 turno.duracionStr,
+                turno.horasRegularesStr,
+                turno.horasExtraStr,
                 dia.totalHorasStr,
-                semanaData.totalHorasSemanaStr
+                dia.horasExtraStr,
+                semanaData.totalHorasSemanaStr,
+                semanaData.totalHorasRegularesStr,
+                semanaData.totalHorasExtraStr
               ]);
             }
           }
@@ -3246,6 +3284,11 @@ export const ReportGenerator = {
             '',
             '-',
             '',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
             '0h 0m',
             '0h 0m',
             '0h 0m'
@@ -3280,8 +3323,12 @@ export const ReportGenerator = {
         'Hora Salida',
         'Dirección Salida',
         'Duración Turno',
+        'Regulares Turno',
+        'Extras Turno',
         'Total Horas Día',
-        'Total Horas Semana'
+        'Extras Día',
+        'Total Horas Semana',
+        'Total Extras Semana'
       ];
 
       const rows: any[][] = [];
@@ -3300,8 +3347,12 @@ export const ReportGenerator = {
               turno.hora_salida || 'Pendiente',
               turno.direccion_salida || '',
               turno.duracionStr,
+              turno.horasRegularesStr,
+              turno.horasExtraStr,
               dia.totalHorasStr,
-              semanaData.totalHorasSemanaStr
+              dia.horasExtraStr,
+              semanaData.totalHorasSemanaStr,
+              semanaData.totalHorasExtraStr
             ]);
           }
         } else {
@@ -3317,7 +3368,11 @@ export const ReportGenerator = {
             '',
             '0h 0m',
             '0h 0m',
-            semanaData.totalHorasSemanaStr
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            semanaData.totalHorasSemanaStr,
+            semanaData.totalHorasExtraStr
           ]);
         }
       }
@@ -3424,26 +3479,61 @@ export const ReportGenerator = {
             await ReportGenerator._exportArrayToXLSX('Retiros', headers, rows, fileName);
     },
     async exportVentasToXLSX(ventas: any[], fileName: string = 'reporte_ventas.xlsx'): Promise<void> {
-
             if (ventas.length === 0) {
               throw new Error('No hay ventas para exportar.');
             }
-            const headers = ['ID','Folio','Fecha Creación','Cliente','Vendedor','Estatus','Referencia/Factura','Tipo Proyecto','Sucursal','Monto Total (Venta)','Total Costo (Proveedor)','Utilidad Bruta','Margen %'];
-            const rows = ventas.map(v => [ 
-              v.id, 
-              v.folio || 'S/F', 
-              v.created_at ? v.created_at.split('T')[0] : '', 
-              v.cliente_nombre || v.cliente || 'Desconocido', 
-              v.vendedor_nombre || v.vendedor || 'Desconocido', 
-              v.estatus || v.estado_pago || v.cfdi_estado || '', 
-              v.factura_referencia || '', 
-              v.tipo_proyecto || '', 
-              v.sucursal || '', 
-              v.total || v.precio_total_facturado || 0, 
-              v.costo_total || 0, 
-              v.utilidad_bruta || 0, 
-              ((v.margen_porcentual || 0) * 100).toFixed(2) + '%' 
-            ]);
+            const headers = [
+              'ID',
+              'Folio',
+              'Fecha Creación',
+              'Cliente',
+              'Vendedor',
+              'Estatus',
+              'Referencia/Factura',
+              'Tipo Proyecto',
+              'Sucursal',
+              'Monto Total (Venta)',
+              'Costo Partidas (Proveedor)',
+              'Utilidad Bruta (Inicial)',
+              'Margen Inicial %',
+              'Gastos Vinculados',
+              'Costo Total Real',
+              'Utilidad Real',
+              'Margen Real %'
+            ];
+            const rows = ventas.map(v => {
+              const precioTotal = Number(v.total) || Number(v.precio_total_facturado) || 0;
+              const costoPartidas = Number(v.costo_total) || 0;
+              const utilidadInicial = precioTotal - costoPartidas;
+              const margenInicial = precioTotal > 0 ? (utilidadInicial / precioTotal) : 0;
+
+              const gastosVinculados = Number(v.gastos_vinculados_total) || 0;
+              const costoTotalReal = v.costo_total_real !== undefined ? Number(v.costo_total_real) : (costoPartidas + gastosVinculados);
+              const utilidadReal = v.utilidad_real !== undefined ? Number(v.utilidad_real) : (precioTotal - costoTotalReal);
+              const margenReal = v.margen_real_porcentual !== undefined 
+                ? Number(v.margen_real_porcentual) 
+                : (precioTotal > 0 ? (utilidadReal / precioTotal) : 0);
+
+              return [
+                v.id, 
+                v.folio || 'S/F', 
+                v.created_at ? v.created_at.split('T')[0] : (v.fecha || ''), 
+                v.cliente_nombre || v.cliente || 'Desconocido', 
+                v.vendedor_nombre || v.vendedor || 'Desconocido', 
+                v.estatus || v.estado_pago || v.cfdi_estado || '', 
+                v.factura_referencia || '', 
+                v.tipo_proyecto || '', 
+                v.sucursal || '', 
+                precioTotal, 
+                costoPartidas, 
+                utilidadInicial,
+                (margenInicial * 100).toFixed(2) + '%',
+                gastosVinculados,
+                costoTotalReal,
+                utilidadReal, 
+                (margenReal * 100).toFixed(2) + '%' 
+              ];
+            });
             await ReportGenerator._exportArrayToXLSX('Ventas', headers, rows, fileName);
     }
 };
@@ -3511,13 +3601,20 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     <head>
       <meta charset="utf-8" />
       <title>${title}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap');
         @page {
           size: letter;
           margin: 0;
         }
+        * {
+          box-sizing: border-box;
+        }
         body {
-          font-family: 'Helvetica', Arial, sans-serif;
+          font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
           color: #333;
           margin: 0;
           padding: 0;
@@ -3836,6 +3933,19 @@ export function cleanFolio(rawFolio?: any): string {
 export async function generarFacturaHTML(venta: any, facturaData: any, isDraft = false): Promise<string> {
   const branding = await getCompanyBranding();
 
+  const effectiveDraft = Boolean(
+    isDraft ||
+    venta?.es_borrador ||
+    venta?.cfdi_estado === 'BORRADOR' ||
+    facturaData?.is_draft ||
+    facturaData?.es_borrador ||
+    !venta?.cfdi_uuid ||
+    String(venta?.cfdi_uuid).startsWith('BORRADOR') ||
+    !facturaData?.uuid ||
+    String(facturaData?.uuid).startsWith('BORRADOR') ||
+    String(facturaData?.stamp?.uuid).startsWith('BORRADOR')
+  );
+
   // Diccionarios de mapeo para SAT
   const formatRegimenFiscal = (val: any) => {
     if (!val) return '612 - Personas físicas con actividades empresariales y profesionales';
@@ -3937,7 +4047,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
   const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   const fullFileName = `${clienteSanitized}_${displayFolio}`;
-  const title = isDraft ? `[PREFACTURA] ${fullFileName}` : fullFileName;
+  const title = effectiveDraft ? `[PREFACTURA] ${fullFileName}` : fullFileName;
   
   // Formatters de Dinero y Fecha
   const formatMoney = (val: any) => `$ ${Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -4150,11 +4260,15 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
     <head>
       <meta charset="utf-8" />
       <title>${title}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap');
         @page { size: letter; margin: 0; }
         * { box-sizing: border-box; }
         body {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
           color: #1e293b;
           margin: 0;
           padding: 0;
@@ -4251,7 +4365,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           margin-top: 8px;
         }
         .uuid-value {
-          font-family: 'Courier New', Courier, monospace;
+          font-family: 'Roboto Mono', 'Courier New', Courier, monospace;
           font-size: 8.5px;
           color: #1e293b;
           font-weight: 600;
@@ -4447,7 +4561,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           margin-bottom: 1px;
         }
         .sat-stamp {
-          font-family: 'Courier New', Courier, monospace;
+          font-family: 'Roboto Mono', 'Courier New', Courier, monospace;
           font-size: 6px;
           line-height: 1.25;
           color: #334155;
@@ -4485,23 +4599,23 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
         }
 
         .prefactura-watermark {
-          position: fixed;
-          top: 38%;
-          left: 50%;
-          transform: translate(-50%, -50%) rotate(-30deg);
-          width: 90%;
-          text-align: center;
-          font-size: 86px;
-          font-weight: 900;
-          color: rgba(220, 38, 38, 0.14);
-          letter-spacing: 16px;
-          font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-          text-transform: uppercase;
-          pointer-events: none;
-          z-index: 9999;
+          position: fixed !important;
+          top: 50% !important;
+          left: 50% !important;
+          transform: translate(-50%, -50%) rotate(-35deg) !important;
+          width: 100% !important;
+          text-align: center !important;
+          font-size: 92px !important;
+          font-weight: 900 !important;
+          color: rgba(220, 38, 38, 0.22) !important;
+          letter-spacing: 16px !important;
+          font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+          text-transform: uppercase !important;
+          pointer-events: none !important;
+          z-index: 999999 !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
-          user-select: none;
+          user-select: none !important;
         }
 
         @media print {
@@ -4513,24 +4627,32 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           .invoice-footer { page-break-inside: avoid !important; break-inside: avoid !important; }
           .prefactura-watermark {
             display: block !important;
-            color: rgba(220, 38, 38, 0.16) !important;
+            position: fixed !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) rotate(-35deg) !important;
+            color: rgba(220, 38, 38, 0.25) !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            z-index: 999999 !important;
           }
         }
       </style>
     </head>
     <body>
-      ${isDraft ? `
+      ${effectiveDraft ? `
         <div style="background-color: #fef3c7; border-bottom: 2px solid #f59e0b; color: #b45309; text-align: center; padding: 8px 16px; font-weight: 800; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; z-index: 100; position: relative;">
           ⚠️ PREFACTURA / BORRADOR — DOCUMENTO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
-        </div>
-        <div class="prefactura-watermark">
-          PREFACTURA
         </div>
       ` : ''}
 
       <div class="page-container">
+        ${effectiveDraft ? `
+          <div class="prefactura-watermark">
+            PREFACTURA
+          </div>
+        ` : ''}
+
         <!-- Top wave banner -->
         <div class="top-banner">
           <svg viewBox="0 0 1000 160" preserveAspectRatio="none" style="width: 100%; height: 160px; display: block;">
@@ -4555,10 +4677,10 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           <!-- Title & Folio -->
           <div class="title-block">
             <div class="title-block-inner">
-              <h1 class="factura-title">${isDraft ? 'PREFACTURA' : 'FACTURA'}</h1>
+              <h1 class="factura-title">${effectiveDraft ? 'PREFACTURA' : 'FACTURA'}</h1>
               <div class="factura-folio">${displayFolio}</div>
               <div class="uuid-label">FOLIO FISCAL (UUID):</div>
-              <div class="uuid-value">${effectiveUuid || (isDraft ? 'PENDIENTE DE ASIGNACIÓN (PREFACTURA)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
+              <div class="uuid-value">${effectiveUuid || (effectiveDraft ? 'PENDIENTE DE ASIGNACIÓN (PREFACTURA)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
             </div>
           </div>
 
@@ -4655,7 +4777,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
                 <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(satVerificationUrl || effectiveUuid)}" class="sat-qr-img" alt="QR SAT" />
               ` : `
                 <div style="width: 95px; height: 95px; border: 1px dashed #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #94a3b8; font-weight: bold; padding: 4px;">
-                  QR SAT<br>(${isDraft ? 'Prefactura' : 'Borrador'})
+                  QR SAT<br>(${effectiveDraft ? 'Prefactura' : 'Borrador'})
                 </div>
               `}
             </div>
@@ -4700,7 +4822,16 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
 
 export async function exportarFacturaOdooPDF(venta: any, facturaData: any, action: any = 'view', isDraft: boolean = false) {
   try {
-    const effectiveDraft = isDraft || Boolean(venta?.es_borrador || venta?.cfdi_estado === 'BORRADOR' || facturaData?.is_draft || facturaData?.es_borrador);
+    const effectiveDraft = isDraft || Boolean(
+      venta?.es_borrador || 
+      venta?.cfdi_estado === 'BORRADOR' || 
+      facturaData?.is_draft || 
+      facturaData?.es_borrador ||
+      !venta?.cfdi_uuid ||
+      String(venta?.cfdi_uuid).startsWith('BORRADOR') ||
+      !facturaData?.uuid ||
+      String(facturaData?.uuid).startsWith('BORRADOR')
+    );
     const htmlContent = await generarFacturaHTML(venta, facturaData, effectiveDraft);
 
     const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';

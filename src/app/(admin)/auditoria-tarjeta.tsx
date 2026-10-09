@@ -1120,7 +1120,7 @@ export default function AuditoriaTarjetaScreen() {
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: themeColors.background }]}>
+    <View style={[styles.safeArea, { backgroundColor: themeColors.background }]}>
 
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
@@ -1922,7 +1922,7 @@ export default function AuditoriaTarjetaScreen() {
         </View>
       </Modal>
 
-    </SafeAreaView>
+    </View>
   );
 }
 
