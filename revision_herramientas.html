@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portal Inttec • Revisión y Unificación de Herramientas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(23, 32, 54, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --card-hover: rgba(30, 41, 69, 0.95);
+      --primary: #3b82f6;
+      --primary-glow: rgba(59, 130, 246, 0.35);
+      --success: #10b981;
+      --success-glow: rgba(16, 185, 129, 0.25);
+      --warning: #f59e0b;
+      --warning-glow: rgba(245, 158, 11, 0.25);
+      --danger: #ef4444;
+      --danger-glow: rgba(239, 68, 68, 0.25);
+      --info: #8b5cf6;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.1) 0px, transparent 50%);
+      background-attachment: fixed;
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+
+    /* HEADER */
+    header {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 28px;
+      margin-bottom: 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .badge-inttec {
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      color: white;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    h1 {
+      font-size: 26px;
+      font-weight: 800;
+      color: #fff;
+      margin-top: 8px;
+      letter-spacing: -0.5px;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 14px;
+      max-width: 700px;
+    }
+
+    /* PROGRESS BAR */
+    .progress-section {
+      background: rgba(11, 15, 25, 0.6);
+      border: 1px solid var(--card-border);
+      padding: 16px;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .progress-bar-bg {
+      height: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 9999px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3b82f6, #10b981);
+      width: 0%;
+      border-radius: 9999px;
+      transition: width 0.4s ease;
+    }
+
+    /* FILTERS & VIEW CONTROLS */
+    .controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .filter-pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 8px 16px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .pill:hover {
+      background: var(--card-hover);
+      color: var(--text);
+    }
+
+    .pill.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+      box-shadow: 0 0 15px var(--primary-glow);
+    }
+
+    .pill.active.pill-critico {
+      background: var(--danger);
+      border-color: var(--danger);
+      box-shadow: 0 0 15px var(--danger-glow);
+    }
+
+    .pill.active.pill-cruzada {
+      background: var(--warning);
+      border-color: var(--warning);
+      box-shadow: 0 0 15px var(--warning-glow);
+    }
+
+    .pill.active.pill-multiple {
+      background: var(--info);
+      border-color: var(--info);
+    }
+
+    /* CARDS */
+    .group-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 20px;
+      transition: transform 0.2s, border-color 0.2s;
+      position: relative;
+    }
+
+    .group-card:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    .group-card.status-decided {
+      border-left: 5px solid var(--success);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .group-tag {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+      display: inline-block;
+      margin-bottom: 6px;
+    }
+
+    .tag-critico { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .tag-cruzada { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .tag-multiple { background: rgba(139, 92, 246, 0.2); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.4); }
+
+    .group-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .group-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .recommendation-box {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #93c5fd;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ITEMS TABLE / GRID */
+    .items-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .item-card {
+      background: rgba(11, 15, 25, 0.7);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: relative;
+    }
+
+    .item-code {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--primary);
+      display: inline-block;
+    }
+
+    .item-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .item-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .item-badge {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .item-badge.estado-bueno { color: #34d399; background: rgba(16, 185, 129, 0.15); }
+    .item-badge.estado-incompleto { color: #fbbf24; background: rgba(245, 158, 11, 0.15); }
+    .item-badge.estado-danado { color: #f87171; background: rgba(239, 68, 68, 0.15); }
+
+    /* DECISION ACTION BUTTONS */
+    .decision-panel {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .decision-label {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #cbd5e1;
+    }
+
+    .decision-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .btn-decision {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+      flex: 1;
+      min-width: 180px;
+      justify-content: center;
+    }
+
+    .btn-decision:hover {
+      background: rgba(255, 255, 255, 0.12);
+      transform: translateY(-1px);
+    }
+
+    .btn-decision.active-unificar {
+      background: #2563eb;
+      border-color: #3b82f6;
+      color: white;
+      box-shadow: 0 0 15px rgba(37, 99, 235, 0.4);
+    }
+
+    .btn-decision.active-mantener {
+      background: #059669;
+      border-color: #10b981;
+      color: white;
+      box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+    }
+
+    .btn-decision.active-eliminar {
+      background: #dc2626;
+      border-color: #ef4444;
+      color: white;
+      box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+    }
+
+    .btn-decision.active-modificar {
+      background: #d97706;
+      border-color: #f59e0b;
+      color: white;
+      box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+    }
+
+    .notes-input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .notes-input:focus {
+      border-color: var(--primary);
+    }
+
+    /* BOTTOM FLOATING SUMMARY & MODAL */
+    .floating-bar {
+      position: sticky;
+      bottom: 24px;
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: var(--radius);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+      z-index: 100;
+      margin-top: 30px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+      box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6);
+    }
+
+    /* MODAL REPORTE */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(8px);
+      z-index: 999;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .modal-card {
+      background: #111827;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius);
+      max-width: 800px;
+      width: 100%;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+    }
+
+    .modal-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-body {
+      padding: 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .report-textarea {
+      width: 100%;
+      height: 320px;
+      background: #030712;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 14px;
+      color: #38bdf8;
+      font-family: monospace;
+      font-size: 12px;
+      resize: vertical;
+      line-height: 1.6;
+    }
+
+    .modal-footer {
+      padding: 16px 24px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 12px; }
+      .floating-bar { flex-direction: column; align-items: stretch; text-align: center; }
+      .btn-decision { min-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- HEADER -->
+    <header>
+      <div class="header-top">
+        <div>
+          <div class="badge-inttec">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            Portal Inttec • Panel de Decisiones
+          </div>
+          <h1>Revisión y Unificación de Herramientas</h1>
+          <p class="subtitle">
+            Herramienta interactiva para revisar duplicados, series idénticas y lotes en el catálogo. Selecciona qué acción tomar en cada caso y genera tu reporte final con un solo clic.
+          </p>
+        </div>
+      </div>
+
+      <!-- PROGRESS -->
+      <div class="progress-section">
+        <div class="progress-header">
+          <span>Progreso de Revisión</span>
+          <span id="progressText">0 de 32 casos decididos (0%)</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progressBar"></div>
+        </div>
+      </div>
+    </header>
+
+    <!-- FILTERS -->
+    <div class="controls-bar">
+      <div class="filter-pills">
+        <button class="pill active" onclick="filterCategory('ALL')">Todos (32)</button>
+        <button class="pill pill-critico" onclick="filterCategory('CRITICO_SERIE')">🔴 Misma Serie (6)</button>
+        <button class="pill pill-cruzada" onclick="filterCategory('CATEGORIA_CRUZADA')">🟡 Mismo Nombre / Reclasificados (10)</button>
+        <button class="pill pill-multiple" onclick="filterCategory('MULTIPLE_UNIDAD')">🔵 Lotes / Unidades Múltiples (16)</button>
+      </div>
+    </div>
+
+    <!-- CARDS CONTAINER -->
+    <div id="cardsContainer"></div>
+
+    <!-- FLOATING BAR -->
+    <div class="floating-bar">
+      <div>
+        <div style="font-weight: 700; font-size: 15px;" id="floatingSummary">0 / 32 Casos Revisados</div>
+        <div style="font-size: 12px; color: var(--text-muted);">Tus decisiones se guardan automáticamente en tu navegador.</div>
+      </div>
+      <button class="btn-primary" onclick="openReportModal()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        Generar Reporte de Decisiones
+      </button>
+    </div>
+  </div>
+
+  <!-- MODAL REPORTE -->
+  <div class="modal-overlay" id="reportModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 style="color: #fff; font-size: 18px; font-weight: 700;">📋 Reporte Final de Decisiones</h3>
+        <button onclick="closeReportModal()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 20px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Copia este resumen para compartirlo directamente por WhatsApp o correo, o descárgalo como archivo:
+        </p>
+        <textarea class="report-textarea" id="reportContent" readonly></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="copyReport()">📋 Copiar al Portapapeles</button>
+        <button class="btn-secondary" onclick="downloadReport()">💾 Descargar Texto</button>
+        <button class="btn-primary" onclick="closeReportModal()">Listo</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const dataset = [{"id":"sn_P046846","title":"Misma Serie / Modelo: \"P046846\"","categoryType":"CRITICO_SERIE","description":"Se detectaron 3 registros que comparten exactamente el mismo número de serie o modelo.","recommendation":"Revisar si es un solo artículo físico registrado múltiples veces o si son piezas distintas.","items":[{"id":"a964b42d-3fa6-42d1-bea2-1ce5fec909e3","codigo":"H-1","nombre":"Multimetro Steren","categoria":"Eléctrica","numero_serie":"P046846","estado":"INCOMPLETO","descripcion":"Faltan Puntas"},{"id":"ce2aa127-4c30-4d38-8fe3-21cec4ebf029","codigo":"H-90","nombre":"Multimetro Steren","categoria":"Eléctrica","numero_serie":"P046846","estado":"BUENO","descripcion":"Completo"},{"id":"d36f8a82-e875-4d2a-90d7-974c4a982c3b","codigo":"H-91","nombre":"Multímetro Steren","categoria":"Eléctrica","numero_serie":"P046846","estado":"BUENO","descripcion":"Completo"}]},{"id":"sn_48_22_6105","title":"Misma Serie / Modelo: \"48-22-6105\"","categoryType":"CRITICO_SERIE","description":"Se detectaron 2 registros que comparten exactamente el mismo número de serie o modelo.","recommendation":"Revisar si es un solo artículo físico registrado múltiples veces o si son piezas distintas.","items":[{"id":"368d1972-954b-47a8-b057-b0d4e2411748","codigo":"H-10","nombre":"Pinza corte fino Millwaukee","categoria":"Manual","numero_serie":"48-22-6105","estado":"BUENO","descripcion":"Completo"},{"id":"b323a497-84d1-4a51-8d7f-d0173bdfdfc6","codigo":"H-9","nombre":"Pinza corte fino Millwaukee","categoria":"Manual","numero_serie":"48-22-6105","estado":"BUENO","descripcion":"Completo"}]},{"id":"sn_48_22_0716","title":"Misma Serie / Modelo: \"48-22-0716\"","categoryType":"CRITICO_SERIE","description":"Se detectaron 2 registros que comparten exactamente el mismo número de serie o modelo.","recommendation":"Revisar si es un solo artículo físico registrado múltiples veces o si son piezas distintas.","items":[{"id":"9a4f355b-cea4-4ffe-9ff2-2d9601bf859c","codigo":"H-101","nombre":"Cinta Milwaukee Magnética 5M","categoria":"Medición","numero_serie":"48-22-0716","estado":"BUENO","descripcion":"Completo"},{"id":"32400bda-5733-4047-b116-81b6d8fb5e97","codigo":"H-102","nombre":"Cinta Milwaukee Magnética 5M","categoria":"Medición","numero_serie":"48-22-0716","estado":"BUENO","descripcion":"Completo"}]},{"id":"sn_48_22_2181","title":"Misma Serie / Modelo: \"48-22-2181\"","categoryType":"CRITICO_SERIE","description":"Se detectaron 2 registros que comparten exactamente el mismo número de serie o modelo.","recommendation":"Revisar si es un solo artículo físico registrado múltiples veces o si son piezas distintas.","items":[{"id":"458e49cf-3e7b-4044-83d1-cb28ff144ee4","codigo":"H-105","nombre":"Juego de llaves Allen Milwaukee Estándar","categoria":"General","numero_serie":"48-22-2181","estado":"BUENO","descripcion":"Completo"},{"id":"0a06a771-ef7d-4f6c-bdf1-f49cc8c8e1a3","codigo":"H-137","nombre":"Llaves Allen Milwaukee","categoria":"General","numero_serie":"48-22-2181","estado":"BUENO","descripcion":"Completo"}]},{"id":"sn_HCS8_6_4A","title":"Misma Serie / Modelo: \"HCS8 6-4A\"","categoryType":"CRITICO_SERIE","description":"Se detectaron 3 registros que comparten exactamente el mismo número de serie o modelo.","recommendation":"Revisar si es un solo artículo físico registrado múltiples veces o si son piezas distintas.","items":[{"id":"a87c3e1e-a2ec-4d27-bc8b-6f9d202e58b0","codigo":"H-3","nombre":"Pinzas para terminal Ponchable","categoria":"Eléctrica","numero_serie":"HCS8 6-4A","estado":"BUENO","descripcion":"Completo"},{"id":"29c98b8a-e38e-45b5-ab57-5a9919150d29","codigo":"H-4","nombre":"Pinzas para terminal Ponchable","categoria":"Eléctrica","numero_serie":"HCS8 6-4A","estado":"REGULAR","descripcion":"Falta Limpieza"},{"id":"c0c0bdb8-d336-4c69-b373-d56d582f7c7b","codigo":"H-5","nombre":"Pinzas para terminal Ponchable","categoria":"Eléctrica","numero_serie":"HCS8 6-4A","estado":"BUENO","descripcion":"Completo"}]},{"id":"sn_LY_2546B","title":"Misma Serie / Modelo: \"LY-2546B\"","categoryType":"CRITICO_SERIE","description":"Se detectaron 3 registros que comparten exactamente el mismo número de serie o modelo.","recommendation":"Revisar si es un solo artículo físico registrado múltiples veces o si son piezas distintas.","items":[{"id":"0731cced-c592-4637-987d-74eb6fef4d8d","codigo":"H-50","nombre":"Pinzas ponchable MC4","categoria":"Eléctrica","numero_serie":"LY-2546B","estado":"BUENO","descripcion":"Completo"},{"id":"9bb6b132-c525-4e67-9fa6-e9bde80b3bb8","codigo":"H-6","nombre":"Pinzas ponchable MC4","categoria":"Eléctrica","numero_serie":"LY-2546B","estado":"BUENO","descripcion":"Completo"},{"id":"2d2a848d-91c9-42be-bdf4-b843e0468a4c","codigo":"H-7","nombre":"Pinzas ponchable MC4","categoria":"Eléctrica","numero_serie":"LY-2546B","estado":"BUENO","descripcion":"Completo"}]},{"id":"cross_Tester_de_corriente_GB","title":"Mismo Nombre / Varias Categorías: \"Tester de corriente GB\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"06b51b09-0967-43ed-b742-743d20eff434","codigo":"H-16","nombre":"Tester de corriente GB","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"c6fed249-e552-406d-a367-79a288a59ab7","codigo":"H-89","nombre":"Tester de corriente GB","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"cross_Martillo","title":"Mismo Nombre / Varias Categorías: \"Martillo\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"db5829f3-b7a0-4877-a9ba-923e10d078fe","codigo":"H-209","nombre":"Martillo","categoria":"Manual","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"d08937b6-3718-436e-b9cd-76eddf936b18","codigo":"H-26","nombre":"Martillo","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"cross_Pinzas_desforradoras__Gen_ricas_","title":"Mismo Nombre / Varias Categorías: \"Pinzas desforradoras (Genéricas)\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"78fa2d30-8088-4aa2-93b8-ed4de937ca45","codigo":"H-51","nombre":"Pinzas desforradoras","categoria":"Eléctrica","numero_serie":"Genérica","estado":"BUENO","descripcion":"Completo"},{"id":"306328df-d3bd-4954-aefc-c82d52646e6c","codigo":"H-97","nombre":"Pinzas desforradoras","categoria":"Eléctrica","numero_serie":"Genérica","estado":"BUENO","descripcion":"Completo"}]},{"id":"cross_Punta_Cincel_SDS_Plus_gen_rica","title":"Mismo Nombre / Varias Categorías: \"Punta Cincel SDS Plus genérica\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"1c8313d1-11dd-4bfb-aaf3-caee08262a20","codigo":"H-28","nombre":"Punta Cincel SDS plus generica","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"0ae5ec09-8f18-40d1-9f3c-020e7ad7ae56","codigo":"H-58","nombre":"Punta Cincel SDS plus generica","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"cross_Marro","title":"Mismo Nombre / Varias Categorías: \"Marro\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"be55e437-f874-49bf-b1d6-046d2af3e122","codigo":"H-124","nombre":"Marro","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"d50a87fd-ee54-4f57-af6c-a83a440d617b","codigo":"H-133","nombre":"Marro","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"cross_Pulidora_Milwaukee","title":"Mismo Nombre / Varias Categorías: \"Pulidora Milwaukee\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"2216ba0c-c2b6-4ec7-8463-43d10e69b46a","codigo":"H-132","nombre":"Pulidora Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"c328a414-2748-4b3a-b86f-9ebe4751e2e7","codigo":"H-182","nombre":"Pulidora Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"400d5c4d-873c-4abb-bfc9-8fddbfcb1770","codigo":"H-35","nombre":"Pulidora Milwaukee","categoria":"Corte","numero_serie":"N/A","estado":"INCOMPLETO","descripcion":"Faltan Guarda"}]},{"id":"cross_Cortadora_Milwaukee","title":"Mismo Nombre / Varias Categorías: \"Cortadora Milwaukee\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"684d0b95-ea87-4a3e-8508-06c735df76f9","codigo":"H-126","nombre":"Cortadora Milwaukee","categoria":"Corte","numero_serie":"C73AD190802168","estado":"BUENO","descripcion":"Completo"},{"id":"97cf3416-1aa0-450b-99b0-d899d95549ad","codigo":"H-181","nombre":"Cortadora Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"cross_Rotomartillo_M18_Milwaukee","title":"Mismo Nombre / Varias Categorías: \"Rotomartillo M18 Milwaukee\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"2a957582-7044-43a1-a0e0-39b66653f4d0","codigo":"H-128","nombre":"Rotomartillo M18 Milwaukee","categoria":"General","numero_serie":"J77AF3016331","estado":"REGULAR","descripcion":"Completo"},{"id":"43fa639b-3570-471a-a858-91c13cd7566f","codigo":"H-61","nombre":"Rotomartillo M18","categoria":"General","numero_serie":"J77AD192919528","estado":"INCOMPLETO","descripcion":"KIT INCOMPLETO le falta cargador, taladro de impacto con su pila , Y SE LE ASIGNA UNA m18 2.0. Esta en mal estado"},{"id":"b1fade52-c7b2-466c-87c7-b061af3f2d88","codigo":"H-83","nombre":"Rotomartillo M18 Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Falta Pila"}]},{"id":"cross_Rotomartillo_M12_Milwaukee","title":"Mismo Nombre / Varias Categorías: \"Rotomartillo M12 Milwaukee\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"6ec572ee-46df-4e0c-8f08-cad10470a20a","codigo":"H-55","nombre":"Rotomartillo M12 Milwaukee","categoria":"General","numero_serie":"F11AD202000646","estado":"BUENO","descripcion":"Cargador y kit completo"},{"id":"330d355f-6cad-402c-9471-b15b4970e2c8","codigo":"H-82","nombre":"Rotomartillo M12 Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Con pila"}]},{"id":"cross_Rotomartillo_Milwaukee_SDS_Plus","title":"Mismo Nombre / Varias Categorías: \"Rotomartillo Milwaukee SDS Plus\"","categoryType":"CATEGORIA_CRUZADA","description":"Aparece registrado en diferentes categorías o con y sin número de serie.","recommendation":"Verificar si son herramientas físicas diferentes o si se duplicó el registro al reclasificar.","items":[{"id":"e77e5b99-22c2-431d-82e6-2568b233dd39","codigo":"H-56","nombre":"Rotomartillo Milwaukee SDS Plus","categoria":"General","numero_serie":"G48BD202204308","estado":"BUENO","descripcion":"completo"},{"id":"c9000226-76b5-4471-a434-3efd9cda0be0","codigo":"H-66","nombre":"Rotomartillo Milwaukee SDS Plus","categoria":"General","numero_serie":"G43DD211804337","estado":"BUENO","descripcion":"Completo"},{"id":"fb7ce108-06c3-43cb-9ec9-3412615adc7d","codigo":"H-84","nombre":"Rotomartillo Milwaukee SDS Plus","categoria":"General","numero_serie":"N/A","estado":"DANADO","descripcion":"No sirve"}]},{"id":"multi_Cautines_Steren","title":"Lote / Múltiples Unidades: \"Cautines Steren\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 5 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"7eaf89ae-9d61-4e27-bd39-f58371b10720","codigo":"H-111","nombre":"Cautin Steren","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"a7e350f4-4955-4648-9fd0-403a39b40f11","codigo":"H-112","nombre":"Cautin Steren","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"659643e9-5783-4a39-afe3-6de16a3b0e21","codigo":"H-113","nombre":"Cautin Steren","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"42957af2-fb76-4984-9335-1b12f41a5245","codigo":"H-114","nombre":"Cautin Steren","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"c5453fdd-c170-49ba-b185-91bd3b08e796","codigo":"H-115","nombre":"Cautin Steren","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Desarmadores_Paleta","title":"Lote / Múltiples Unidades: \"Desarmadores Paleta\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 4 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"25fe3338-8161-4b96-98a4-2dddc148b278","codigo":"H-118","nombre":"Desarmador paleta","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"8e2acb69-bd03-44fe-8885-e4e2908dc2de","codigo":"H-119","nombre":"Desarmador paleta","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"51a169ae-71bc-4e61-8985-640702ca7b8f","codigo":"H-120","nombre":"Desarmador paleta","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"04afca1a-c7b3-4582-bed2-d39ac9a8a52f","codigo":"H-121","nombre":"Desarmador paleta","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Desarmadores_Cruz","title":"Lote / Múltiples Unidades: \"Desarmadores Cruz\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 3 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"938d9b8d-27f0-4797-afc9-ef4eacdfd96d","codigo":"H-29","nombre":"Desarmador Cruz","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"24e0d419-2d5a-472c-a0d4-05d01a3f9942","codigo":"H-30","nombre":"Desarmador Cruz","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"d57d452a-6ab9-4e31-a351-703b0b2fc836","codigo":"H-31","nombre":"Desarmador Cruz","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Corta_Machuelos","title":"Lote / Múltiples Unidades: \"Corta Machuelos\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 4 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"b3e0e425-2a92-4fba-89fc-7a1bfd9f4331","codigo":"H-22","nombre":"Corta Machuelo","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"d4139a30-4671-4182-814b-6af396bd472e","codigo":"H-23","nombre":"Corta Machuelo","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"a345f6e4-c60e-403f-8a71-6a7ab175d5a4","codigo":"H-24","nombre":"Corta Machuelo","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"226b2fae-fd13-40fb-a17c-15d3d866a290","codigo":"H-25","nombre":"Corta Machuelo","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Niveles_de_mano_peque_os","title":"Lote / Múltiples Unidades: \"Niveles de mano pequeños\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 4 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"70ddcfb5-f61f-465c-9e26-30f620a56e50","codigo":"H-18","nombre":"Nivel de mano pequeño","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"24c1c96a-315d-4d6e-8d7e-c5d22cf5cb65","codigo":"H-19","nombre":"Nivel de mano pequeño","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"4247e378-0fcc-4edd-91ff-fa47c3b63943","codigo":"H-20","nombre":"Nivel de mano pequeño","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"13294230-9bef-4d0f-9a69-7014c6f544c2","codigo":"H-21","nombre":"Nivel de mano pequeño","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Pilas_M18_5_0Ah_Milwaukee","title":"Lote / Múltiples Unidades: \"Pilas M18 5.0Ah Milwaukee\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 6 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"87bebd07-82d2-4986-a8f9-8994cca21de3","codigo":"H-146","nombre":"Pila M18 5.0 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"326f9de8-66b9-447a-8e66-cb36a7479990","codigo":"H-147","nombre":"Pila M18 5.0 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"2f7374cd-99f0-43f4-9cd9-cf3e63b64f2c","codigo":"H-148","nombre":"Pila M18 5.0 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"2a797b22-672b-41ad-a9e7-5ec84dbece89","codigo":"H-149","nombre":"Pila M18 5.0 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"3c783d3f-3eb0-4fbe-b157-da415d2020d3","codigo":"H-36","nombre":"Pila M18 5.0 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"8c621f27-4971-4429-967b-86eb74cc04cb","codigo":"H-37","nombre":"Pila M18 5.0 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"DANADO","descripcion":"No carga"}]},{"id":"multi_Pilas_M18_1_5Ah_Milwaukee","title":"Lote / Múltiples Unidades: \"Pilas M18 1.5Ah Milwaukee\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 3 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"a1431f77-8039-4be9-97b6-78308ed2b340","codigo":"H-40","nombre":"Pila M18 1.5 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"9687ea93-d957-4a86-9c56-623a42cee2e3","codigo":"H-41","nombre":"Pila M18 1.5 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"f17d2baa-b505-4313-9788-24221e5fe704","codigo":"H-42","nombre":"Pila M18 1.5 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Pilas_M12_4_0Ah_Milwaukee","title":"Lote / Múltiples Unidades: \"Pilas M12 4.0Ah Milwaukee\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 2 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"3262db87-65ef-483b-b9eb-b2438af7b8b2","codigo":"H-38","nombre":"Pila M12 4.0 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"584d8c3d-1004-4b0d-b0bb-eb333d5baa80","codigo":"H-39","nombre":"Pila M12 4.0 Millwaukee","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Cargadores_Milwaukee_M12","title":"Lote / Múltiples Unidades: \"Cargadores Milwaukee M12\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 6 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"fc19943b-7021-482c-bdf3-aa72fe6ec17e","codigo":"H-150","nombre":"Cargador Milwaukee M12","categoria":"Eléctrica","numero_serie":"D63C9170893951G","estado":"BUENO","descripcion":"Completo"},{"id":"b4c1ab53-56c1-4470-be1d-ba4bc75f7e9f","codigo":"H-157","nombre":"Cargador Milwaukee M12","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"f9c433fc-091b-476b-8f4b-16199a652352","codigo":"H-44","nombre":"Cargador Milwaukee M12","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"a86ad1e3-f7da-4e00-95b8-ec0979eb1709","codigo":"H-45","nombre":"Cargador Milwaukee M12","categoria":"Eléctrica","numero_serie":"N/A","estado":"DANADO","descripcion":"No carga"},{"id":"b05185e4-eda9-451a-9bae-668bb68394c6","codigo":"H-63","nombre":"Cargador Milwaukee M12","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"f1168922-70e8-49b5-906d-07b7394c3f73","codigo":"H-64","nombre":"Cargador Milwaukee M12","categoria":"Eléctrica","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Pinzas_el_ctricas_Milwaukee","title":"Lote / Múltiples Unidades: \"Pinzas eléctricas Milwaukee\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 4 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"372cb750-4317-461a-867d-5b2d1d124245","codigo":"H-167","nombre":"Pinzas electricas Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"a0f26c4e-1ee5-4810-bd84-babd4b9e8eaf","codigo":"H-169","nombre":"Pinzas electricas Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"a7f0e5d0-715a-4fa2-91c7-c47a1a8af1f8","codigo":"H-170","nombre":"Pinzas electricas Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"7a396656-01a1-480c-a8f2-7c8a9b7652ab","codigo":"H-178","nombre":"Pinzas electricas Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Pinzas_pericas_Milwaukee","title":"Lote / Múltiples Unidades: \"Pinzas pericas Milwaukee\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 2 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"444e4bc2-37ce-49b9-9230-82091d50d8d5","codigo":"H-171","nombre":"Pinza Perica Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"722f6d43-c60d-4537-9fcc-5fa70ac787f0","codigo":"H-172","nombre":"Pinza Perica Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Pinzas_de_punta_Milwaukee","title":"Lote / Múltiples Unidades: \"Pinzas de punta Milwaukee\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 2 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"adf0c316-3ce3-4350-b997-3020fbcb6203","codigo":"H-173","nombre":"Pinzas de punta Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"f732d4b1-4bfe-4841-bdcd-fbc462c03a83","codigo":"H-174","nombre":"Pinzas de punta Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Pinzas_pela_cables_Milwaukee","title":"Lote / Múltiples Unidades: \"Pinzas pela cables Milwaukee\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 2 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"aaec897c-c537-45b5-8587-1c8c6e40b39c","codigo":"H-176","nombre":"Pinza pela cables Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"},{"id":"6d0522a0-97d9-4093-9668-015a0c1fcf18","codigo":"H-177","nombre":"Pinza pela cables Milwaukee","categoria":"General","numero_serie":"N/A","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Desarmadores_Milwaukee_Multipuntas","title":"Lote / Múltiples Unidades: \"Desarmadores Milwaukee Multipuntas\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 2 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"b014a5f8-bf6c-408e-95d2-871c63a51237","codigo":"H-13","nombre":"Desarmador Millwaukee Multipuntas","categoria":"Manual","numero_serie":"N/A","estado":"INCOMPLETO","descripcion":"Faltan Puntas"},{"id":"2e694009-7f66-4c42-ad12-266e737f262f","codigo":"H-14","nombre":"Desarmador Millwaukee Multipuntas","categoria":"Manual","numero_serie":"N/A","estado":"INCOMPLETO","descripcion":"Faltan Puntas"}]},{"id":"multi_Pistolas_de_clavos_Ramset","title":"Lote / Múltiples Unidades: \"Pistolas de clavos Ramset\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 3 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"ee840be0-f496-4f5e-adfc-c10f83cae78e","codigo":"H-189","nombre":"Pistola de clavos Ramset","categoria":"General","numero_serie":"41108583","estado":"BUENO","descripcion":"Completo"},{"id":"bc2dc9eb-d8a1-411b-a9a8-cd698e63d576","codigo":"H-190","nombre":"Pistola de clavos Ramset","categoria":"General","numero_serie":"50505511","estado":"BUENO","descripcion":"Completo"},{"id":"0f3a3511-e3f0-437d-8013-3240f60fcb32","codigo":"H-191","nombre":"Pistola de clavos Ramset","categoria":"General","numero_serie":"50505503","estado":"BUENO","descripcion":"Completo"}]},{"id":"multi_Etiquetadoras_Panduit__Distintos_Modelos_","title":"Lote / Múltiples Unidades: \"Etiquetadoras Panduit (Distintos Modelos)\"","categoryType":"MULTIPLE_UNIDAD","description":"Existen 3 piezas registradas con códigos independientes.","recommendation":"¿Se mantienen como códigos separados individuales para asignar a diferentes técnicos, o se manejan por stock/cantidad?","items":[{"id":"b4a876ae-d39f-4674-bda4-c97859331b81","codigo":"H-186","nombre":"Etiquetadora Panduit","categoria":"General","numero_serie":"XA9L2300205 (MP75)","estado":"BUENO","descripcion":"Completo"},{"id":"14a63bf0-6967-4ebe-b73d-b0a3f442819d","codigo":"H-187","nombre":"Etiquetadora Panduit","categoria":"General","numero_serie":"MP200","estado":"BUENO","descripcion":"Completo"},{"id":"f7a429d3-6dcd-4ecc-8d7b-8c223f389335","codigo":"H-188","nombre":"Etiquetadora Panduit","categoria":"General","numero_serie":"PanTher LS8E","estado":"BUENO","descripcion":"Completo"}]}];
+    let decisions = JSON.parse(localStorage.getItem('portal_inttec_decisions') || '{}');
+    let currentCategory = 'ALL';
+
+    function saveDecisions() {
+      localStorage.setItem('portal_inttec_decisions', JSON.stringify(decisions));
+      updateProgress();
+    }
+
+    function setDecision(groupId, action) {
+      if (!decisions[groupId]) decisions[groupId] = {};
+      decisions[groupId].action = action;
+      saveDecisions();
+      renderCards();
+    }
+
+    function setNotes(groupId, note) {
+      if (!decisions[groupId]) decisions[groupId] = {};
+      decisions[groupId].notes = note;
+      saveDecisions();
+    }
+
+    function updateProgress() {
+      const decidedCount = Object.keys(decisions).filter(k => decisions[k] && decisions[k].action).length;
+      const total = dataset.length;
+      const pct = Math.round((decidedCount / total) * 100);
+
+      document.getElementById('progressBar').style.width = pct + '%';
+      document.getElementById('progressText').innerText = decidedCount + ' de ' + total + ' casos decididos (' + pct + '%)';
+      document.getElementById('floatingSummary').innerText = decidedCount + ' / ' + total + ' Casos Revisados (' + pct + '%)';
+    }
+
+    function filterCategory(cat) {
+      currentCategory = cat;
+      document.querySelectorAll('.filter-pills .pill').forEach(el => el.classList.remove('active'));
+      event.target.classList.add('active');
+      renderCards();
+    }
+
+    function renderCards() {
+      const container = document.getElementById('cardsContainer');
+      container.innerHTML = '';
+
+      const filtered = dataset.filter(g => currentCategory === 'ALL' || g.categoryType === currentCategory);
+
+      filtered.forEach(group => {
+        const dec = decisions[group.id] || {};
+        const isDecided = !!dec.action;
+
+        let tagClass = 'tag-critico';
+        let tagLabel = '🔴 Misma Serie';
+        if (group.categoryType === 'CATEGORIA_CRUZADA') {
+          tagClass = 'tag-cruzada';
+          tagLabel = '🟡 Reclasificado / Mismo Nombre';
+        } else if (group.categoryType === 'MULTIPLE_UNIDAD') {
+          tagClass = 'tag-multiple';
+          tagLabel = '🔵 Lote / Múltiples Piezas';
+        }
+
+        const card = document.createElement('div');
+        card.className = 'group-card ' + (isDecided ? 'status-decided' : '');
+        card.id = 'card_' + group.id;
+
+        card.innerHTML = `
+          <div class="card-header">
+            <div>
+              <span class="group-tag ${tagClass}">${tagLabel}</span>
+              <div class="group-title">${group.title}</div>
+            </div>
+            ${isDecided ? '<span style="color: #34d399; font-size: 12px; font-weight: 700;">✓ REVISADO</span>' : ''}
+          </div>
+
+          <p class="group-desc">${group.description}</p>
+
+          <div class="recommendation-box">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <span>${group.recommendation}</span>
+          </div>
+
+          <div class="items-grid">
+            ${group.items.map(item => `
+              <div class="item-card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span class="item-code">${item.codigo}</span>
+                  <span class="item-badge estado-${item.estado.toLowerCase()}">${item.estado}</span>
+                </div>
+                <div class="item-name">${item.nombre}</div>
+                <div class="item-meta">
+                  <span>📁 ${item.categoria}</span>
+                  <span>🔢 N/S: <strong>${item.numero_serie || 'Sin Serie'}</strong></span>
+                </div>
+                ${item.descripcion ? '<div style="font-size: 11px; color: #94a3b8;">📝 ' + item.descripcion + '</div>' : ''}
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="decision-panel">
+            <div class="decision-label">¿Qué decisión tomar para este caso?</div>
+            <div class="decision-buttons">
+              <button 
+                class="btn-decision ${dec.action === 'UNIFICAR' ? 'active-unificar' : ''}" 
+                onclick="setDecision('${group.id}', 'UNIFICAR')">
+                🔗 Unificar en 1 solo código
+              </button>
+              <button 
+                class="btn-decision ${dec.action === 'MANTENER' ? 'active-mantener' : ''}" 
+                onclick="setDecision('${group.id}', 'MANTENER')">
+                📦 Mantener como piezas separadas
+              </button>
+              <button 
+                class="btn-decision ${dec.action === 'ELIMINAR' ? 'active-eliminar' : ''}" 
+                onclick="setDecision('${group.id}', 'ELIMINAR')">
+                🗑️ Eliminar registros repetidos
+              </button>
+              <button 
+                class="btn-decision ${dec.action === 'MODIFICAR' ? 'active-modificar' : ''}" 
+                onclick="setDecision('${group.id}', 'MODIFICAR')">
+                ✏️ Renombrar / Modificar Serie
+              </button>
+            </div>
+            <input 
+              type="text" 
+              class="notes-input" 
+              placeholder="Notas u observaciones específicas (ej. 'Dejar solo H-90 y borrar H-91')..." 
+              value="${dec.notes || ''}" 
+              oninput="setNotes('${group.id}', this.value)"
+            />
+          </div>
+        `;
+
+        container.appendChild(card);
+      });
+
+      updateProgress();
+    }
+
+    function generateReportText() {
+      let report = '===============================================\n';
+      report += '  PORTAL INTTEC • REPORTE DE DECISIONES DE HERRAMIENTAS\n';
+      report += '  Fecha: ' + new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + '\n';
+      report += '===============================================\n\n';
+
+      let totalDecided = 0;
+      let countUnificar = 0;
+      let countMantener = 0;
+      let countEliminar = 0;
+      let countModificar = 0;
+
+      dataset.forEach((group, index) => {
+        const dec = decisions[group.id];
+        if (dec && dec.action) {
+          totalDecided++;
+          if (dec.action === 'UNIFICAR') countUnificar++;
+          if (dec.action === 'MANTENER') countMantener++;
+          if (dec.action === 'ELIMINAR') countEliminar++;
+          if (dec.action === 'MODIFICAR') countModificar++;
+
+          report += (index + 1) + '. ' + group.title + '\n';
+          report += '   • Códigos involucrados: ' + group.items.map(i => i.codigo).join(', ') + '\n';
+          report += '   • DECISIÓN: [' + dec.action + ']\n';
+          if (dec.notes) {
+            report += '   • Observaciones: "' + dec.notes + '"\n';
+          }
+          report += '\n';
+        }
+      });
+
+      report += '-----------------------------------------------\n';
+      report += 'RESUMEN:\n';
+      report += '• Total Casos Revisados: ' + totalDecided + ' de ' + dataset.length + '\n';
+      report += '  - Unificar en 1 solo código: ' + countUnificar + '\n';
+      report += '  - Mantener como piezas separadas: ' + countMantener + '\n';
+      report += '  - Eliminar registros duplicados: ' + countEliminar + '\n';
+      report += '  - Modificar / Renombrar: ' + countModificar + '\n';
+      report += '===============================================\n';
+
+      return report;
+    }
+
+    function openReportModal() {
+      document.getElementById('reportContent').value = generateReportText();
+      document.getElementById('reportModal').style.display = 'flex';
+    }
+
+    function closeReportModal() {
+      document.getElementById('reportModal').style.display = 'none';
+    }
+
+    function copyReport() {
+      const txt = document.getElementById('reportContent');
+      txt.select();
+      document.execCommand('copy');
+      alert('¡Reporte copiado al portapapeles! Ya puedes pegarlo en WhatsApp o correo.');
+    }
+
+    function downloadReport() {
+      const text = generateReportText();
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'Reporte_Decision_Herramientas_Inttec.txt';
+      link.click();
+    }
+
+    // Initial render
+    renderCards();
+  </script>
+</body>
+</html>

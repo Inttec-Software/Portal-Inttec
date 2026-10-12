@@ -52,7 +52,7 @@ export default function EmpleadoVehiculosScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={styles.header}>
         <View style={{ marginRight: Spacing.three, padding: Spacing.one, width: 32 }} />
         <View style={{ flex: 1 }}>
@@ -204,12 +204,13 @@ export default function EmpleadoVehiculosScreen() {
       <ImageViewerModal
         visible={viewerVisible}
         imageUrl={activePreviewUrl}
+        imageUrls={activePreviewUrl ? (activePreviewUrl.includes(',') ? activePreviewUrl.split(',').map(u => u.trim()) : [activePreviewUrl]) : []}
         onClose={() => {
           setViewerVisible(false);
           setActivePreviewUrl(null);
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

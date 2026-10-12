@@ -12,28 +12,32 @@ import { Cotizacion } from '@/types/ventas';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleCache } from '@/services/moduleCache';
-
 const getStatusConfig = (estado: string, isDark: boolean) => {
-  switch(estado) {
-    case 'Borrador':
+  const norm = (estado || '').toLowerCase().trim();
+  switch(norm) {
+    case 'cotizacion':
+    case 'cotización':
+    case 'borrador':
       return {
         color: isDark ? '#f8f9fa' : '#343a40',
         bg: isDark ? '#495057' : '#e9ecef',
         icon: 'document-outline' as const
       };
-    case 'Enviado':
+    case 'enviado':
+    case 'enviada':
       return {
         color: isDark ? '#fef08a' : '#b45309',
         bg: isDark ? '#78350f' : '#fef3c7',
         icon: 'paper-plane-outline' as const
       };
-    case 'Aprobada':
+    case 'aprobada':
+    case 'aprobado':
       return {
         color: isDark ? '#a7f3d0' : '#047857',
         bg: isDark ? '#064e3b' : '#d1fae5',
         icon: 'checkmark-circle-outline' as const
       };
-    case 'Orden de Compra':
+    case 'orden de compra':
       return {
         color: isDark ? '#bae6fd' : '#0369a1',
         bg: isDark ? '#0c4a6e' : '#e0f2fe',
@@ -46,6 +50,13 @@ const getStatusConfig = (estado: string, isDark: boolean) => {
         icon: 'document-text-outline' as const
       };
   }
+};
+
+const getDisplayEstado = (estado?: string) => {
+  if (!estado || estado.toLowerCase() === 'borrador') {
+    return 'Cotización';
+  }
+  return estado;
 };
 
 const getActionBtnStyle = (action: 'view' | 'download' | 'email' | 'edit' | 'delete', isDark: boolean) => {
@@ -390,49 +401,31 @@ export default function CotizacionesListScreen() {
     }
   };
 
-  // HEADER CORPORATIVO (EXCLUSIVO ESCRITORIO WEB)
-  const renderDesktopHeader = () => (
-    <View style={styles.desktopNavBar}>
-      <View style={styles.desktopNavBarLeft}>
-        <Image 
-          source={
-            company === 'daravisa'
-              ? require('@/assets/images/logo_daravisa.png')
-              : require('@/assets/images/logo.jpeg')
-          } 
-          style={styles.desktopLogo} 
-          resizeMode="contain"
-        />
-        <View style={styles.desktopLogoTexts}>
-          <Text style={styles.desktopLogoTitle}>
-            {company === 'daravisa' ? 'DARAVISA' : 'INTTEC'}
-          </Text>
-          <Text style={styles.desktopLogoSubtitle}>
-            {company === 'daravisa' ? 'PORTAL DE GESTIÓN' : 'INTEGRACIÓN DE TECNOLOGÍAS'}
-          </Text>
-        </View>
-      </View>
-      <View style={styles.desktopNavBarRight}>
-      </View>
-    </View>
-  );
-
   // SUB-HEADER BAR (EXCLUSIVO ESCRITORIO WEB)
   const renderDesktopToolbar = () => (
     <View style={styles.desktopToolbar}>
       <View style={styles.desktopToolbarLeft}>
         <View style={styles.calculatorCircle}>
-          <Ionicons name="calculator" size={20} color="#fff" />
+          <Ionicons name="calculator" size={16} color="#fff" />
         </View>
         <Text style={styles.desktopModuleTitle}>Cotizaciones</Text>
+        <View style={styles.countBadge}>
+          <Text style={styles.countBadgeText}>{filteredCotizaciones.length}</Text>
+        </View>
         <View style={styles.desktopSearchContainer}>
+          <Ionicons name="search" size={15} color={themeColors.textSecondary} style={styles.searchIconInside} />
           <TextInput
             style={styles.desktopSearchInput}
-            placeholder="Buscar"
+            placeholder="Buscar por folio, cliente o vendedor..."
+            placeholderTextColor={themeColors.textSecondary + '80'}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
-          <Ionicons name="search" size={18} color="#00C3F3" style={styles.searchIconInside} />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={{ padding: 2 }}>
+              <Ionicons name="close-circle" size={14} color={themeColors.textSecondary} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
       <View style={styles.desktopToolbarRight}>
@@ -440,7 +433,8 @@ export default function CotizacionesListScreen() {
           onPress={() => router.push('/(admin)/nueva-cotizacion')}
           style={styles.addCotizacionButton}
         >
-          <Text style={styles.addCotizacionButtonText}>+ Agregar Cotización</Text>
+          <Ionicons name="add" size={16} color="#fff" />
+          <Text style={styles.addCotizacionButtonText}>Nueva Cotización</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -448,31 +442,19 @@ export default function CotizacionesListScreen() {
 
   // TABLA DE COTIZACIONES DE ALTA FIDELIDAD (WEB/DESKTOP)
   const renderDesktopTable = () => (
-    <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: '100%' }}>
-      <View style={[styles.tableContainer, { minWidth: 1100 }]}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ width: '100%' }}>
+      <View style={styles.tableContainer}>
         {/* Encabezado de la Tabla */}
         <View style={styles.tableHeaderRow}>
-          <Text style={[styles.tableHeaderCell, { width: '5%', minWidth: 45, fontWeight: 'bold' }]}>No. C</Text>
-          <Text style={[styles.tableHeaderCell, { width: '8%', minWidth: 75, fontWeight: 'bold' }]}>Folio Alt</Text>
-          <Text style={[styles.tableHeaderCell, { width: '9%', minWidth: 85, fontWeight: 'bold' }]}>Fecha de Emisión</Text>
-          <Text style={[styles.tableHeaderCell, { width: '7%', minWidth: 70, fontWeight: 'bold' }]}>Usuario</Text>
-          <Text style={[styles.tableHeaderCell, { width: '16%', minWidth: 130, fontWeight: 'bold' }]}>Empresa</Text>
-          <Text style={[styles.tableHeaderCell, { width: '11%', minWidth: 95, fontWeight: 'bold' }]}>Referencia</Text>
-          <Text style={[styles.tableHeaderCell, { width: '10%', minWidth: 80, fontWeight: 'bold' }]}>Estado</Text>
-          <Text style={[styles.tableHeaderCell, { width: '10%', minWidth: 105, fontWeight: 'bold', textAlign: 'right', paddingRight: 12, flexShrink: 0 }]}>Total</Text>
-          
-          {/* Acciones Header con iconos pequeños */}
-          <View style={[styles.tableHeaderCell, styles.headerActionsContainer, { width: '24%', minWidth: 250, paddingRight: 2, flexShrink: 0 }]}>
-            <Ionicons name="eye-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="pencil-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="copy-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="download-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="mail-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="chatbubble-ellipses-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="chevron-down" size={12} color={themeColors.accent} />
-            <Ionicons name="cash-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="trash-outline" size={12} color={themeColors.danger} />
-          </View>
+          <Text style={[styles.tableHeaderCell, { width: '5%', textAlign: 'center' }]}>No. C</Text>
+          <Text style={[styles.tableHeaderCell, { width: '8%', textAlign: 'center' }]}>Folio</Text>
+          <Text style={[styles.tableHeaderCell, { width: '9%', textAlign: 'center' }]}>Fecha</Text>
+          <Text style={[styles.tableHeaderCell, { width: '8%', textAlign: 'center' }]}>Usuario</Text>
+          <Text style={[styles.tableHeaderCell, { width: '18%', textAlign: 'left', paddingHorizontal: 6 }]}>Empresa</Text>
+          <Text style={[styles.tableHeaderCell, { width: '14%', textAlign: 'left', paddingHorizontal: 6 }]}>Referencia</Text>
+          <Text style={[styles.tableHeaderCell, { width: '10%', textAlign: 'center' }]}>Estado</Text>
+          <Text style={[styles.tableHeaderCell, { width: '9%', textAlign: 'right', paddingRight: 8 }]}>Total</Text>
+          <Text style={[styles.tableHeaderCell, { width: '19%', textAlign: 'center' }]}>Acciones</Text>
         </View>
 
         {/* Cuerpo de la Tabla */}
@@ -486,6 +468,8 @@ export default function CotizacionesListScreen() {
           filteredCotizaciones.map((cot, index) => {
             const sequentialId = 1532 + (filteredCotizaciones.length - 1 - index);
             const firstLineName = cot.lineas?.[0]?.productoNombre || 'Sin referencia';
+            const estadoDisplay = getDisplayEstado(cot.estado);
+            const config = getStatusConfig(estadoDisplay, scheme === 'dark');
             
             return (
               <View key={cot.id}>
@@ -499,31 +483,25 @@ export default function CotizacionesListScreen() {
                     expandedRowId === cot.id && { borderBottomWidth: 0, backgroundColor: themeColors.backgroundSelected }
                   ]}
                 >
-                  <Text style={[styles.tableCell, { width: '5%', minWidth: 45, color: themeColors.textSecondary }]}>{sequentialId}</Text>
-                  <Text style={[styles.tableCell, { width: '8%', minWidth: 75, color: themeColors.textSecondary }]}>{cot.folio}</Text>
-                  <Text style={[styles.tableCell, { width: '9%', minWidth: 85 }]}>{cot.fecha_creacion}</Text>
-                  <Text style={[styles.tableCell, { width: '7%', minWidth: 70 }]}>{cot.vendedor || 'Admin'}</Text>
-                  <Text style={[styles.tableCell, { width: '16%', minWidth: 130, fontWeight: 'bold', color: themeColors.text }]} numberOfLines={1}>
+                  <Text style={[styles.tableCell, { width: '5%', textAlign: 'center', color: themeColors.textSecondary }]}>{sequentialId}</Text>
+                  <Text style={[styles.tableCell, { width: '8%', textAlign: 'center', color: themeColors.textSecondary }]}>{cot.folio}</Text>
+                  <Text style={[styles.tableCell, { width: '9%', textAlign: 'center' }]}>{cot.fecha_creacion}</Text>
+                  <Text style={[styles.tableCell, { width: '8%', textAlign: 'center' }]} numberOfLines={1}>{cot.vendedor || 'Admin'}</Text>
+                  <Text style={[styles.tableCell, { width: '18%', textAlign: 'left', paddingHorizontal: 6, fontWeight: '600', color: themeColors.text }]} numberOfLines={1}>
                     {cot.cliente_nombre}
                   </Text>
-                  <Text style={[styles.tableCell, { width: '11%', minWidth: 95, color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
-                  <View style={[styles.tableCell, { width: '10%', minWidth: 80 }]}>
-                    {(() => {
-                      const estado = cot.estado || 'Borrador';
-                      const config = getStatusConfig(estado, scheme === 'dark');
-                      return (
-                        <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10, alignSelf: 'flex-start' }]}>
-                          <Text style={{ fontSize: 9, fontWeight: 'bold', color: config.color }}>
-                            {estado}
-                          </Text>
-                        </View>
-                      );
-                    })()}
+                  <Text style={[styles.tableCell, { width: '14%', textAlign: 'left', paddingHorizontal: 6, color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
+                  <View style={[styles.tableCell, { width: '10%', alignItems: 'center', justifyContent: 'center' }]}>
+                    <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10, alignSelf: 'center' }]}>
+                      <Text style={{ fontSize: 9, fontWeight: 'bold', color: config.color }}>
+                        {estadoDisplay}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={[styles.tableCell, { width: '10%', minWidth: 105, fontWeight: 'bold', textAlign: 'right', paddingRight: 12, flexShrink: 0 }]}>{formatearMoneda(cot.total)}</Text>
+                  <Text style={[styles.tableCell, { width: '9%', textAlign: 'right', paddingRight: 8, fontWeight: 'bold' }]}>{formatearMoneda(cot.total)}</Text>
                   
-                  {/* 9 Iconos de acción con Tooltips en Hover */}
-                  <View style={[styles.tableCell, styles.rowActionsContainer, { width: '24%', minWidth: 250, paddingRight: 2, flexShrink: 0 }]}>
+                  {/* Iconos de acción con Tooltips en Hover */}
+                  <View style={[styles.tableCell, styles.rowActionsContainer, { width: '19%' }]}>
                     <ActionButtonWithTooltip icon="eye-outline" color={themeColors.textSecondary} tooltip="Ver PDF" onPress={() => handleDownloadPDF(cot, 'view')} />
                     <ActionButtonWithTooltip icon="pencil-outline" color={themeColors.textSecondary} tooltip="Editar Cotización" onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} />
                     <ActionButtonWithTooltip icon="copy-outline" color={themeColors.textSecondary} tooltip="Duplicar Cotización" onPress={() => handleDuplicate(cot)} />
@@ -574,17 +552,16 @@ export default function CotizacionesListScreen() {
       {isDesktop ? (
         // --- DISEÑO DESCRITORIO WEB (ALTA FIDELIDAD) ---
         <View style={{ flex: 1 }}>
-          {renderDesktopHeader()}
           {renderDesktopToolbar()}
           <ScrollView style={styles.desktopScrollView}>
-            <View style={{ paddingHorizontal: 24, paddingVertical: 12 }}>
+            <View style={{ paddingHorizontal: 20, paddingVertical: 8 }}>
               {renderDesktopTable()}
             </View>
           </ScrollView>
         </View>
       ) : (
-        // --- DISEÑO MÓVIL/TABLETA ORIGINAL RESPETADO ---
-        <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+        // --- DISEÑO MÓVIL/TABLETA ---
+        <View style={{ flex: 1 }}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
           {/* HEADER MÓVIL */}
           <View style={styles.header}>
@@ -656,7 +633,7 @@ export default function CotizacionesListScreen() {
                         <Text style={styles.folio}>#{cot.folio}</Text>
                       </View>
                       {(() => {
-                        const estado = cot.estado || 'Borrador';
+                        const estado = getDisplayEstado(cot.estado);
                         const config = getStatusConfig(estado, scheme === 'dark');
                         return (
                           <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingHorizontal: 6 }]}>
@@ -740,7 +717,7 @@ export default function CotizacionesListScreen() {
             </TouchableOpacity>
           )}
         </ScrollView>
-    </SafeAreaView>
+    </View>
       )}
     </View>
   );
@@ -825,111 +802,12 @@ const getStyles = (themeColors: any) => StyleSheet.create({
   },
 
   // --- ESTILOS DESKTOP/WEB DE ALTA FIDELIDAD ---
-  desktopNavBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: themeColors.backgroundElement,
-    borderBottomWidth: 1,
-    borderBottomColor: themeColors.border,
-  },
-  desktopNavBarLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  desktopLogo: {
-    width: 60,
-    height: 40,
-    marginRight: 10,
-  },
-  desktopLogoTexts: {
-    flexDirection: 'column',
-  },
-  desktopLogoTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 1,
-    color: themeColors.text,
-  },
-  desktopLogoSubtitle: {
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    color: themeColors.textSecondary,
-    marginTop: -2,
-  },
-  desktopNavBarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 15,
-  },
-  helpButton: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: themeColors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  helpButtonText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: themeColors.accent,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    gap: 6,
-  },
-  backButtonText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  adminText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: themeColors.text,
-  },
-  matrizText: {
-    fontSize: 11,
-    color: themeColors.textSecondary,
-    marginLeft: -5,
-    marginRight: 5,
-  },
-  avatarImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: themeColors.border,
-  },
-  menuNavButton: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 10,
-  },
-  menuNavText: {
-    fontSize: 8,
-    fontWeight: 'bold',
-    color: themeColors.accent,
-    marginTop: -2,
-  },
-
-  // Toolbar
   desktopToolbar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
     backgroundColor: themeColors.backgroundElement,
     borderBottomWidth: 1,
     borderBottomColor: themeColors.border,
@@ -937,40 +815,54 @@ const getStyles = (themeColors: any) => StyleSheet.create({
   desktopToolbarLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
   calculatorCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: themeColors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   desktopModuleTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '700',
     color: themeColors.text,
+  },
+  countBadge: {
+    backgroundColor: themeColors.accent + '20',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  countBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: themeColors.accent,
   },
   desktopSearchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: themeColors.background,
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    width: 250,
-    marginLeft: 15,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: themeColors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    width: 280,
+    marginLeft: 6,
+    gap: 6,
   },
   desktopSearchInput: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 12,
     color: themeColors.text,
     padding: 0,
     outlineStyle: 'none',
   } as any,
   searchIconInside: {
-    marginLeft: 8,
+    marginRight: 2,
   },
   desktopToolbarRight: {
     flexDirection: 'row',
@@ -978,15 +870,18 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     gap: 10,
   },
   addCotizacionButton: {
-    backgroundColor: themeColors.accent,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: themeColors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 6,
   },
   addCotizacionButtonText: {
     color: '#ffffff',
-    fontSize: 13,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontWeight: '700',
   },
   menuRightButton: {
     flexDirection: 'column',
@@ -1020,43 +915,39 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     backgroundColor: themeColors.background,
     borderBottomWidth: 1,
     borderBottomColor: themeColors.border,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
     alignItems: 'center',
+    width: '100%',
   },
   tableHeaderCell: {
     fontSize: 12,
+    fontWeight: 'bold',
     color: themeColors.text,
-    paddingRight: 10,
   },
   tableRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: themeColors.border,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
     alignItems: 'center',
+    width: '100%',
   },
   tableCell: {
-    fontSize: 13,
+    fontSize: 12,
     color: themeColors.text,
-    paddingRight: 10,
   },
   headerActionsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 2,
-    paddingRight: 0,
-    flexShrink: 0,
+    justifyContent: 'center',
   },
   rowActionsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 2,
-    paddingRight: 0,
-    flexShrink: 0,
+    justifyContent: 'center',
+    gap: 3,
   },
   rowActionBtn: {
     padding: 3,

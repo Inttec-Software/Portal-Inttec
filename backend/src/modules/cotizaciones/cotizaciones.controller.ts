@@ -346,7 +346,7 @@ export const duplicateCotizacion = async (req: Request, res: Response) => {
       lineas: original.lineas || [],
       terminos_condiciones: original.terminos_condiciones,
       notas_observaciones: original.notas_observaciones || null,
-      estado: 'Borrador'
+      estado: 'Cotización'
     };
 
     let { error: insError } = await client

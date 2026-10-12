@@ -31,7 +31,8 @@ import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
-import MaterialesSelector from '@/components/MaterialesSelector';
+import MaterialesSelector, { ProductoInventario } from '@/components/MaterialesSelector';
+import { normalizeText } from '@/utils/helpers';
 
 export default function EvidenciaForm() {
   const router = useRouter();
@@ -70,13 +71,29 @@ export default function EvidenciaForm() {
   const [selectedSucursal, setSelectedSucursal] = useState<string>('');
   const [sucursalSearch, setSucursalSearch] = useState('');
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
-  const [productos, setProductos] = useState<any[]>([]);
+  
+  // Colaboradores e Inventarios
+  const [empleadosDisponibles, setEmpleadosDisponibles] = useState<any[]>([]);
+  const [selectedColaboradores, setSelectedColaboradores] = useState<{ id: string; nombre: string; email?: string }[]>([]);
+  const [showColaboradorModal, setShowColaboradorModal] = useState(false);
+  const [colaboradorSearch, setColaboradorSearch] = useState('');
+  const [miInventarioRaw, setMiInventarioRaw] = useState<any[]>([]);
+  const [productos, setProductos] = useState<ProductoInventario[]>([]);
 
   const [trabajos, setTrabajos] = useState<{
     descripcion: string;
     usa_materiales?: boolean;
     materiales: string;
-    materiales_usados?: { productoId: string; nombre: string; retirado: number; usado: number; sobrante: number; unidad?: string }[];
+    materiales_usados?: { 
+      productoId: string; 
+      nombre: string; 
+      retirado: number; 
+      usado: number; 
+      sobrante: number; 
+      unidad?: string;
+      empleadoId?: string;
+      empleadoNombre?: string;
+    }[];
     solucion: string;
     antesImg?: { uri: string; base64: string | null };
     despuesImg?: { uri: string; base64: string | null };
@@ -126,6 +143,198 @@ export default function EvidenciaForm() {
     }
   };
 
+  // Sincronizar y combinar inventario propio con el de los colaboradores seleccionados
+  const syncCombinedProductos = async (
+    miInv: any[], 
+    colabs: { id: string; nombre: string }[], 
+    userObj: Usuario | null
+  ) => {
+    const miProductos: ProductoInventario[] = (miInv || []).map((item: any) => ({
+      id: item.producto_id,
+      sku_interno: item.productos?.sku_interno || '',
+      nombre_oficial: item.productos?.nombre_oficial || '',
+      stock_actual: Number(item.cantidad_disponible) || 0,
+      unidad: item.productos?.unidad || 'pza',
+      empleadoId: userObj?.id,
+      empleadoNombre: 'Mi Inventario',
+      esMio: true,
+    }));
+
+    if (!colabs || colabs.length === 0) {
+      setProductos(miProductos);
+      return;
+    }
+
+    try {
+      const colabIds = colabs.map(c => c.id).filter(Boolean);
+      if (colabIds.length === 0) {
+        setProductos(miProductos);
+        return;
+      }
+
+      let colabInventarioData: any[] = [];
+      
+      // 1. Intentar por endpoint del backend
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/evidencias/inventario-colaboradores?ids=${colabIds.join(',')}`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.inventario) && data.inventario.length > 0) {
+            colabInventarioData = data.inventario;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('API inventario-colaboradores error:', apiErr);
+      }
+
+      // 2. Fallback directo a Supabase en caso de que el backend no devuelva datos
+      if (colabInventarioData.length === 0) {
+        try {
+          const activeClient = company === 'daravisa' ? daravisaClient : inttecClient;
+          const { data: dbData, error: dbError } = await activeClient
+            .from('inventario_empleados')
+            .select('id, cantidad_disponible, producto_id, empleado_id, productos(id, sku_interno, nombre_oficial, unidad)')
+            .in('empleado_id', colabIds)
+            .gt('cantidad_disponible', 0);
+          
+          if (!dbError && Array.isArray(dbData)) {
+            colabInventarioData = dbData;
+          }
+        } catch (dbErr) {
+          console.warn('Direct Supabase inventario query fallback error:', dbErr);
+        }
+      }
+
+      // Si algún item no trae `productos` anidado, buscar en el catálogo o consultarlo
+      const missingProdIds = colabInventarioData
+        .filter(item => (!item.productos || !item.productos.nombre_oficial) && item.producto_id)
+        .map(item => item.producto_id);
+
+      let extraProdMap = new Map<string, any>();
+      if (missingProdIds.length > 0) {
+        try {
+          const activeClient = company === 'daravisa' ? daravisaClient : inttecClient;
+          const { data: pData } = await activeClient
+            .from('productos')
+            .select('id, sku_interno, nombre_oficial, unidad')
+            .in('id', missingProdIds);
+          if (pData) {
+            pData.forEach(p => extraProdMap.set(p.id, p));
+          }
+        } catch (pErr) {
+          console.warn('Error fetching missing productos details:', pErr);
+        }
+      }
+
+      const colabProductos: ProductoInventario[] = colabInventarioData.map((item: any) => {
+        const empName = colabs.find(c => c.id === item.empleado_id)?.nombre || 'Colaborador';
+        const prodObj = item.productos || extraProdMap.get(item.producto_id) || miProductos.find(p => p.id === item.producto_id);
+        
+        return {
+          id: item.producto_id || prodObj?.id || item.id,
+          sku_interno: prodObj?.sku_interno || item.sku_interno || 'N/A',
+          nombre_oficial: prodObj?.nombre_oficial || item.nombre_oficial || 'Material de Cuadrilla',
+          stock_actual: Number(item.cantidad_disponible) || 0,
+          unidad: prodObj?.unidad || item.unidad || 'pza',
+          empleadoId: item.empleado_id,
+          empleadoNombre: empName,
+          esMio: false,
+        };
+      });
+
+      setProductos([...miProductos, ...colabProductos]);
+    } catch (err) {
+      console.warn('Error syncing combined inventario:', err);
+      setProductos(miProductos);
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser) {
+      syncCombinedProductos(miInventarioRaw, selectedColaboradores, currentUser);
+    }
+  }, [selectedColaboradores, miInventarioRaw, company]);
+
+  // Obtener la lista de productos con el stock restante disponible para el trabajo actual,
+  // restando lo que ya se ha asignado en los OTROS trabajos del mismo reporte.
+  const getProductosDisponiblesParaTrabajo = (trabajoIndex: number): ProductoInventario[] => {
+    const usedByOtherTrabajos = new Map<string, number>();
+    
+    trabajos.forEach((t, tIdx) => {
+      if (tIdx !== trabajoIndex && t.usa_materiales && Array.isArray(t.materiales_usados)) {
+        t.materiales_usados.forEach(m => {
+          const empKey = m.empleadoId || currentUser?.id || 'propio';
+          const key = `${empKey}___${m.productoId}`;
+          usedByOtherTrabajos.set(key, (usedByOtherTrabajos.get(key) || 0) + (Number(m.usado) || 0));
+        });
+      }
+    });
+
+    return productos.map(p => {
+      const empKey = p.empleadoId || currentUser?.id || 'propio';
+      const key = `${empKey}___${p.id}`;
+      const usedElsewhere = usedByOtherTrabajos.get(key) || 0;
+      const originalStock = Number(p.stock_actual) || 0;
+      const remainingStock = Math.max(0, Math.round((originalStock - usedElsewhere) * 100) / 100);
+
+      return {
+        ...p,
+        stock_actual: remainingStock,
+      };
+    });
+  };
+
+  const handleAddColaborador = async (emp: any) => {
+    if (selectedColaboradores.some(c => c.id === emp.id)) return;
+    const newColabs = [...selectedColaboradores, { id: emp.id, nombre: emp.nombre, email: emp.email }];
+    setSelectedColaboradores(newColabs);
+    setShowColaboradorModal(false);
+    setColaboradorSearch('');
+    await syncCombinedProductos(miInventarioRaw, newColabs, currentUser);
+  };
+
+  const handleRemoveColaborador = async (empId: string, empNombre: string) => {
+    const doRemove = async () => {
+      const newColabs = selectedColaboradores.filter(c => c.id !== empId);
+      setSelectedColaboradores(newColabs);
+
+      // Limpiar de los trabajos cualquier material que pertenecía a este colaborador
+      setTrabajos(prev => prev.map(t => {
+        const filteredMat = (t.materiales_usados || []).filter(m => m.empleadoId !== empId);
+        const textoMateriales = filteredMat.map(m => `৹ ${m.usado}x ${m.nombre} (${m.unidad || 'pza'})`).join('\n');
+        return {
+          ...t,
+          materiales_usados: filteredMat,
+          materiales: textoMateriales,
+          usa_materiales: filteredMat.length > 0 ? t.usa_materiales : false
+        };
+      }));
+
+      await syncCombinedProductos(miInventarioRaw, newColabs, currentUser);
+    };
+
+    // Verificar si se usaron materiales de este colaborador
+    const hasUsedMat = trabajos.some(t => (t.materiales_usados || []).some(m => m.empleadoId === empId));
+    if (hasUsedMat) {
+      if (Platform.OS === 'web') {
+        if (window.confirm(`Al remover a ${empNombre}, se quitarán de la lista los materiales asignados a su inventario. ¿Continuar?`)) {
+          await doRemove();
+        }
+      } else {
+        Alert.alert(
+          'Remover Colaborador',
+          `Al remover a ${empNombre}, se quitarán de este reporte los materiales tomados de su inventario. ¿Deseas continuar?`,
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Remover', style: 'destructive', onPress: doRemove }
+          ]
+        );
+      }
+    } else {
+      await doRemove();
+    }
+  };
 
   const loadCatalogos = async (userId?: string) => {
     try {
@@ -136,12 +345,34 @@ export default function EvidenciaForm() {
       
       if (data.clientes) setClientes(data.clientes);
       if (data.sucursales) setSucursalesCliente(data.sucursales);
+      
+      let emps = data.empleados || data.todosLosEmpleados || [];
+      if (!emps || emps.length === 0) {
+        try {
+          const userRes = await fetch(`${getApiUrl()}/api/usuarios`, { headers });
+          if (userRes.ok) {
+            const uData = await userRes.json();
+            if (Array.isArray(uData) && uData.length > 0) {
+              emps = uData;
+            }
+          }
+        } catch (uErr) {
+          console.warn('Fallback loading usuarios failed:', uErr);
+        }
+      }
+      setEmpleadosDisponibles(emps);
+
       if (data.inventario) {
-        const formattedProductos = data.inventario.map((item: any) => ({
+        setMiInventarioRaw(data.inventario);
+        const formattedProductos: ProductoInventario[] = data.inventario.map((item: any) => ({
           id: item.producto_id,
           sku_interno: item.productos?.sku_interno || '',
           nombre_oficial: item.productos?.nombre_oficial || '',
-          stock_actual: item.cantidad_disponible
+          stock_actual: Number(item.cantidad_disponible) || 0,
+          unidad: item.productos?.unidad || 'pza',
+          empleadoId: userId,
+          empleadoNombre: 'Mi Inventario',
+          esMio: true,
         }));
         setProductos(formattedProductos);
       }
@@ -193,6 +424,7 @@ export default function EvidenciaForm() {
     clientes,
     selectedSucursal,
     sucursalesCliente,
+    selectedColaboradores,
     currentStep,
     trabajos,
     activeDraftId,
@@ -208,13 +440,14 @@ export default function EvidenciaForm() {
       clientes,
       selectedSucursal,
       sucursalesCliente,
+      selectedColaboradores,
       currentStep,
       trabajos,
       activeDraftId,
       isSubmitting,
       isSavingDraft,
     };
-  }, [currentUser, company, selectedCliente, clientes, selectedSucursal, sucursalesCliente, currentStep, trabajos, activeDraftId, isSubmitting, isSavingDraft]);
+  }, [currentUser, company, selectedCliente, clientes, selectedSucursal, sucursalesCliente, selectedColaboradores, currentStep, trabajos, activeDraftId, isSubmitting, isSavingDraft]);
 
   // Autoguardado automático en segundo plano cada 60 segundos
   useEffect(() => {
@@ -224,6 +457,7 @@ export default function EvidenciaForm() {
 
       const hasContent = Boolean(
         state.selectedCliente ||
+        state.selectedColaboradores.length > 0 ||
         state.trabajos.some(t => 
           t.descripcion?.trim() || 
           t.solucion?.trim() || 
@@ -246,6 +480,7 @@ export default function EvidenciaForm() {
           clienteNombre: clienteObj ? clienteObj.nombre : (state.selectedCliente ? 'Cliente' : 'Sin cliente asignado'),
           selectedSucursal: state.selectedSucursal,
           sucursalNombre: sucObj ? sucObj.nombre : '',
+          colaboradores: state.selectedColaboradores,
           currentStep: state.currentStep,
           trabajos: state.trabajos,
         });
@@ -276,6 +511,7 @@ export default function EvidenciaForm() {
         clienteNombre: clienteObj ? clienteObj.nombre : (selectedCliente ? 'Cliente' : 'Sin cliente asignado'),
         selectedSucursal,
         sucursalNombre: sucObj ? sucObj.nombre : '',
+        colaboradores: selectedColaboradores,
         currentStep,
         trabajos,
       });
@@ -302,7 +538,7 @@ export default function EvidenciaForm() {
     }
   };
 
-  const handleLoadDraft = (draft: EvidenceDraft, notify = true) => {
+  const handleLoadDraft = async (draft: EvidenceDraft, notify = true) => {
     setSelectedCliente(draft.selectedCliente || '');
     const cli = clientes.find(c => c.id === draft.selectedCliente);
     setClienteSearch(cli ? cli.nombre : (draft.clienteNombre || ''));
@@ -310,6 +546,10 @@ export default function EvidenciaForm() {
     setSelectedSucursal(draft.selectedSucursal || '');
     const suc = sucursalesCliente.find(s => s.id === draft.selectedSucursal);
     setSucursalSearch(suc ? suc.nombre : (draft.sucursalNombre || ''));
+
+    const colabs = draft.colaboradores || [];
+    setSelectedColaboradores(colabs);
+    await syncCombinedProductos(miInventarioRaw, colabs, currentUser);
 
     if (draft.trabajos && draft.trabajos.length > 0) {
       setTrabajos(draft.trabajos);
@@ -354,11 +594,13 @@ export default function EvidenciaForm() {
   };
 
   const handleStartNewDraft = () => {
-    const doReset = () => {
+    const doReset = async () => {
       setSelectedCliente('');
       setClienteSearch('');
       setSelectedSucursal('');
       setSucursalSearch('');
+      setSelectedColaboradores([]);
+      await syncCombinedProductos(miInventarioRaw, [], currentUser);
       setTrabajos([{ descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }]);
       setCurrentStep(1);
       setActiveDraftId(null);
@@ -367,7 +609,7 @@ export default function EvidenciaForm() {
       setDraftsModalVisible(false);
     };
 
-    if (trabajos.some(t => t.descripcion || t.solucion || t.antesImg || t.despuesImg || (t.fotosAdicionales && t.fotosAdicionales.length > 0))) {
+    if (trabajos.some(t => t.descripcion || t.solucion || t.antesImg || t.despuesImg || (t.fotosAdicionales && t.fotosAdicionales.length > 0)) || selectedColaboradores.length > 0) {
       if (Platform.OS === 'web') {
         if (window.confirm('¿Deseas limpiar el formulario y empezar un nuevo reporte desde cero?')) {
           doReset();
@@ -614,6 +856,7 @@ export default function EvidenciaForm() {
         }))),
         materiales_usados: allMateriales || null,
         observaciones: allSoluciones || null,
+        colaboradores: selectedColaboradores,
       };
 
       await EvidenceReportGenerator.exportToPDF(
@@ -812,6 +1055,7 @@ export default function EvidenciaForm() {
           foto_antes_url: fotoAntesUrl,
           foto_despues_url: fotoDespuesUrl,
           fotos_adicionales_urls: allFotosAdicionalesUrls.length > 0 ? allFotosAdicionalesUrls : null,
+          colaboradores: selectedColaboradores,
         })
       });
 
@@ -920,7 +1164,7 @@ export default function EvidenciaForm() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -1364,6 +1608,107 @@ export default function EvidenciaForm() {
                 </View>
               )}
 
+              {/* SECCIÓN DE COLABORADORES DE CUADRILLA */}
+              <View style={{
+                marginBottom: Spacing.four,
+                backgroundColor: themeColors.backgroundElement,
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                borderRadius: BorderRadius.medium,
+                padding: Spacing.two,
+              }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="people" size={18} color={themeColors.primary} />
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.text }}>
+                      Colaboradores de Cuadrilla
+                    </Text>
+                    {selectedColaboradores.length > 0 && (
+                      <View style={{ backgroundColor: themeColors.primary + '25', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.primary }}>
+                          +{selectedColaboradores.length}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      setColaboradorSearch('');
+                      setShowColaboradorModal(true);
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 8,
+                      backgroundColor: themeColors.primary + '15',
+                      borderWidth: 1,
+                      borderColor: themeColors.primary + '40',
+                    }}
+                  >
+                    <Ionicons name="person-add-outline" size={13} color={themeColors.primary} />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary }}>+ Agregar</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginBottom: 8, lineHeight: 15 }}>
+                  Si andan trabajando en equipo, agrega a tus compañeros para compartir y descontar de sus inventarios de material.
+                </Text>
+
+                {selectedColaboradores.length === 0 ? (
+                  <View style={{
+                    borderWidth: 1,
+                    borderStyle: 'dashed',
+                    borderColor: themeColors.border,
+                    borderRadius: BorderRadius.small,
+                    padding: 10,
+                    alignItems: 'center',
+                    backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)'
+                  }}>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, textAlign: 'center' }}>
+                      👤 Reporte individual (solo tu inventario cargado).
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {selectedColaboradores.map(colab => (
+                      <View
+                        key={colab.id}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                          backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                          borderWidth: 1,
+                          borderColor: themeColors.primary + '40',
+                          paddingVertical: 5,
+                          paddingLeft: 8,
+                          paddingRight: 6,
+                          borderRadius: 16,
+                        }}
+                      >
+                        <Ionicons name="person" size={12} color={themeColors.primary} />
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>
+                          {colab.nombre}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => handleRemoveColaborador(colab.id, colab.nombre)}
+                          style={{
+                            padding: 2,
+                            borderRadius: 10,
+                            backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'
+                          }}
+                        >
+                          <Ionicons name="close" size={13} color={themeColors.textSecondary} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
 
               {trabajos.map((trabajo, index) => (
                 <View key={index} style={{ marginBottom: Spacing.four, borderLeftWidth: 3, borderLeftColor: themeColors.accent, paddingLeft: Spacing.two }}>
@@ -1416,7 +1761,7 @@ export default function EvidenciaForm() {
 
                   {/* Selector de Materiales con Switch */}
                   <MaterialesSelector
-                    productos={productos}
+                    productos={getProductosDisponiblesParaTrabajo(index)}
                     materiales={trabajo.materiales_usados || []}
                     usaMateriales={trabajo.usa_materiales ?? (trabajo.materiales_usados && trabajo.materiales_usados.length > 0)}
                     onToggleUsaMateriales={(val) => {
@@ -2043,7 +2388,95 @@ export default function EvidenciaForm() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+
+      {/* Modal de Selección de Colaboradores */}
+      <Modal 
+        statusBarTranslucent={true} 
+        visible={showColaboradorModal} 
+        animationType="fade" 
+        transparent={true} 
+        onRequestClose={() => setShowColaboradorModal(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="people" size={20} color={themeColors.primary} />
+                <Text style={{ fontSize: 17, fontWeight: 'bold', color: themeColors.text }}>Agregar Colaborador</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowColaboradorModal(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: Spacing.two }}>
+              <CustomInput
+                placeholder="Buscar compañero por nombre o correo..."
+                value={colaboradorSearch}
+                onChangeText={setColaboradorSearch}
+                iconName="search-outline"
+                style={{ height: 42 }}
+              />
+            </View>
+
+            <ScrollView style={{ paddingHorizontal: Spacing.two, maxHeight: 360 }} keyboardShouldPersistTaps="handled">
+              {(() => {
+                const searchLower = (colaboradorSearch || '').trim().toLowerCase();
+                const filtered = (empleadosDisponibles || [])
+                  .filter(e => e && e.id && e.id !== currentUser?.id)
+                  .filter(e => !selectedColaboradores.some(sc => sc.id === e.id))
+                  .filter(e => {
+                    if (!searchLower) return true;
+                    const nombre = (e.nombre || '').toLowerCase();
+                    const email = (e.email || '').toLowerCase();
+                    return nombre.includes(searchLower) || email.includes(searchLower);
+                  });
+
+                if (filtered.length === 0) {
+                  return (
+                    <Text style={{ padding: 24, textAlign: 'center', color: themeColors.textSecondary, fontSize: 13 }}>
+                      {colaboradorSearch.trim() ? 'No se encontraron compañeros con esa búsqueda.' : 'No hay más compañeros disponibles para agregar.'}
+                    </Text>
+                  );
+                }
+
+                return filtered.map(emp => (
+                  <TouchableOpacity
+                    key={emp.id}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingVertical: 12,
+                      paddingHorizontal: 10,
+                      borderBottomWidth: 1,
+                      borderBottomColor: themeColors.border,
+                    }}
+                    onPress={() => handleAddColaborador(emp)}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: themeColors.primary + '20', alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ fontSize: 14, fontWeight: 'bold', color: themeColors.primary }}>
+                          {(emp.nombre || 'E').charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: themeColors.text }}>{emp.nombre}</Text>
+                        <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>{emp.email || 'Empleado'}</Text>
+                      </View>
+                    </View>
+                    <Ionicons name="add-circle-outline" size={24} color={themeColors.primary} />
+                  </TouchableOpacity>
+                ));
+              })()}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </View>
   );
 }
 
@@ -2351,5 +2784,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
     marginTop: Spacing.one,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.three,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 520,
+    borderRadius: BorderRadius.large,
+    maxHeight: '80%',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: Spacing.three,
+    borderBottomWidth: 1,
   },
 });

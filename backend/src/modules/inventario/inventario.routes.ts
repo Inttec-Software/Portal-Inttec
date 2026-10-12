@@ -15,7 +15,8 @@ import {
   verificarFolioFactura,
   hardDeleteProducto,
   getMovimientosInventario,
-  getFirmaMovimiento
+  getFirmaMovimiento,
+  eliminarMovimiento
 } from './inventario.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -34,6 +35,7 @@ const invMutate = (req: any, res: any, next: any) => {
 
 router.get('/dashboard', cacheMiddleware(30), getDashboardData);
 router.get('/movimientos', getMovimientosInventario);
+router.delete('/movimientos/:id', invMutate, eliminarMovimiento);
 router.get('/retiros', getMovimientosInventario);
 router.get('/firma/:id', getFirmaMovimiento);
 router.post('/devoluciones/aprobar', invMutate, aprobarDevolucion);

@@ -17,6 +17,7 @@ export interface OfflineGastoItem {
   metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia';
   justificacion?: string | null;
   base64Foto?: string | null; // Foto en base64 para guardado offline
+  base64Fotos?: { base64: string; ext?: string }[] | null;
   localFotoUri?: string | null; // URL local guardada en disco
   fotoExt?: string | null;
   fecha_comprobante?: string | null;
@@ -177,35 +178,52 @@ export const SyncService = {
           let publicUrl = '';
           let publicInvoiceUrl = '';
 
-          let b64Foto = item.base64Foto;
-          if (!b64Foto && item.localFotoUri) {
-           try {
-               b64Foto = await new File(item.localFotoUri).text();
-             } catch (e) {
-               console.warn('No se pudo leer foto local:', e);
-             }
+          const fotosList: { base64: string; ext?: string }[] = [];
+          if (Array.isArray(item.base64Fotos) && item.base64Fotos.length > 0) {
+            fotosList.push(...item.base64Fotos);
+          } else {
+            let b64Foto = item.base64Foto;
+            if (!b64Foto && item.localFotoUri) {
+              try {
+                b64Foto = await new File(item.localFotoUri).text();
+              } catch (e) {
+                console.warn('No se pudo leer foto local:', e);
+              }
+            }
+            if (b64Foto) {
+              fotosList.push({ base64: b64Foto, ext: item.fotoExt || 'jpg' });
+            }
           }
 
-          // 1. Subir foto a Supabase Storage si existe
-          if (b64Foto) {
-            const ext = item.fotoExt || 'jpg';
-            const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-            const fileName = `${item.empleado_id}/${Date.now()}.${ext}`;
-            const arrayBuffer = base64ToArrayBuffer(b64Foto);
+          // 1. Subir fotos de ticket a Supabase Storage si existen
+          if (fotosList.length > 0) {
+            const uploadedFotoUrls: string[] = [];
+            for (let i = 0; i < fotosList.length; i++) {
+              const fItem = fotosList[i];
+              const ext = fItem.ext || 'jpg';
+              const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
+              const fileName = `${item.empleado_id}/ticket_${Date.now()}_${i}.${ext}`;
+              const arrayBuffer = base64ToArrayBuffer(fItem.base64);
 
-            const { data: _uploadData, error: uploadError } = await supabase.storage
-              .from('tickets')
-              .upload(fileName, arrayBuffer, {
-                contentType: contentType,
-                upsert: true,
-              });
+              const { error: uploadError } = await supabase.storage
+                .from('tickets')
+                .upload(fileName, arrayBuffer, {
+                  contentType: contentType,
+                  upsert: true,
+                });
 
-            if (uploadError) {
-              throw new Error(`Storage upload error: ${uploadError.message}`);
+              if (uploadError) {
+                console.error(`Storage ticket upload error [${i}]:`, uploadError.message);
+              } else {
+                const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+                if (urlData?.publicUrl) {
+                  uploadedFotoUrls.push(urlData.publicUrl);
+                }
+              }
             }
-
-            const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-            publicUrl = urlData.publicUrl;
+            if (uploadedFotoUrls.length > 0) {
+              publicUrl = uploadedFotoUrls.join(',');
+            }
           }
 
           const facturasList: { base64: string; ext?: string }[] = [];

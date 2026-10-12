@@ -574,7 +574,11 @@ export function generateCfdiPdfHtml(data: CfdiDataCompleta): string {
 <head>
 <meta charset="UTF-8">
 <title>Factura - ${data.uuid}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap');
   @page {
     size: letter portrait;
     margin: 12mm 15mm 12mm 15mm;
@@ -583,13 +587,14 @@ export function generateCfdiPdfHtml(data: CfdiDataCompleta): string {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
   }
   body {
     font-size: 8pt;
     color: #000;
     line-height: 1.25;
     background: #fff;
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -807,7 +812,7 @@ export function generateCfdiPdfHtml(data: CfdiDataCompleta): string {
     margin-bottom: 1px;
   }
   .sello-text {
-    font-family: "Courier New", Courier, monospace;
+    font-family: 'Roboto Mono', "Courier New", Courier, monospace;
     font-size: 5.5pt;
     line-height: 1.15;
     word-break: break-all;
