@@ -239,7 +239,13 @@ export const EvidenceReportGenerator = {
               <h3 style="font-size: 18px; font-weight: bold; color: #000; margin-bottom: 4px; margin-top: 0;">Material:</h3>
               <div style="font-size: 16px; color: #000; margin-bottom: 12px; line-height: 1.5;">
                 <ul style="margin: 4px 0; padding-left: 18px; list-style-type: none;">
-                  ${t.materiales_usados.map((m: any) => `<li style="margin-bottom: 6px; position: relative;"><span style="position: absolute; left: -14px;">৹</span>${m.usado}x ${m.nombre}</li>`).join('\n')}
+                  ${t.materiales_usados.map((m: any) => `
+                    <li style="margin-bottom: 6px; position: relative;">
+                      <span style="position: absolute; left: -14px;">৹</span>
+                      ${m.usado}x ${m.nombre}${m.unidad ? ` (${m.unidad})` : ''}
+                      ${m.empleadoNombre ? `<span style="font-size: 13px; color: #555; margin-left: 4px;">— Stock de: ${m.empleadoNombre}</span>` : ''}
+                    </li>
+                  `).join('\n')}
                 </ul>
               </div>
               ` : t.materiales ? `
@@ -248,7 +254,6 @@ export const EvidenceReportGenerator = {
                 ${textToBulletPoints(t.materiales.replace(/Sobrante.*?(?=\n|$)/g, '').replace(/Retirado.*?(?=\n|$)/g, ''))}
               </div>
               ` : ''}
-            </div>
             
             ${fotosHtml}
           </div>
@@ -258,6 +263,23 @@ export const EvidenceReportGenerator = {
 
     // Título principal con el nombre de la sucursal o el cliente
     const tituloPrincipal = `Reporte de mantenimiento ${(evidencia as any).sucursal_nombre ? 'sucursal ' + (evidencia as any).sucursal_nombre : (evidencia.cliente || '')}`;
+
+    // Procesar técnicos y colaboradores
+    let equipoTecnico: string[] = [];
+    if (evidencia.empleado_nombre) equipoTecnico.push(evidencia.empleado_nombre);
+    if ((evidencia as any).colaboradores) {
+      let colabs = (evidencia as any).colaboradores;
+      if (typeof colabs === 'string') {
+        try { colabs = JSON.parse(colabs); } catch (e) {}
+      }
+      if (Array.isArray(colabs)) {
+        colabs.forEach((c: any) => {
+          const nom = typeof c === 'string' ? c : (c?.nombre || '');
+          if (nom && !equipoTecnico.includes(nom)) equipoTecnico.push(nom);
+        });
+      }
+    }
+    const tecnicosStr = equipoTecnico.length > 0 ? equipoTecnico.join(', ') : 'Técnico en campo';
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -271,7 +293,7 @@ export const EvidenceReportGenerator = {
             font-family: 'Calibri', 'Helvetica Neue', Helvetica, Arial, sans-serif;
             color: #000000;
             margin: 0;
-            padding: 15mm 15mm 25mm 15mm;
+            padding: 0;
             line-height: 1.4;
             background-color: #ffffff;
             -webkit-print-color-adjust: exact;
@@ -279,7 +301,22 @@ export const EvidenceReportGenerator = {
           }
           @page {
             size: letter;
-            margin: 0;
+            margin: 12mm 15mm 18mm 15mm;
+            @bottom-left {
+              content: "";
+            }
+            @bottom-center {
+              content: "Integración de Tecnologías";
+              font-family: 'Calibri', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+              font-size: 11px;
+              color: #666;
+            }
+            @bottom-right {
+              content: counter(page);
+              font-family: 'Calibri', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+              font-size: 11px;
+              color: #666;
+            }
           }
           table.report-container {
             width: 100%;
@@ -319,17 +356,6 @@ export const EvidenceReportGenerator = {
             text-align: right;
             min-width: 150px;
           }
-          .footer-inner {
-            display: flex;
-            justify-content: space-between;
-            padding-top: 10px;
-            margin-top: 20px;
-            font-size: 12px;
-            color: #666;
-          }
-          .page-number:after {
-            content: counter(page);
-          }
           ul {
             margin: 0;
             padding-left: 20px;
@@ -355,13 +381,7 @@ export const EvidenceReportGenerator = {
           
           <tfoot class="report-footer">
             <tr>
-              <td>
-                <div class="footer-inner">
-                  <span></span>
-                  <span>Integración de Tecnologías</span>
-                  <span class="page-number"></span>
-                </div>
-              </td>
+              <td style="height: 1px; border: none; padding: 0;"></td>
             </tr>
           </tfoot>
 
@@ -371,14 +391,16 @@ export const EvidenceReportGenerator = {
                 <table style="width: 100%; margin: 10px 0 25px 0; border-collapse: collapse; font-size: 12px; border: 1px solid #ddd; text-align: center;">
                   <thead>
                     <tr>
-                      <th style="padding: 4px 10px; border: 1px solid #ddd; background-color: #eee; font-weight: bold; color: #333; width: 50%;">CLIENTE</th>
-                      <th style="padding: 4px 10px; border: 1px solid #ddd; background-color: #eee; font-weight: bold; color: #333; width: 50%;">SUCURSAL</th>
+                      <th style="padding: 6px 10px; border: 1px solid #ddd; background-color: #eee; font-weight: bold; color: #333; width: 33%;">CLIENTE</th>
+                      <th style="padding: 6px 10px; border: 1px solid #ddd; background-color: #eee; font-weight: bold; color: #333; width: 33%;">SUCURSAL</th>
+                      <th style="padding: 6px 10px; border: 1px solid #ddd; background-color: #eee; font-weight: bold; color: #333; width: 34%;">TÉCNICO(S) / CUADRILLA</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td style="padding: 6px 10px; border: 1px solid #ddd; color: #000;">${(evidencia.cliente || '').split('-')[0].trim()}</td>
-                      <td style="padding: 6px 10px; border: 1px solid #ddd; color: #000;">${(evidencia as any).sucursal_nombre || (evidencia.cliente || '').split('-')[1]?.trim() || 'N/A'}</td>
+                      <td style="padding: 8px 10px; border: 1px solid #ddd; color: #000; font-weight: 500;">${(evidencia.cliente || '').split('-')[0].trim()}</td>
+                      <td style="padding: 8px 10px; border: 1px solid #ddd; color: #000;">${(evidencia as any).sucursal_nombre || (evidencia.cliente || '').split('-')[1]?.trim() || 'N/A'}</td>
+                      <td style="padding: 8px 10px; border: 1px solid #ddd; color: #000; font-weight: 500;">${tecnicosStr}</td>
                     </tr>
                   </tbody>
                 </table>

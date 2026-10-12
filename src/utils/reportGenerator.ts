@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { Platform, Alert } from 'react-native';
 import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService, supabase, inttecClient, daravisaClient } from '../services/supabase';
 import { Cotizacion } from '@/types/ventas';
+import { getWeekRange, processAsistenciasSemana, formatMinutesToHours, formatHoraDisplay } from './asistenciaUtils';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
 // Esto evita ~959 KB en el bundle principal de la app
@@ -941,11 +942,18 @@ export const ReportGenerator = {
     }
     const branding = await getCompanyBranding();
 
-    const empleadosMap = new Map(personal.map((p) => [p.id, p.nombre]));
+    const empleadosMap = new Map((personal || []).map((p) => [p.id, p.nombre]));
 
     let tableRows = '';
-    asistencias.forEach((a) => {
-      const empleadoNombre = empleadosMap.get(a.empleado_id) || 'Desconocido';
+    asistencias.forEach((a: any) => {
+      const empleadoNombre =
+        empleadosMap.get(a.empleado_id) ||
+        empleadosMap.get(a.usuario_id) ||
+        (a.empleados ? `${a.empleados.nombre || ''} ${a.empleados.apellidos || ''}`.trim() : null) ||
+        (a.empleado ? `${a.empleado.nombre || ''} ${a.empleado.apellidos || ''}`.trim() : null) ||
+        a.empleado_nombre ||
+        a.usuario_nombre ||
+        'Desconocido';
       const fecha = a.fecha || '';
       const horaEntrada = a.hora_entrada || '--:--';
       const dirEntrada = a.direccion_entrada || 'N/A';
@@ -1198,8 +1206,504 @@ export const ReportGenerator = {
   },
 
   /**
-   * Genera un reporte PDF de inventario y lo comparte
+   * Helper unificado para imprimir en Web o guardar y compartir en Móvil
    */
+  async _printOrShareHtml(htmlContent: string, fileName: string, dialogTitle: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (iframeDoc) {
+        iframeDoc.open();
+        iframeDoc.write(htmlContent);
+        iframeDoc.close();
+
+        setTimeout(() => {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 1000);
+        }, 500);
+      }
+      return;
+    }
+
+    const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+    const safeUri = `${cacheDirectory}${fileName}`;
+    await writeAsStringAsync(safeUri, base64 || '', {
+      encoding: EncodingType.Base64,
+    });
+
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(safeUri, {
+        mimeType: 'application/pdf',
+        dialogTitle: dialogTitle || 'Exportar PDF',
+        UTI: 'com.adobe.pdf',
+      });
+    } else {
+      throw new Error('La función de compartir no está disponible.');
+    }
+  },
+
+  /**
+   * Genera el Reporte General de Asistencia Semanal en PDF (Todos los empleados)
+   * Incluye total de horas de la semana por empleado y subíndice detallado de cada turno por día
+   */
+  async exportReporteAsistenciaSemanalGeneralPDF(
+    asistencias: Asistencia[],
+    personal: Usuario[],
+    weekMondayInput?: Date | string
+  ): Promise<void> {
+    const range = getWeekRange(weekMondayInput);
+    const branding = await getCompanyBranding();
+
+    const asistenciasPorEmpleado = new Map<string, Asistencia[]>();
+    for (const a of asistencias) {
+      const empId = a.empleado_id;
+      if (!empId) continue;
+      const list = asistenciasPorEmpleado.get(empId) || [];
+      list.push(a);
+      asistenciasPorEmpleado.set(empId, list);
+    }
+
+    const personalTarget = (personal || []).filter(
+      p => p.rol === 'EMPLEADO' || p.rol === 'ADMIN' || asistenciasPorEmpleado.has(p.id)
+    );
+
+    let totalMinutosEmpresa = 0;
+    let totalMinutosRegularesEmpresa = 0;
+    let totalMinutosExtrasEmpresa = 0;
+    let totalTurnosEmpresa = 0;
+    let empleadosConRegistro = 0;
+
+    let empleadosHtml = '';
+
+    for (const emp of personalTarget) {
+      const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
+      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate);
+
+      if (semanaData.turnosTotales > 0) {
+        empleadosConRegistro++;
+        totalMinutosEmpresa += semanaData.totalMinutosSemana;
+        totalMinutosRegularesEmpresa += semanaData.totalMinutosRegulares;
+        totalMinutosExtrasEmpresa += semanaData.totalMinutosExtra;
+        totalTurnosEmpresa += semanaData.turnosTotales;
+      }
+
+      let diasHtml = '';
+      const diasConTurnos = semanaData.dias.filter(d => d.turnos.length > 0);
+
+      if (diasConTurnos.length === 0) {
+        diasHtml = `
+          <tr>
+            <td colspan="5" style="text-align: center; color: #888; font-style: italic; padding: 10px;">
+              Sin registros de asistencia en esta semana
+            </td>
+          </tr>
+        `;
+      } else {
+        for (const dia of diasConTurnos) {
+          for (const turno of dia.turnos) {
+            diasHtml += `
+              <tr>
+                <td style="font-weight: 600; color: #0d1b2a;">
+                  ${dia.dayName} ${dia.shortDate}
+                </td>
+                <td style="text-align: center;">
+                  <span style="background-color: #64748b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold;">
+                    Turno #${turno.index}
+                  </span>
+                </td>
+                <td>
+                  <span style="color: #16a34a; font-weight: bold;">📥 ${turno.hora_entrada}</span>
+                  ${turno.direccion_entrada ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_entrada}</div>` : ''}
+                </td>
+                <td>
+                  <span style="color: ${turno.hora_salida ? '#0284c7' : '#d97706'}; font-weight: bold;">
+                    ${turno.hora_salida ? `📤 ${turno.hora_salida}` : '⏳ Pendiente'}
+                  </span>
+                  ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
+                </td>
+                <td style="text-align: right; font-weight: bold;">
+                  <span style="color: ${turno.enCurso ? '#d97706' : '#16a34a'};">${turno.duracionStr}</span>
+                  ${turno.minutosExtra > 0 ? `<div style="font-size: 8.5px; color: #ea580c; font-weight: bold; margin-top: 2px;">+${turno.horasExtraStr} extra</div>` : ''}
+                </td>
+              </tr>
+            `;
+          }
+        }
+      }
+
+      empleadosHtml += `
+        <div style="margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; page-break-inside: avoid;">
+          <div style="background-color: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <span style="font-size: 13px; font-weight: bold; color: #0f172a;">👤 ${emp.nombre}</span>
+              <span style="margin-left: 8px; font-size: 10px; background-color: #e2e8f0; color: #475569; padding: 2px 6px; border-radius: 4px;">${emp.rol || 'EMPLEADO'}</span>
+              ${emp.sucursal ? `<span style="margin-left: 6px; font-size: 10px; color: #64748b;">(${emp.sucursal})</span>` : ''}
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="font-size: 10px; color: #64748b;">Días: <b>${semanaData.diasLaborados}/7</b></span>
+              <span style="background-color: #dcfce7; color: #15803d; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
+                Regulares: ${semanaData.totalHorasRegularesStr}
+              </span>
+              ${semanaData.totalMinutosExtra > 0 ? `
+                <span style="background-color: #ffedd5; color: #c2410c; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
+                  🔥 Extras: +${semanaData.totalHorasExtraStr}
+                </span>
+              ` : ''}
+              <span style="background-color: #f1f5f9; color: #0f172a; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 12px;">
+                Total: ${semanaData.totalHorasSemanaStr}
+              </span>
+            </div>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+            <thead>
+              <tr style="background-color: #f1f5f9; color: #475569; text-transform: uppercase; font-size: 9px;">
+                <th style="padding: 6px 10px; text-align: left; width: 18%;">Día / Fecha</th>
+                <th style="padding: 6px 8px; text-align: center; width: 12%;">Subíndice</th>
+                <th style="padding: 6px 10px; text-align: left; width: 32%;">Entrada</th>
+                <th style="padding: 6px 10px; text-align: left; width: 32%;">Salida</th>
+                <th style="padding: 6px 10px; text-align: right; width: 16%;">Duración</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${diasHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Reporte General de Asistencia Semanal</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            margin: 0;
+            padding: 24px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @page {
+            size: letter;
+            margin: 12mm;
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 20px;
+            font-weight: bold;
+            margin: 0;
+          }
+          .summary-grid {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 10px;
+          }
+          .summary-card {
+            flex: 1;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+          }
+          .summary-card .value {
+            font-size: 15px;
+            font-weight: bold;
+            color: #0d1b2a;
+            margin-top: 3px;
+          }
+          .summary-card .label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: bold;
+          }
+          table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid #f1f5f9;
+          }
+          .footer {
+            margin-top: 25px;
+            text-align: center;
+            font-size: 9px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 8px;
+          }
+          .logo-img {
+            max-height: 44px;
+            max-width: 170px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <table style="width: 100%; border-collapse: collapse; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 14px; border: none;">
+          <tr>
+            <td style="vertical-align: middle; border: none; padding: 0;">
+              <h1 class="title">Reporte General de Asistencia Semanal</h1>
+              <p style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Horario laboral estándar: 08:00 AM - 06:00 PM (10h jornada)</p>
+            </td>
+            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
+              ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
+            </td>
+          </tr>
+        </table>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div class="label">Personal Activo</div>
+            <div class="value">${empleadosConRegistro} de ${personalTarget.length}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Total Horas Empresa</div>
+            <div class="value" style="color: #0f172a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Regulares (8-6)</div>
+            <div class="value" style="color: #16a34a;">${formatMinutesToHours(totalMinutosRegularesEmpresa)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Extras Totales</div>
+            <div class="value" style="color: #ea580c;">${formatMinutesToHours(totalMinutosExtrasEmpresa)}</div>
+          </div>
+        </div>
+
+        ${empleadosHtml}
+
+        <div class="footer">
+          Sistema Inttec & Daravisa - Reporte Oficial de Asistencias y Turnos Semanales - Documento Confidencial
+        </div>
+      </body>
+      </html>
+    `;
+
+    await ReportGenerator._printOrShareHtml(
+      htmlContent,
+      `reporte_asistencia_general_${range.mondayStr}.pdf`,
+      'Reporte General de Asistencia PDF'
+    );
+  },
+
+  /**
+   * Genera el Reporte Individual de Asistencia Semanal en PDF para un empleado
+   */
+  async exportReporteAsistenciaEmpleadoPDF(
+    asistencias: Asistencia[],
+    empleado: Usuario,
+    weekMondayInput?: Date | string
+  ): Promise<void> {
+    const range = getWeekRange(weekMondayInput);
+    const branding = await getCompanyBranding();
+    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate);
+
+    let diasHtml = '';
+    for (const dia of semanaData.dias) {
+      if (dia.turnos.length === 0) {
+        diasHtml += `
+          <tr>
+            <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+            <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
+          </tr>
+        `;
+      } else {
+        dia.turnos.forEach((turno, idx) => {
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">
+                ${idx === 0 ? `${dia.dayName} ${dia.shortDate}` : `<span style="color: #94a3b8; font-size: 8px;">↳ ${dia.dayName}</span>`}
+              </td>
+              <td style="text-align: center;">
+                <span style="background-color: #64748b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold;">
+                  Turno #${turno.index}
+                </span>
+              </td>
+              <td>
+                <span style="color: #16a34a; font-weight: bold;">📥 ${turno.hora_entrada}</span>
+                ${turno.direccion_entrada ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_entrada}</div>` : ''}
+              </td>
+              <td>
+                <span style="color: ${turno.hora_salida ? '#0284c7' : '#d97706'}; font-weight: bold;">
+                  ${turno.hora_salida ? `📤 ${turno.hora_salida}` : '⏳ Pendiente'}
+                </span>
+                ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
+              </td>
+              <td style="text-align: right; font-weight: bold;">
+                <span style="color: ${turno.enCurso ? '#d97706' : '#16a34a'};">${turno.duracionStr}</span>
+                ${turno.minutosExtra > 0 ? `<div style="font-size: 8.5px; color: #ea580c; font-weight: bold; margin-top: 2px;">+${turno.horasExtraStr} extra</div>` : ''}
+              </td>
+            </tr>
+          `;
+        });
+      }
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Reporte de Asistencia - ${empleado.nombre}</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            margin: 0;
+            padding: 24px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @page {
+            size: letter;
+            margin: 12mm;
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 20px;
+            font-weight: bold;
+            margin: 0;
+          }
+          .summary-grid {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 10px;
+          }
+          .summary-card {
+            flex: 1;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+          }
+          .summary-card .value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #0d1b2a;
+            margin-top: 3px;
+          }
+          .summary-card .label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: bold;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            overflow: hidden;
+          }
+          th {
+            background-color: #0d1b2a;
+            color: white;
+            text-align: left;
+            padding: 8px 10px;
+            font-size: 9px;
+            text-transform: uppercase;
+          }
+          td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #f1f5f9;
+          }
+          .footer {
+            margin-top: 25px;
+            text-align: center;
+            font-size: 9px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 8px;
+          }
+          .logo-img {
+            max-height: 44px;
+            max-width: 170px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <table style="width: 100%; border-collapse: collapse; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 14px; border: none;">
+          <tr>
+            <td style="vertical-align: middle; border: none; padding: 0;">
+              <h1 class="title">Reporte Individual de Asistencia</h1>
+              <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">👤 ${empleado.nombre}</p>
+              <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Horario: 08:00 - 18:00</p>
+            </td>
+            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
+              ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
+            </td>
+          </tr>
+        </table>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div class="label">Total Horas Semana</div>
+            <div class="value" style="color: #0f172a; font-size: 17px;">${semanaData.totalHorasSemanaStr}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Regulares (8-6)</div>
+            <div class="value" style="color: #16a34a; font-size: 17px;">${semanaData.totalHorasRegularesStr}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Horas Extras</div>
+            <div class="value" style="color: #ea580c; font-size: 17px;">${semanaData.totalHorasExtraStr}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Días Laborados</div>
+            <div class="value">${semanaData.diasLaborados} de 7</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 18%;">Día / Fecha</th>
+              <th style="width: 12%; text-align: center;">Subíndice</th>
+              <th style="width: 32%;">Entrada</th>
+              <th style="width: 32%;">Salida</th>
+              <th style="width: 16%; text-align: right;">Duración</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${diasHtml}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Sistema Inttec & Daravisa - Reporte Oficial de Asistencias - Documento Confidencial
+        </div>
+      </body>
+      </html>
+    `;
+
+    const safeName = (empleado.nombre || 'empleado').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    await ReportGenerator._printOrShareHtml(
+      htmlContent,
+      `reporte_asistencia_${safeName}_${range.mondayStr}.pdf`,
+      `Reporte Asistencia ${empleado.nombre}`
+    );
+  },
   async exportInventarioToPDF(
     productos: ReportProducto[],
     categorias: ReportCategoria[],
@@ -2347,52 +2851,55 @@ export const ReportGenerator = {
 
     const branding = await getCompanyBranding();
 
-    const totalFacturado = ventas.reduce((sum, v) => sum + Number(v.precio_total_facturado || 0), 0);
-    const totalCosto = ventas.reduce((sum, v) => sum + Number(v.costo_total || 0), 0);
-    const totalUtilidad = totalFacturado - totalCosto;
-    const margenConsolidado = totalFacturado > 0 ? (totalUtilidad / totalFacturado) * 100 : 0;
+    const formatCurr = (val: number) =>
+      new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val);
+
+    const totalFacturado = ventas.reduce((sum, v) => sum + Number(v.precio_total_facturado || v.total || 0), 0);
+    const totalCostoPartidas = ventas.reduce((sum, v) => sum + Number(v.costo_total || 0), 0);
+    const totalGastosVinculados = ventas.reduce((sum, v) => sum + Number(v.gastos_vinculados_total || 0), 0);
+    const totalCostoReal = totalCostoPartidas + totalGastosVinculados;
+    const totalUtilidadReal = totalFacturado - totalCostoReal;
+    const margenRealConsolidado = totalFacturado > 0 ? (totalUtilidadReal / totalFacturado) * 100 : 0;
 
     let tableRows = '';
     ventas.forEach((v) => {
-      const fecha = v.fecha || '';
-      const facturadoFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(v.precio_total_facturado || 0));
+      const fecha = v.fecha || (v.created_at ? v.created_at.split('T')[0] : '');
+      const precioFacturado = Number(v.precio_total_facturado || v.total || 0);
+      const costoPartidas = Number(v.costo_total || 0);
+      const gastosVinc = Number(v.gastos_vinculados_total || 0);
+      const costoTotalReal = v.costo_total_real !== undefined ? Number(v.costo_total_real) : (costoPartidas + gastosVinc);
+      const utilidadReal = v.utilidad_real !== undefined ? Number(v.utilidad_real) : (precioFacturado - costoTotalReal);
+      const margenReal = v.margen_real_porcentual !== undefined 
+        ? Number(v.margen_real_porcentual) 
+        : (precioFacturado > 0 ? (utilidadReal / precioFacturado) : 0);
 
-      const costoFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(v.costo_total || 0));
-
-      const utilidadFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(v.utilidad_bruta || 0));
-
-      const margenPercent = ((v.margen_porcentual || 0) * 100).toFixed(1) + '%';
-      const isProfit = Number(v.utilidad_bruta || 0) >= 0;
+      const facturadoFormatted = formatCurr(precioFacturado);
+      const costoPartidasFormatted = formatCurr(costoPartidas);
+      const gastosVincFormatted = formatCurr(gastosVinc);
+      const costoTotalRealFormatted = formatCurr(costoTotalReal);
+      const utilidadRealFormatted = formatCurr(utilidadReal);
+      const margenPercent = (margenReal * 100).toFixed(1) + '%';
+      const isProfit = utilidadReal >= 0;
 
       tableRows += `
         <tr>
           <td>${fecha}</td>
           <td>
-            <div style="font-weight: bold;">${v.cliente || 'N/A'}</div>
+            <div style="font-weight: bold;">${v.cliente_nombre || v.cliente || 'N/A'}</div>
             ${v.factura_referencia ? `<span style="font-size: 9px; color: #777;">Ref: ${v.factura_referencia}</span>` : ''}
           </td>
           <td>${v.tipo_proyecto || 'N/A'}</td>
           <td>${v.sucursal || 'N/A'}</td>
           <td>${v.proveedor || 'N/A'}</td>
           <td style="text-align: right; color: #0d1b2a; font-weight: bold;">${facturadoFormatted}</td>
-          <td style="text-align: right; color: #f44336;">${costoFormatted}</td>
-          <td style="text-align: right; color: ${isProfit ? '#4CAF50' : '#F44336'}; font-weight: bold;">${utilidadFormatted}</td>
-          <td style="text-align: right; color: ${isProfit ? '#4CAF50' : '#F44336'}; font-weight: bold;">${margenPercent}</td>
+          <td style="text-align: right; color: #64748b;">${costoPartidasFormatted}</td>
+          <td style="text-align: right; color: ${gastosVinc > 0 ? '#d97706' : '#94a3b8'}; font-weight: ${gastosVinc > 0 ? 'bold' : 'normal'};">${gastosVincFormatted}</td>
+          <td style="text-align: right; color: #ef4444; font-weight: 600;">${costoTotalRealFormatted}</td>
+          <td style="text-align: right; color: ${isProfit ? '#10b981' : '#ef4444'}; font-weight: bold;">${utilidadRealFormatted}</td>
+          <td style="text-align: right; color: ${isProfit ? '#10b981' : '#ef4444'}; font-weight: bold;">${margenPercent}</td>
         </tr>
       `;
     });
-
-    const formatCurr = (val: number) =>
-      new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val);
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -2415,8 +2922,8 @@ export const ReportGenerator = {
               print-color-adjust: exact;
             }
             @page {
-              size: letter;
-              margin: 15mm;
+              size: letter landscape;
+              margin: 10mm;
             }
           }
           .title {
@@ -2434,21 +2941,21 @@ export const ReportGenerator = {
             display: flex;
             justify-content: space-between;
             margin-bottom: 25px;
-            gap: 15px;
+            gap: 12px;
           }
           .summary-card {
             flex: 1;
             background-color: #f8f9fa;
             border: 1px solid #e9ecef;
             border-radius: 8px;
-            padding: 12px;
+            padding: 10px;
             text-align: center;
           }
           .summary-card .value {
-            font-size: 16px;
+            font-size: 15px;
             font-weight: bold;
             color: #0d1b2a;
-            margin-top: 5px;
+            margin-top: 4px;
           }
           .summary-card .label {
             font-size: 9px;
@@ -2460,17 +2967,17 @@ export const ReportGenerator = {
             width: 100%;
             border-collapse: collapse;
             margin-top: 10px;
-            font-size: 11px;
+            font-size: 10.5px;
           }
           th {
             background-color: #0d1b2a;
             color: white;
             text-align: left;
-            padding: 10px 8px;
+            padding: 8px 6px;
             font-weight: 600;
           }
           td {
-            padding: 10px 8px;
+            padding: 8px 6px;
             border-bottom: 1px solid #e9ecef;
           }
           tr:nth-child(even) {
@@ -2506,31 +3013,41 @@ export const ReportGenerator = {
             <div class="value" style="color: #0d1b2a;">${formatCurr(totalFacturado)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Costo Proveedores</div>
-            <div class="value" style="color: #f44336;">${formatCurr(totalCosto)}</div>
+            <div class="label">Costo Insumos</div>
+            <div class="value" style="color: #64748b;">${formatCurr(totalCostoPartidas)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Utilidad Consolidada</div>
-            <div class="value" style="color: ${totalUtilidad >= 0 ? '#4CAF50' : '#f44336'};">${formatCurr(totalUtilidad)}</div>
+            <div class="label">Gastos Vinculados</div>
+            <div class="value" style="color: #d97706;">${formatCurr(totalGastosVinculados)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Margen Consolidado</div>
-            <div class="value" style="color: ${totalUtilidad >= 0 ? '#4CAF50' : '#f44336'};">${margenConsolidado.toFixed(1)}%</div>
+            <div class="label">Costo Total Real</div>
+            <div class="value" style="color: #ef4444;">${formatCurr(totalCostoReal)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Utilidad Real</div>
+            <div class="value" style="color: ${totalUtilidadReal >= 0 ? '#10b981' : '#ef4444'};">${formatCurr(totalUtilidadReal)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Margen Real</div>
+            <div class="value" style="color: ${totalUtilidadReal >= 0 ? '#10b981' : '#ef4444'};">${margenRealConsolidado.toFixed(1)}%</div>
           </div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th style="width: 10%">Fecha</th>
-              <th style="width: 18%">Cliente / Ref</th>
-              <th style="width: 12%">Tipo</th>
-              <th style="width: 12%">Sucursal</th>
-              <th style="width: 13%">Proveedor</th>
-              <th style="width: 10%; text-align: right;">Venta</th>
-              <th style="width: 9%; text-align: right;">Costo</th>
-              <th style="width: 9%; text-align: right;">Utilidad</th>
-              <th style="width: 7%; text-align: right;">Margen</th>
+              <th style="width: 8%">Fecha</th>
+              <th style="width: 15%">Cliente / Ref</th>
+              <th style="width: 8%">Tipo</th>
+              <th style="width: 8%">Sucursal</th>
+              <th style="width: 9%">Proveedor</th>
+              <th style="width: 9%; text-align: right;">Venta</th>
+              <th style="width: 8%; text-align: right;">Insumos</th>
+              <th style="width: 9%; text-align: right;">Gastos Vinc.</th>
+              <th style="width: 9%; text-align: right;">Costo Real</th>
+              <th style="width: 9%; text-align: right;">Util. Real</th>
+              <th style="width: 8%; text-align: right;">Margen</th>
             </tr>
           </thead>
           <tbody>
@@ -2610,7 +3127,7 @@ export const ReportGenerator = {
               m.producto_nombre || 'Producto',
               m.cantidad || 0,
               m.producto_unidad || 'pza',
-              m.usuario_nombre || m.empleado_nombre || 'Almacén',
+              m.usuario?.nombre || m.empleado?.nombre || m.usuario_nombre || m.empleado_nombre || 'Almacén',
               m.proveedor_nombre || '',
               m.cliente_nombre || '',
               m.tipo_gasto || '',
@@ -2623,14 +3140,16 @@ export const ReportGenerator = {
             if (gastos.length === 0) {
               throw new Error('No hay gastos para exportar.');
             }
-            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Comentarios'];
+            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Venta Vinculada','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Estado Reembolso','Comentarios'];
             const rows = gastos.map(g => {
               const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
               let estadoFactura = 'No Facturado';
               if (g.facturado === true) estadoFactura = 'Facturado';
               else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) estadoFactura = 'Pendiente de Entregar';
               const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
-              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, commentText ];
+              const estadoReembolso = g.estado_reembolso === 'REEMBOLSADO' ? 'Reembolsado' : 'No';
+              const ventaVinc = g.venta_id ? `Venta #${String(g.venta_id).slice(0, 8)}` : 'Sin Venta';
+              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), ventaVinc, g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, estadoReembolso, commentText ];
             });
             await ReportGenerator._exportArrayToXLSX('Gastos', headers, rows, fileName);
     },
@@ -2649,30 +3168,235 @@ export const ReportGenerator = {
             });
             await ReportGenerator._exportArrayToXLSX('Gasolina', headers, rows, fileName);
     },
-    async exportAsistenciasToXLSX(asistencias: any[], personal: Usuario[], fileName: string = 'reporte_asistencia.xlsx'): Promise<void> {
+    async exportAsistenciasToXLSX(asistencias: any[], personal: Usuario[] = [], fileName: string = 'reporte_asistencia.xlsx'): Promise<void> {
 
             if (asistencias.length === 0) {
               throw new Error('No hay asistencias para exportar.');
             }
+            const empleadosMap = new Map((personal || []).map((p) => [p.id, p.nombre]));
             const headers = ['ID','Fecha','Empleado Nombre','Empresa','Hora Entrada','Dirección Entrada','Hora Salida','Dirección Salida'];
             const rows = asistencias.map(a => {
-              const empleadoNombre = a.empleados ? `${a.empleados.nombre || ''} ${a.empleados.apellidos || ''}`.trim() : (a.empleado_nombre || 'Desconocido');
+              const empleadoNombre =
+                empleadosMap.get(a.empleado_id) ||
+                empleadosMap.get(a.usuario_id) ||
+                (a.empleados ? `${a.empleados.nombre || ''} ${a.empleados.apellidos || ''}`.trim() : null) ||
+                (a.empleado ? `${a.empleado.nombre || ''} ${a.empleado.apellidos || ''}`.trim() : null) ||
+                a.empleado_nombre ||
+                a.usuario_nombre ||
+                'Desconocido';
               return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada || 'Sin registro', a.direccion_entrada || '', a.hora_salida || 'Sin registro', a.direccion_salida || '' ];
             });
             await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
+    },
+
+    /**
+     * Exporta el Reporte General de Asistencia Semanal en formato Excel XLSX
+     * Incluye resumen por empleado, horas totales de la semana y el subíndice detallado de cada turno por día
+     */
+    async exportReporteAsistenciaSemanalGeneralXLSX(
+      asistencias: Asistencia[],
+      personal: Usuario[],
+      weekMondayInput?: Date | string,
+      fileName?: string
+    ): Promise<void> {
+      const range = getWeekRange(weekMondayInput);
+      const asistenciasPorEmpleado = new Map<string, Asistencia[]>();
+      for (const a of asistencias) {
+        const empId = a.empleado_id;
+        if (!empId) continue;
+        const list = asistenciasPorEmpleado.get(empId) || [];
+        list.push(a);
+        asistenciasPorEmpleado.set(empId, list);
+      }
+
+      const personalTarget = (personal || []).filter(
+        p => p.rol === 'EMPLEADO' || p.rol === 'ADMIN' || asistenciasPorEmpleado.has(p.id)
+      );
+
+      const headers = [
+        'Semana',
+        'Empleado',
+        'Rol',
+        'Sucursal',
+        'Fecha',
+        'Día',
+        'Subíndice Turno',
+        'Hora Entrada',
+        'Dirección Entrada',
+        'Hora Salida',
+        'Dirección Salida',
+        'Duración Turno',
+        'Regulares Turno',
+        'Extras Turno',
+        'Total Horas Día',
+        'Extras Día',
+        'Total Horas Semana',
+        'Total Regulares Semana',
+        'Total Extras Semana'
+      ];
+
+      const rows: any[][] = [];
+
+      for (const emp of personalTarget) {
+        const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
+        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate);
+
+        let tieneRegistros = false;
+        for (const dia of semanaData.dias) {
+          if (dia.turnos.length > 0) {
+            tieneRegistros = true;
+            for (const turno of dia.turnos) {
+              rows.push([
+                range.label,
+                emp.nombre,
+                emp.rol || 'EMPLEADO',
+                emp.sucursal || 'N/A',
+                dia.dateStr,
+                dia.dayName,
+                `Turno #${turno.index}`,
+                turno.hora_entrada,
+                turno.direccion_entrada || '',
+                turno.hora_salida || 'Pendiente',
+                turno.direccion_salida || '',
+                turno.duracionStr,
+                turno.horasRegularesStr,
+                turno.horasExtraStr,
+                dia.totalHorasStr,
+                dia.horasExtraStr,
+                semanaData.totalHorasSemanaStr,
+                semanaData.totalHorasRegularesStr,
+                semanaData.totalHorasExtraStr
+              ]);
+            }
+          }
+        }
+
+        if (!tieneRegistros) {
+          rows.push([
+            range.label,
+            emp.nombre,
+            emp.rol || 'EMPLEADO',
+            emp.sucursal || 'N/A',
+            '-',
+            '-',
+            'Sin registros',
+            '-',
+            '',
+            '-',
+            '',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m'
+          ]);
+        }
+      }
+
+      const targetFileName = fileName || `reporte_asistencia_general_${range.mondayStr}.xlsx`;
+      await ReportGenerator._exportArrayToXLSX('Asistencia General', headers, rows, targetFileName);
+    },
+
+    /**
+     * Exporta el Reporte Individual de Asistencia Semanal en formato Excel XLSX para un empleado
+     */
+    async exportReporteAsistenciaEmpleadoXLSX(
+      asistencias: Asistencia[],
+      empleado: Usuario,
+      weekMondayInput?: Date | string,
+      fileName?: string
+    ): Promise<void> {
+      const range = getWeekRange(weekMondayInput);
+      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate);
+
+      const headers = [
+        'Semana',
+        'Empleado',
+        'Fecha',
+        'Día',
+        'Turno #',
+        'Hora Entrada',
+        'Dirección Entrada',
+        'Hora Salida',
+        'Dirección Salida',
+        'Duración Turno',
+        'Regulares Turno',
+        'Extras Turno',
+        'Total Horas Día',
+        'Extras Día',
+        'Total Horas Semana',
+        'Total Extras Semana'
+      ];
+
+      const rows: any[][] = [];
+
+      for (const dia of semanaData.dias) {
+        if (dia.turnos.length > 0) {
+          for (const turno of dia.turnos) {
+            rows.push([
+              range.label,
+              empleado.nombre,
+              dia.dateStr,
+              dia.dayName,
+              `Turno #${turno.index}`,
+              turno.hora_entrada,
+              turno.direccion_entrada || '',
+              turno.hora_salida || 'Pendiente',
+              turno.direccion_salida || '',
+              turno.duracionStr,
+              turno.horasRegularesStr,
+              turno.horasExtraStr,
+              dia.totalHorasStr,
+              dia.horasExtraStr,
+              semanaData.totalHorasSemanaStr,
+              semanaData.totalHorasExtraStr
+            ]);
+          }
+        } else {
+          rows.push([
+            range.label,
+            empleado.nombre,
+            dia.dateStr,
+            dia.dayName,
+            '-',
+            '-',
+            '',
+            '-',
+            '',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            '0h 0m',
+            semanaData.totalHorasSemanaStr,
+            semanaData.totalHorasExtraStr
+          ]);
+        }
+      }
+
+      const safeName = (empleado.nombre || 'empleado').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      const targetFileName = fileName || `reporte_asistencia_${safeName}_${range.mondayStr}.xlsx`;
+      await ReportGenerator._exportArrayToXLSX('Asistencia Semanal', headers, rows, targetFileName);
     },
     async exportInventarioToXLSX(productos: any[], categorias: ReportCategoria[], fileName: string = 'reporte_inventario.xlsx'): Promise<void> {
 
             if (productos.length === 0) {
               throw new Error('No hay productos para exportar.');
             }
-            const headers = ['ID','SKU','Producto','Categoría','Unidad','Stock Actual (Nuevo)','Stock Usado','Stock Por Revisar','Stock Total Sumado','Punto Reorden','Ubicación','Precio Unit.'];
+            const headers = ['ID','SKU','Producto','Categoría','Unidad','Stock Actual (Nuevo)','Stock Usado','Stock Por Revisar','Stock Total Sumado','Punto Reorden','Ubicación','Precio Unit.', 'Valor Total', 'Estado (Activo)'];
             const rows = productos.map(p => {
               const categoriaNombre = categorias.find((c: any) => c.id === p.categoria_id)?.nombre || 'Sin Categoría';
               const sNuevo = Number(p.stock_nuevo || 0);
               const sUsado = Number(p.stock_usado || 0);
               const sRevision = Number(p.stock_por_revisar || 0);
-              return [ p.id, p.sku_interno || '-', p.nombre_oficial || 'Producto', categoriaNombre, p.unidad_medida || 'pza', sNuevo, sUsado, sRevision, (sNuevo+sUsado+sRevision), p.punto_reorden || 0, p.ubicacion_almacen || '', p.precio_unitario || 0 ];
+              const totalStock = sNuevo + sUsado + sRevision;
+              const precioUnitario = Number(p.precio_unitario || 0);
+              const valorTotal = totalStock * precioUnitario;
+              const estado = p.activo !== false ? 'Activo' : 'Inactivo';
+              return [ p.id, p.sku_interno || '-', p.nombre_oficial || 'Producto', categoriaNombre, p.unidad_medida || 'pza', sNuevo, sUsado, sRevision, totalStock, p.punto_reorden || 0, p.ubicacion_almacen || '', precioUnitario, valorTotal, estado ];
             });
             await ReportGenerator._exportArrayToXLSX('Inventario', headers, rows, fileName);
     },
@@ -2681,8 +3405,65 @@ export const ReportGenerator = {
             if (consumos.length === 0) {
               throw new Error('No hay consumos para exportar.');
             }
+
+            // Identificar IDs de usuarios faltantes para buscar sus nombres si no vienen precargados
+            const missingUserIds = new Set<string>();
+            consumos.forEach((c) => {
+              const hasName = c.usuario?.nombre || c.empleado?.nombre || c.empleado_nombre || c.usuario_nombre;
+              if (!hasName) {
+                if (c.creado_por && typeof c.creado_por === 'string' && c.creado_por.length > 10) missingUserIds.add(c.creado_por);
+                if (c.empleado_id && typeof c.empleado_id === 'string' && c.empleado_id.length > 10) missingUserIds.add(c.empleado_id);
+                if (c.usuario_id && typeof c.usuario_id === 'string' && c.usuario_id.length > 10) missingUserIds.add(c.usuario_id);
+              }
+            });
+
+            const userNamesMap = new Map<string, string>();
+            if (missingUserIds.size > 0) {
+              try {
+                const client = CompanyService.getActiveCompany() === 'daravisa' ? daravisaClient : inttecClient;
+                const { data: usersData } = await client
+                  .from('usuarios')
+                  .select('id, nombre')
+                  .in('id', Array.from(missingUserIds));
+
+                if (usersData) {
+                  usersData.forEach((u: any) => {
+                    if (u.id && u.nombre) userNamesMap.set(u.id, u.nombre);
+                  });
+                }
+              } catch (err) {
+                console.warn('[reportGenerator] Error resolving user names for consumos XLSX:', err);
+              }
+            }
+
             const headers = ['ID','Fecha','Empleado Nombre','SKU','Producto','Categoría','Cantidad Consumida','Proyecto/Uso','Costo Estimado'];
-            const rows = consumos.map(c => [ c.id, c.fecha ? c.fecha.split('T')[0] : '', c.empleado_nombre || 'Desconocido', c.producto_sku || '-', c.producto_nombre || 'Producto', c.categoria_nombre || '', c.cantidad || 0, c.detalle_motivo || '', c.costo_total || 0 ]);
+            const rows = consumos.map(c => {
+              const userId = c.creado_por || c.empleado_id || c.usuario_id;
+              const empleadoNombre =
+                c.usuario?.nombre ||
+                c.empleado?.nombre ||
+                c.empleado_nombre ||
+                c.usuario_nombre ||
+                (userId ? userNamesMap.get(userId) : null) ||
+                'No especificado / Almacén';
+              const sku = c.producto?.sku_interno || c.producto_sku || '-';
+              const producto = c.producto?.nombre_oficial || c.producto_nombre || 'Producto';
+              const categoria = c.categoria_nombre || c.producto?.categoria?.nombre || c.categoria || '';
+              const detalle = c.detalle_motivo || c.folio_factura || c.motivo || '';
+              const costo = c.costo_total !== undefined ? c.costo_total : ((Number(c.cantidad || 0) * Number(c.producto?.precio_unitario || 0)) || 0);
+
+              return [
+                c.id,
+                c.fecha ? c.fecha.split('T')[0] : '',
+                empleadoNombre,
+                sku,
+                producto,
+                categoria,
+                c.cantidad || 0,
+                detalle,
+                costo
+              ];
+            });
             await ReportGenerator._exportArrayToXLSX('Consumos', headers, rows, fileName);
     },
     async exportRetirosToXLSX(retiros: any[], fileName: string = 'reporte_retiros_material.xlsx'): Promise<void> {
@@ -2690,17 +3471,69 @@ export const ReportGenerator = {
             if (retiros.length === 0) {
               throw new Error('No hay retiros para exportar.');
             }
-            const headers = ['ID','Fecha de Retiro','Empleado','SKU','Herramienta','Estado Entrega','Cantidad Prestada','Proyecto / Motivo'];
-            const rows = retiros.map(r => [ r.id, r.fecha ? r.fecha.split('T')[0] : '', r.empleado_nombre || 'Desconocido', r.producto_sku || '-', r.producto_nombre || 'Herramienta', r.estado_entrega || 'NUEVA', r.cantidad || 0, r.detalle_motivo || '' ]);
+            const headers = ['ID','Fecha de Retiro','Empleado','Tipo Destino','Cliente','Sucursal','Proveedor','Detalle','Motivo','SKU','Herramienta','Estado Entrega','Cantidad Prestada','Unidad'];
+            const rows = retiros.map(r => {
+              const empleadoNombre = r.usuario?.nombre || r.empleado?.nombre || r.empleado_nombre || r.usuario_nombre || (typeof r.empleado === 'string' ? r.empleado : '') || 'Desconocido';
+              return [ r.id, r.fecha ? r.fecha.split('T')[0] : '', empleadoNombre, r.tipo_gasto || 'Operativo', r.cliente_nombre || (r.is_split ? 'Dividido' : ''), r.sucursal_nombre || '', r.proveedor || '', r.detalle_servicio_proyecto || '', r.motivo || '', r.producto_sku || '-', r.producto_nombre || 'Herramienta', r.estado_entrega || 'NUEVA', r.cantidad || 0, r.producto_unidad || 'pza' ];
+            });
             await ReportGenerator._exportArrayToXLSX('Retiros', headers, rows, fileName);
     },
     async exportVentasToXLSX(ventas: any[], fileName: string = 'reporte_ventas.xlsx'): Promise<void> {
-
             if (ventas.length === 0) {
               throw new Error('No hay ventas para exportar.');
             }
-            const headers = ['ID','Folio','Fecha Creación','Cliente','Vendedor','Estatus','Monto Total'];
-            const rows = ventas.map(v => [ v.id, v.folio || 'S/F', v.created_at ? v.created_at.split('T')[0] : '', v.cliente_nombre || 'Desconocido', v.vendedor_nombre || 'Desconocido', v.estatus || '', v.total || 0 ]);
+            const headers = [
+              'ID',
+              'Folio',
+              'Fecha Creación',
+              'Cliente',
+              'Vendedor',
+              'Estatus',
+              'Referencia/Factura',
+              'Tipo Proyecto',
+              'Sucursal',
+              'Monto Total (Venta)',
+              'Costo Partidas (Proveedor)',
+              'Utilidad Bruta (Inicial)',
+              'Margen Inicial %',
+              'Gastos Vinculados',
+              'Costo Total Real',
+              'Utilidad Real',
+              'Margen Real %'
+            ];
+            const rows = ventas.map(v => {
+              const precioTotal = Number(v.total) || Number(v.precio_total_facturado) || 0;
+              const costoPartidas = Number(v.costo_total) || 0;
+              const utilidadInicial = precioTotal - costoPartidas;
+              const margenInicial = precioTotal > 0 ? (utilidadInicial / precioTotal) : 0;
+
+              const gastosVinculados = Number(v.gastos_vinculados_total) || 0;
+              const costoTotalReal = v.costo_total_real !== undefined ? Number(v.costo_total_real) : (costoPartidas + gastosVinculados);
+              const utilidadReal = v.utilidad_real !== undefined ? Number(v.utilidad_real) : (precioTotal - costoTotalReal);
+              const margenReal = v.margen_real_porcentual !== undefined 
+                ? Number(v.margen_real_porcentual) 
+                : (precioTotal > 0 ? (utilidadReal / precioTotal) : 0);
+
+              return [
+                v.id, 
+                v.folio || 'S/F', 
+                v.created_at ? v.created_at.split('T')[0] : (v.fecha || ''), 
+                v.cliente_nombre || v.cliente || 'Desconocido', 
+                v.vendedor_nombre || v.vendedor || 'Desconocido', 
+                v.estatus || v.estado_pago || v.cfdi_estado || '', 
+                v.factura_referencia || '', 
+                v.tipo_proyecto || '', 
+                v.sucursal || '', 
+                precioTotal, 
+                costoPartidas, 
+                utilidadInicial,
+                (margenInicial * 100).toFixed(2) + '%',
+                gastosVinculados,
+                costoTotalReal,
+                utilidadReal, 
+                (margenReal * 100).toFixed(2) + '%' 
+              ];
+            });
             await ReportGenerator._exportArrayToXLSX('Ventas', headers, rows, fileName);
     }
 };
@@ -2733,6 +3566,9 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
   const titleStr = tipoDocumento === 'venta' ? 'Orden de venta' : 'Cotizacion';
   const title = `${titleStr} - ${folioPDF}`;
   
+  const formatMoney = (val: any) =>
+    Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   const renderDescription = (name: string, description: string) => {
     const fullText = (name || '') + (description ? '\n' + description : '');
     const parts = fullText.split('\n');
@@ -2765,13 +3601,20 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     <head>
       <meta charset="utf-8" />
       <title>${title}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap');
         @page {
           size: letter;
           margin: 0;
         }
+        * {
+          box-sizing: border-box;
+        }
         body {
-          font-family: 'Helvetica', Arial, sans-serif;
+          font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
           color: #333;
           margin: 0;
           padding: 0;
@@ -2939,13 +3782,13 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
                               ${linea.tiempoEntrega || ''}
                           </td>
                           <td class="text-center">${linea.cantidad.toFixed(1)}</td>
-                          <td class="text-end">$ ${linea.precioUnitario.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          <td class="text-end">$ ${formatMoney(linea.precioUnitario)}</td>
                           
                           <td class="text-center">
                               ${linea.impuestoPorcentaje}%
                           </td>
 
-                          <td class="text-end">$ ${linea.importe.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          <td class="text-end">$ ${formatMoney(linea.importe)}</td>
                       </tr>
                   `).join('')}
               </tbody>
@@ -2969,11 +3812,11 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
               </div>
               <div class="col-5">
                   <table class="table-totals">
-                      <tr><td>Subtotal</td><td class="text-end">$ ${cotizacion.subtotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
-                      <tr><td>IVA 16%</td><td class="text-end">$ ${cotizacion.iva.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
+                      <tr><td>Subtotal</td><td class="text-end">$ ${formatMoney(cotizacion.subtotal)}</td></tr>
+                      <tr><td>IVA 16%</td><td class="text-end">$ ${formatMoney(cotizacion.iva)}</td></tr>
                       <tr>
                           <td>TOTAL</td>
-                          <td class="text-end">$ ${cotizacion.total.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                          <td class="text-end">$ ${formatMoney(cotizacion.total)}</td>
                       </tr>
                   </table>
               </div>
@@ -3090,6 +3933,19 @@ export function cleanFolio(rawFolio?: any): string {
 export async function generarFacturaHTML(venta: any, facturaData: any, isDraft = false): Promise<string> {
   const branding = await getCompanyBranding();
 
+  const effectiveDraft = Boolean(
+    isDraft ||
+    venta?.es_borrador ||
+    venta?.cfdi_estado === 'BORRADOR' ||
+    facturaData?.is_draft ||
+    facturaData?.es_borrador ||
+    !venta?.cfdi_uuid ||
+    String(venta?.cfdi_uuid).startsWith('BORRADOR') ||
+    !facturaData?.uuid ||
+    String(facturaData?.uuid).startsWith('BORRADOR') ||
+    String(facturaData?.stamp?.uuid).startsWith('BORRADOR')
+  );
+
   // Diccionarios de mapeo para SAT
   const formatRegimenFiscal = (val: any) => {
     if (!val) return '612 - Personas físicas con actividades empresariales y profesionales';
@@ -3191,7 +4047,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
   const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
   const fullFileName = `${clienteSanitized}_${displayFolio}`;
-  const title = isDraft ? `[BORRADOR] ${fullFileName}` : fullFileName;
+  const title = effectiveDraft ? `[PREFACTURA] ${fullFileName}` : fullFileName;
   
   // Formatters de Dinero y Fecha
   const formatMoney = (val: any) => `$ ${Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -3404,11 +4260,15 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
     <head>
       <meta charset="utf-8" />
       <title>${title}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap');
         @page { size: letter; margin: 0; }
         * { box-sizing: border-box; }
         body {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
           color: #1e293b;
           margin: 0;
           padding: 0;
@@ -3505,7 +4365,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           margin-top: 8px;
         }
         .uuid-value {
-          font-family: 'Courier New', Courier, monospace;
+          font-family: 'Roboto Mono', 'Courier New', Courier, monospace;
           font-size: 8.5px;
           color: #1e293b;
           font-weight: 600;
@@ -3701,7 +4561,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           margin-bottom: 1px;
         }
         .sat-stamp {
-          font-family: 'Courier New', Courier, monospace;
+          font-family: 'Roboto Mono', 'Courier New', Courier, monospace;
           font-size: 6px;
           line-height: 1.25;
           color: #334155;
@@ -3738,6 +4598,26 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           font-weight: normal;
         }
 
+        .prefactura-watermark {
+          position: fixed !important;
+          top: 50% !important;
+          left: 50% !important;
+          transform: translate(-50%, -50%) rotate(-35deg) !important;
+          width: 100% !important;
+          text-align: center !important;
+          font-size: 92px !important;
+          font-weight: 900 !important;
+          color: rgba(220, 38, 38, 0.22) !important;
+          letter-spacing: 16px !important;
+          font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+          text-transform: uppercase !important;
+          pointer-events: none !important;
+          z-index: 999999 !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          user-select: none !important;
+        }
+
         @media print {
           @page { size: letter; margin: 0; }
           body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: #fff !important; }
@@ -3745,20 +4625,34 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           .invoice-body { padding: 10px 45px 30px 45px !important; }
           .sat-block { page-break-inside: avoid !important; break-inside: avoid !important; }
           .invoice-footer { page-break-inside: avoid !important; break-inside: avoid !important; }
+          .prefactura-watermark {
+            display: block !important;
+            position: fixed !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) rotate(-35deg) !important;
+            color: rgba(220, 38, 38, 0.25) !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            z-index: 999999 !important;
+          }
         }
       </style>
     </head>
     <body>
-      ${isDraft ? `
+      ${effectiveDraft ? `
         <div style="background-color: #fef3c7; border-bottom: 2px solid #f59e0b; color: #b45309; text-align: center; padding: 8px 16px; font-weight: 800; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; z-index: 100; position: relative;">
-          ⚠️ VISTA PREVIA / BORRADOR — DOCUMENTO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
-        </div>
-        <div style="position: fixed; top: 38%; left: 0; width: 100%; text-align: center; font-size: 80px; font-weight: 900; color: rgba(220, 38, 38, 0.08); transform: rotate(-30deg); pointer-events: none; z-index: 999; letter-spacing: 12px; font-family: sans-serif;">
-          BORRADOR
+          ⚠️ PREFACTURA / BORRADOR — DOCUMENTO SIN VALIDEZ FISCAL (NO TIMBRADO ANTE EL SAT)
         </div>
       ` : ''}
 
       <div class="page-container">
+        ${effectiveDraft ? `
+          <div class="prefactura-watermark">
+            PREFACTURA
+          </div>
+        ` : ''}
+
         <!-- Top wave banner -->
         <div class="top-banner">
           <svg viewBox="0 0 1000 160" preserveAspectRatio="none" style="width: 100%; height: 160px; display: block;">
@@ -3783,10 +4677,10 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           <!-- Title & Folio -->
           <div class="title-block">
             <div class="title-block-inner">
-              <h1 class="factura-title">FACTURA</h1>
+              <h1 class="factura-title">${effectiveDraft ? 'PREFACTURA' : 'FACTURA'}</h1>
               <div class="factura-folio">${displayFolio}</div>
               <div class="uuid-label">FOLIO FISCAL (UUID):</div>
-              <div class="uuid-value">${effectiveUuid || (isDraft ? 'PENDIENTE DE ASIGNACIÓN (BORRADOR)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
+              <div class="uuid-value">${effectiveUuid || (effectiveDraft ? 'PENDIENTE DE ASIGNACIÓN (PREFACTURA)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
             </div>
           </div>
 
@@ -3883,7 +4777,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
                 <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(satVerificationUrl || effectiveUuid)}" class="sat-qr-img" alt="QR SAT" />
               ` : `
                 <div style="width: 95px; height: 95px; border: 1px dashed #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #94a3b8; font-weight: bold; padding: 4px;">
-                  QR SAT<br>(Borrador)
+                  QR SAT<br>(${effectiveDraft ? 'Prefactura' : 'Borrador'})
                 </div>
               `}
             </div>
@@ -3926,9 +4820,19 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   return htmlContent;
 }
 
-export async function exportarFacturaOdooPDF(venta: any, facturaData: any, action: any = 'view') {
+export async function exportarFacturaOdooPDF(venta: any, facturaData: any, action: any = 'view', isDraft: boolean = false) {
   try {
-    const htmlContent = await generarFacturaHTML(venta, facturaData, false);
+    const effectiveDraft = isDraft || Boolean(
+      venta?.es_borrador || 
+      venta?.cfdi_estado === 'BORRADOR' || 
+      facturaData?.is_draft || 
+      facturaData?.es_borrador ||
+      !venta?.cfdi_uuid ||
+      String(venta?.cfdi_uuid).startsWith('BORRADOR') ||
+      !facturaData?.uuid ||
+      String(facturaData?.uuid).startsWith('BORRADOR')
+    );
+    const htmlContent = await generarFacturaHTML(venta, facturaData, effectiveDraft);
 
     const clienteRaw = venta?.cliente || facturaData?.customer?.legal_name || 'Cliente';
     const clienteSanitized = clienteRaw.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
@@ -3942,7 +4846,9 @@ export async function exportarFacturaOdooPDF(venta: any, facturaData: any, actio
     } else if (!folioNum) {
       folioNum = '0001';
     }
-    const fullFileName = `${clienteSanitized}_${serie}${folioNum}`;
+    const fullFileName = effectiveDraft 
+      ? `PREFACTURA_${clienteSanitized}_${serie}${folioNum}` 
+      : `${clienteSanitized}_${serie}${folioNum}`;
 
     if (Platform.OS === 'web') {
       const prevDocTitle = document.title;

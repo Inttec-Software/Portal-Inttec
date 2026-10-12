@@ -1,5 +1,13 @@
 import { Router } from 'express';
-import { getCatalogos, crearEvidencia, getAdminEvidencias, getMisEvidencias, actualizarEvidencia, getAdminEvidenciaById } from './evidencias.controller';
+import { 
+  getCatalogos, 
+  getInventarioColaboradores,
+  crearEvidencia, 
+  getAdminEvidencias, 
+  getMisEvidencias, 
+  actualizarEvidencia, 
+  getAdminEvidenciaById 
+} from './evidencias.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
 
@@ -9,6 +17,7 @@ router.use(verifyToken);
 router.use(tenantMiddleware);
 
 router.get('/catalogos', getCatalogos);
+router.get('/inventario-colaboradores', getInventarioColaboradores);
 router.get('/mis-evidencias', getMisEvidencias);
 router.post('/', crearEvidencia);
 router.get('/admin/all', getAdminEvidencias);

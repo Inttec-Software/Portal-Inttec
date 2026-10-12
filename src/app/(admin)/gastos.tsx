@@ -20,12 +20,14 @@ import {
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { supabase, Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, inttecClient, daravisaClient, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
+import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
+import { getWeekRange, getPreviousWeekMonday, getNextWeekMonday } from '@/utils/asistenciaUtils';
 import ExpenseCard from '@/components/ExpenseCard';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
@@ -33,6 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import GastoFotosGallery from '@/components/GastoFotosGallery';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { base64ToArrayBuffer } from '@/services/sync';
@@ -52,6 +55,7 @@ const TIPOS_PROYECTO = ['Servicio', 'Proyecto', 'Venta', 'Operativo'];
 
 export default function AdminGastosScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const { width: windowWidth } = useWindowDimensions();
   const isMobile = windowWidth < 600;
   const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
@@ -107,6 +111,7 @@ export default function AdminGastosScreen() {
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
   const [prevSelectedGastoId, setPrevSelectedGastoId] = useState<string | undefined>(undefined);
@@ -182,6 +187,8 @@ export default function AdminGastosScreen() {
   const [asistenciaEmpleado, setAsistenciaEmpleado] = useState<Usuario | null>(null);
   const [asistencias, setAsistencias] = useState<Asistencia[]>([]);
   const [isLoadingAsistencias, setIsLoadingAsistencias] = useState(false);
+  const [asistenciaSelectedMonday, setAsistenciaSelectedMonday] = useState<Date>(() => getWeekRange().mondayDate);
+  const [isExportingAsistencia, setIsExportingAsistencia] = useState(false);
   const [asistenciaPreviewUrl, setAsistenciaPreviewUrl] = useState<string | null>(null);
   const [asistenciaViewerVisible, setAsistenciaViewerVisible] = useState(false);
   const [selectedAsistenciaInfo, setSelectedAsistenciaInfo] = useState<{
@@ -201,6 +208,7 @@ export default function AdminGastosScreen() {
 
   // === Vinculación con Ventas al Aprobar ===
   const [isLinkSaleModalVisible, setIsLinkSaleModalVisible] = useState(false);
+  const [isRelinkingSaleMode, setIsRelinkingSaleMode] = useState(false);
   const [salesForLinking, setSalesForLinking] = useState<Venta[]>([]);
   const [isLoadingSalesForLinking, setIsLoadingSalesForLinking] = useState(false);
   const [linkSaleSearch, setLinkSaleSearch] = useState('');
@@ -400,6 +408,35 @@ export default function AdminGastosScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company, env]);
 
+  // Manejar navegación directa a un gasto específico o búsqueda desde Ventas u otros módulos
+  useEffect(() => {
+    if (params.search && typeof params.search === 'string') {
+      setSearchQuery(params.search);
+      setActiveTab('historial');
+    }
+    if (params.gastoId && typeof params.gastoId === 'string') {
+      setActiveTab('historial');
+      const gId = params.gastoId;
+      const found = gastos.find(g => String(g.id) === String(gId));
+      if (found) {
+        setSelectedGasto(found);
+        setReviewModalVisible(true);
+      } else {
+        (async () => {
+          try {
+            const { data } = await supabase.from('gastos').select('*').eq('id', gId).single();
+            if (data) {
+              setSelectedGasto(data);
+              setReviewModalVisible(true);
+            }
+          } catch (err) {
+            console.warn('Error loading single gasto for detail:', err);
+          }
+        })();
+      }
+    }
+  }, [params.search, params.gastoId, gastos]);
+
 
 
   const handleLogout = async () => {
@@ -513,13 +550,32 @@ export default function AdminGastosScreen() {
   const loadSalesForLinking = async () => {
     setIsLoadingSalesForLinking(true);
     try {
-      const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/reportes/admin/ventas`, { headers });
-      if (!res.ok) throw new Error('Error al cargar ventas para vinculación');
-      const data = await res.json();
-      setSalesForLinking(data.ventas || []);
-      setClientesCatalog(data.clientes || []);
-      setSucursalesCatalog(data.sucursales || []);
+      let loadedVentas: any[] = [];
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/reportes/admin/ventas?limit=5000`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.ventas) && data.ventas.length > 0) {
+            loadedVentas = data.ventas;
+            if (data.clientes) setClientesCatalog(data.clientes);
+            if (data.sucursales) setSucursalesCatalog(data.sucursales);
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Backend ventas load failed, using Supabase fallback:', apiErr);
+      }
+
+      // Fallback a Supabase para cargar TODO el registro histórico de ventas
+      if (loadedVentas.length === 0) {
+        const { data: dbVentas } = await supabase
+          .from('ventas')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (dbVentas) loadedVentas = dbVentas;
+      }
+
+      setSalesForLinking(loadedVentas);
     } catch (err) {
       logger.error('Error loading sales for linking:', err);
     } finally {
@@ -537,10 +593,100 @@ export default function AdminGastosScreen() {
       );
       return;
     }
+    setIsRelinkingSaleMode(false);
     setLinkSaleSearch('');
     setIsQuickSaleFormVisible(false);
     setIsLinkSaleModalVisible(true);
     loadSalesForLinking();
+  };
+
+  // Abrir modal para Vincular o Cambiar Venta de un gasto
+  const handleOpenRelinkSaleModal = (gasto: Gasto | null) => {
+    if (!gasto) return;
+    setSelectedGasto(gasto);
+    setIsRelinkingSaleMode(true);
+    setLinkSaleSearch('');
+    setIsQuickSaleFormVisible(false);
+    setIsLinkSaleModalVisible(true);
+    loadSalesForLinking();
+  };
+
+  // Ejecutar cambio de vinculación con venta (o desvinculación si newVentaId es null)
+  const executeRelinkGastoVenta = async (newVentaId: string | null) => {
+    if (!selectedGasto || !adminUser) return;
+    setIsProcessingAction(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}/relink-venta`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          venta_id: newVentaId,
+          actor_id: adminUser.id,
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al reasignar venta');
+      }
+
+      const resData = await res.json();
+      const foundVenta = newVentaId ? salesForLinking.find(v => v.id === newVentaId) : null;
+      const updatedGasto: Gasto = {
+        ...selectedGasto,
+        venta_id: newVentaId,
+        venta_rel: foundVenta ? {
+          id: foundVenta.id,
+          cliente: foundVenta.cliente,
+          fecha: foundVenta.fecha,
+          sucursal: foundVenta.sucursal,
+          tipo_proyecto: foundVenta.tipo_proyecto,
+          factura_referencia: foundVenta.factura_referencia,
+          precio_total_facturado: foundVenta.precio_total_facturado,
+        } : (resData.venta_rel || null)
+      };
+
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
+
+      showAlert(
+        'Éxito',
+        newVentaId
+          ? `Gasto vinculado exitosamente a la venta de ${foundVenta?.cliente || 'la venta seleccionada'}.`
+          : 'Gasto desvinculado de la venta exitosamente. Los costos se han recalculado.'
+      );
+      setIsLinkSaleModalVisible(false);
+      setIsRelinkingSaleMode(false);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo vincular/desvincular el gasto.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Desvincular de venta directamente con confirmación
+  const handleDirectUnlinkSale = (gasto: Gasto | null) => {
+    if (!gasto) return;
+    const doUnlink = () => {
+      executeRelinkGastoVenta(null);
+    };
+
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        '¿Estás seguro de que deseas desvincular este gasto de la venta actual? El costo y utilidad de la venta se recalcularán automáticamente.'
+      );
+      if (confirmed) doUnlink();
+    } else {
+      Alert.alert(
+        'Desvincular Venta',
+        '¿Estás seguro de que deseas desvincular este gasto de la venta actual? El costo y utilidad de la venta se recalcularán automáticamente.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Desvincular', style: 'destructive', onPress: doUnlink }
+        ]
+      );
+    }
   };
 
   const executeApproveGasto = async (ventaId: string | null) => {
@@ -1293,10 +1439,14 @@ export default function AdminGastosScreen() {
       const data = await res.json();
       const ventaId = data.ventaId;
 
-      // 3. Aprobar y vincular gasto
+      // 3. Vincular o aprobar gasto
       setIsQuickSaleFormVisible(false);
       setIsLinkSaleModalVisible(false);
-      await executeApproveGasto(ventaId);
+      if (isRelinkingSaleMode) {
+        await executeRelinkGastoVenta(ventaId);
+      } else {
+        await executeApproveGasto(ventaId);
+      }
     } catch (err: any) {
       showAlert('Error al guardar venta rápida', err.message || 'No se pudo crear la venta.');
     } finally {
@@ -1518,17 +1668,56 @@ export default function AdminGastosScreen() {
   };
 
   // Ver Historial de Asistencia de un Empleado
-  const handleOpenAsistencia = async (empleado: Usuario) => {
+  const handleOpenAsistencia = async (empleado: Usuario, targetMonday?: Date) => {
+    const monday = targetMonday || getWeekRange().mondayDate;
+    setAsistenciaSelectedMonday(monday);
     setAsistenciaEmpleado(empleado);
     setAsistenciaModalVisible(true);
     setIsLoadingAsistencias(true);
     try {
-      const historial = await AsistenciaService.getHistorialEmpleado(empleado.id);
+      const range = getWeekRange(monday);
+      const historial = await AsistenciaService.getHistorialEmpleado(empleado.id, range.mondayStr, range.sundayStr);
       setAsistencias(historial);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'No se pudo cargar el historial de asistencia.');
     } finally {
       setIsLoadingAsistencias(false);
+    }
+  };
+
+  const handleAsistenciaPrevWeek = () => {
+    if (!asistenciaEmpleado) return;
+    const prev = getPreviousWeekMonday(asistenciaSelectedMonday);
+    handleOpenAsistencia(asistenciaEmpleado, prev);
+  };
+
+  const handleAsistenciaNextWeek = () => {
+    if (!asistenciaEmpleado) return;
+    const next = getNextWeekMonday(asistenciaSelectedMonday);
+    handleOpenAsistencia(asistenciaEmpleado, next);
+  };
+
+  const handleExportIndividualPDF = async () => {
+    if (!asistenciaEmpleado) return;
+    try {
+      setIsExportingAsistencia(true);
+      await ReportGenerator.exportReporteAsistenciaEmpleadoPDF(asistencias, asistenciaEmpleado, asistenciaSelectedMonday);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'No se pudo generar el reporte en PDF');
+    } finally {
+      setIsExportingAsistencia(false);
+    }
+  };
+
+  const handleExportIndividualXLSX = async () => {
+    if (!asistenciaEmpleado) return;
+    try {
+      setIsExportingAsistencia(true);
+      await ReportGenerator.exportReporteAsistenciaEmpleadoXLSX(asistencias, asistenciaEmpleado, asistenciaSelectedMonday);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'No se pudo generar el reporte en Excel');
+    } finally {
+      setIsExportingAsistencia(false);
     }
   };
 
@@ -2052,7 +2241,7 @@ export default function AdminGastosScreen() {
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={{ flex: 1 }}>
 
       {/* Contents based on tab */}
@@ -2930,23 +3119,15 @@ export default function AdminGastosScreen() {
 
             {selectedGasto && (
               <ScrollView contentContainerStyle={styles.modalScroll}>
-                {selectedGasto.foto_url ? (
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => {
-                      setActivePreviewUrl(selectedGasto.foto_url!);
-                      setViewerVisible(true);
-                    }}
-                    style={styles.modalImageContainer}
-                  >
-                    <Image source={{ uri: selectedGasto.foto_url }} style={styles.modalImage} resizeMode="contain" />
-                  </TouchableOpacity>
-                ) : (
-                  <View style={[styles.modalNoImage, { backgroundColor: themeColors.backgroundElement }]}>
-                    <Ionicons name="image-outline" size={48} color={themeColors.textSecondary} />
-                    <Text style={{ color: themeColors.textSecondary }}>Sin fotografía de ticket</Text>
-                  </View>
-                )}
+                <GastoFotosGallery
+                  gasto={selectedGasto}
+                  themeColors={themeColors}
+                  onPhotoPress={(url, index) => {
+                    setActivePreviewUrl(url);
+                    setViewerInitialIndex(index);
+                    setViewerVisible(true);
+                  }}
+                />
 
                 <View style={styles.modalDetails}>
                   {/* Monto */}
@@ -3090,6 +3271,56 @@ export default function AdminGastosScreen() {
                       </View>
                     </View>
                   )}
+
+                  {/* Venta / Proyecto Vinculado */}
+                  <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                    <View style={{ flex: 1, marginRight: Spacing.two }}>
+                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Venta / Proyecto Vinculado</Text>
+                      {selectedGasto.venta_rel || selectedGasto.venta_id ? (
+                        <View style={{ marginTop: 2 }}>
+                          <Text style={[styles.detailValue, { color: themeColors.primary, fontWeight: '700' }]}>
+                            {selectedGasto.venta_rel?.cliente 
+                              ? `${selectedGasto.venta_rel.cliente} (${selectedGasto.venta_rel.fecha || 'Sin fecha'})` 
+                              : `Venta ID: ${selectedGasto.venta_id}`}
+                          </Text>
+                          {selectedGasto.venta_rel?.tipo_proyecto ? (
+                            <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 1 }}>
+                              Proyecto: {selectedGasto.venta_rel.tipo_proyecto} {selectedGasto.venta_rel.sucursal ? `| ${selectedGasto.venta_rel.sucursal}` : ''}
+                            </Text>
+                          ) : null}
+                          {selectedGasto.venta_rel?.precio_total_facturado ? (
+                            <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '600', marginTop: 1 }}>
+                              Total Venta: {formatCurrency(selectedGasto.venta_rel.precio_total_facturado)}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ) : (
+                        <Text style={[styles.detailValue, { color: themeColors.textSecondary, fontStyle: 'italic', marginTop: 2 }]}>
+                          Sin venta vinculada (Gasto general no asignado)
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                      <TouchableOpacity
+                        onPress={() => handleOpenRelinkSaleModal(selectedGasto)}
+                        style={styles.quickFieldBtn}
+                      >
+                        <Ionicons name="swap-horizontal-outline" size={14} color={themeColors.accent} />
+                        <Text style={styles.quickFieldBtnText}>
+                          {selectedGasto.venta_id ? 'Cambiar' : 'Vincular'}
+                        </Text>
+                      </TouchableOpacity>
+                      {selectedGasto.venta_id ? (
+                        <TouchableOpacity
+                          onPress={() => handleDirectUnlinkSale(selectedGasto)}
+                          style={[styles.quickFieldBtn, { borderColor: themeColors.danger + '40', backgroundColor: themeColors.danger + '10' }]}
+                        >
+                          <Ionicons name="link-outline" size={14} color={themeColors.danger} />
+                          <Text style={[styles.quickFieldBtnText, { color: themeColors.danger }]}>Desvincular</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
 
                   {/* Cliente / Sucursal */}
                   <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
@@ -4991,7 +5222,11 @@ export default function AdminGastosScreen() {
                    </TouchableOpacity>
                  )}
                  <Text style={[styles.modalTitle, { color: themeColors.text }]}>
-                   {isQuickSaleFormVisible ? 'Crear Venta Rápida' : '¿Vincular Gasto a Venta?'}
+                   {isQuickSaleFormVisible 
+                     ? 'Crear Venta Rápida' 
+                     : isRelinkingSaleMode 
+                       ? 'Vincular o Cambiar Venta' 
+                       : '¿Vincular Gasto a Venta?'}
                  </Text>
                </View>
                <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
@@ -5045,8 +5280,12 @@ export default function AdminGastosScreen() {
                       renderItem={({ item }) => (
                         <TouchableOpacity
                           onPress={() => {
-                            setIsLinkSaleModalVisible(false);
-                            executeApproveGasto(item.id);
+                            if (isRelinkingSaleMode) {
+                              executeRelinkGastoVenta(item.id);
+                            } else {
+                              setIsLinkSaleModalVisible(false);
+                              executeApproveGasto(item.id);
+                            }
                           }}
                           style={[
                             styles.linkSaleItem,
@@ -5086,17 +5325,24 @@ export default function AdminGastosScreen() {
                 {/* Footer con opciones */}
                 <View style={{ gap: Spacing.two, paddingTop: Spacing.two, borderTopWidth: 1, borderTopColor: themeColors.border }}>
                   <CustomButton
-                    title="Aprobar sin vincular"
+                    title={isRelinkingSaleMode ? "Desvincular de venta" : "Aprobar sin vincular"}
                     onPress={() => {
-                      setIsLinkSaleModalVisible(false);
-                      executeApproveGasto(null);
+                      if (isRelinkingSaleMode) {
+                        executeRelinkGastoVenta(null);
+                      } else {
+                        setIsLinkSaleModalVisible(false);
+                        executeApproveGasto(null);
+                      }
                     }}
-                    variant="primary"
+                    variant={isRelinkingSaleMode ? "danger" : "primary"}
                     style={{ width: '100%' }}
                   />
                   <CustomButton
                     title="Cancelar"
-                    onPress={() => setIsLinkSaleModalVisible(false)}
+                    onPress={() => {
+                      setIsLinkSaleModalVisible(false);
+                      setIsRelinkingSaleMode(false);
+                    }}
                     variant="secondary"
                     style={{ width: '100%' }}
                   />
@@ -5741,6 +5987,8 @@ export default function AdminGastosScreen() {
       <ImageViewerModal
         visible={viewerVisible}
         imageUrl={activePreviewUrl}
+        imageUrls={selectedGasto ? GastoHelper.getFotoUrls(selectedGasto) : (activePreviewUrl ? (activePreviewUrl.includes(',') ? activePreviewUrl.split(',').map(u => u.trim()) : [activePreviewUrl]) : [])}
+        initialIndex={viewerInitialIndex}
         onClose={() => {
           setViewerVisible(false);
           setActivePreviewUrl(null);
@@ -5759,13 +6007,13 @@ export default function AdminGastosScreen() {
         }}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '85%' }]}>
-            <View style={styles.modalHeader}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, height: '88%', padding: 0 }]}>
+            <View style={[styles.modalHeader, { paddingHorizontal: Spacing.four, paddingTop: Spacing.four, paddingBottom: Spacing.two }]}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Historial de Asistencia</Text>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Historial de Asistencia Semanal</Text>
                 {asistenciaEmpleado && (
                   <Text style={{ color: themeColors.textSecondary, fontSize: 13, marginTop: 2 }}>
-                    {asistenciaEmpleado.nombre}
+                    👤 {asistenciaEmpleado.nombre}
                   </Text>
                 )}
               </View>
@@ -5778,148 +6026,91 @@ export default function AdminGastosScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Quick Export Actions */}
+            {asistenciaEmpleado && (
+              <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: Spacing.four, paddingBottom: Spacing.two }}>
+                <TouchableOpacity
+                  onPress={handleExportIndividualPDF}
+                  disabled={isExportingAsistencia}
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    paddingVertical: 9,
+                    borderRadius: BorderRadius.medium,
+                    backgroundColor: '#EF4444',
+                    opacity: isExportingAsistencia ? 0.6 : 1,
+                  }}
+                >
+                  <Ionicons name="document-text" size={16} color="#FFFFFF" />
+                  <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>Descargar PDF</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleExportIndividualXLSX}
+                  disabled={isExportingAsistencia}
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    paddingVertical: 9,
+                    borderRadius: BorderRadius.medium,
+                    backgroundColor: '#10B981',
+                    opacity: isExportingAsistencia ? 0.6 : 1,
+                  }}
+                >
+                  <Ionicons name="grid" size={16} color="#FFFFFF" />
+                  <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>Descargar Excel</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {isLoadingAsistencias ? (
-              <View style={styles.loaderContainer}>
+              <View style={[styles.loaderContainer, { flex: 1 }]}>
                 <ActivityIndicator size="large" color={themeColors.accent} />
-                <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando historial...</Text>
+                <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando semana...</Text>
               </View>
             ) : (
-              <FlatList
-                data={asistencias}
-                initialNumToRender={8}
-                maxToRenderPerBatch={8}
-                windowSize={5}
-                removeClippedSubviews={true}
-                keyExtractor={(item) => item.id}
+              <ScrollView
+                style={{ flex: 1, paddingHorizontal: Spacing.four }}
                 contentContainerStyle={{ paddingBottom: Spacing.seven }}
-                renderItem={({ item }) => (
-                  <View style={[styles.asistenciaCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                    <Text style={[styles.asistenciaFecha, { color: themeColors.text }]}>
-                      📅 {formatAsistenciaFecha(item.fecha)}
-                    </Text>
-                    <View style={styles.asistenciaRow}>
-                      {/* Entrada */}
-                      <View style={styles.asistenciaBlock}>
-                        <Text style={[styles.asistenciaBlockLabel, { color: themeColors.success }]}>📥 Entrada</Text>
-                        {item.foto_entrada_url ? (
-                          <TouchableOpacity
-                            style={styles.asistenciaThumb}
-                            activeOpacity={0.8}
-                            onPress={() => {
-                              setAsistenciaPreviewUrl(item.foto_entrada_url!);
-                              setSelectedAsistenciaInfo({
-                                fecha: item.fecha,
-                                hora: item.hora_entrada!,
-                                direccion: item.direccion_entrada || 'Dirección no registrada',
-                                lat: Number(item.latitud_entrada),
-                                lng: Number(item.longitud_entrada),
-                                empleadoNombre: asistenciaEmpleado?.nombre || 'Empleado',
-                                tipo: 'Entrada',
-                              });
-                              setAsistenciaViewerVisible(true);
-                            }}
-                          >
-                            <Image source={{ uri: item.foto_entrada_url }} style={styles.asistenciaThumbImg} resizeMode="cover" />
-                          </TouchableOpacity>
-                        ) : (
-                          <View style={[styles.asistenciaNoImg, { backgroundColor: themeColors.backgroundSelected }]}>
-                            <Ionicons name="image-outline" size={24} color={themeColors.textSecondary} />
-                          </View>
-                        )}
-                        <Text style={[styles.asistenciaHora, { color: themeColors.text }]}>
-                          {item.hora_entrada?.substring(0, 5) || '--:--'}
-                        </Text>
-                        {item.direccion_entrada ? (
-                          <TouchableOpacity
-                            onPress={() => handleOpenMap(Number(item.latitud_entrada), Number(item.longitud_entrada))}
-                            activeOpacity={0.7}
-                            style={{ width: '100%' }}
-                          >
-                            <Text style={[styles.asistenciaAddress, { color: themeColors.textSecondary }]} numberOfLines={3}>
-                              🏠 {item.direccion_entrada}
-                            </Text>
-                          </TouchableOpacity>
-                        ) : item.latitud_entrada != null && (
-                          <TouchableOpacity
-                            onPress={() => handleOpenMap(Number(item.latitud_entrada), Number(item.longitud_entrada))}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[styles.asistenciaCoords, { color: themeColors.textSecondary }]}>
-                              📍 {Number(item.latitud_entrada).toFixed(4)}, {Number(item.longitud_entrada).toFixed(4)}
-                            </Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-
-                      {/* Salida */}
-                      <View style={styles.asistenciaBlock}>
-                        <Text style={[styles.asistenciaBlockLabel, { color: item.hora_salida ? themeColors.accent : themeColors.warning }]}>
-                          📤 Salida
-                        </Text>
-                        {item.foto_salida_url ? (
-                          <TouchableOpacity
-                            style={styles.asistenciaThumb}
-                            activeOpacity={0.8}
-                            onPress={() => {
-                              setAsistenciaPreviewUrl(item.foto_salida_url!);
-                              setSelectedAsistenciaInfo({
-                                fecha: item.fecha,
-                                hora: item.hora_salida!,
-                                direccion: item.direccion_salida || 'Dirección no registrada',
-                                lat: Number(item.latitud_salida),
-                                lng: Number(item.longitud_salida),
-                                empleadoNombre: asistenciaEmpleado?.nombre || 'Empleado',
-                                tipo: 'Salida',
-                              });
-                              setAsistenciaViewerVisible(true);
-                            }}
-                          >
-                            <Image source={{ uri: item.foto_salida_url }} style={styles.asistenciaThumbImg} resizeMode="cover" />
-                          </TouchableOpacity>
-                        ) : (
-                          <View style={[styles.asistenciaNoImg, { backgroundColor: themeColors.backgroundSelected }]}>
-                            <Ionicons name={item.hora_salida ? 'image-outline' : 'hourglass-outline'} size={24} color={themeColors.textSecondary} />
-                            {!item.hora_salida && (
-                              <Text style={{ fontSize: 9, color: themeColors.warning, fontWeight: '700', marginTop: 2 }}>Pendiente</Text>
-                            )}
-                          </View>
-                        )}
-                        <Text style={[styles.asistenciaHora, { color: item.hora_salida ? themeColors.text : themeColors.warning }]}>
-                          {item.hora_salida?.substring(0, 5) || 'Pendiente'}
-                        </Text>
-                        {item.direccion_salida ? (
-                          <TouchableOpacity
-                            onPress={() => handleOpenMap(Number(item.latitud_salida), Number(item.longitud_salida))}
-                            activeOpacity={0.7}
-                            style={{ width: '100%' }}
-                          >
-                            <Text style={[styles.asistenciaAddress, { color: themeColors.textSecondary }]} numberOfLines={3}>
-                              🏠 {item.direccion_salida}
-                            </Text>
-                          </TouchableOpacity>
-                        ) : item.latitud_salida != null && (
-                          <TouchableOpacity
-                            onPress={() => handleOpenMap(Number(item.latitud_salida), Number(item.longitud_salida))}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[styles.asistenciaCoords, { color: themeColors.textSecondary }]}>
-                              📍 {Number(item.latitud_salida).toFixed(4)}, {Number(item.longitud_salida).toFixed(4)}
-                            </Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </View>
-                  </View>
-                )}
-                ListEmptyComponent={
-                  <View style={styles.emptyContainer}>
-                    <Ionicons name="calendar-outline" size={48} color={themeColors.textSecondary} />
-                    <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-                      No hay registros de asistencia para este empleado.
-                    </Text>
-                  </View>
-                }
-              />
+                showsVerticalScrollIndicator={false}
+              >
+                <AsistenciaSemanalCard
+                  asistencias={asistencias}
+                  empleadoNombre={asistenciaEmpleado?.nombre || 'Empleado'}
+                  isLoading={isLoadingAsistencias}
+                  onRefresh={() => {
+                    if (asistenciaEmpleado) {
+                      handleOpenAsistencia(asistenciaEmpleado, asistenciaSelectedMonday);
+                    }
+                  }}
+                  selectedMonday={asistenciaSelectedMonday}
+                  onChangeWeek={(newMonday) => {
+                    setAsistenciaSelectedMonday(newMonday);
+                    if (asistenciaEmpleado) {
+                      handleOpenAsistencia(asistenciaEmpleado, newMonday);
+                    }
+                  }}
+                  onViewFoto={(info) => {
+                    setAsistenciaPreviewUrl(info.url);
+                    setSelectedAsistenciaInfo({
+                      fecha: info.fecha,
+                      hora: info.hora,
+                      direccion: info.direccion,
+                      lat: info.lat,
+                      lng: info.lng,
+                      empleadoNombre: info.empleadoNombre,
+                      tipo: info.tipo,
+                    });
+                    setAsistenciaViewerVisible(true);
+                  }}
+                />
+              </ScrollView>
             )}
           </View>
         </View>
@@ -5938,7 +6129,7 @@ export default function AdminGastosScreen() {
       />
       
     </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -191,6 +191,7 @@ export interface Usuario {
   email: string;
   rol: 'ADMIN' | 'EMPLEADO' | 'DEV';
   telefono?: string;
+  sucursal?: string;
   created_at?: string;
 }
 
@@ -229,6 +230,15 @@ export interface Gasto {
   tipo_servicio_proyecto?: string | null;
   detalle_servicio_proyecto?: string | null;
   venta_id?: string | null;
+  venta_rel?: {
+    id: string;
+    cliente?: string;
+    fecha?: string;
+    sucursal?: string;
+    tipo_proyecto?: string;
+    factura_referencia?: string;
+    precio_total_facturado?: number;
+  } | null;
   // Relaciones Joins normalizadas
   categoria_rel?: { id: string; nombre: string } | null;
   subcategoria_rel?: { 
@@ -243,6 +253,13 @@ export interface Gasto {
 }
 
 export const GastoHelper = {
+  getVentaInfo: (g: Gasto | null | undefined): string => {
+    if (!g) return '';
+    if (g.venta_rel?.cliente) {
+      return `${g.venta_rel.cliente}${g.venta_rel.fecha ? ` (${g.venta_rel.fecha})` : ''}`;
+    }
+    return g.venta_id ? `Venta ID: ${g.venta_id.slice(0, 8)}...` : '';
+  },
   getCategoria: (g: Gasto | null | undefined): string => {
     if (!g) return '';
     return (
@@ -272,6 +289,39 @@ export const GastoHelper = {
   getFacturaUrls: (g: Gasto | null | undefined): string[] => {
     if (!g || !g.factura_url) return [];
     return g.factura_url.split(',').map(u => u.trim()).filter(Boolean);
+  },
+  getFotoUrls: (g: Gasto | null | undefined): string[] => {
+    if (!g) return [];
+    if (Array.isArray((g as any).base64Fotos) && (g as any).base64Fotos.length > 0) {
+      return (g as any).base64Fotos.map((item: any) => {
+        if (typeof item === 'string') {
+          return item.startsWith('data:') || item.startsWith('http') ? item : `data:image/jpeg;base64,${item}`;
+        }
+        const b64 = item.base64 || item.uri || item.url;
+        if (!b64) return '';
+        return b64.startsWith('data:') || b64.startsWith('http') ? b64 : `data:image/jpeg;base64,${b64}`;
+      }).filter(Boolean);
+    }
+    const raw = g.foto_url || ((g as any).isOffline ? (g as any).base64Foto : null);
+    if (!raw) return [];
+    const trimmed = typeof raw === 'string' ? raw.trim() : '';
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map((item: any) => typeof item === 'string' ? item : item?.uri || item?.url).filter(Boolean);
+        }
+      } catch {}
+    }
+    return trimmed.split(',').map(u => {
+      const s = u.trim();
+      if (!s) return '';
+      if (!s.startsWith('http') && !s.startsWith('data:') && !s.startsWith('file:') && !s.startsWith('/') && s.length > 100) {
+        return `data:image/jpeg;base64,${s}`;
+      }
+      return s;
+    }).filter(Boolean);
   },
   getEstadoReembolsoLabel: (g: Gasto | null | undefined): string => {
     if (!g) return 'Normal';
@@ -592,21 +642,26 @@ export const AsistenciaService = {
    * Registra la salida del empleado (actualiza el registro existente de la jornada).
    */
   async registrarSalida(
-    asistenciaId: string,
+    asistenciaId: string | null | undefined,
     fotoUrl: string,
     latitud: number,
     longitud: number,
-    direccion: string
+    direccion: string,
+    empleadoId?: string,
+    fecha?: string
   ): Promise<Asistencia> {
     const ahora = new Date();
     const horaStr = this.getHoraLocal(ahora);
+    const fechaStr = fecha || this.getFechaJornada(ahora);
 
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/asistencias/salida`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({
-        id: asistenciaId,
+        id: asistenciaId || undefined,
+        empleado_id: empleadoId,
+        fecha: fechaStr,
         hora_salida: horaStr,
         foto_salida_url: fotoUrl,
         latitud_salida: latitud,
@@ -619,11 +674,15 @@ export const AsistenciaService = {
   },
 
   /**
-   * Obtiene el historial de asistencias de un empleado.
+   * Obtiene el historial de asistencias de un empleado (opcionalmente filtrado por rango de fechas).
    */
-  async getHistorialEmpleado(empleadoId: string): Promise<Asistencia[]> {
+  async getHistorialEmpleado(empleadoId: string, startDate?: string, endDate?: string): Promise<Asistencia[]> {
     const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/asistencias/historial/${empleadoId}`, { headers });
+    const params = new URLSearchParams();
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`${getApiUrl()}/api/asistencias/historial/${empleadoId}${qs}`, { headers });
     if (!res.ok) throw new Error('Error al obtener historial de asistencia');
     return await res.json();
   },
@@ -676,6 +735,52 @@ export const AsistenciaService = {
       logger.error('[Supabase Storage] Excepción capturada en subirFotoAsistencia:', err.message || err);
       throw err;
     }
+  },
+
+  /**
+   * Edita las horas de entrada y/o salida de un registro de asistencia (Exclusivo para usuarios con rol DEV).
+   */
+  async editarHorasAsistencia(
+    asistenciaId: string,
+    horaEntrada: string,
+    horaSalida: string | null,
+    observaciones?: string,
+    fecha?: string
+  ): Promise<{ success: boolean; message: string; data: any }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/editar-horas/${asistenciaId}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        hora_entrada: horaEntrada,
+        hora_salida: horaSalida,
+        observaciones,
+        fecha,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Error al actualizar horas de asistencia');
+    }
+    return data;
+  },
+
+  /**
+   * Elimina un registro de asistencia (Exclusivo para usuarios con rol DEV).
+   */
+  async eliminarAsistencia(
+    asistenciaId: string
+  ): Promise<{ success: boolean; message: string }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/eliminar/${asistenciaId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || data.error || 'Error al eliminar el registro de asistencia');
+    }
+    return data;
   },
 };
 
@@ -734,13 +839,15 @@ export interface VentaPago {
   created_at?: string;
 }
 
-export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO';
+export type EstadoPagoVenta = 'PAGADO' | 'PAGO PARCIAL' | 'PENDIENTE DE PAGO' | 'SIN PRECIO';
 
 export function calcularEstadoPago(precioTotalFacturado: number, totalPagado: number): EstadoPagoVenta {
-  if (totalPagado >= precioTotalFacturado && precioTotalFacturado > 0) {
+  if (precioTotalFacturado > 0 && totalPagado >= precioTotalFacturado - 0.01) {
     return 'PAGADO';
-  } else if (totalPagado > 0) {
+  } else if (totalPagado > 0 && totalPagado < precioTotalFacturado - 0.01) {
     return 'PAGO PARCIAL';
+  } else if (precioTotalFacturado <= 0 && totalPagado <= 0) {
+    return 'SIN PRECIO';
   } else {
     return 'PENDIENTE DE PAGO';
   }
@@ -1109,6 +1216,8 @@ export interface Herramienta {
   numero_serie?: string | null;
   foto_url?: string | null;
   estado: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO' | 'EN_REPARACION' | 'BAJA' | 'FALTANTE';
+  cantidad?: number;
+  unidades_estado?: Record<string, number>;
   activo: boolean;
   created_at?: string;
   custodia_actual?: {

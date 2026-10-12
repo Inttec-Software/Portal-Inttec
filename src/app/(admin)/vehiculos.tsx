@@ -166,7 +166,7 @@ export default function AdminVehiculosScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['top', 'left', 'right']}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={styles.header}>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
           <View style={{ marginLeft: Spacing.two }}>
@@ -498,12 +498,13 @@ export default function AdminVehiculosScreen() {
       <ImageViewerModal
         visible={viewerVisible}
         imageUrl={activePreviewUrl}
+        imageUrls={activePreviewUrl ? (activePreviewUrl.includes(',') ? activePreviewUrl.split(',').map(u => u.trim()) : [activePreviewUrl]) : []}
         onClose={() => {
           setViewerVisible(false);
           setActivePreviewUrl(null);
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 

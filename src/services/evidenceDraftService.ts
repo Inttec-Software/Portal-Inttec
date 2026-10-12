@@ -12,11 +12,19 @@ export interface EvidenceDraftTrabajo {
     usado: number;
     sobrante: number;
     unidad?: string;
+    empleadoId?: string;
+    empleadoNombre?: string;
   }[];
   solucion: string;
   antesImg?: { uri: string; base64: string | null };
   despuesImg?: { uri: string; base64: string | null };
   fotosAdicionales?: { uri: string; base64: string | null }[];
+}
+
+export interface Colaborador {
+  id: string;
+  nombre: string;
+  email?: string;
 }
 
 export interface EvidenceDraft {
@@ -27,6 +35,7 @@ export interface EvidenceDraft {
   clienteNombre?: string;
   selectedSucursal: string;
   sucursalNombre?: string;
+  colaboradores?: Colaborador[];
   currentStep: number;
   trabajos: EvidenceDraftTrabajo[];
   createdAt: string;
@@ -124,6 +133,7 @@ export const EvidenceDraftService = {
         clienteNombre: draftData.clienteNombre || '',
         selectedSucursal: draftData.selectedSucursal || '',
         sucursalNombre: draftData.sucursalNombre || '',
+        colaboradores: draftData.colaboradores || [],
         currentStep: draftData.currentStep || 1,
         trabajos: sanitizedTrabajos,
         createdAt: originalCreatedAt,

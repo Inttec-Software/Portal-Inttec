@@ -13,7 +13,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import { AuthService } from '@/services/supabase';
 import { TareasService } from '@/services/tareasService';
@@ -37,6 +37,7 @@ const MODULES: ModuleConfig[] = [
   { id: 'tareas', name: 'Tareas', icon: 'checkbox-outline', route: '/(admin)/tareas', color: '#f39c12' },
   { id: 'inventario', name: 'Inventario', icon: 'cube', route: '/(admin)/inventario', color: '#48dbfb' },
   { id: 'empleados', name: 'Empleados', icon: 'people', route: '/(admin)/empleados', color: '#1dd1a1' },
+  { id: 'asistencia', name: 'Asistencia', icon: 'time-outline', route: '/(admin)/asistencia', color: '#2ed573' },
   { id: 'vehiculos', name: 'Flota', icon: 'car', route: '/(admin)/vehiculos', color: '#ff9ff3' },
   { id: 'herramientas', name: 'Herramientas', icon: 'build', route: '/(admin)/herramientas', color: '#00cec9' },
   { id: 'evidencias', name: 'Evidencias', icon: 'briefcase', route: '/(admin)/evidencias', color: '#ff5252' },
@@ -48,6 +49,7 @@ const MODULES: ModuleConfig[] = [
 ];
 
 export default function AdminDashboardGrid() {
+  const insets = useSafeAreaInsets();
   const [showTasksPopover, setShowTasksPopover] = useState(false);
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -85,8 +87,10 @@ export default function AdminDashboardGrid() {
           } else {
             setHasNewTasks(false);
           }
-        } catch (error) {
-          console.error('Error fetching tasks for badge', error);
+        } catch (error: any) {
+          // Si el backend local no está corriendo, registrar como warn sin romper el dashboard
+          console.warn('No se pudieron obtener tareas para el badge (backend offline o inaccesible):', error?.message || error);
+          setPendingTasksCount(0);
         }
       };
       fetchPendingTasks();
@@ -133,11 +137,13 @@ export default function AdminDashboardGrid() {
     : ['#f8fafc', '#e2e8f0'] as const;
 
   return (
-    <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom', 'left', 'right']}>
-      <LinearGradient colors={gradientColors} style={styles.container}>
-        
-        {/* Top Bar para Perfil, Empresa y Salir */}
-        <View style={[styles.topBar, isMobile && styles.topBarMobile]}>
+    <LinearGradient colors={gradientColors} style={styles.container}>
+      {/* Top Bar para Perfil, Empresa y Salir */}
+        <View style={[
+          styles.topBar,
+          isMobile && styles.topBarMobile,
+          { paddingTop: Math.max(insets.top, Platform.OS === 'ios' ? 44 : 12) + (isMobile ? 4 : 8) }
+        ]}>
           <View style={styles.topBarMainRow}>
             <View style={styles.userInfo}>
               <View style={[styles.avatar, { backgroundColor: themeColors.accent }]}>
@@ -351,7 +357,6 @@ export default function AdminDashboardGrid() {
           </View>
         </ScrollView>
       </LinearGradient>
-    </SafeAreaView>
   );
 }
 

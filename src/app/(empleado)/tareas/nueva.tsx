@@ -22,6 +22,7 @@ import VentaSelectModal from '@/components/VentaSelectModal';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '@/services/supabase';
 import { TareasService } from '@/services/tareasService';
+import { useHeaderAction } from '@/context/HeaderActionContext';
 
 export default function NuevaTareaScreen() {
   const router = useRouter();
@@ -31,6 +32,7 @@ export default function NuevaTareaScreen() {
 
   const [loading, setLoading] = useState(false);
   const [fetchingData, setFetchingData] = useState(false);
+  const { setHeaderRight } = useHeaderAction();
   
   // Data lists
   const [usuarios, setUsuarios] = useState<any[]>([]);
@@ -156,25 +158,29 @@ export default function NuevaTareaScreen() {
   const selectedClienteNombre = clientes.find(c => c.id === clienteId)?.nombre;
   const ventasDisponibles = ventas.filter(v => v.cliente === selectedClienteNombre);
 
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['bottom', 'left', 'right']}>
-      {/* HEADER */}
-      <View style={[styles.header, { borderBottomColor: themeColors.border }]}>
-        <View style={styles.backBtn} />
-        <Text style={[styles.headerTitle, { color: themeColors.text }]}>Nueva Tarea</Text>
-        <TouchableOpacity 
-          onPress={handleSave} 
-          disabled={loading || fetchingData}
-          style={[styles.saveBtn, { opacity: loading || fetchingData ? 0.5 : 1 }]}
-        >
-          {loading ? (
-            <ActivityIndicator size="small" color={themeColors.primary} />
-          ) : (
-            <Text style={[styles.saveBtnText, { color: themeColors.primary }]}>Guardar</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+  useEffect(() => {
+    setHeaderRight(
+      <TouchableOpacity 
+        onPress={handleSave} 
+        disabled={loading || fetchingData}
+        style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, opacity: loading || fetchingData ? 0.5 : 1, marginRight: 4 }}
+        activeOpacity={0.7}
+      >
+        {loading ? (
+          <ActivityIndicator size="small" color={themeColors.primary} />
+        ) : (
+          <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 15 }}>Guardar</Text>
+        )}
+      </TouchableOpacity>
+    );
 
+    return () => {
+      setHeaderRight(null);
+    };
+  }, [loading, fetchingData, titulo, descripcion, fechaCompromiso, responsableId, corresponsables, vinculoTipo, relacionarVenta, clienteId, referenciaVentaId, themeColors]);
+
+  return (
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
         
         {/* TÍTULO Y DESCRIPCIÓN */}
@@ -380,7 +386,7 @@ export default function NuevaTareaScreen() {
         )}
 
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
