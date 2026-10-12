@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -40,7 +40,7 @@ export default function EmpleadoGastos() {
   const router = useRouter();
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { user, company, changeCompany, env, changeEnv } = useAuth();
+  const { user, setUser, company, changeCompany, env, changeEnv } = useAuth();
 
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [offlineGastos, setOfflineGastos] = useState<OfflineGastoItem[]>([]);
@@ -498,7 +498,7 @@ export default function EmpleadoGastos() {
   const handleLogout = async () => {
     const performLogout = async () => {
       await AuthService.logout();
-      setAuthUser(null);
+      setUser(null);
     };
 
     if (Platform.OS === 'web') {

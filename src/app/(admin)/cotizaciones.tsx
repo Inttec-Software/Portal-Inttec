@@ -492,7 +492,7 @@ export default function CotizacionesListScreen() {
                     {cot.cliente_nombre}
                   </Text>
                   <Text style={[styles.tableCell, { width: '14%', textAlign: 'left', paddingHorizontal: 6, color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
-                  <View style={[styles.tableCell, { width: '10%', alignItems: 'center', justifyContent: 'center' }]}>
+                  <View style={{ width: '10%', alignItems: 'center', justifyContent: 'center' }}>
                     <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10, alignSelf: 'center' }]}>
                       <Text style={{ fontSize: 9, fontWeight: 'bold', color: config.color }}>
                         {estadoDisplay}
@@ -502,7 +502,7 @@ export default function CotizacionesListScreen() {
                   <Text style={[styles.tableCell, { width: '9%', textAlign: 'right', paddingRight: 8, fontWeight: 'bold' }]}>{formatearMoneda(cot.total)}</Text>
                   
                   {/* Iconos de acción con Tooltips en Hover */}
-                  <View style={[styles.tableCell, styles.rowActionsContainer, { width: '19%' }]}>
+                  <View style={[styles.rowActionsContainer, { width: '19%' }]}>
                     <ActionButtonWithTooltip icon="eye-outline" color={themeColors.textSecondary} tooltip="Ver PDF" onPress={() => handleDownloadPDF(cot, 'view')} />
                     <ActionButtonWithTooltip icon="pencil-outline" color={themeColors.textSecondary} tooltip="Editar Cotización" onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} />
                     <ActionButtonWithTooltip icon="copy-outline" color={themeColors.textSecondary} tooltip="Duplicar Cotización" onPress={() => handleDuplicate(cot)} />
