@@ -38,7 +38,7 @@ export const getApiHeaders = async (forceRefresh = false) => {
   }
 
   let company = 'inttec';
-  let env = 'prod';
+  let env = typeof __DEV__ !== 'undefined' && __DEV__ ? 'test' : 'cloud';
   let token = null;
 
   try {
@@ -48,7 +48,9 @@ export const getApiHeaders = async (forceRefresh = false) => {
         AsyncStorage.getItem('active_env')
       ]);
       company = compRes || 'inttec';
-      env = envRes || 'prod';
+      if (envRes) {
+        env = envRes === 'prod' ? 'cloud' : envRes;
+      }
       token = await AsyncStorage.getItem(`jwt_token_${company}`);
     }
   } catch (e) {

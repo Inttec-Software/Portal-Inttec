@@ -24,14 +24,14 @@ export const tenantMiddleware = (req: Request, res: Response, next: NextFunction
     company = 'daravisa';
   }
 
-  // Si el proceso del backend está configurado con APP_ENV (ej. en Lightsail test),
+  // Si el proceso del backend está configurado con APP_ENV (ej. en local o Lightsail test),
   // se fuerza ese entorno para evitar cualquier fuga de datos accidental entre test y prod.
-  const processEnv = process.env.APP_ENV;
-  if (processEnv === 'test') {
+  const processEnv = (process.env.APP_ENV || '').trim().toLowerCase();
+  if (processEnv === 'test' || processEnv === 'staging' || processEnv === 'development') {
     env = 'test';
-  } else if (processEnv === 'prod' || processEnv === 'cloud') {
+  } else if (processEnv === 'prod' || processEnv === 'production' || processEnv === 'cloud') {
     env = 'cloud';
-  } else if (envHeader === 'test') {
+  } else if (envHeader === 'test' || envHeader === 'staging') {
     env = 'test';
   }
 

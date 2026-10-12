@@ -33,7 +33,7 @@ export const CompanyService = {
   }
 };
 
-let activeEnv: 'cloud' | 'test' = 'cloud';
+let activeEnv: 'cloud' | 'test' = typeof __DEV__ !== 'undefined' && __DEV__ ? 'test' : 'cloud';
 export const EnvService = {
   getActiveEnv(): 'cloud' | 'test' {
     return activeEnv;
