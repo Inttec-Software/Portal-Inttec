@@ -12,29 +12,32 @@ import { Cotizacion } from '@/types/ventas';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleCache } from '@/services/moduleCache';
-import ConfirmarFacturaModal from '@/components/ConfirmarFacturaModal';
-
 const getStatusConfig = (estado: string, isDark: boolean) => {
-  switch(estado) {
-    case 'Borrador':
+  const norm = (estado || '').toLowerCase().trim();
+  switch(norm) {
+    case 'cotizacion':
+    case 'cotización':
+    case 'borrador':
       return {
         color: isDark ? '#f8f9fa' : '#343a40',
         bg: isDark ? '#495057' : '#e9ecef',
         icon: 'document-outline' as const
       };
-    case 'Enviado':
+    case 'enviado':
+    case 'enviada':
       return {
         color: isDark ? '#fef08a' : '#b45309',
         bg: isDark ? '#78350f' : '#fef3c7',
         icon: 'paper-plane-outline' as const
       };
-    case 'Aprobada':
+    case 'aprobada':
+    case 'aprobado':
       return {
         color: isDark ? '#a7f3d0' : '#047857',
         bg: isDark ? '#064e3b' : '#d1fae5',
         icon: 'checkmark-circle-outline' as const
       };
-    case 'Orden de Compra':
+    case 'orden de compra':
       return {
         color: isDark ? '#bae6fd' : '#0369a1',
         bg: isDark ? '#0c4a6e' : '#e0f2fe',
@@ -49,7 +52,14 @@ const getStatusConfig = (estado: string, isDark: boolean) => {
   }
 };
 
-const getActionBtnStyle = (action: 'view' | 'download' | 'email' | 'edit' | 'delete' | 'facturar', isDark: boolean) => {
+const getDisplayEstado = (estado?: string) => {
+  if (!estado || estado.toLowerCase() === 'borrador') {
+    return 'Cotización';
+  }
+  return estado;
+};
+
+const getActionBtnStyle = (action: 'view' | 'download' | 'email' | 'edit' | 'delete', isDark: boolean) => {
   switch (action) {
     case 'view':
       return {
@@ -75,11 +85,6 @@ const getActionBtnStyle = (action: 'view' | 'download' | 'email' | 'edit' | 'del
       return {
         bg: isDark ? '#3b1219' : '#ffebee',
         color: isDark ? '#f87171' : '#e53935',
-      };
-    case 'facturar':
-      return {
-        bg: isDark ? '#083344' : '#cffafe',
-        color: isDark ? '#06b6d4' : '#0891b2',
       };
   }
 };
@@ -167,10 +172,6 @@ export default function CotizacionesListScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
-
-  // Modal de confirmación para facturar cotización
-  const [facturarModalVisible, setFacturarModalVisible] = useState(false);
-  const [cotizacionAFacturar, setCotizacionAFacturar] = useState<any | null>(null);
 
   // Al volver a esta pantalla, cerrar automáticamente cualquier fila expandida
   useFocusEffect(
@@ -321,17 +322,6 @@ export default function CotizacionesListScreen() {
     router.push(`/(admin)/ventas?fromCotizacion=true&cotizacionData=${cotizacionData}`);
   };
 
-  const handleOpenFacturarModal = (cot: any) => {
-    setCotizacionAFacturar(cot);
-    setFacturarModalVisible(true);
-  };
-
-  const handleConfirmFactura = (facturaData: any) => {
-    setFacturarModalVisible(false);
-    const cotizacionData = encodeURIComponent(JSON.stringify(facturaData));
-    router.push(`/(admin)/facturacion?fromCotizacion=true&cotizacionData=${cotizacionData}`);
-  };
-
   const handleDuplicate = async (cot: any) => {
     try {
       setIsLoading(true);
@@ -452,32 +442,19 @@ export default function CotizacionesListScreen() {
 
   // TABLA DE COTIZACIONES DE ALTA FIDELIDAD (WEB/DESKTOP)
   const renderDesktopTable = () => (
-    <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: '100%' }}>
-      <View style={[styles.tableContainer, { minWidth: 1100 }]}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ width: '100%' }}>
+      <View style={styles.tableContainer}>
         {/* Encabezado de la Tabla */}
         <View style={styles.tableHeaderRow}>
-          <Text style={[styles.tableHeaderCell, { width: '5%', minWidth: 45, fontWeight: 'bold' }]}>No. C</Text>
-          <Text style={[styles.tableHeaderCell, { width: '8%', minWidth: 75, fontWeight: 'bold' }]}>Folio Alt</Text>
-          <Text style={[styles.tableHeaderCell, { width: '9%', minWidth: 85, fontWeight: 'bold' }]}>Fecha de Emisión</Text>
-          <Text style={[styles.tableHeaderCell, { width: '7%', minWidth: 70, fontWeight: 'bold' }]}>Usuario</Text>
-          <Text style={[styles.tableHeaderCell, { width: '16%', minWidth: 130, fontWeight: 'bold' }]}>Empresa</Text>
-          <Text style={[styles.tableHeaderCell, { width: '11%', minWidth: 95, fontWeight: 'bold' }]}>Referencia</Text>
-          <Text style={[styles.tableHeaderCell, { width: '10%', minWidth: 80, fontWeight: 'bold' }]}>Estado</Text>
-          <Text style={[styles.tableHeaderCell, { width: '10%', minWidth: 105, fontWeight: 'bold', textAlign: 'right', paddingRight: 12, flexShrink: 0 }]}>Total</Text>
-          
-          {/* Acciones Header con iconos pequeños */}
-          <View style={[styles.tableHeaderCell, styles.headerActionsContainer, { width: '25%', minWidth: 280, paddingRight: 2, flexShrink: 0 }]}>
-            <Ionicons name="eye-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="pencil-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="copy-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="download-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="mail-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="chatbubble-ellipses-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="chevron-down" size={12} color={themeColors.accent} />
-            <Ionicons name="cash-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="receipt-outline" size={12} color={themeColors.accent} />
-            <Ionicons name="trash-outline" size={12} color={themeColors.danger} />
-          </View>
+          <Text style={[styles.tableHeaderCell, { width: '5%', textAlign: 'center' }]}>No. C</Text>
+          <Text style={[styles.tableHeaderCell, { width: '8%', textAlign: 'center' }]}>Folio</Text>
+          <Text style={[styles.tableHeaderCell, { width: '9%', textAlign: 'center' }]}>Fecha</Text>
+          <Text style={[styles.tableHeaderCell, { width: '8%', textAlign: 'center' }]}>Usuario</Text>
+          <Text style={[styles.tableHeaderCell, { width: '18%', textAlign: 'left', paddingHorizontal: 6 }]}>Empresa</Text>
+          <Text style={[styles.tableHeaderCell, { width: '14%', textAlign: 'left', paddingHorizontal: 6 }]}>Referencia</Text>
+          <Text style={[styles.tableHeaderCell, { width: '10%', textAlign: 'center' }]}>Estado</Text>
+          <Text style={[styles.tableHeaderCell, { width: '9%', textAlign: 'right', paddingRight: 8 }]}>Total</Text>
+          <Text style={[styles.tableHeaderCell, { width: '19%', textAlign: 'center' }]}>Acciones</Text>
         </View>
 
         {/* Cuerpo de la Tabla */}
@@ -491,6 +468,8 @@ export default function CotizacionesListScreen() {
           filteredCotizaciones.map((cot, index) => {
             const sequentialId = 1532 + (filteredCotizaciones.length - 1 - index);
             const firstLineName = cot.lineas?.[0]?.productoNombre || 'Sin referencia';
+            const estadoDisplay = getDisplayEstado(cot.estado);
+            const config = getStatusConfig(estadoDisplay, scheme === 'dark');
             
             return (
               <View key={cot.id}>
@@ -504,31 +483,25 @@ export default function CotizacionesListScreen() {
                     expandedRowId === cot.id && { borderBottomWidth: 0, backgroundColor: themeColors.backgroundSelected }
                   ]}
                 >
-                  <Text style={[styles.tableCell, { width: '5%', minWidth: 45, color: themeColors.textSecondary }]}>{sequentialId}</Text>
-                  <Text style={[styles.tableCell, { width: '8%', minWidth: 75, color: themeColors.textSecondary }]}>{cot.folio}</Text>
-                  <Text style={[styles.tableCell, { width: '9%', minWidth: 85 }]}>{cot.fecha_creacion}</Text>
-                  <Text style={[styles.tableCell, { width: '7%', minWidth: 70 }]}>{cot.vendedor || 'Admin'}</Text>
-                  <Text style={[styles.tableCell, { width: '16%', minWidth: 130, fontWeight: 'bold', color: themeColors.text }]} numberOfLines={1}>
+                  <Text style={[styles.tableCell, { width: '5%', textAlign: 'center', color: themeColors.textSecondary }]}>{sequentialId}</Text>
+                  <Text style={[styles.tableCell, { width: '8%', textAlign: 'center', color: themeColors.textSecondary }]}>{cot.folio}</Text>
+                  <Text style={[styles.tableCell, { width: '9%', textAlign: 'center' }]}>{cot.fecha_creacion}</Text>
+                  <Text style={[styles.tableCell, { width: '8%', textAlign: 'center' }]} numberOfLines={1}>{cot.vendedor || 'Admin'}</Text>
+                  <Text style={[styles.tableCell, { width: '18%', textAlign: 'left', paddingHorizontal: 6, fontWeight: '600', color: themeColors.text }]} numberOfLines={1}>
                     {cot.cliente_nombre}
                   </Text>
-                  <Text style={[styles.tableCell, { width: '11%', minWidth: 95, color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
-                  <View style={[styles.tableCell, { width: '10%', minWidth: 80 }]}>
-                    {(() => {
-                      const estado = cot.estado || 'Borrador';
-                      const config = getStatusConfig(estado, scheme === 'dark');
-                      return (
-                        <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10, alignSelf: 'flex-start' }]}>
-                          <Text style={{ fontSize: 9, fontWeight: 'bold', color: config.color }}>
-                            {estado}
-                          </Text>
-                        </View>
-                      );
-                    })()}
+                  <Text style={[styles.tableCell, { width: '14%', textAlign: 'left', paddingHorizontal: 6, color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
+                  <View style={[styles.tableCell, { width: '10%', alignItems: 'center', justifyContent: 'center' }]}>
+                    <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10, alignSelf: 'center' }]}>
+                      <Text style={{ fontSize: 9, fontWeight: 'bold', color: config.color }}>
+                        {estadoDisplay}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={[styles.tableCell, { width: '10%', minWidth: 105, fontWeight: 'bold', textAlign: 'right', paddingRight: 12, flexShrink: 0 }]}>{formatearMoneda(cot.total)}</Text>
+                  <Text style={[styles.tableCell, { width: '9%', textAlign: 'right', paddingRight: 8, fontWeight: 'bold' }]}>{formatearMoneda(cot.total)}</Text>
                   
-                  {/* 10 Iconos de acción con Tooltips en Hover */}
-                  <View style={[styles.tableCell, styles.rowActionsContainer, { width: '25%', minWidth: 280, paddingRight: 2, flexShrink: 0 }]}>
+                  {/* Iconos de acción con Tooltips en Hover */}
+                  <View style={[styles.tableCell, styles.rowActionsContainer, { width: '19%' }]}>
                     <ActionButtonWithTooltip icon="eye-outline" color={themeColors.textSecondary} tooltip="Ver PDF" onPress={() => handleDownloadPDF(cot, 'view')} />
                     <ActionButtonWithTooltip icon="pencil-outline" color={themeColors.textSecondary} tooltip="Editar Cotización" onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} />
                     <ActionButtonWithTooltip icon="copy-outline" color={themeColors.textSecondary} tooltip="Duplicar Cotización" onPress={() => handleDuplicate(cot)} />
@@ -537,7 +510,6 @@ export default function CotizacionesListScreen() {
                     <ActionButtonWithTooltip icon="chatbubble-ellipses-outline" color={themeColors.textSecondary} tooltip="Notas y Comentarios" onPress={() => handleComments(cot)} />
                     <ActionButtonWithTooltip icon={expandedRowId === cot.id ? "chevron-up" : "chevron-down"} color={themeColors.textSecondary} tooltip={expandedRowId === cot.id ? "Ocultar Partidas" : "Ver Partidas"} onPress={() => toggleRowExpansion(cot.id)} />
                     <ActionButtonWithTooltip icon="cash-outline" color={themeColors.primary} tooltip="Convertir a Venta" onPress={() => handleConvertirVenta(cot)} />
-                    <ActionButtonWithTooltip icon="receipt-outline" color="#00C3F3" tooltip="Facturar Cotización (CFDI)" onPress={() => handleOpenFacturarModal(cot)} />
                     <ActionButtonWithTooltip icon="trash-outline" color={themeColors.danger} tooltip="Eliminar Cotización" onPress={() => handleDelete(cot.id)} />
                   </View>
                 </Pressable>
@@ -661,7 +633,7 @@ export default function CotizacionesListScreen() {
                         <Text style={styles.folio}>#{cot.folio}</Text>
                       </View>
                       {(() => {
-                        const estado = cot.estado || 'Borrador';
+                        const estado = getDisplayEstado(cot.estado);
                         const config = getStatusConfig(estado, scheme === 'dark');
                         return (
                           <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2, paddingHorizontal: 6 }]}>
@@ -726,7 +698,6 @@ export default function CotizacionesListScreen() {
                         <ActionButtonWithTooltip icon="copy-outline" iconSize={16} color={getActionBtnStyle('view', scheme === 'dark').color} bgColor={getActionBtnStyle('view', scheme === 'dark').bg} tooltip="Duplicar Cotización" isCircular onPress={() => handleDuplicate(cot)} />
                         <ActionButtonWithTooltip icon="pencil-outline" iconSize={16} color={getActionBtnStyle('edit', scheme === 'dark').color} bgColor={getActionBtnStyle('edit', scheme === 'dark').bg} tooltip="Editar Cotización" isCircular onPress={() => router.push(`/(admin)/nueva-cotizacion?id=${cot.id}`)} />
                         <ActionButtonWithTooltip icon="cash-outline" iconSize={16} color={getActionBtnStyle('download', scheme === 'dark').color} bgColor={getActionBtnStyle('download', scheme === 'dark').bg} tooltip="Convertir a Venta" isCircular onPress={() => handleConvertirVenta(cot)} />
-                        <ActionButtonWithTooltip icon="receipt-outline" iconSize={16} color={getActionBtnStyle('facturar', scheme === 'dark').color} bgColor={getActionBtnStyle('facturar', scheme === 'dark').bg} tooltip="Facturar Cotización" isCircular onPress={() => handleOpenFacturarModal(cot)} />
                         <ActionButtonWithTooltip icon="trash-outline" iconSize={16} color={getActionBtnStyle('delete', scheme === 'dark').color} bgColor={getActionBtnStyle('delete', scheme === 'dark').bg} tooltip="Eliminar Cotización" isCircular onPress={() => handleDelete(cot.id)} />
                       </View>
                     </View>
@@ -748,17 +719,6 @@ export default function CotizacionesListScreen() {
         </ScrollView>
     </View>
       )}
-
-      {/* Modal de Confirmación para Facturar Cotización */}
-      <ConfirmarFacturaModal
-        visible={facturarModalVisible}
-        cotizacion={cotizacionAFacturar}
-        onClose={() => {
-          setFacturarModalVisible(false);
-          setCotizacionAFacturar(null);
-        }}
-        onConfirm={handleConfirmFactura}
-      />
     </View>
   );
 }
@@ -955,43 +915,39 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     backgroundColor: themeColors.background,
     borderBottomWidth: 1,
     borderBottomColor: themeColors.border,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
     alignItems: 'center',
+    width: '100%',
   },
   tableHeaderCell: {
     fontSize: 12,
+    fontWeight: 'bold',
     color: themeColors.text,
-    paddingRight: 10,
   },
   tableRow: {
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: themeColors.border,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
     alignItems: 'center',
+    width: '100%',
   },
   tableCell: {
-    fontSize: 13,
+    fontSize: 12,
     color: themeColors.text,
-    paddingRight: 10,
   },
   headerActionsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 2,
-    paddingRight: 0,
-    flexShrink: 0,
+    justifyContent: 'center',
   },
   rowActionsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 2,
-    paddingRight: 0,
-    flexShrink: 0,
+    justifyContent: 'center',
+    gap: 3,
   },
   rowActionBtn: {
     padding: 3,

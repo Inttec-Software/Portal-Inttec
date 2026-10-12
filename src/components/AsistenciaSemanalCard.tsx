@@ -33,6 +33,7 @@ interface AsistenciaSemanalCardProps {
   onRefresh?: () => void;
   selectedMonday: Date;
   onChangeWeek: (newMonday: Date) => void;
+  isEmployeeView?: boolean;
   onViewFoto?: (info: {
     url: string;
     fecha: string;
@@ -53,12 +54,13 @@ export default function AsistenciaSemanalCard({
   selectedMonday,
   onChangeWeek,
   onViewFoto,
+  isEmployeeView = false,
 }: AsistenciaSemanalCardProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { user } = useAuth();
-  const canViewOvertime = user?.rol === 'ADMIN' || user?.rol === 'DEV';
-  const isDev = user?.rol === 'DEV';
+  const canViewOvertime = !isEmployeeView && (user?.rol === 'ADMIN' || user?.rol === 'DEV');
+  const isDev = !isEmployeeView && (user?.rol === 'DEV');
 
   // Estado del modal de selección de período manual
   const [periodoModalVisible, setPeriodoModalVisible] = useState(false);
@@ -174,7 +176,7 @@ export default function AsistenciaSemanalCard({
           <View style={styles.hoursValueRow}>
             <Ionicons name="time" size={16} color={themeColors.text} style={{ marginRight: 4 }} />
             <Text style={[styles.summaryHoursText, { color: themeColors.text }]}>
-              {semanaData.totalHorasSemanaStr}
+              {canViewOvertime ? semanaData.totalHorasSemanaStr : semanaData.totalHorasRegularesStr}
             </Text>
           </View>
         </View>
@@ -330,7 +332,7 @@ export default function AsistenciaSemanalCard({
                         },
                       ]}
                     >
-                      {dia.totalHorasStr}
+                      {canViewOvertime ? dia.totalHorasStr : dia.horasRegularesStr}
                     </Text>
                   </View>
 
@@ -409,7 +411,7 @@ export default function AsistenciaSemanalCard({
                                   { color: turno.enCurso ? themeColors.warning : themeColors.success },
                                 ]}
                               >
-                                {turno.duracionStr}
+                                {turno.enCurso ? 'En curso' : (canViewOvertime ? turno.duracionStr : turno.horasRegularesStr)}
                               </Text>
                             </View>
                           </View>

@@ -451,6 +451,7 @@ export default function EmpleadoAsistencia() {
             asistencias={historialAsistencias}
             empleadoNombre={user?.nombre || 'Empleado'}
             isLoading={isLoadingHistorial}
+            isEmployeeView={true}
             onRefresh={() => {
               cargarEstadoHoy();
               cargarHistorialSemana(selectedMonday);

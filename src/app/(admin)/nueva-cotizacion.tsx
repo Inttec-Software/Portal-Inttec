@@ -80,7 +80,7 @@ export default function NuevaCotizacionScreen() {
     lineas: [],
     terminosCondiciones: 'Precios sujetos a cambio sin previo aviso. Tiempo de entrega salvo previa venta.',
     notasObservaciones: '',
-    estado: 'Borrador',
+    estado: 'Cotización',
     subtotal: 0,
     iva: 0,
     total: 0,
@@ -232,7 +232,7 @@ export default function NuevaCotizacionScreen() {
               moneda: cotData.moneda || 'MXN',
               lineas: cotData.lineas || [],
               terminosCondiciones: cotData.terminos_condiciones || 'https://inttec.odoo.com/terms',
-              estado: cotData.estado || 'Borrador',
+              estado: (!cotData.estado || cotData.estado.toLowerCase() === 'borrador') ? 'Cotización' : cotData.estado,
               subtotal: cotData.subtotal || 0,
               iva: cotData.iva || 0,
               total: cotData.total || 0,
@@ -472,9 +472,11 @@ export default function NuevaCotizacionScreen() {
 
           {/* Status Picker (Upper Right) */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-            {['Borrador', 'Enviado', 'Aprobada', 'Orden de Compra'].map(status => {
+            {['Cotización', 'Enviado', 'Aprobada', 'Orden de Compra'].map(status => {
               const getStatusColor = () => {
                 switch(status) {
+                  case 'Cotización':
+                  case 'Cotizacion':
                   case 'Borrador': return '#757575';
                   case 'Enviado': return '#FF9800';
                   case 'Aprobada': return '#4CAF50';
@@ -483,7 +485,7 @@ export default function NuevaCotizacionScreen() {
                 }
               };
               const activeColor = getStatusColor();
-              const isActive = cotizacion.estado === status;
+              const isActive = cotizacion.estado === status || (status === 'Cotización' && cotizacion.estado === 'Borrador');
 
               return (
                 <TouchableOpacity
