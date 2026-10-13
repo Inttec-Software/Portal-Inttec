@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 import { Gasto, GastoHelper } from '../services/supabase';
+import { formatFriendlyDate } from '@/utils/helpers';
 import { Ionicons } from '@expo/vector-icons';
 
 interface ExpenseCardProps {
@@ -27,14 +28,7 @@ function ExpenseCard({
     currency: 'MXN',
   }).format(gasto.monto);
 
-  const rawFecha = gasto.fecha_comprobante || gasto.created_at?.split('T')[0] || '';
-  let fecha = rawFecha;
-  if (rawFecha) {
-    const parts = rawFecha.split('-');
-    if (parts.length === 3) {
-      fecha = `${parts[2]}/${parts[1]}/${parts[0]}`;
-    }
-  }
+  const fecha = formatFriendlyDate(gasto.fecha_comprobante || gasto.created_at);
 
   const categoriaNombre = GastoHelper.getCategoria(gasto);
   const subcategoriaNombre = GastoHelper.getSubcategoria(gasto);

@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { Vehiculo, RegistroGasolina, VehiculoService, supabase } from '@/services/supabase';
+import { formatFriendlyDate } from '@/utils/helpers';
 import ImageViewerModal from '@/components/ImageViewerModal';
 
 export default function EmpleadoVehiculosScreen() {
@@ -139,8 +140,7 @@ export default function EmpleadoVehiculosScreen() {
             ) : (
               <View style={{ gap: Spacing.two }}>
                 {misRegistrosGasolina.map((reg) => {
-                  const dateParts = reg.fecha.split('-');
-                  const formattedDate = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : reg.fecha;
+                  const formattedDate = formatFriendlyDate(reg.fecha);
                   return (
                     <View
                       key={reg.id}

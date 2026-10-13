@@ -29,6 +29,7 @@ import { CatalogService } from '@/services/catalogService';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
+import { formatFriendlyDate } from '@/utils/helpers';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
@@ -2484,7 +2485,7 @@ export default function VentasScreen() {
                   >
                     <Text style={[styles.tableCell, { color: themeColors.text, width: '13%', fontWeight: '600' }]} numberOfLines={1}>{item.cliente}</Text>
                     <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%' }]} numberOfLines={1}>{item.sucursal || '--'}</Text>
-                    <Text style={[styles.tableCell, { color: themeColors.text, width: '8%' }]}>{item.fecha}</Text>
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '8%' }]}>{formatFriendlyDate(item.fecha)}</Text>
                     <Text style={[styles.tableCell, { width: '9%', color: themeColors.textSecondary }]} numberOfLines={1}>{item.factura_referencia || '--'}</Text>
                     <View style={{ width: '8%' }}>
                       {item.tipo_proyecto ? (
@@ -2663,10 +2664,10 @@ export default function VentasScreen() {
                 <View style={[styles.historialTotals, { marginBottom: 8, backgroundColor: themeColors.background, borderColor: themeColors.border + '40', borderWidth: 1, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8 }]}>
                   <View style={{ alignItems: 'flex-start', flex: 1 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FECHA</Text>
-                    <Text style={[styles.historialFecha, { color: themeColors.text, fontSize: 11, fontWeight: '700', marginTop: 1 }]}>{item.fecha}</Text>
+                    <Text style={[styles.historialFecha, { color: themeColors.text, fontSize: 11, fontWeight: '700', marginTop: 1 }]}>{formatFriendlyDate(item.fecha)}</Text>
                     {item.fecha_ultimo_pago && (
                       <Text style={{ color: themeColors.textSecondary, fontSize: 9, marginTop: 2 }}>
-                        Pago: {item.fecha_ultimo_pago}
+                        Pago: {formatFriendlyDate(item.fecha_ultimo_pago)}
                       </Text>
                     )}
                   </View>
@@ -2895,7 +2896,7 @@ export default function VentasScreen() {
                   
                   <View style={styles.modalRow}>
                     <Text style={[styles.modalLabel, { color: themeColors.textSecondary }]}>Fecha:</Text>
-                    <Text style={[styles.modalValue, { color: themeColors.text }]}>{selectedVenta.fecha}</Text>
+                    <Text style={[styles.modalValue, { color: themeColors.text }]}>{formatFriendlyDate(selectedVenta.fecha)}</Text>
                   </View>
                   
                   {selectedVenta.factura_referencia ? (
@@ -3063,7 +3064,7 @@ export default function VentasScreen() {
                                 </View>
                               </View>
                               <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 3 }}>
-                                Fecha de Pago: <Text style={{ color: themeColors.text, fontWeight: '600' }}>{pago.fecha_pago}</Text>
+                                Fecha de Pago: <Text style={{ color: themeColors.text, fontWeight: '600' }}>{formatFriendlyDate(pago.fecha_pago)}</Text>
                                 {pago.referencia ? ` • Ref: ${pago.referencia}` : ''}
                               </Text>
                             </View>
@@ -3375,7 +3376,7 @@ export default function VentasScreen() {
                           </View>
                           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
                             <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                              Fecha: {gasto.fecha_comprobante || gasto.created_at?.split('T')[0] || 'N/A'}
+                              Fecha: {formatFriendlyDate(gasto.fecha_comprobante || gasto.created_at)}
                             </Text>
                             {gasto.empleado_nombre && (
                               <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
@@ -3786,7 +3787,7 @@ export default function VentasScreen() {
                                 </View>
                               </View>
                               <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 3 }}>
-                                Fecha: <Text style={{ color: themeColors.text, fontWeight: '600' }}>{pago.fecha_pago}</Text>
+                                Fecha: <Text style={{ color: themeColors.text, fontWeight: '600' }}>{formatFriendlyDate(pago.fecha_pago)}</Text>
                                 {pago.referencia ? ` • Ref: ${pago.referencia}` : ''}
                               </Text>
                             </View>

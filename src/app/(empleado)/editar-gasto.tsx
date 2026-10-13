@@ -271,10 +271,11 @@ export default function EditarGastoForm() {
             if (data.monto !== undefined && data.monto !== null) setMonto(data.monto.toString());
             
             if (data.fecha_comprobante) {
-              const parts = data.fecha_comprobante.split('-'); // YYYY-MM-DD
+              const cleanFecha = String(data.fecha_comprobante).split('T')[0].split(' ')[0].trim();
+              const parts = cleanFecha.split('-'); // YYYY-MM-DD
               if (parts.length === 3) {
-                const dd = parts[2];
-                const mm = parts[1];
+                const dd = parts[2].padStart(2, '0');
+                const mm = parts[1].padStart(2, '0');
                 const yyyy = parts[0];
                 setFechaComprobante(`${dd}/${mm}/${yyyy}`);
                 const parsedDate = new Date(parseInt(yyyy, 10), parseInt(mm, 10) - 1, parseInt(dd, 10));

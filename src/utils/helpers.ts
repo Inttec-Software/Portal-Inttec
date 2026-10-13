@@ -60,3 +60,30 @@ export const normalizeText = (text: string | null | undefined): string => {
     .trim();
 };
 
+/**
+ * Formatea cualquier string de fecha (ISO, YYYY-MM-DD, con hora o zona horaria) a DD/MM/AAAA.
+ * Si ya viene en formato DD/MM/AAAA lo conserva.
+ */
+export const formatFriendlyDate = (dateStr?: string | null): string => {
+  if (!dateStr) return 'N/A';
+  const cleanStr = String(dateStr).trim();
+  if (!cleanStr) return 'N/A';
+
+  // Si ya viene como DD/MM/AAAA
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(cleanStr)) {
+    return cleanStr;
+  }
+
+  // Tomar solo la parte de la fecha antes de 'T' o espacio si es ISO / Datetime
+  const dateOnly = cleanStr.split('T')[0].split(' ')[0].trim();
+  const parts = dateOnly.split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    const yyyy = parts[0];
+    const mm = parts[1].padStart(2, '0');
+    const dd = parts[2].padStart(2, '0');
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
+  return cleanStr;
+};
+

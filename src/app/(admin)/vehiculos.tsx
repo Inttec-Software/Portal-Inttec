@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Vehiculo, RegistroGasolina, VehiculoService, supabase } from '@/services/supabase';
 import { ReportGenerator } from '@/utils/reportGenerator';
+import { formatFriendlyDate } from '@/utils/helpers';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -423,8 +424,7 @@ export default function AdminVehiculosScreen() {
                 ) : (
                   <View style={{ gap: Spacing.two }}>
                     {registrosGasolina.map((reg) => {
-                      const dateParts = reg.fecha.split('-');
-                      const formattedDate = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : reg.fecha;
+                      const formattedDate = formatFriendlyDate(reg.fecha);
                       return (
                         <View
                           key={reg.id}

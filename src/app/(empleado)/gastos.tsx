@@ -584,11 +584,22 @@ export default function EmpleadoGastos() {
 
   const formatFriendlyDate = (dateStr?: string | null) => {
     if (!dateStr) return 'N/A';
-    const parts = dateStr.split('-');
-    if (parts.length === 3) {
-      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    const cleanStr = String(dateStr).trim();
+    if (!cleanStr) return 'N/A';
+
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(cleanStr)) {
+      return cleanStr;
     }
-    return dateStr;
+
+    const dateOnly = cleanStr.split('T')[0].split(' ')[0].trim();
+    const parts = dateOnly.split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+      const yyyy = parts[0];
+      const mm = parts[1].padStart(2, '0');
+      const dd = parts[2].padStart(2, '0');
+      return `${dd}/${mm}/${yyyy}`;
+    }
+    return cleanStr;
   };
 
   const parseJustificacion = (just: string | null | undefined) => {
@@ -1464,8 +1475,7 @@ export default function EmpleadoGastos() {
                 ) : (
                   <View style={{ gap: Spacing.two }}>
                     {misRegistrosGasolina.map((reg) => {
-                      const dateParts = reg.fecha.split('-');
-                      const formattedDate = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : reg.fecha;
+                      const formattedDate = formatFriendlyDate(reg.fecha);
                       return (
                         <View
                           key={reg.id}

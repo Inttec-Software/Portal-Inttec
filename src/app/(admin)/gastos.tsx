@@ -896,10 +896,10 @@ export default function AdminGastosScreen() {
     if (fieldType === 'monto') {
       setTempMonto(String(selectedGasto.monto || ''));
     } else if (fieldType === 'fecha') {
-      const rawFecha = selectedGasto.fecha_comprobante || selectedGasto.created_at?.split('T')[0] || new Date().toISOString().split('T')[0];
+      const rawFecha = (selectedGasto.fecha_comprobante || selectedGasto.created_at || new Date().toISOString()).split('T')[0].split(' ')[0].trim();
       setTempFecha(rawFecha);
       const parts = rawFecha.split('-');
-      if (parts.length === 3) {
+      if (parts.length === 3 && parts[0].length === 4) {
         setCalViewYear(parseInt(parts[0], 10) || new Date().getFullYear());
         setCalViewMonth((parseInt(parts[1], 10) - 1) || new Date().getMonth());
       }
@@ -2031,11 +2031,22 @@ export default function AdminGastosScreen() {
 
   const formatFriendlyDate = (dateStr?: string | null) => {
     if (!dateStr) return 'N/A';
-    const parts = dateStr.split('-');
-    if (parts.length === 3) {
-      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    const cleanStr = String(dateStr).trim();
+    if (!cleanStr) return 'N/A';
+
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(cleanStr)) {
+      return cleanStr;
     }
-    return dateStr;
+
+    const dateOnly = cleanStr.split('T')[0].split(' ')[0].trim();
+    const parts = dateOnly.split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+      const yyyy = parts[0];
+      const mm = parts[1].padStart(2, '0');
+      const dd = parts[2].padStart(2, '0');
+      return `${dd}/${mm}/${yyyy}`;
+    }
+    return cleanStr;
   };
 
   const parseJustificacion = (just: string | null | undefined) => {
@@ -2281,12 +2292,7 @@ export default function AdminGastosScreen() {
                       </View>
                     ) : (
                       pendingGastos.map((item) => {
-                        const rawFecha = item.fecha_comprobante || item.created_at?.split('T')[0] || '';
-                        let fecha = rawFecha;
-                        if (rawFecha) {
-                          const parts = rawFecha.split('-');
-                          if (parts.length === 3) fecha = `${parts[2]}/${parts[1]}/${parts[0]}`;
-                        }
+                        const fecha = formatFriendlyDate(item.fecha_comprobante || item.created_at);
                         
                         let statusText = 'PENDIENTE';
                         let statusColor: string = themeColors.warning;
@@ -2439,12 +2445,7 @@ export default function AdminGastosScreen() {
                       </View>
                     ) : (
                       historyGastos.map((item) => {
-                        const rawFecha = item.fecha_comprobante || item.created_at?.split('T')[0] || '';
-                        let fecha = rawFecha;
-                        if (rawFecha) {
-                          const parts = rawFecha.split('-');
-                          if (parts.length === 3) fecha = `${parts[2]}/${parts[1]}/${parts[0]}`;
-                        }
+                        const fecha = formatFriendlyDate(item.fecha_comprobante || item.created_at);
                         
                         let statusText = 'PENDIENTE';
                         let statusColor: string = themeColors.warning;
@@ -2820,8 +2821,7 @@ export default function AdminGastosScreen() {
                     ) : (
                       <View style={{ gap: Spacing.two }}>
                         {registrosGasolina.map((reg) => {
-                          const dateParts = reg.fecha.split('-');
-                          const formattedDate = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : reg.fecha;
+                          const formattedDate = formatFriendlyDate(reg.fecha);
                           return (
                             <View
                               key={reg.id}
