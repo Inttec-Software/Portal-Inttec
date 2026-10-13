@@ -14,7 +14,7 @@ jobs:
         id: env_select
         run: |
           if [[ "${{ github.ref_name }}" == "lightsail/prod" ]]; then
-            echo "TARGET_ENV=production" >> $GITHUB_OUTPUT
+            echo "TARGET_ENV=prod" >> $GITHUB_OUTPUT
             echo "API_URL=https://api.inttec.net" >> $GITHUB_OUTPUT
             echo "WEB_DIR=/var/www/portal-prod-web" >> $GITHUB_OUTPUT
             echo "PM2_NAME=backend-prod" >> $GITHUB_OUTPUT
@@ -32,6 +32,7 @@ jobs:
           username: ubuntu
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
+            set -e
             APP_DIR="/home/ubuntu/apps/portal-${{ steps.env_select.outputs.TARGET_ENV }}"
             echo "===> Iniciando despliegue en $APP_DIR..."
             
