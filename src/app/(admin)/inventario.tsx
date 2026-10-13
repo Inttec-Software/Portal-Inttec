@@ -537,7 +537,10 @@ export default function InventarioDashboard() {
       if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || 'Error al aprobar devolución'); }
 
       Alert.alert('Éxito', 'Devolución aprobada e integrada al almacén.');
+      ModuleCache.invalidate('inventario_dashboard');
       loadDevolucionesPendientes(selectedEmpleadoRetribucion);
+      loadMovimientos();
+      loadAllData(true);
     } catch(err:any) {
       console.error(err);
       Alert.alert('Error', err.message);
@@ -580,7 +583,11 @@ export default function InventarioDashboard() {
       if (evidencias) {
         evidencias.forEach((ev: any) => {
           try {
-            const trabajosArr = JSON.parse(ev.descripcion_trabajo || '[]');
+            const trabajosArr = Array.isArray(ev.descripcion_trabajo)
+              ? ev.descripcion_trabajo
+              : typeof ev.descripcion_trabajo === 'string'
+                ? JSON.parse(ev.descripcion_trabajo || '[]')
+                : (ev.descripcion_trabajo && typeof ev.descripcion_trabajo === 'object' ? [ev.descripcion_trabajo] : []);
             const materialesUsadosList: any[] = [];
             if (Array.isArray(trabajosArr)) {
               trabajosArr.forEach((t: any) => {
@@ -3106,7 +3113,19 @@ export default function InventarioDashboard() {
                 <View style={{ marginBottom: 24 }}>
                   <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.primary, marginBottom: 12 }}>Solicitudes de Devolución Pendientes</Text>
                   {devolucionesData.map(dev => {
-                    const mats = JSON.parse(dev.materiales || '[]');
+                    let mats: any[] = [];
+                    try {
+                      if (Array.isArray(dev.materiales)) {
+                        mats = dev.materiales;
+                      } else if (typeof dev.materiales === 'string') {
+                        mats = JSON.parse(dev.materiales || '[]');
+                      } else if (dev.materiales && typeof dev.materiales === 'object') {
+                        mats = [dev.materiales];
+                      }
+                    } catch {
+                      mats = [];
+                    }
+                    if (!Array.isArray(mats)) mats = [];
                     return (
                       <View key={dev.id} style={{ backgroundColor: themeColors.backgroundElement, padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 2, borderColor: themeColors.primary }}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>

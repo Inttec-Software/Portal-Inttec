@@ -52,6 +52,8 @@ export default function AdminAsistencia() {
   const { width } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && width >= 900;
 
+  const cleanFecha = (f?: string | null) => (f ? String(f).split('T')[0] : '');
+
   // Estado del personal y asistencias generales
   const [personal, setPersonal] = useState<Usuario[]>([]);
   const [isLoadingPersonal, setIsLoadingPersonal] = useState(true);
@@ -123,7 +125,7 @@ export default function AdminAsistencia() {
     try {
       setIsLoadingAdminChecador(true);
       const reg = await AsistenciaService.getRegistroHoy(authUser.id);
-      setAdminRegistroHoy(reg);
+      setAdminRegistroHoy(reg ? { ...reg, fecha: cleanFecha(reg.fecha) } : null);
     } catch (err) {
       console.warn('[Admin Asistencia] Error cargando estado checador admin:', err);
     } finally {
@@ -167,7 +169,10 @@ export default function AdminAsistencia() {
         );
         if (resAsist.ok) {
           const asistData = await resAsist.json();
-          setAllAsistenciasSemana(asistData || []);
+          setAllAsistenciasSemana((asistData || []).map((a: Asistencia) => ({
+            ...a,
+            fecha: cleanFecha(a.fecha),
+          })));
         } else {
           setAllAsistenciasSemana([]);
           console.warn('[Admin Asistencia] API devolvió error:', await resAsist.text().catch(()=>''));
@@ -203,12 +208,18 @@ export default function AdminAsistencia() {
         range.mondayStr,
         range.sundayStr
       );
-      setAsistenciasEmpleado(hist || []);
+      setAsistenciasEmpleado((hist || []).map((a: Asistencia) => ({
+        ...a,
+        fecha: cleanFecha(a.fecha),
+      })));
     } catch (err: any) {
       console.error('[Admin Asistencia] Error cargando asistencias del empleado:', err);
       // Fallback a filtrar del conjunto general
       const localFiltered = allAsistenciasSemana.filter((a) => a.empleado_id === empleadoId);
-      setAsistenciasEmpleado(localFiltered);
+      setAsistenciasEmpleado(localFiltered.map((a: Asistencia) => ({
+        ...a,
+        fecha: cleanFecha(a.fecha),
+      })));
     } finally {
       setIsLoadingEmpleadoDetalle(false);
     }
@@ -269,7 +280,7 @@ export default function AdminAsistencia() {
   // Información calculada para cada día de la semana (para la barra interactiva)
   const diasSemanaInfo = useMemo(() => {
     return rangeSemana.days.map((day) => {
-      const asistenciasDelDia = allAsistenciasSemana.filter((a) => a.fecha === day.dateStr);
+      const asistenciasDelDia = allAsistenciasSemana.filter((a) => cleanFecha(a.fecha) === day.dateStr);
       const uniqueEmpleadosCount = new Set(asistenciasDelDia.map((a) => a.empleado_id)).size;
       const enTurnoCount = asistenciasDelDia.filter((a) => a.hora_entrada && !a.hora_salida).length;
       const cerradosCount = asistenciasDelDia.filter((a) => a.hora_entrada && a.hora_salida).length;
@@ -300,7 +311,7 @@ export default function AdminAsistencia() {
       const semanaProcesada = processAsistenciasSemana(asistenciasEmp, selectedMonday);
 
       // Buscar asistencias del día objetivo (hoy o el seleccionado)
-      const asistenciasTargetDia = asistenciasEmp.filter((a) => a.fecha === targetFecha);
+      const asistenciasTargetDia = asistenciasEmp.filter((a) => cleanFecha(a.fecha) === targetFecha);
 
       let estadoDia: 'EN_TURNO' | 'COMPLETADO' | 'SIN_REGISTRO' = 'SIN_REGISTRO';
       let ultimaEntrada: string | null = null;

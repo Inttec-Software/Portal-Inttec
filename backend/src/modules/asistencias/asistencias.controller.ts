@@ -3,6 +3,16 @@ import { getDbPool } from '../../config/database';
 
 let hikvisionHeartbeatCounter = 0;
 
+const formatAsistenciaRecord = (rec: any) => {
+  if (!rec || typeof rec !== 'object') return rec;
+  return {
+    ...rec,
+    fecha: rec.fecha
+      ? (typeof rec.fecha === 'object' && rec.fecha.toISOString ? rec.fecha.toISOString().split('T')[0] : String(rec.fecha).split('T')[0])
+      : rec.fecha
+  };
+};
+
 export const getAsistenciaHoy = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -21,7 +31,7 @@ export const getAsistenciaHoy = async (req: Request, res: Response) => {
     );
 
     if (openShiftResult.rows.length > 0) {
-      return res.json(openShiftResult.rows[0]);
+      return res.json(formatAsistenciaRecord(openShiftResult.rows[0]));
     }
 
     // 2. Si no hay turno abierto, retornar el último turno cerrado de hoy
@@ -30,7 +40,7 @@ export const getAsistenciaHoy = async (req: Request, res: Response) => {
       [empleado_id, fecha]
     );
 
-    return res.json(lastShiftResult.rows[0] || null);
+    return res.json(formatAsistenciaRecord(lastShiftResult.rows[0]) || null);
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -86,7 +96,7 @@ export const registrarEntrada = async (req: Request, res: Response) => {
       throw new Error(err.message || String(err));
     }
 
-    return res.json(data);
+    return res.json(formatAsistenciaRecord(data));
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -146,7 +156,7 @@ export const registrarSalida = async (req: Request, res: Response) => {
           ? (resD.value as any).rows[0]
           : { success: true };
 
-    return res.json(data);
+    return res.json(formatAsistenciaRecord(data));
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -177,7 +187,7 @@ export const getHistorial = async (req: Request, res: Response) => {
 
     const result = await pool.query(query, params);
 
-    return res.json(result.rows || []);
+    return res.json((result.rows || []).map(formatAsistenciaRecord));
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

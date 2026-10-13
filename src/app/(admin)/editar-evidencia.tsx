@@ -214,7 +214,11 @@ export default function EvidenciaForm() {
               
               if (ev.descripcion_trabajo) {
                 try {
-                  const parsedTrabajos = JSON.parse(ev.descripcion_trabajo);
+                  const parsedTrabajos = Array.isArray(ev.descripcion_trabajo)
+                    ? ev.descripcion_trabajo
+                    : typeof ev.descripcion_trabajo === 'string'
+                      ? JSON.parse(ev.descripcion_trabajo)
+                      : (ev.descripcion_trabajo && typeof ev.descripcion_trabajo === 'object' ? [ev.descripcion_trabajo] : []);
                   if (Array.isArray(parsedTrabajos) && parsedTrabajos.length > 0) {
                     const loadedTrabajos = parsedTrabajos.map((t: any) => ({
                       descripcion: t.descripcion || '',

@@ -476,7 +476,11 @@ export const AsistenciaService = {
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/asistencias/hoy/${empleadoId}?fecha=${fechaJornada}`, { headers });
     if (!res.ok) throw new Error('Error al obtener registro de asistencia');
-    return await res.json();
+    const data = await res.json();
+    if (data && data.fecha) {
+      data.fecha = String(data.fecha).split('T')[0];
+    }
+    return data;
   },
 
   /**
@@ -508,7 +512,11 @@ export const AsistenciaService = {
       })
     });
     if (!res.ok) throw new Error('Error al registrar entrada');
-    return await res.json();
+    const data = await res.json();
+    if (data && data.fecha) {
+      data.fecha = String(data.fecha).split('T')[0];
+    }
+    return data;
   },
 
   /**
@@ -543,7 +551,11 @@ export const AsistenciaService = {
       })
     });
     if (!res.ok) throw new Error('Error al registrar salida');
-    return await res.json();
+    const data = await res.json();
+    if (data && data.fecha) {
+      data.fecha = String(data.fecha).split('T')[0];
+    }
+    return data;
   },
 
   /**
@@ -557,7 +569,11 @@ export const AsistenciaService = {
     const qs = params.toString() ? `?${params.toString()}` : '';
     const res = await fetch(`${getApiUrl()}/api/asistencias/historial/${empleadoId}${qs}`, { headers });
     if (!res.ok) throw new Error('Error al obtener historial de asistencia');
-    return await res.json();
+    const list = await res.json();
+    return (list || []).map((item: Asistencia) => ({
+      ...item,
+      fecha: item.fecha ? String(item.fecha).split('T')[0] : item.fecha
+    }));
   },
 
   /**

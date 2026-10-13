@@ -112,12 +112,14 @@ export default function EmpleadoAsistencia() {
     }
   }, [user, selectedMonday]);
 
+  const cleanFecha = (f?: string | null) => (f ? String(f).split('T')[0] : '');
+
   const cargarEstadoHoy = async () => {
     if (!user) return;
     setIsLoadingChecador(true);
     try {
       const registro = await AsistenciaService.getRegistroHoy(user.id);
-      setRegistroHoy(registro);
+      setRegistroHoy(registro ? { ...registro, fecha: cleanFecha(registro.fecha) } : null);
     } catch (err: any) {
       console.error('[Checador] Error al cargar registro hoy:', err);
     } finally {
@@ -136,7 +138,10 @@ export default function EmpleadoAsistencia() {
         range.mondayStr,
         range.sundayStr
       );
-      setHistorialAsistencias(historial || []);
+      setHistorialAsistencias((historial || []).map((a) => ({
+        ...a,
+        fecha: cleanFecha(a.fecha),
+      })));
     } catch (err: any) {
       console.error('[Checador] Error al cargar historial semanal:', err);
     } finally {

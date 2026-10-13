@@ -280,17 +280,21 @@ export function processAsistenciasSemana(
 ): SemanaAsistencia {
   const range = getWeekRange(weekDateInput);
 
+  const cleanFecha = (f?: string | null) => (f ? String(f).split('T')[0] : '');
+
   // Filtrar registros que caigan dentro del rango de lunes a domingo
   const asistenciasSemana = (asistencias || []).filter((a) => {
-    return a.fecha >= range.mondayStr && a.fecha <= range.sundayStr;
+    const f = cleanFecha(a.fecha);
+    return f >= range.mondayStr && f <= range.sundayStr;
   });
 
-  // Agrupar por fecha
+  // Agrupar por fecha normalizada
   const porFecha = new Map<string, Asistencia[]>();
   for (const a of asistenciasSemana) {
-    const list = porFecha.get(a.fecha) || [];
-    list.push(a);
-    porFecha.set(a.fecha, list);
+    const f = cleanFecha(a.fecha);
+    const list = porFecha.get(f) || [];
+    list.push({ ...a, fecha: f });
+    porFecha.set(f, list);
   }
 
   let totalMinutosSemana = 0;

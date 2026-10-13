@@ -149,7 +149,7 @@ export const aprobarDevolucion = async (req: Request, res: Response) => {
     }
 
     await pool.query(
-      `UPDATE devoluciones_empleado SET estado = 'APROBADO', revisado_por = $1 WHERE id = $2`,
+      `UPDATE devoluciones_empleado SET estado = 'APROBADO', revisado_por = $1, actualizado_en = CURRENT_TIMESTAMP WHERE id = $2`,
       [user?.id, dev.id]
     );
 
@@ -897,7 +897,8 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
       pool.query(`
         SELECT *
         FROM devoluciones_empleado
-          ORDER BY creado_en DESC
+        WHERE estado = 'APROBADO'
+        ORDER BY actualizado_en DESC, creado_en DESC
         LIMIT 200
       `),
       pool.query(`SELECT id, nombre, email, rol FROM usuarios`),
@@ -967,6 +968,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
       const shortId = d.id ? d.id.substring(0, 8).toUpperCase() : 'DEV';
       const cleanObs = (d.observaciones || '').replace(/^DEVOLUCI[OÓ]N:\s*/i, '').trim();
       const fullFolio = `DEVOLUCIÓN #${shortId}${cleanObs ? ': ' + cleanObs : ''}`;
+      const devFecha = d.actualizado_en || d.creado_en || d.updated_at || d.created_at || new Date().toISOString();
 
       structuredDevs.push({
         id: d.id,
@@ -974,7 +976,8 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
         tipo: 'ENTRADA',
         subtipo: 'DEVOLUCIÓN',
         cantidad: totalQty,
-        fecha: d.updated_at || d.created_at,
+        fecha: devFecha,
+        created_at: devFecha,
         folio_factura: fullFolio,
         detalle_motivo: d.observaciones || fullFolio,
         motivo: cleanObs || 'Devolución de material',
@@ -1081,15 +1084,25 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
           }
         }
       } else if (isDevolucion) {
+        let matchedSd: any = null;
         const alreadyInStructuredDev = structuredDevs.some((sd: any) => {
           const sdIdShort = sd.id ? sd.id.substring(0, 8).toLowerCase() : '';
           const matchFolioId = Boolean(sdIdShort && folio.toLowerCase().includes(sdIdShort));
           const sdTime = new Date(sd.fecha).getTime();
           const matchTimeAndUser = (sd.usuario_id === m.creado_por || sd.usuario_nombre === userMap.get(m.creado_por)) && Math.abs(sdTime - mTime) < 300000;
-          return matchFolioId || matchTimeAndUser;
+          if (matchFolioId || matchTimeAndUser) {
+            matchedSd = sd;
+            return true;
+          }
+          return false;
         });
 
-        if (!alreadyInStructuredDev) {
+        if (alreadyInStructuredDev && matchedSd) {
+          if (m.fecha && (!matchedSd.fecha || new Date(m.fecha).getTime() > new Date(matchedSd.fecha).getTime())) {
+            matchedSd.fecha = m.fecha;
+            matchedSd.created_at = m.fecha;
+          }
+        } else if (!alreadyInStructuredDev) {
           const baseFolio = folio.split('(')[0].trim();
           const cleanKey = baseFolio.replace(/[^a-zA-Z0-9]/g, '').substring(0, 25);
           const groupKey = `${m.creado_por}_${cleanKey}_${Math.floor(mTime / 300000)}`;
@@ -1102,6 +1115,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
               subtipo: 'DEVOLUCIÓN',
               cantidad: 0,
               fecha: m.fecha,
+              created_at: m.fecha,
               folio_factura: folio,
               detalle_motivo: folio,
               motivo: cleanObs || 'Devolución de material',

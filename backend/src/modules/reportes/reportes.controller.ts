@@ -267,7 +267,11 @@ export const getExportData = async (req: Request, res: Response) => {
       query += ' ORDER BY fecha DESC, creado_en ASC';
       
       const { rows } = await pool.query(query, params);
-      return res.json(rows || []);
+      const cleanRows = (rows || []).map((r: any) => ({
+        ...r,
+        fecha: r.fecha ? (typeof r.fecha === 'object' && r.fecha.toISOString ? r.fecha.toISOString().split('T')[0] : String(r.fecha).split('T')[0]) : r.fecha
+      }));
+      return res.json(cleanRows);
     } else if (type === 'inventario') {
       const [prodRes, catRes] = await Promise.all([
         pool.query('SELECT * FROM productos ORDER BY nombre_oficial'),

@@ -1,4 +1,8 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
+
+// Forzar que el tipo de datos DATE de PostgreSQL (OID 1082) siempre se devuelva como string 'YYYY-MM-DD'
+// en lugar de serializarse como objeto Date de JavaScript con hora UTC (ej: '2026-10-13T06:00:00.000Z')
+types.setTypeParser(1082, (val: string) => val);
 
 // Cache de conexiones para no abrir un pool nuevo en cada request
 const pools: Record<string, Pool> = {};
