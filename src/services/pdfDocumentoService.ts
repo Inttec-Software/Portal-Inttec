@@ -1,4 +1,5 @@
 import { supabase } from '@/services/supabase';
+import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { cacheDirectory, copyAsync, writeAsStringAsync, EncodingType, getContentUriAsync } from 'expo-file-system/legacy';
@@ -345,13 +346,39 @@ export const PdfDocumentoService = {
     const hashSha256 = await generarSHA256(datosAudit);
 
     if (!documento.archivo_pdf_url) {
-      return this.generarYCompartirPdf(params);
+      return this.generarHtmlDocumentoFallback(params);
     }
 
     try {
       // 1. Descargar los bytes del PDF original subido por el Admin
-      const response = await fetch(documento.archivo_pdf_url);
-      const pdfArrayBuffer = await response.arrayBuffer();
+      let pdfArrayBuffer: ArrayBuffer | null = null;
+      try {
+        const response = await fetch(documento.archivo_pdf_url);
+        if (response.ok) {
+          pdfArrayBuffer = await response.arrayBuffer();
+        }
+      } catch (directErr) {
+        console.warn('[PdfDocumentoService] Fetch directo falló (posible CORS en Web), intentando proxy:', directErr);
+      }
+
+      // Si falló el fetch directo en Web (o por restricción de CORS), intentar vía proxy del backend
+      if (!pdfArrayBuffer && Platform.OS === 'web') {
+        try {
+          const proxyUrl = `${getApiUrl()}/api/documentos/proxy-pdf?url=${encodeURIComponent(documento.archivo_pdf_url)}`;
+          const headers = await getApiHeaders();
+          const proxyRes = await fetch(proxyUrl, { headers });
+          if (proxyRes.ok) {
+            pdfArrayBuffer = await proxyRes.arrayBuffer();
+          }
+        } catch (proxyErr) {
+          console.warn('[PdfDocumentoService] Fetch vía proxy de backend falló:', proxyErr);
+        }
+      }
+
+      if (!pdfArrayBuffer) {
+        console.warn('[PdfDocumentoService] No se pudieron obtener los bytes del PDF original, ejecutando fallback HTML.');
+        return this.generarHtmlDocumentoFallback(params);
+      }
 
       // 2. Cargar el documento PDF con pdf-lib
       const pdfDoc = await PDFDocument.load(pdfArrayBuffer);
@@ -550,9 +577,8 @@ export const PdfDocumentoService = {
       const pdfBytes = await pdfDoc.save();
 
       if (Platform.OS === 'web') {
-        const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+        const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
         const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, '_blank');
         return { uri: blobUrl, hashSha256 };
       }
 
@@ -580,52 +606,19 @@ export const PdfDocumentoService = {
 
       return { uri: safeUri, hashSha256 };
     } catch (pdfErr) {
-      console.warn('Fallo estamparFirmaEnPdfOriginal con pdf-lib, haciendo fallback:', pdfErr);
-      return this.generarYCompartirPdf(params);
+      console.warn('Fallo estamparFirmaEnPdfOriginal con pdf-lib, haciendo fallback a HTML:', pdfErr);
+      return this.generarHtmlDocumentoFallback(params);
     }
   },
 
   /**
-   * Genera el archivo PDF local e inicia la descarga o previsualización
+   * Genera el documento HTML de respaldo cuando no hay PDF original o cuando pdf-lib falla
    */
-  async generarYCompartirPdf(params: GenerarPdfParams): Promise<{ uri?: string; hashSha256: string }> {
-    if (params.documento.archivo_pdf_url && params.documento.tipo_documento === 'PDF') {
-      return this.estamparFirmaEnPdfOriginal(params);
-    }
-
+  async generarHtmlDocumentoFallback(params: GenerarPdfParams): Promise<{ uri?: string; hashSha256: string }> {
     const { html, hashSha256 } = await this.generarHtmlDocumento(params);
 
     if (Platform.OS === 'web') {
-      try {
-        const iframe = document.createElement('iframe');
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = '0';
-        document.body.appendChild(iframe);
-
-        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-        if (iframeDoc) {
-          iframeDoc.open();
-          iframeDoc.write(html);
-          iframeDoc.close();
-
-          setTimeout(() => {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-            setTimeout(() => {
-              if (document.body.contains(iframe)) {
-                document.body.removeChild(iframe);
-              }
-            }, 1000);
-          }, 500);
-        }
-      } catch (err) {
-        console.warn('Fallback a Print.printAsync en Web:', err);
-        await Print.printAsync({ html });
-      }
+      // En Web, no abrimos diálogos de impresión modal durante el registro de la firma
       return { hashSha256 };
     }
 
@@ -661,6 +654,16 @@ export const PdfDocumentoService = {
       await Print.printAsync({ html });
       return { hashSha256 };
     }
+  },
+
+  /**
+   * Genera el archivo PDF local e inicia la descarga o previsualización
+   */
+  async generarYCompartirPdf(params: GenerarPdfParams): Promise<{ uri?: string; hashSha256: string }> {
+    if (params.documento.archivo_pdf_url && params.documento.tipo_documento === 'PDF') {
+      return this.estamparFirmaEnPdfOriginal(params);
+    }
+    return this.generarHtmlDocumentoFallback(params);
   },
 };
 

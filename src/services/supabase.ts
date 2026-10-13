@@ -1038,12 +1038,39 @@ export const DocumentoService = {
 
   async subirPdfFirmado(fileUri: string, fileName: string): Promise<string> {
     try {
-      const response = await fetch(fileUri);
-      const blob = await response.blob();
+      let b64: string;
+      if (fileUri.startsWith('data:')) {
+        b64 = fileUri;
+      } else if (fileUri.startsWith('blob:') || Platform.OS === 'web') {
+        const response = await fetch(fileUri);
+        const blob = await response.blob();
+        b64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } else {
+        try {
+          const { readAsStringAsync, EncodingType } = await import('expo-file-system/legacy');
+          const fileData = await readAsStringAsync(fileUri, { encoding: EncodingType.Base64 });
+          b64 = `data:application/pdf;base64,${fileData}`;
+        } catch {
+          const response = await fetch(fileUri);
+          const blob = await response.blob();
+          b64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+
       const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
       const filePath = `firmados/${Date.now()}_${cleanFileName}`;
-
-      const b64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onloadend = () => resolve(reader.result as string); reader.readAsDataURL(blob); }); const url = await apiClient.uploadBase64(b64, filePath, 'application/pdf', 'documentos-firmados'); return url;
+      const url = await apiClient.uploadBase64(b64, filePath, 'application/pdf', 'documentos-firmados');
+      return url;
     } catch (e) {
       logger.error('Fallo la subida de PDF firmado:', e);
       throw e;

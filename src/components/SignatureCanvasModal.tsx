@@ -140,21 +140,20 @@ export default function SignatureCanvasModal({
   };
 
   const handleConfirm = async () => {
+    if (!hasSignature && segments.length === 0) {
+      if (Platform.OS === 'web') {
+        window.alert('Por favor dibuja tu firma en el recuadro blanco antes de confirmar.');
+      } else {
+        Alert.alert('Firma requerida', 'Por favor dibuja tu firma en el lienzo blanco antes de confirmar.');
+      }
+      return;
+    }
+
     if (Platform.OS === 'web' && webCanvasRef.current) {
-      if (!hasSignature) return;
       const dataUrl = webCanvasRef.current.toDataURL('image/png');
       onConfirm(dataUrl);
       handleClear();
       onClose();
-      return;
-    }
-
-    if (!hasSignature && segments.length === 0) {
-      if (Platform.OS === 'web') {
-        window.alert('Por favor dibuja tu firma antes de confirmar.');
-      } else {
-        Alert.alert('Firma requerida', 'Por favor dibuja tu firma en el lienzo blanco antes de confirmar.');
-      }
       return;
     }
 

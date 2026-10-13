@@ -173,25 +173,37 @@ export default function AdminDocumentosScreen() {
 
   const handleCerrarFirmaAdmin = () => {
     setModalFirmaVisible(false);
-    setTimeout(() => {
-      setModalLecturaVisible(true);
-    }, Platform.OS === 'android' ? 120 : 0);
+    if (!isSigning) {
+      setTimeout(() => {
+        setModalLecturaVisible(true);
+      }, Platform.OS === 'android' ? 120 : 0);
+    }
   };
 
   const handleConfirmarFirmaAdmin = async (signatureBase64: string) => {
     setModalFirmaVisible(false);
+    setModalLecturaVisible(false);
     if (!selectedMisDoc || !selectedMisDoc.documentos) return;
     setIsSigning(true);
 
     try {
-      // 1. Obtener ubicación GPS
+      // 1. Obtener ubicación GPS con timeout estricto de 2.5s
       let gpsString = 'No proporcionada';
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          gpsString = `${loc.coords.latitude.toFixed(6)}, ${loc.coords.longitude.toFixed(6)}`;
-        }
+        const obtenerGps = async () => {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status === 'granted') {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            return `${loc.coords.latitude.toFixed(6)}, ${loc.coords.longitude.toFixed(6)}`;
+          }
+          return 'No autorizada';
+        };
+
+        const timeoutPromise = new Promise<string>((resolve) =>
+          setTimeout(() => resolve('No disponible (Timeout)'), 2500)
+        );
+
+        gpsString = await Promise.race([obtenerGps(), timeoutPromise]);
       } catch (e) {
         console.warn('GPS no disponible:', e);
       }
@@ -221,24 +233,27 @@ export default function AdminDocumentosScreen() {
         }
       }
 
-      // 3. Registrar firma completa en Supabase
+      // 3. Registrar firma completa en Supabase / Backend
       await DocumentoService.registrarFirma(selectedMisDoc.id, {
         firmaBase64: signatureBase64,
         pdfUrl: pdfFirmadoUrl,
         ipRegistro: 'App Inttec (Admin Autenticado)',
         ubicacionGps: gpsString,
         dispositivoInfo: infoDispositivo,
-        hashSha256: pdfResult.hashSha256,
+        hashSha256: pdfResult?.hashSha256 || 'HASH_ADMIN',
       });
 
-      showAlert('¡Documento Firmado!', 'Has firmado el documento exitosamente con plena validez legal.', () => {
-        setModalLecturaVisible(false);
-        cargarTodosLosDatos();
-      });
+      // 4. Actualizar estado y UI inmediatamente
+      setModalLecturaVisible(false);
+      setMisDocSubTab('firmados');
+      await cargarTodosLosDatos();
+
+      showAlert('¡Documento Firmado!', 'Has firmado el documento exitosamente con plena validez legal.');
     } catch (error: any) {
       console.error('Error al procesar la firma del admin:', error);
       const msg = error?.message || String(error);
       showAlert('Error', `Ocurrió un fallo al registrar la firma del documento: ${msg}`);
+      setModalLecturaVisible(true);
     } finally {
       setIsSigning(false);
     }
@@ -985,6 +1000,21 @@ export default function AdminDocumentosScreen() {
         onClose={handleCerrarFirmaAdmin}
         onConfirm={handleConfirmarFirmaAdmin}
       />
+
+      {/* Overlay de procesamiento de firma del Administrador */}
+      {isSigning && (
+        <View style={styles.signingOverlay}>
+          <View style={[styles.signingBox, { backgroundColor: themeColors.backgroundElement }]}>
+            <ActivityIndicator size="large" color={themeColors.accent} />
+            <Text style={{ marginTop: 12, fontWeight: 'bold', fontSize: 15, color: themeColors.text }}>
+              Certificando y registrando firma...
+            </Text>
+            <Text style={{ marginTop: 4, fontSize: 12, color: themeColors.textSecondary }}>
+              Generando sello de inalterabilidad SHA-256
+            </Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -1378,5 +1408,27 @@ const styles = StyleSheet.create({
   },
   modalLecturaFooter: {
     marginTop: 16,
+  },
+  signingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  signingBox: {
+    padding: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    minWidth: 260,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
 });

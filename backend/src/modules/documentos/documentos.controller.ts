@@ -197,10 +197,20 @@ export const registrarFirma = async (req: Request, res: Response) => {
       `UPDATE documentos_firmados 
        SET estado = 'FIRMADO', firma_base64 = $1, pdf_firmado_url = $2, ip_registro = $3, ubicacion_gps = $4, dispositivo_info = $5, hash_sha256 = $6, firmado_at = $7 
        WHERE id = $8 RETURNING *`,
-      [params.firmaBase64, params.pdfUrl, params.ipRegistro, params.ubicacionGps, params.dispositivoInfo, params.hashSha256, new Date().toISOString(), idAsignacion]
+      [
+        params.firmaBase64 || null,
+        params.pdfUrl || null,
+        params.ipRegistro || null,
+        params.ubicacionGps || null,
+        params.dispositivoInfo || null,
+        params.hashSha256 || null,
+        new Date().toISOString(),
+        idAsignacion
+      ]
     );
     return res.json(data[0] || { id: idAsignacion, estado: 'FIRMADO' });
   } catch (error: any) {
+    console.error('[Documentos Controller Error] registrarFirma:', error);
     return res.status(500).json({ error: error.message });
   }
 };
@@ -213,6 +223,36 @@ export const eliminarDocumento = async (req: Request, res: Response) => {
     await pool.query(`DELETE FROM documentos WHERE id = $1`, [id]);
     return res.json({ success: true });
   } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const proxyPdf = async (req: Request, res: Response) => {
+  try {
+    const { url } = req.query;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: 'Falta parámetro url' });
+    }
+
+    const parsedUrl = new URL(url);
+    if (!parsedUrl.hostname.includes('amazonaws.com') && !parsedUrl.hostname.includes('s3')) {
+      return res.status(403).json({ error: 'URL de almacenamiento no permitida' });
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      return res.status(response.status).json({ error: 'No se pudo descargar el archivo remoto' });
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="documento.pdf"');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.send(buffer);
+  } catch (error: any) {
+    console.error('[Documentos Proxy PDF Error]:', error);
     return res.status(500).json({ error: error.message });
   }
 };
