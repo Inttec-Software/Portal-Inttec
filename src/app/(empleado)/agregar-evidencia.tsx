@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import {
   View,
   Text,
@@ -8,11 +7,11 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Modal,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -80,7 +79,13 @@ export default function EvidenciaForm() {
   const [miInventarioRaw, setMiInventarioRaw] = useState<any[]>([]);
   const [productos, setProductos] = useState<ProductoInventario[]>([]);
 
+  const generateTrabajoId = () => 'job_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
+
+  // Estado para indicar procesamiento inline de foto (ej. 'antes_0', 'despues_0')
+  const [processingPhotoTarget, setProcessingPhotoTarget] = useState<string | null>(null);
+
   const [trabajos, setTrabajos] = useState<{
+    id?: string;
     descripcion: string;
     usa_materiales?: boolean;
     materiales: string;
@@ -101,7 +106,7 @@ export default function EvidenciaForm() {
     ia_desc_run?: boolean;
     ia_sol_run?: boolean;
   }[]>([
-    { descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }
+    { id: 'job_init_0', descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }
   ]);
 
   // Modal de imagen a pantalla completa
@@ -521,7 +526,7 @@ export default function EvidenciaForm() {
     await syncCombinedProductos(miInventarioRaw, colabs, currentUser);
 
     if (draft.trabajos && draft.trabajos.length > 0) {
-      setTrabajos(draft.trabajos);
+      setTrabajos(draft.trabajos.map(t => ({ ...t, id: (t as any).id || generateTrabajoId() })));
     }
     setCurrentStep(draft.currentStep || 1);
     setActiveDraftId(draft.id);
@@ -570,7 +575,7 @@ export default function EvidenciaForm() {
       setSucursalSearch('');
       setSelectedColaboradores([]);
       await syncCombinedProductos(miInventarioRaw, [], currentUser);
-      setTrabajos([{ descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }]);
+      setTrabajos([{ id: generateTrabajoId(), descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }]);
       setCurrentStep(1);
       setActiveDraftId(null);
       setLastSavedAt(null);
@@ -634,41 +639,37 @@ export default function EvidenciaForm() {
 
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: Platform.OS !== 'web',
-        quality: 0.4,
-        base64: true,
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.6,
       });
 
       if (!result.canceled && result.assets?.[0]) {
-        setLoadingTitle('Procesando foto');
-        setLoadingMessage('Optimizando imagen...');
-        setLoadingCurrent(1);
-        setLoadingTotal(1);
-        setLoadingModalVisible(true);
+        const photoUri = result.assets[0].uri;
+        setProcessingPhotoTarget(`${type}_${jobIndex}`);
 
         try {
-          const optimized = await optimizeImage(result.assets[0].uri);
+          const optimized = await optimizeImage(photoUri);
           if (type === 'antes') {
-            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: optimized.uri, base64: optimized.base64 || null } } : t));
+            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: optimized.uri, base64: null } } : t));
           } else if (type === 'despues') {
-            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: optimized.uri, base64: optimized.base64 || null } } : t));
+            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: optimized.uri, base64: null } } : t));
           } else if (type === 'adicional') {
             setTrabajos(prev => prev.map((t, i) => {
               if (i === jobIndex) {
-                const updated = [...(t.fotosAdicionales || []), { uri: optimized.uri, base64: optimized.base64 || null }];
+                const updated = [...(t.fotosAdicionales || []), { uri: optimized.uri, base64: null }];
                 return { ...t, fotosAdicionales: updated.slice(0, 250) };
               }
               return t;
             }));
           }
         } finally {
-          setLoadingModalVisible(false);
+          setProcessingPhotoTarget(null);
         }
       }
     } catch (err) {
       console.error('Camera capture error:', err);
-      setLoadingModalVisible(false);
+      setProcessingPhotoTarget(null);
       if (Platform.OS === 'web') {
         await handleSelectGallery(type, jobIndex);
       } else {
@@ -693,84 +694,88 @@ export default function EvidenciaForm() {
 
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsMultipleSelection: type === 'adicional',
-        allowsEditing: type !== 'adicional',
+        allowsEditing: false,
         selectionLimit: remainingSlots,
-        quality: 0.4,
-        base64: true,
+        quality: 0.6,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        if (type === 'antes') {
-          setLoadingTitle('Optimizando foto');
-          setLoadingMessage('Comprimiendo imagen...');
-          setLoadingCurrent(1);
-          setLoadingTotal(1);
-          setLoadingModalVisible(true);
+        if (type === 'antes' || type === 'despues') {
+          setProcessingPhotoTarget(`${type}_${jobIndex}`);
           try {
             const opt = await optimizeImage(result.assets[0].uri);
-            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: opt.uri, base64: opt.base64 || null } } : t));
+            if (type === 'antes') {
+              setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, antesImg: { uri: opt.uri, base64: null } } : t));
+            } else {
+              setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: opt.uri, base64: null } } : t));
+            }
           } finally {
-            setLoadingModalVisible(false);
-          }
-        } else if (type === 'despues') {
-          setLoadingTitle('Optimizando foto');
-          setLoadingMessage('Comprimiendo imagen...');
-          setLoadingCurrent(1);
-          setLoadingTotal(1);
-          setLoadingModalVisible(true);
-          try {
-            const opt = await optimizeImage(result.assets[0].uri);
-            setTrabajos(prev => prev.map((t, i) => i === jobIndex ? { ...t, despuesImg: { uri: opt.uri, base64: opt.base64 || null } } : t));
-          } finally {
-            setLoadingModalVisible(false);
+            setProcessingPhotoTarget(null);
           }
         } else if (type === 'adicional') {
-          const totalToProcess = result.assets.length;
-          setLoadingTitle('Procesando fotografías');
-          setLoadingMessage(`Optimizando 0 de ${totalToProcess} fotos...`);
-          setLoadingCurrent(0);
-          setLoadingTotal(totalToProcess);
-          setLoadingModalVisible(true);
-
-          const mappedPhotos: { uri: string; base64: string | null }[] = [];
-          const BATCH_SIZE = 5;
-
-          try {
-            for (let i = 0; i < totalToProcess; i += BATCH_SIZE) {
-              const chunk = result.assets.slice(i, i + BATCH_SIZE);
-              const processedChunk = await Promise.all(
-                chunk.map(async (asset) => {
-                  try {
-                    const opt = await optimizeImage(asset.uri);
-                    return { uri: opt.uri, base64: opt.base64 || null };
-                  } catch (e) {
-                    console.warn('Error optimizing photo:', e);
-                    return { uri: asset.uri, base64: asset.base64 || null };
-                  }
-                })
-              );
-              mappedPhotos.push(...processedChunk);
-              const currentDone = Math.min(i + chunk.length, totalToProcess);
-              setLoadingCurrent(currentDone);
-              setLoadingMessage(`Optimizando ${currentDone} de ${totalToProcess} fotos (${Math.round((currentDone / totalToProcess) * 100)}%)...`);
+          if (result.assets.length === 1) {
+            setProcessingPhotoTarget(`adicional_${jobIndex}`);
+            try {
+              const opt = await optimizeImage(result.assets[0].uri);
+              setTrabajos(prev => prev.map((t, i) => {
+                if (i === jobIndex) {
+                  const combined = [...(t.fotosAdicionales || []), { uri: opt.uri, base64: null }];
+                  return { ...t, fotosAdicionales: combined.slice(0, 250) };
+                }
+                return t;
+              }));
+            } finally {
+              setProcessingPhotoTarget(null);
             }
+          } else {
+            const totalToProcess = result.assets.length;
+            setLoadingTitle('Procesando fotografías');
+            setLoadingMessage(`Optimizando 0 de ${totalToProcess} fotos...`);
+            setLoadingCurrent(0);
+            setLoadingTotal(totalToProcess);
+            setLoadingModalVisible(true);
 
-            setTrabajos(prev => prev.map((t, i) => {
-              if (i === jobIndex) {
-                const combined = [...(t.fotosAdicionales || []), ...mappedPhotos];
-                return { ...t, fotosAdicionales: combined.slice(0, 250) };
+            const mappedPhotos: { uri: string; base64: string | null }[] = [];
+            const BATCH_SIZE = 5;
+
+            try {
+              for (let i = 0; i < totalToProcess; i += BATCH_SIZE) {
+                const chunk = result.assets.slice(i, i + BATCH_SIZE);
+                const processedChunk = await Promise.all(
+                  chunk.map(async (asset) => {
+                    try {
+                      const opt = await optimizeImage(asset.uri);
+                      return { uri: opt.uri, base64: null };
+                    } catch (e) {
+                      console.warn('Error optimizing photo:', e);
+                      return { uri: asset.uri, base64: null };
+                    }
+                  })
+                );
+                mappedPhotos.push(...processedChunk);
+                const currentDone = Math.min(i + chunk.length, totalToProcess);
+                setLoadingCurrent(currentDone);
+                setLoadingMessage(`Optimizando ${currentDone} de ${totalToProcess} fotos (${Math.round((currentDone / totalToProcess) * 100)}%)...`);
               }
-              return t;
-            }));
-          } finally {
-            setLoadingModalVisible(false);
+
+              setTrabajos(prev => prev.map((t, i) => {
+                if (i === jobIndex) {
+                  const combined = [...(t.fotosAdicionales || []), ...mappedPhotos];
+                  return { ...t, fotosAdicionales: combined.slice(0, 250) };
+                }
+                return t;
+              }));
+            } finally {
+              setLoadingModalVisible(false);
+            }
           }
         }
       }
     } catch (err) {
       console.error('Gallery select error:', err);
+      setProcessingPhotoTarget(null);
       setLoadingModalVisible(false);
       Alert.alert('Error', 'No se pudo abrir la galería o procesar las fotos.');
     }
@@ -1365,13 +1370,17 @@ export default function EvidenciaForm() {
       )}
 
 
-      <KeyboardAwareScrollView
+      <KeyboardAvoidingView
         style={{ flex: 1 }}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        enableOnAndroid={true}
-        extraScrollHeight={100}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="none"
+          showsVerticalScrollIndicator={true}
+        >
           <StepIndicator
             currentStep={currentStep}
             steps={['Información y Evidencias', 'Revisión y Finalizar']}
@@ -1716,7 +1725,7 @@ export default function EvidenciaForm() {
               </View>
 
               {trabajos.map((trabajo, index) => (
-                <View key={index} style={{ marginBottom: Spacing.four, borderLeftWidth: 3, borderLeftColor: themeColors.accent, paddingLeft: Spacing.two }}>
+                <View key={trabajo.id || `job_${index}`} style={{ marginBottom: Spacing.four, borderLeftWidth: 3, borderLeftColor: themeColors.accent, paddingLeft: Spacing.two }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.two }}>
                     <Text style={{ fontSize: 15, fontWeight: '700', color: themeColors.text }}>Trabajo / Arreglo #{index + 1}</Text>
                     {trabajos.length > 1 && (
@@ -1831,14 +1840,19 @@ export default function EvidenciaForm() {
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.photoLabel, { fontSize: 12, color: themeColors.textSecondary }]}>Antes</Text>
                       <View style={[styles.imageCard, { height: 120, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        {trabajo.antesImg?.uri ? (
+                        {processingPhotoTarget === `antes_${index}` ? (
+                          <View style={[styles.previewContainer, { justifyContent: 'center', alignItems: 'center' }]}>
+                            <ActivityIndicator size="small" color={themeColors.primary} />
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4 }}>Procesando...</Text>
+                          </View>
+                        ) : trabajo.antesImg?.uri ? (
                           <View style={styles.previewContainer}>
                             <TouchableOpacity
                               activeOpacity={0.9}
                               onPress={() => handleOpenPhoto(trabajo.antesImg?.uri || null)}
                               style={{ flex: 1 }}
                             >
-                              <Image source={{ uri: trabajo.antesImg.uri }} style={styles.previewImage} resizeMode="contain" />
+                              <Image source={{ uri: trabajo.antesImg.uri }} style={styles.previewImage} contentFit="contain" />
                             </TouchableOpacity>
                             <TouchableOpacity
                               style={[styles.removeImageBtn, { width: 28, height: 28, top: 4, right: 4 }]}
@@ -1870,14 +1884,19 @@ export default function EvidenciaForm() {
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.photoLabel, { fontSize: 12, color: themeColors.textSecondary }]}>Después</Text>
                       <View style={[styles.imageCard, { height: 120, backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        {trabajo.despuesImg?.uri ? (
+                        {processingPhotoTarget === `despues_${index}` ? (
+                          <View style={[styles.previewContainer, { justifyContent: 'center', alignItems: 'center' }]}>
+                            <ActivityIndicator size="small" color={themeColors.primary} />
+                            <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4 }}>Procesando...</Text>
+                          </View>
+                        ) : trabajo.despuesImg?.uri ? (
                           <View style={styles.previewContainer}>
                             <TouchableOpacity
                               activeOpacity={0.9}
                               onPress={() => handleOpenPhoto(trabajo.despuesImg?.uri || null)}
                               style={{ flex: 1 }}
                             >
-                              <Image source={{ uri: trabajo.despuesImg.uri }} style={styles.previewImage} resizeMode="contain" />
+                              <Image source={{ uri: trabajo.despuesImg.uri }} style={styles.previewImage} contentFit="contain" />
                             </TouchableOpacity>
                             <TouchableOpacity
                               style={[styles.removeImageBtn, { width: 28, height: 28, top: 4, right: 4 }]}
@@ -1981,7 +2000,7 @@ export default function EvidenciaForm() {
                                 onPress={() => handleOpenPhoto(item.uri)}
                                 style={{ width: '100%', height: '100%' }}
                               >
-                                <Image source={{ uri: item.uri }} style={styles.adicionalImage} />
+                                <Image source={{ uri: item.uri }} style={styles.adicionalImage} contentFit="cover" />
                               </TouchableOpacity>
                               <View style={styles.adicionalIndexBadge}>
                                 <Text style={styles.adicionalIndexText}>#{photoIdx + 1}</Text>
@@ -2046,7 +2065,7 @@ export default function EvidenciaForm() {
 
               <TouchableOpacity
                 onPress={() => {
-                  setTrabajos(prev => [...prev, { descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }]);
+                  setTrabajos(prev => [...prev, { id: generateTrabajoId(), descripcion: '', usa_materiales: false, materiales: '', materiales_usados: [], solucion: '', fotosAdicionales: [], ia_desc_run: false, ia_sol_run: false }]);
                 }}
                 style={{
                   flexDirection: 'row',
@@ -2083,7 +2102,8 @@ export default function EvidenciaForm() {
               </View>
             </View>
           )}
-      </KeyboardAwareScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <ImageViewerModal
         visible={viewerVisible}

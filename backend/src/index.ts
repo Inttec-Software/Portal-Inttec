@@ -52,6 +52,35 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// Logging estructurado y seguro para monitoreo en producción/desarrollo
+app.use((req, res, next) => {
+  // Ignorar pings de Hikvision y health checks para no saturar los logs
+  if (req.originalUrl?.includes('/asistencias/hikvision') || req.url?.includes('/asistencias/hikvision')) {
+    return next();
+  }
+
+  const start = Date.now();
+  const timeStr = new Date().toLocaleTimeString('es-MX', { hour12: false });
+  const company = req.headers['x-company'] || 'none';
+  const env = req.headers['x-env'] || 'cloud';
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+  const cleanIp = typeof clientIp === 'string' ? clientIp.split(',')[0].trim() : clientIp;
+
+  // Sanitizar ruta removiendo query params sensibles
+  const sanitizedUrl = req.originalUrl?.split('?')[0] || req.url.split('?')[0];
+
+  console.log(`\n[${timeStr}] [REQ] ${req.method} ${sanitizedUrl} | Tenant: ${company}:${env} | IP: ${cleanIp}`);
+
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const status = res.statusCode;
+    const tag = status >= 500 ? '[ERROR]' : status >= 400 ? '[WARN]' : '✓';
+    console.log(`[${timeStr}] [RES] ${tag} ${req.method} ${sanitizedUrl} -> ${status} (${duration}ms)`);
+  });
+
+  next();
+});
+
 // 1. HTTP Security Headers (Helmet)
 app.use(helmet());
 

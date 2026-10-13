@@ -157,7 +157,29 @@ export default function AdminDocumentosScreen() {
     setModalLecturaVisible(true);
   };
 
+  const handleAbrirPdfAdmin = (url?: string | null) => {
+    if (!url) return;
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'No se pudo abrir el documento PDF.');
+    });
+  };
+
+  const handleIniciarFirmaAdmin = () => {
+    setModalLecturaVisible(false);
+    setTimeout(() => {
+      setModalFirmaVisible(true);
+    }, Platform.OS === 'android' ? 120 : 0);
+  };
+
+  const handleCerrarFirmaAdmin = () => {
+    setModalFirmaVisible(false);
+    setTimeout(() => {
+      setModalLecturaVisible(true);
+    }, Platform.OS === 'android' ? 120 : 0);
+  };
+
   const handleConfirmarFirmaAdmin = async (signatureBase64: string) => {
+    setModalFirmaVisible(false);
     if (!selectedMisDoc || !selectedMisDoc.documentos) return;
     setIsSigning(true);
 
@@ -597,7 +619,6 @@ export default function AdminDocumentosScreen() {
         visible={modalFirmasVisible}
         animationType="fade"
         transparent
-        statusBarTranslucent={true}
         onRequestClose={() => setModalFirmasVisible(false)}
       >
         <View style={styles.modalOverlay}>
@@ -831,7 +852,6 @@ export default function AdminDocumentosScreen() {
 
       {/* ────────────────── MODAL LECTURA Y FIRMA (ADMIN) ────────────────── */}
       <Modal
-        statusBarTranslucent={true}
         visible={modalLecturaVisible}
         animationType="slide"
         transparent
@@ -865,11 +885,7 @@ export default function AdminDocumentosScreen() {
                   </Text>
                   <TouchableOpacity
                     style={[styles.openPdfBtn, { backgroundColor: themeColors.accent }]}
-                    onPress={() => {
-                      if (selectedMisDoc.documentos?.archivo_pdf_url) {
-                        Linking.openURL(selectedMisDoc.documentos.archivo_pdf_url);
-                      }
-                    }}
+                    onPress={() => handleAbrirPdfAdmin(selectedMisDoc.documentos?.archivo_pdf_url)}
                   >
                     <Ionicons name="open-outline" size={16} color="#ffffff" />
                     <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>
@@ -904,7 +920,7 @@ export default function AdminDocumentosScreen() {
               {selectedMisDoc?.estado === 'PENDIENTE' ? (
                 <CustomButton
                   title="Firmar Este Documento Ahora"
-                  onPress={() => setModalFirmaVisible(true)}
+                  onPress={handleIniciarFirmaAdmin}
                   loading={isSigning}
                   icon={<Ionicons name="create-outline" size={20} color="#ffffff" />}
                 />
@@ -966,7 +982,7 @@ export default function AdminDocumentosScreen() {
       <SignatureCanvasModal
         visible={modalFirmaVisible}
         titulo={`Firma: ${selectedMisDoc?.documentos?.titulo || 'Documento Corporativo'}`}
-        onClose={() => setModalFirmaVisible(false)}
+        onClose={handleCerrarFirmaAdmin}
         onConfirm={handleConfirmarFirmaAdmin}
       />
     </View>

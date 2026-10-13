@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   PanResponder,
   Platform,
+  Alert,
 } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import { Ionicons } from '@expo/vector-icons';
@@ -62,6 +63,16 @@ export default function SignatureCanvasModal({
       }
     });
   };
+
+  useEffect(() => {
+    if (visible) {
+      setTimeout(() => {
+        updateContainerOffset();
+      }, 50);
+    } else {
+      handleClear();
+    }
+  }, [visible]);
 
   // PanResponder para móvil (iOS / Android) usando coordenadas absolutas pageX/pageY
   const panResponder = useRef(
@@ -138,7 +149,14 @@ export default function SignatureCanvasModal({
       return;
     }
 
-    if (!hasSignature && segments.length === 0) return;
+    if (!hasSignature && segments.length === 0) {
+      if (Platform.OS === 'web') {
+        window.alert('Por favor dibuja tu firma antes de confirmar.');
+      } else {
+        Alert.alert('Firma requerida', 'Por favor dibuja tu firma en el lienzo blanco antes de confirmar.');
+      }
+      return;
+    }
 
     try {
       if (viewShotRef.current && viewShotRef.current.capture) {
@@ -187,7 +205,7 @@ export default function SignatureCanvasModal({
   };
 
   return (
-    <Modal statusBarTranslucent={true} visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={[styles.container, { backgroundColor: themeColors.backgroundElement }]}>
           {/* Header */}

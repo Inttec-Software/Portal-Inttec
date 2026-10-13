@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import {
   View,
   Text,
@@ -8,11 +7,11 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Modal,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -1226,13 +1225,17 @@ export default function EvidenciaForm() {
       )}
 
 
-      <KeyboardAwareScrollView
+      <KeyboardAvoidingView
         style={{ flex: 1 }}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        enableOnAndroid={true}
-        extraScrollHeight={100}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="none"
+          showsVerticalScrollIndicator={true}
+        >
           <StepIndicator
             currentStep={currentStep}
             steps={['Información y Evidencias', 'Revisión y Finalizar']}
@@ -1843,7 +1846,8 @@ export default function EvidenciaForm() {
               </View>
             </View>
           )}
-      </KeyboardAwareScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <ImageViewerModal
         visible={viewerVisible}

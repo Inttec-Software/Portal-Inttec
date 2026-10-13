@@ -85,11 +85,30 @@ export default function EmpleadoDocumentosScreen() {
     setModalLecturaVisible(true);
   };
 
+  const handleAbrirPdf = (url?: string | null) => {
+    if (!url) return;
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'No se pudo abrir el documento PDF.');
+    });
+  };
+
   const handleIniciarFirma = () => {
-    setModalFirmaVisible(true);
+    // Cerrar primero el modal de lectura para evitar colisión de dos Modals en Android
+    setModalLecturaVisible(false);
+    setTimeout(() => {
+      setModalFirmaVisible(true);
+    }, Platform.OS === 'android' ? 120 : 0);
+  };
+
+  const handleCerrarFirma = () => {
+    setModalFirmaVisible(false);
+    setTimeout(() => {
+      setModalLecturaVisible(true);
+    }, Platform.OS === 'android' ? 120 : 0);
   };
 
   const handleConfirmarFirma = async (signatureBase64: string) => {
+    setModalFirmaVisible(false);
     if (!selectedDoc || !selectedDoc.documentos) return;
     setIsSigning(true);
 
@@ -309,7 +328,7 @@ export default function EmpleadoDocumentosScreen() {
       )}
 
       {/* Modal de Lectura y Firma del Documento */}
-      <Modal statusBarTranslucent={true}
+      <Modal
         visible={modalLecturaVisible}
         animationType="slide"
         transparent
@@ -343,11 +362,7 @@ export default function EmpleadoDocumentosScreen() {
                   </Text>
                   <TouchableOpacity
                     style={[styles.openPdfBtn, { backgroundColor: themeColors.accent }]}
-                    onPress={() => {
-                      if (selectedDoc.documentos?.archivo_pdf_url) {
-                        Linking.openURL(selectedDoc.documentos.archivo_pdf_url);
-                      }
-                    }}
+                    onPress={() => handleAbrirPdf(selectedDoc.documentos?.archivo_pdf_url)}
                   >
                     <Ionicons name="open-outline" size={16} color="#ffffff" />
                     <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 13 }}>
@@ -412,7 +427,7 @@ export default function EmpleadoDocumentosScreen() {
       {/* Modal Canvas de Firma Táctil */}
       <SignatureCanvasModal
         visible={modalFirmaVisible}
-        onClose={() => setModalFirmaVisible(false)}
+        onClose={handleCerrarFirma}
         onConfirm={handleConfirmarFirma}
         titulo={`Firma: ${selectedDoc?.documentos?.titulo}`}
       />

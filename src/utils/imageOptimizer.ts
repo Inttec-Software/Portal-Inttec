@@ -38,11 +38,15 @@ export const optimizeImage = async (uri: string): Promise<{ uri: string; base64?
     return { uri: finalUri, base64: finalBase64 };
   }
 
-  const result = await ImageManipulator.manipulateAsync(
-    uri,
-    [{ resize: { width: 1000 } }],
-    { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-  );
-
-  return { uri: result.uri, base64: result.base64 };
+  try {
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 1000 } }],
+      { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return { uri: result.uri };
+  } catch (err) {
+    console.warn("Could not optimize image, returning original uri:", err);
+    return { uri };
+  }
 };
