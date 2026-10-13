@@ -15,12 +15,12 @@ jobs:
         run: |
           if [[ "${{ github.ref_name }}" == "lightsail/prod" ]]; then
             echo "TARGET_ENV=production" >> $GITHUB_OUTPUT
-            echo "PORT=10000" >> $GITHUB_OUTPUT
+            echo "API_URL=https://api.inttec.net" >> $GITHUB_OUTPUT
             echo "WEB_DIR=/var/www/portal-prod-web" >> $GITHUB_OUTPUT
             echo "PM2_NAME=backend-prod" >> $GITHUB_OUTPUT
           else
             echo "TARGET_ENV=test" >> $GITHUB_OUTPUT
-            echo "PORT=10001" >> $GITHUB_OUTPUT
+            echo "API_URL=https://api-test.inttec.net" >> $GITHUB_OUTPUT
             echo "WEB_DIR=/var/www/portal-test-web" >> $GITHUB_OUTPUT
             echo "PM2_NAME=backend-test" >> $GITHUB_OUTPUT
           fi
@@ -49,7 +49,7 @@ jobs:
             # 2. Actualizar y exportar Frontend Web
             cd $APP_DIR
             npm install
-            EXPO_PUBLIC_API_URL="http://${{ secrets.LIGHTSAIL_IP }}:${{ steps.env_select.outputs.PORT }}" npx expo export -p web -c
+            EXPO_PUBLIC_API_URL="${{ steps.env_select.outputs.API_URL }}" npx expo export -p web -c
             cp -r dist/* ${{ steps.env_select.outputs.WEB_DIR }}/
             
             echo "===> ¡Despliegue finalizado con éxito!"
