@@ -11,10 +11,8 @@ import {
   Platform,
   Alert,
   RefreshControl,
-  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
@@ -53,8 +51,6 @@ export default function AdminAsistencia() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { user: authUser, company } = useAuth();
-  const { width } = useWindowDimensions();
-  const isDesktop = Platform.OS === 'web' && width >= 900;
 
   const cleanFecha = (f?: string | null) => (f ? String(f).split('T')[0] : '');
 
@@ -111,22 +107,12 @@ export default function AdminAsistencia() {
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [checadorResultMsg, setChecadorResultMsg] = useState('');
   const [checadorResultType, setChecadorResultType] = useState<'entrada' | 'salida'>('entrada');
-  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
-
   const cameraRef = useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const dateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Cargar datos iniciales
-  useEffect(() => {
-    cargarDatosGenerales();
-    if (authUser?.id) {
-      cargarEstadoChecadorAdmin();
-    }
-  }, [company, selectedMonday, modoPeriodo, selectedMonth]);
-
   // Cargar estado de asistencia del admin logueado
-  const cargarEstadoChecadorAdmin = async () => {
+  const cargarEstadoChecadorAdmin = useCallback(async () => {
     if (!authUser?.id) return;
     try {
       setIsLoadingAdminChecador(true);
@@ -137,10 +123,10 @@ export default function AdminAsistencia() {
     } finally {
       setIsLoadingAdminChecador(false);
     }
-  };
+  }, [authUser?.id]);
 
   // Cargar lista de empleados y asistencias del período (semana o mes)
-  const cargarDatosGenerales = async () => {
+  const cargarDatosGenerales = useCallback(async () => {
     setIsLoadingPersonal(true);
     setIsLoadingAsistencias(true);
 
@@ -163,7 +149,7 @@ export default function AdminAsistencia() {
           const { data: uData } = await client.from('usuarios').select('*').order('nombre');
           usersList = sortUsuariosByRoleAndName(uData || []);
         }
-      } catch (_) {
+      } catch {
         const client = company === 'daravisa' ? daravisaClient : inttecClient;
         const { data: uData } = await client.from('usuarios').select('*').order('nombre');
         usersList = sortUsuariosByRoleAndName(uData || []);
@@ -196,7 +182,16 @@ export default function AdminAsistencia() {
       setIsLoadingAsistencias(false);
       setRefreshing(false);
     }
-  };
+  }, [company, modoPeriodo, selectedMonth, selectedMonday]);
+
+  // Cargar datos iniciales
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    cargarDatosGenerales();
+    if (authUser?.id) {
+      cargarEstadoChecadorAdmin();
+    }
+  }, [cargarDatosGenerales, cargarEstadoChecadorAdmin, authUser?.id]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -315,7 +310,7 @@ export default function AdminAsistencia() {
 
   // Información calculada para cada día (para la barra interactiva)
   const diasSemanaInfo = useMemo(() => {
-    const days = isMes ? rangeMes.days : rangeSemana.days;
+    const days = rangeActivo.days;
     return days.map((day) => {
       const asistenciasDelDia = allAsistenciasSemana.filter((a) => cleanFecha(a.fecha) === day.dateStr);
       const uniqueEmpleadosCount = new Set(asistenciasDelDia.map((a) => a.empleado_id)).size;
@@ -331,7 +326,7 @@ export default function AdminAsistencia() {
         hasActivity: asistenciasDelDia.length > 0,
       };
     });
-  }, [isMes, rangeMes, rangeSemana, allAsistenciasSemana]);
+  }, [rangeActivo, allAsistenciasSemana]);
 
   const selectedDayInfo = useMemo(() => {
     if (!selectedDayStr) return null;
@@ -676,7 +671,6 @@ export default function AdminAsistencia() {
         setChecadorResultMsg('Salida registrada exitosamente en Inttec y Daravisa');
       }
 
-      setCapturedPhotoUri(photo.uri);
       setChecadorResultType(tipoRegistro);
       setChecadorResultVisible(true);
 
@@ -724,6 +718,7 @@ export default function AdminAsistencia() {
                 style={[styles.quickCheckinBtn, { backgroundColor: isAdminInActiveShift ? '#ea580c' : '#16a34a' }]}
                 onPress={handleOpenChecadorAdmin}
                 activeOpacity={0.8}
+                disabled={isLoadingAdminChecador}
               >
                 <Ionicons name="camera-outline" size={16} color="#fff" />
                 <Text style={styles.quickCheckinBtnText}>
@@ -1029,6 +1024,7 @@ export default function AdminAsistencia() {
               ]}
               onPress={handleOpenChecadorAdmin}
               activeOpacity={0.8}
+              disabled={isLoadingAdminChecador}
             >
               <View style={styles.pulseDot} />
               <Ionicons name="camera-outline" size={16} color="#fff" />
