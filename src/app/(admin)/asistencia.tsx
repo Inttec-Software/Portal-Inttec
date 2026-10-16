@@ -39,9 +39,13 @@ import {
   getWeekRange,
   getPreviousWeekMonday,
   getNextWeekMonday,
+  getMonthRange,
+  getPreviousMonthDate,
+  getNextMonthDate,
   formatHoraDisplay,
   formatMinutesToHours,
   processAsistenciasSemana,
+  processAsistenciasMes,
 } from '@/utils/asistenciaUtils';
 import { ReportGenerator } from '@/utils/reportGenerator';
 
@@ -59,8 +63,10 @@ export default function AdminAsistencia() {
   const [isLoadingPersonal, setIsLoadingPersonal] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Semana y Día seleccionado
+  // Modo de visualización: 'mes' o 'semana'
+  const [modoPeriodo, setModoPeriodo] = useState<'mes' | 'semana'>('mes');
   const [selectedMonday, setSelectedMonday] = useState<Date>(() => getWeekRange().mondayDate);
+  const [selectedMonth, setSelectedMonth] = useState<Date>(() => new Date());
   const [selectedDayStr, setSelectedDayStr] = useState<string | null>(null);
   const [periodoModalVisible, setPeriodoModalVisible] = useState(false);
   const [allAsistenciasSemana, setAllAsistenciasSemana] = useState<Asistencia[]>([]);
@@ -117,7 +123,7 @@ export default function AdminAsistencia() {
     if (authUser?.id) {
       cargarEstadoChecadorAdmin();
     }
-  }, [company, selectedMonday]);
+  }, [company, selectedMonday, modoPeriodo, selectedMonth]);
 
   // Cargar estado de asistencia del admin logueado
   const cargarEstadoChecadorAdmin = async () => {
@@ -133,14 +139,17 @@ export default function AdminAsistencia() {
     }
   };
 
-  // Cargar lista de empleados y asistencias de la semana
+  // Cargar lista de empleados y asistencias del período (semana o mes)
   const cargarDatosGenerales = async () => {
     setIsLoadingPersonal(true);
     setIsLoadingAsistencias(true);
 
     try {
       const headers = await getApiHeaders();
-      const range = getWeekRange(selectedMonday);
+      const isMes = modoPeriodo === 'mes';
+      const rangeActivo = isMes ? getMonthRange(selectedMonth) : getWeekRange(selectedMonday);
+      const startStr = isMes ? (rangeActivo as any).startStr : (rangeActivo as any).mondayStr;
+      const endStr = isMes ? (rangeActivo as any).endStr : (rangeActivo as any).sundayStr;
 
       // 1. Cargar personal
       let usersList: Usuario[] = [];
@@ -161,10 +170,10 @@ export default function AdminAsistencia() {
       }
       setPersonal(usersList);
 
-      // 2. Cargar asistencias de toda la semana
+      // 2. Cargar asistencias de todo el período
       try {
         const resAsist = await fetch(
-          `${getApiUrl()}/api/reportes/admin/export/asistencias?startDate=${range.mondayStr}&endDate=${range.sundayStr}`,
+          `${getApiUrl()}/api/reportes/admin/export/asistencias?startDate=${startStr}&endDate=${endStr}`,
           { headers }
         );
         if (resAsist.ok) {
@@ -194,19 +203,31 @@ export default function AdminAsistencia() {
     cargarDatosGenerales();
     cargarEstadoChecadorAdmin();
     if (selectedEmpleado) {
-      cargarAsistenciasEmpleado(selectedEmpleado.id, selectedMonday);
+      cargarAsistenciasEmpleado(
+        selectedEmpleado.id,
+        modoPeriodo === 'mes' ? selectedMonth : selectedMonday,
+        modoPeriodo
+      );
     }
   };
 
   // Cargar asistencias detalladas de un empleado específico
-  const cargarAsistenciasEmpleado = async (empleadoId: string, monday: Date) => {
+  const cargarAsistenciasEmpleado = async (
+    empleadoId: string,
+    refDate: Date,
+    modoOverride?: 'mes' | 'semana'
+  ) => {
     setIsLoadingEmpleadoDetalle(true);
     try {
-      const range = getWeekRange(monday);
+      const isMes = (modoOverride || modoPeriodo) === 'mes';
+      const rangeActivo = isMes ? getMonthRange(refDate) : getWeekRange(refDate);
+      const startStr = isMes ? (rangeActivo as any).startStr : (rangeActivo as any).mondayStr;
+      const endStr = isMes ? (rangeActivo as any).endStr : (rangeActivo as any).sundayStr;
+
       const hist = await AsistenciaService.getHistorialEmpleado(
         empleadoId,
-        range.mondayStr,
-        range.sundayStr
+        startStr,
+        endStr
       );
       setAsistenciasEmpleado((hist || []).map((a: Asistencia) => ({
         ...a,
@@ -227,7 +248,11 @@ export default function AdminAsistencia() {
 
   const handleSelectEmpleado = (emp: Usuario) => {
     setSelectedEmpleado(emp);
-    cargarAsistenciasEmpleado(emp.id, selectedMonday);
+    cargarAsistenciasEmpleado(
+      emp.id,
+      modoPeriodo === 'mes' ? selectedMonth : selectedMonday,
+      modoPeriodo
+    );
   };
 
   const handleBackToList = () => {
@@ -240,7 +265,10 @@ export default function AdminAsistencia() {
   // ==========================================
   const fechaHoyJornada = useMemo(() => AsistenciaService.getFechaJornada(), []);
 
+  const isMes = modoPeriodo === 'mes';
   const rangeSemana = useMemo(() => getWeekRange(selectedMonday), [selectedMonday]);
+  const rangeMes = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
+  const rangeActivo = isMes ? rangeMes : rangeSemana;
 
   const isCurrentWeek = useMemo(() => {
     const currentMon = getWeekRange().mondayDate;
@@ -250,6 +278,14 @@ export default function AdminAsistencia() {
       selectedMonday.getDate() === currentMon.getDate()
     );
   }, [selectedMonday]);
+
+  const isCurrentMonth = useMemo(() => {
+    const now = new Date();
+    return (
+      selectedMonth.getFullYear() === now.getFullYear() &&
+      selectedMonth.getMonth() === now.getMonth()
+    );
+  }, [selectedMonth]);
 
   const formatWeekTitle = useCallback((range: typeof rangeSemana) => {
     const m = range.mondayDate;
@@ -277,9 +313,10 @@ export default function AdminAsistencia() {
     return map;
   }, [allAsistenciasSemana]);
 
-  // Información calculada para cada día de la semana (para la barra interactiva)
+  // Información calculada para cada día (para la barra interactiva)
   const diasSemanaInfo = useMemo(() => {
-    return rangeSemana.days.map((day) => {
+    const days = isMes ? rangeMes.days : rangeSemana.days;
+    return days.map((day) => {
       const asistenciasDelDia = allAsistenciasSemana.filter((a) => cleanFecha(a.fecha) === day.dateStr);
       const uniqueEmpleadosCount = new Set(asistenciasDelDia.map((a) => a.empleado_id)).size;
       const enTurnoCount = asistenciasDelDia.filter((a) => a.hora_entrada && !a.hora_salida).length;
@@ -294,7 +331,7 @@ export default function AdminAsistencia() {
         hasActivity: asistenciasDelDia.length > 0,
       };
     });
-  }, [rangeSemana, allAsistenciasSemana]);
+  }, [isMes, rangeMes, rangeSemana, allAsistenciasSemana]);
 
   const selectedDayInfo = useMemo(() => {
     if (!selectedDayStr) return null;
@@ -308,7 +345,9 @@ export default function AdminAsistencia() {
 
     return personal.map((emp) => {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-      const semanaProcesada = processAsistenciasSemana(asistenciasEmp, selectedMonday);
+      const periodoProcesado = isMes
+        ? processAsistenciasMes(asistenciasEmp, selectedMonth)
+        : processAsistenciasSemana(asistenciasEmp, selectedMonday);
 
       // Buscar asistencias del día objetivo (hoy o el seleccionado)
       const asistenciasTargetDia = asistenciasEmp.filter((a) => cleanFecha(a.fecha) === targetFecha);
@@ -349,19 +388,19 @@ export default function AdminAsistencia() {
         fotoEntradaHoy: fotoEntradaDia,
         isViewingToday,
         targetFecha,
-        totalMinutosSemana: semanaProcesada.totalMinutosSemana,
-        totalHorasFormateadas: semanaProcesada.totalHorasSemanaStr,
-        totalMinutosRegulares: semanaProcesada.totalMinutosRegulares,
-        totalHorasRegularesFormateadas: semanaProcesada.totalHorasRegularesStr,
-        totalMinutosExtra: semanaProcesada.totalMinutosExtra,
-        totalHorasExtraFormateadas: semanaProcesada.totalHorasExtraStr,
-        diasTrabajados: semanaProcesada.diasLaborados,
+        totalMinutosSemana: periodoProcesado.totalMinutosPeriodo || periodoProcesado.totalMinutosSemana,
+        totalHorasFormateadas: periodoProcesado.totalHorasPeriodoStr || periodoProcesado.totalHorasSemanaStr,
+        totalMinutosRegulares: periodoProcesado.totalMinutosRegulares,
+        totalHorasRegularesFormateadas: periodoProcesado.totalHorasRegularesStr,
+        totalMinutosExtra: periodoProcesado.totalMinutosExtra,
+        totalHorasExtraFormateadas: periodoProcesado.totalHorasExtraStr,
+        diasTrabajados: periodoProcesado.diasLaborados,
         asistenciasCount: asistenciasEmp.length,
       };
     });
-  }, [personal, asistenciasPorEmpleado, selectedMonday, fechaHoyJornada, selectedDayStr]);
+  }, [personal, asistenciasPorEmpleado, isMes, selectedMonth, selectedMonday, fechaHoyJornada, selectedDayStr]);
 
-  // Estadísticas del día o de la semana
+  // Estadísticas del día o del período
   const statsHoy = useMemo(() => {
     let enTurno = 0;
     let completados = 0;
@@ -415,11 +454,19 @@ export default function AdminAsistencia() {
   const handleExportGeneralPDF = async () => {
     setIsExporting(true);
     try {
-      await ReportGenerator.exportReporteAsistenciaSemanalGeneralPDF(
-        allAsistenciasSemana,
-        personal,
-        selectedMonday
-      );
+      if (modoPeriodo === 'mes') {
+        await ReportGenerator.exportReporteAsistenciaMensualGeneralPDF(
+          allAsistenciasSemana,
+          personal,
+          selectedMonth
+        );
+      } else {
+        await ReportGenerator.exportReporteAsistenciaSemanalGeneralPDF(
+          allAsistenciasSemana,
+          personal,
+          selectedMonday
+        );
+      }
     } catch (err: any) {
       Alert.alert('Error al generar PDF', err.message || 'No se pudo generar el reporte.');
     } finally {
@@ -430,11 +477,19 @@ export default function AdminAsistencia() {
   const handleExportGeneralXLSX = async () => {
     setIsExporting(true);
     try {
-      await ReportGenerator.exportReporteAsistenciaSemanalGeneralXLSX(
-        allAsistenciasSemana,
-        personal,
-        selectedMonday
-      );
+      if (modoPeriodo === 'mes') {
+        await ReportGenerator.exportReporteAsistenciaMensualGeneralXLSX(
+          allAsistenciasSemana,
+          personal,
+          selectedMonth
+        );
+      } else {
+        await ReportGenerator.exportReporteAsistenciaSemanalGeneralXLSX(
+          allAsistenciasSemana,
+          personal,
+          selectedMonday
+        );
+      }
     } catch (err: any) {
       Alert.alert('Error al exportar Excel', err.message || 'No se pudo generar el archivo.');
     } finally {
@@ -446,13 +501,21 @@ export default function AdminAsistencia() {
     if (!selectedEmpleado) return;
     setIsExporting(true);
     try {
-      await ReportGenerator.exportReporteAsistenciaEmpleadoPDF(
-        asistenciasEmpleado,
-        selectedEmpleado,
-        selectedMonday
-      );
+      if (modoPeriodo === 'mes') {
+        await ReportGenerator.exportReporteAsistenciaMensualEmpleadoPDF(
+          asistenciasEmpleado,
+          selectedEmpleado,
+          selectedMonth
+        );
+      } else {
+        await ReportGenerator.exportReporteAsistenciaEmpleadoPDF(
+          asistenciasEmpleado,
+          selectedEmpleado,
+          selectedMonday
+        );
+      }
     } catch (err: any) {
-      Alert.alert('Error al exportar PDF', err.message || 'No se pudo generar el reporte.');
+      Alert.alert('Error al exportar PDF', err.message || 'No se pudo generar el reporte individual.');
     } finally {
       setIsExporting(false);
     }
@@ -462,13 +525,21 @@ export default function AdminAsistencia() {
     if (!selectedEmpleado) return;
     setIsExporting(true);
     try {
-      await ReportGenerator.exportReporteAsistenciaEmpleadoXLSX(
-        asistenciasEmpleado,
-        selectedEmpleado,
-        selectedMonday
-      );
+      if (modoPeriodo === 'mes') {
+        await ReportGenerator.exportReporteAsistenciaMensualEmpleadoXLSX(
+          asistenciasEmpleado,
+          selectedEmpleado,
+          selectedMonth
+        );
+      } else {
+        await ReportGenerator.exportReporteAsistenciaEmpleadoXLSX(
+          asistenciasEmpleado,
+          selectedEmpleado,
+          selectedMonday
+        );
+      }
     } catch (err: any) {
-      Alert.alert('Error al exportar Excel', err.message || 'No se pudo generar el archivo.');
+      Alert.alert('Error al exportar Excel', err.message || 'No se pudo generar el archivo individual.');
     } finally {
       setIsExporting(false);
     }
@@ -704,7 +775,7 @@ export default function AdminAsistencia() {
             {/* Acciones de exportación individual */}
             <View style={[styles.exportActionsRow, { borderTopColor: themeColors.border }]}>
               <CustomButton
-                title={isExporting ? 'Generando...' : 'Descargar PDF'}
+                title={isExporting ? 'Generando...' : modoPeriodo === 'mes' ? 'Descargar PDF (Mes)' : 'Descargar PDF (Semana)'}
                 onPress={handleExportIndividualPDF}
                 variant="primary"
                 disabled={isExporting}
@@ -712,7 +783,7 @@ export default function AdminAsistencia() {
                 icon={<Ionicons name="document-text-outline" size={16} color="#fff" style={{ marginRight: 6 }} />}
               />
               <CustomButton
-                title={isExporting ? 'Generando...' : 'Descargar Excel'}
+                title={isExporting ? 'Generando...' : modoPeriodo === 'mes' ? 'Descargar Excel (Mes)' : 'Descargar Excel (Semana)'}
                 onPress={handleExportIndividualXLSX}
                 variant="success"
                 disabled={isExporting}
@@ -722,16 +793,26 @@ export default function AdminAsistencia() {
             </View>
           </View>
 
-          {/* Tarjeta con desglose semanal día a día del empleado */}
+          {/* Tarjeta con desglose semanal o mensual día a día del empleado */}
           <AsistenciaSemanalCard
             asistencias={asistenciasEmpleado}
             empleadoNombre={selectedEmpleado.nombre || 'Empleado'}
             isLoading={isLoadingEmpleadoDetalle}
-            onRefresh={() => cargarAsistenciasEmpleado(selectedEmpleado.id, selectedMonday)}
+            onRefresh={() => cargarAsistenciasEmpleado(selectedEmpleado.id, modoPeriodo === 'mes' ? selectedMonth : selectedMonday, modoPeriodo)}
             selectedMonday={selectedMonday}
             onChangeWeek={(newMonday) => {
               setSelectedMonday(newMonday);
-              cargarAsistenciasEmpleado(selectedEmpleado.id, newMonday);
+              cargarAsistenciasEmpleado(selectedEmpleado.id, newMonday, 'semana');
+            }}
+            modo={modoPeriodo}
+            selectedMonth={selectedMonth}
+            onChangeMonth={(newMonth) => {
+              setSelectedMonth(newMonth);
+              cargarAsistenciasEmpleado(selectedEmpleado.id, newMonth, 'mes');
+            }}
+            onChangeModo={(newModo) => {
+              setModoPeriodo(newModo);
+              cargarAsistenciasEmpleado(selectedEmpleado.id, newModo === 'mes' ? selectedMonth : selectedMonday, newModo);
             }}
             onViewFoto={(info) => {
               setActivePreviewUrl(info.url);
@@ -780,63 +861,162 @@ export default function AdminAsistencia() {
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* 1. Header Toolbar Compacto y Unificado */}
       <View style={[styles.headerToolbar, { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border }]}>
-        {/* Fila superior: Navegador de Semanas + Acciones Principales */}
+        {/* Fila superior: Navegador de Período (Semana/Mes) + Acciones Principales */}
         <View style={styles.headerTopRow}>
-          {/* Navegador de Semanas Moderno */}
-          <View style={styles.weekNavCompact}>
-            <TouchableOpacity
-              style={[styles.weekNavBtnMini, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
-              onPress={() => {
-                const prevMonday = getPreviousWeekMonday(selectedMonday);
-                setSelectedMonday(prevMonday);
-                setSelectedDayStr(null);
-              }}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="chevron-back" size={16} color={themeColors.text} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.weekNavCenterBadge, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
-              onPress={() => setPeriodoModalVisible(true)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="calendar" size={15} color={themeColors.accent} style={{ marginRight: 6 }} />
-              <Text style={[styles.weekNavCurrentText, { color: themeColors.text }]}>
-                {formatWeekTitle(rangeSemana)}
-              </Text>
-              {isCurrentWeek && (
-                <View style={[styles.currentWeekTag, { backgroundColor: themeColors.accent + '20' }]}>
-                  <Text style={[styles.currentWeekTagText, { color: themeColors.accent }]}>Actual</Text>
-                </View>
-              )}
-              <Ionicons name="chevron-down" size={13} color={themeColors.textSecondary} style={{ marginLeft: 4 }} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.weekNavBtnMini, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
-              onPress={() => {
-                const nextMonday = getNextWeekMonday(selectedMonday);
-                setSelectedMonday(nextMonday);
-                setSelectedDayStr(null);
-              }}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="chevron-forward" size={16} color={themeColors.text} />
-            </TouchableOpacity>
-
-            {!isCurrentWeek && (
+          {/* Selector de Modo y Navegador */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {/* Toggle de Modo: Semana / Mes */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginRight: 2 }}>
               <TouchableOpacity
+                style={[
+                  styles.modoPillBtn,
+                  !isMes
+                    ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+                    : { backgroundColor: themeColors.background, borderColor: themeColors.border },
+                ]}
                 onPress={() => {
-                  setSelectedMonday(getWeekRange().mondayDate);
+                  setModoPeriodo('semana');
                   setSelectedDayStr(null);
                 }}
-                style={[styles.todayChipBtn, { backgroundColor: themeColors.accent + '20', borderColor: themeColors.accent + '40' }]}
                 activeOpacity={0.7}
               >
-                <Ionicons name="today-outline" size={13} color={themeColors.accent} style={{ marginRight: 4 }} />
-                <Text style={[styles.todayChipBtnText, { color: themeColors.accent }]}>Hoy</Text>
+                <Ionicons name="calendar-outline" size={13} color={!isMes ? '#fff' : themeColors.text} />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: !isMes ? '#fff' : themeColors.text }}>
+                  Semana
+                </Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modoPillBtn,
+                  isMes
+                    ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+                    : { backgroundColor: themeColors.background, borderColor: themeColors.border },
+                ]}
+                onPress={() => {
+                  setModoPeriodo('mes');
+                  setSelectedDayStr(null);
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="calendar" size={13} color={isMes ? '#fff' : themeColors.text} />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: isMes ? '#fff' : themeColors.text }}>
+                  Mes
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Navegador según el modo */}
+            {isMes ? (
+              <View style={styles.weekNavCompact}>
+                <TouchableOpacity
+                  style={[styles.weekNavBtnMini, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+                  onPress={() => {
+                    const prevM = getPreviousMonthDate(selectedMonth);
+                    setSelectedMonth(prevM);
+                    setSelectedDayStr(null);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="chevron-back" size={16} color={themeColors.text} />
+                </TouchableOpacity>
+
+                <View
+                  style={[styles.weekNavCenterBadge, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
+                >
+                  <Ionicons name="calendar" size={15} color={themeColors.accent} style={{ marginRight: 6 }} />
+                  <Text style={[styles.weekNavCurrentText, { color: themeColors.text }]}>
+                    {selectedMonth.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }).toUpperCase()}
+                  </Text>
+                  {isCurrentMonth && (
+                    <View style={[styles.currentWeekTag, { backgroundColor: themeColors.accent + '20' }]}>
+                      <Text style={[styles.currentWeekTagText, { color: themeColors.accent }]}>Actual</Text>
+                    </View>
+                  )}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.weekNavBtnMini, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+                  onPress={() => {
+                    const nextM = getNextMonthDate(selectedMonth);
+                    setSelectedMonth(nextM);
+                    setSelectedDayStr(null);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="chevron-forward" size={16} color={themeColors.text} />
+                </TouchableOpacity>
+
+                {!isCurrentMonth && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSelectedMonth(new Date());
+                      setSelectedDayStr(null);
+                    }}
+                    style={[styles.todayChipBtn, { backgroundColor: themeColors.accent + '20', borderColor: themeColors.accent + '40' }]}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="today-outline" size={13} color={themeColors.accent} style={{ marginRight: 4 }} />
+                    <Text style={[styles.todayChipBtnText, { color: themeColors.accent }]}>Mes Actual</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <View style={styles.weekNavCompact}>
+                <TouchableOpacity
+                  style={[styles.weekNavBtnMini, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+                  onPress={() => {
+                    const prevMonday = getPreviousWeekMonday(selectedMonday);
+                    setSelectedMonday(prevMonday);
+                    setSelectedDayStr(null);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="chevron-back" size={16} color={themeColors.text} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.weekNavCenterBadge, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
+                  onPress={() => setPeriodoModalVisible(true)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="calendar" size={15} color={themeColors.accent} style={{ marginRight: 6 }} />
+                  <Text style={[styles.weekNavCurrentText, { color: themeColors.text }]}>
+                    {formatWeekTitle(rangeSemana)}
+                  </Text>
+                  {isCurrentWeek && (
+                    <View style={[styles.currentWeekTag, { backgroundColor: themeColors.accent + '20' }]}>
+                      <Text style={[styles.currentWeekTagText, { color: themeColors.accent }]}>Actual</Text>
+                    </View>
+                  )}
+                  <Ionicons name="chevron-down" size={13} color={themeColors.textSecondary} style={{ marginLeft: 4 }} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.weekNavBtnMini, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+                  onPress={() => {
+                    const nextMonday = getNextWeekMonday(selectedMonday);
+                    setSelectedMonday(nextMonday);
+                    setSelectedDayStr(null);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="chevron-forward" size={16} color={themeColors.text} />
+                </TouchableOpacity>
+
+                {!isCurrentWeek && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSelectedMonday(getWeekRange().mondayDate);
+                      setSelectedDayStr(null);
+                    }}
+                    style={[styles.todayChipBtn, { backgroundColor: themeColors.accent + '20', borderColor: themeColors.accent + '40' }]}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="today-outline" size={13} color={themeColors.accent} style={{ marginRight: 4 }} />
+                    <Text style={[styles.todayChipBtnText, { color: themeColors.accent }]}>Hoy</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
           </View>
 
@@ -904,7 +1084,7 @@ export default function AdminAsistencia() {
                   { color: selectedDayStr === null ? '#fff' : themeColors.text },
                 ]}
               >
-                Toda la semana
+                {isMes ? 'Todo el mes' : 'Toda la semana'}
               </Text>
               <View
                 style={[
@@ -1284,10 +1464,10 @@ export default function AdminAsistencia() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1 }}>
                       <Ionicons name="time-outline" size={15} color={themeColors.textSecondary} />
                       <Text style={[styles.semanaHorasText, { color: themeColors.textSecondary }]}>
-                        Semana: <Text style={{ fontWeight: '800', color: themeColors.text }}>{emp.totalHorasFormateadas || '0h 0m'}</Text>
+                        {isMes ? 'Mes' : 'Semana'}: <Text style={{ fontWeight: '800', color: themeColors.text }}>{emp.totalHorasFormateadas || '0h 0m'}</Text>
                         {emp.diasTrabajados ? ` (${emp.diasTrabajados} d)` : ''}
                       </Text>
-                      {emp.totalMinutosExtra > 0 && (
+                      {(emp.totalMinutosExtra || 0) > 0 && (
                         <View style={styles.cardExtraHoursBadge}>
                           <Ionicons name="flame" size={12} color="#ea580c" />
                           <Text style={styles.cardExtraHoursText}>+{emp.totalHorasExtraFormateadas} extra</Text>
@@ -1578,6 +1758,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  modoPillBtn: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   weekNavCompact: {
     flexDirection: 'row',
