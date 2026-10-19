@@ -110,6 +110,7 @@ export default function AdminEmpleadosScreen() {
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
   const [rejectionFeedback, setRejectionFeedback] = useState('');
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
+  const [feedbackActionType, setFeedbackActionType] = useState<'REJECTED' | 'ACTION_REQUIRED'>('ACTION_REQUIRED');
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
@@ -438,16 +439,20 @@ export default function AdminEmpleadosScreen() {
       }
 
       // Generar registro de auditoría
-      await supabase.from('audit_logs').insert([
-        {
-          action: status === 'APPROVED' ? 'APPROVE' : status === 'REJECTED' ? 'REJECT' : status === 'PENDING' ? 'REVERT' : 'UPDATE',
-          actor_id: adminUser.id,
-          target_id: selectedGasto.id,
-          details: status === 'PENDING' 
-            ? `Gasto por ${selectedGasto.monto} devuelto a revisión por Admin.` 
-            : `Gasto por ${selectedGasto.monto} revisado por Admin. Estado final: ${status}`,
-        },
-      ]);
+      try {
+        await supabase.from('audit_logs').insert([
+          {
+            action: status === 'APPROVED' ? 'APPROVE' : status === 'REJECTED' ? 'REJECT' : 'UPDATE',
+            actor_id: adminUser.id,
+            target_id: selectedGasto.id,
+            details: status === 'PENDING' 
+              ? `Gasto por ${selectedGasto.monto} devuelto a revisión por Admin.` 
+              : `Gasto por ${selectedGasto.monto} revisado por Admin. Estado final: ${status}`,
+          },
+        ]);
+      } catch (auditErr: any) {
+        console.warn('[empleados.handleUpdateStatus] Error en audit_logs insert:', auditErr);
+      }
 
       let friendlyStatus = 'Acción Requerida';
       if (status === 'APPROVED') friendlyStatus = 'Aprobado';
@@ -3300,15 +3305,21 @@ export default function AdminEmpleadosScreen() {
                             />
                             <CustomButton
                               title="Rechazar"
-                              onPress={() => handleUpdateStatus('REJECTED')}
+                              onPress={() => {
+                                setFeedbackActionType('REJECTED');
+                                setShowFeedbackInput(true);
+                              }}
                               variant="danger"
                               style={{ flex: 1 }}
-                              loading={isProcessingAction}
+                              disabled={isProcessingAction}
                             />
                           </View>
                           <CustomButton
                             title="Devolver (Acción Requerida)"
-                            onPress={() => setShowFeedbackInput(true)}
+                            onPress={() => {
+                              setFeedbackActionType('ACTION_REQUIRED');
+                              setShowFeedbackInput(true);
+                            }}
                             variant="secondary"
                             style={{ width: '100%', marginTop: Spacing.one }}
                             disabled={isProcessingAction}
@@ -3335,8 +3346,8 @@ export default function AdminEmpleadosScreen() {
                       ) : (
                         <View style={styles.feedbackForm}>
                           <CustomInput
-                            label="Duda / Comentario para el Empleado"
-                            placeholder="Escribe la información faltante requerida..."
+                            label={feedbackActionType === 'REJECTED' ? "Motivo de Rechazo del Gasto *" : "Duda / Comentario para el Empleado *"}
+                            placeholder={feedbackActionType === 'REJECTED' ? "Escribe el motivo por el cual se rechaza este gasto..." : "Escribe la información faltante requerida..."}
                             value={rejectionFeedback}
                             onChangeText={setRejectionFeedback}
                             multiline
@@ -3346,14 +3357,18 @@ export default function AdminEmpleadosScreen() {
                           <View style={styles.rowActions}>
                             <CustomButton
                               title="Cancelar"
-                              onPress={() => setShowFeedbackInput(false)}
+                              onPress={() => {
+                                setShowFeedbackInput(false);
+                                setRejectionFeedback('');
+                              }}
                               variant="secondary"
                               style={{ flex: 1 }}
+                              disabled={isProcessingAction}
                             />
                             <CustomButton
-                              title="Enviar Observación"
-                              onPress={() => handleUpdateStatus('ACTION_REQUIRED')}
-                              variant="warning"
+                              title={feedbackActionType === 'REJECTED' ? "Confirmar Rechazo" : "Enviar Observación"}
+                              onPress={() => handleUpdateStatus(feedbackActionType)}
+                              variant={feedbackActionType === 'REJECTED' ? "danger" : "warning"}
                               style={{ flex: 1.5 }}
                               loading={isProcessingAction}
                             />

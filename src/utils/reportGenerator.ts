@@ -7,7 +7,7 @@ import { Platform, Alert } from 'react-native';
 import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
 import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
-import { getWeekRange, processAsistenciasSemana, formatMinutesToHours, formatHoraDisplay } from './asistenciaUtils';
+import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay } from './asistenciaUtils';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
 // Esto evita ~959 KB en el bundle principal de la app
@@ -1705,6 +1705,436 @@ export const ReportGenerator = {
       `Reporte Asistencia ${empleado.nombre}`
     );
   },
+
+  /**
+   * Genera el Reporte General de Asistencia Mensual en PDF
+   */
+  async exportReporteAsistenciaMensualGeneralPDF(
+    asistencias: Asistencia[],
+    personal: Usuario[],
+    monthDateInput?: Date | string | { year: number; month: number }
+  ): Promise<void> {
+    const range = getMonthRange(monthDateInput);
+    const branding = await getCompanyBranding();
+
+    const asistenciasPorEmpleado = new Map<string, Asistencia[]>();
+    for (const a of asistencias) {
+      const empId = a.empleado_id;
+      if (!empId) continue;
+      const list = asistenciasPorEmpleado.get(empId) || [];
+      list.push(a);
+      asistenciasPorEmpleado.set(empId, list);
+    }
+
+    const personalTarget = (personal || []).filter(
+      p => p.rol === 'EMPLEADO' || p.rol === 'ADMIN' || asistenciasPorEmpleado.has(p.id)
+    );
+
+    let totalMinutosEmpresa = 0;
+    let totalMinutosRegularesEmpresa = 0;
+    let totalMinutosExtrasEmpresa = 0;
+    let totalTurnosEmpresa = 0;
+    let empleadosConRegistro = 0;
+
+    let empleadosHtml = '';
+
+    for (const emp of personalTarget) {
+      const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
+      const mesData = processAsistenciasMes(asistenciasEmp, range.startDate);
+
+      if (mesData.turnosTotales > 0) {
+        empleadosConRegistro++;
+        totalMinutosEmpresa += mesData.totalMinutosPeriodo;
+        totalMinutosRegularesEmpresa += mesData.totalMinutosRegulares;
+        totalMinutosExtrasEmpresa += mesData.totalMinutosExtra;
+        totalTurnosEmpresa += mesData.turnosTotales;
+      }
+
+      let diasHtml = '';
+      const diasConTurnos = mesData.dias.filter(d => d.turnos.length > 0);
+
+      if (diasConTurnos.length === 0) {
+        diasHtml = `
+          <tr>
+            <td colspan="5" style="text-align: center; color: #888; font-style: italic; padding: 10px;">
+              Sin registros de asistencia en este mes
+            </td>
+          </tr>
+        `;
+      } else {
+        for (const dia of diasConTurnos) {
+          for (const turno of dia.turnos) {
+            diasHtml += `
+              <tr>
+                <td style="font-weight: 600; color: #0d1b2a;">
+                  ${dia.dayName} ${dia.shortDate}
+                </td>
+                <td style="text-align: center;">
+                  <span style="background-color: #64748b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold;">
+                    Turno #${turno.index}
+                  </span>
+                </td>
+                <td>
+                  <span style="color: #16a34a; font-weight: bold;">📥 ${turno.hora_entrada}</span>
+                  ${turno.direccion_entrada ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_entrada}</div>` : ''}
+                </td>
+                <td>
+                  <span style="color: ${turno.hora_salida ? '#0284c7' : '#d97706'}; font-weight: bold;">
+                    ${turno.hora_salida ? `📤 ${turno.hora_salida}` : '⏳ Pendiente'}
+                  </span>
+                  ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
+                </td>
+                <td style="text-align: right; font-weight: bold;">
+                  <span style="color: ${turno.enCurso ? '#d97706' : '#16a34a'};">${turno.duracionStr}</span>
+                </td>
+              </tr>
+            `;
+          }
+        }
+      }
+
+      empleadosHtml += `
+        <div style="margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; page-break-inside: avoid;">
+          <div style="background-color: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <span style="font-size: 13px; font-weight: bold; color: #0f172a;">👤 ${emp.nombre}</span>
+              <span style="margin-left: 8px; font-size: 10px; background-color: #e2e8f0; color: #475569; padding: 2px 6px; border-radius: 4px;">${emp.rol || 'EMPLEADO'}</span>
+              ${emp.sucursal ? `<span style="margin-left: 6px; font-size: 10px; color: #64748b;">(${emp.sucursal})</span>` : ''}
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="font-size: 10px; color: #64748b;">Días laborados: <b>${mesData.diasLaborados}</b></span>
+              <span style="background-color: #f1f5f9; color: #0f172a; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 12px;">
+                Total: ${mesData.totalHorasPeriodoStr}
+              </span>
+            </div>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+            <thead>
+              <tr style="background-color: #f1f5f9; color: #475569; text-transform: uppercase; font-size: 9px;">
+                <th style="padding: 6px 10px; text-align: left; width: 18%;">Día / Fecha</th>
+                <th style="padding: 6px 8px; text-align: center; width: 12%;">Turno</th>
+                <th style="padding: 6px 10px; text-align: left; width: 32%;">Entrada</th>
+                <th style="padding: 6px 10px; text-align: left; width: 32%;">Salida</th>
+                <th style="padding: 6px 10px; text-align: right; width: 16%;">Duración</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${diasHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Reporte General de Asistencia Mensual</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            margin: 0;
+            padding: 24px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @page {
+            size: letter;
+            margin: 12mm;
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 20px;
+            font-weight: bold;
+            margin: 0;
+          }
+          .summary-grid {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 10px;
+          }
+          .summary-card {
+            flex: 1;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+          }
+          .summary-card .value {
+            font-size: 15px;
+            font-weight: bold;
+            color: #0d1b2a;
+            margin-top: 3px;
+          }
+          .summary-card .label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: bold;
+          }
+          table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid #f1f5f9;
+          }
+          .footer {
+            margin-top: 25px;
+            text-align: center;
+            font-size: 9px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 8px;
+          }
+          .logo-img {
+            max-height: 44px;
+            max-width: 170px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <table style="width: 100%; border-collapse: collapse; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 14px; border: none;">
+          <tr>
+            <td style="vertical-align: middle; border: none; padding: 0;">
+              <h1 class="title">Reporte General de Asistencia Mensual</h1>
+              <p style="margin: 4px 0 0 0; font-size: 12px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
+            </td>
+            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
+              ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
+            </td>
+          </tr>
+        </table>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div class="label">Personal Activo</div>
+            <div class="value">${empleadosConRegistro} de ${personalTarget.length}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Total Horas Empresa</div>
+            <div class="value" style="color: #0f172a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Turnos Registrados</div>
+            <div class="value" style="color: #0284c7;">${totalTurnosEmpresa}</div>
+          </div>
+        </div>
+
+        ${empleadosHtml}
+
+        <div class="footer">
+          Sistema Inttec & Daravisa - Reporte Oficial de Asistencias Mensuales - Documento Confidencial
+        </div>
+      </body>
+      </html>
+    `;
+
+    await ReportGenerator._printOrShareHtml(
+      htmlContent,
+      `reporte_asistencia_general_${range.startStr}.pdf`,
+      'Reporte General de Asistencia Mensual PDF'
+    );
+  },
+
+  /**
+   * Genera el Reporte Individual de Asistencia Mensual en PDF para un empleado
+   */
+  async exportReporteAsistenciaMensualEmpleadoPDF(
+    asistencias: Asistencia[],
+    empleado: Usuario,
+    monthDateInput?: Date | string | { year: number; month: number }
+  ): Promise<void> {
+    const range = getMonthRange(monthDateInput);
+    const branding = await getCompanyBranding();
+    const mesData = processAsistenciasMes(asistencias, range.startDate);
+
+    let diasHtml = '';
+    for (const dia of mesData.dias) {
+      if (dia.turnos.length === 0) {
+        diasHtml += `
+          <tr>
+            <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+            <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
+          </tr>
+        `;
+      } else {
+        dia.turnos.forEach((turno, idx) => {
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">
+                ${idx === 0 ? `${dia.dayName} ${dia.shortDate}` : `<span style="color: #94a3b8; font-size: 8px;">↳ ${dia.dayName}</span>`}
+              </td>
+              <td style="text-align: center;">
+                <span style="background-color: #64748b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold;">
+                  Turno #${turno.index}
+                </span>
+              </td>
+              <td>
+                <span style="color: #16a34a; font-weight: bold;">📥 ${turno.hora_entrada}</span>
+                ${turno.direccion_entrada ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_entrada}</div>` : ''}
+              </td>
+              <td>
+                <span style="color: ${turno.hora_salida ? '#0284c7' : '#d97706'}; font-weight: bold;">
+                  ${turno.hora_salida ? `📤 ${turno.hora_salida}` : '⏳ Pendiente'}
+                </span>
+                ${turno.direccion_salida ? `<div style="font-size: 8px; color: #666; margin-top: 2px;">📍 ${turno.direccion_salida}</div>` : ''}
+              </td>
+              <td style="text-align: right; font-weight: bold;">
+                <span style="color: ${turno.enCurso ? '#d97706' : '#16a34a'};">${turno.duracionStr}</span>
+              </td>
+            </tr>
+          `;
+        });
+      }
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Reporte Individual de Asistencia Mensual</title>
+        <style>
+          body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            margin: 0;
+            padding: 24px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          @page {
+            size: letter;
+            margin: 12mm;
+          }
+          .title {
+            color: #0d1b2a;
+            font-size: 20px;
+            font-weight: bold;
+            margin: 0;
+          }
+          .summary-grid {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 10px;
+          }
+          .summary-card {
+            flex: 1;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+          }
+          .summary-card .value {
+            font-size: 15px;
+            font-weight: bold;
+            color: #0d1b2a;
+            margin-top: 3px;
+          }
+          .summary-card .label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: bold;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+          }
+          table th {
+            background-color: #f1f5f9;
+            color: #475569;
+            text-transform: uppercase;
+            font-size: 9px;
+            padding: 7px 10px;
+            text-align: left;
+            border-bottom: 1px solid #cbd5e1;
+          }
+          table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid #f1f5f9;
+          }
+          .footer {
+            margin-top: 25px;
+            text-align: center;
+            font-size: 9px;
+            color: #94a3b8;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 8px;
+          }
+          .logo-img {
+            max-height: 44px;
+            max-width: 170px;
+            object-fit: contain;
+          }
+        </style>
+      </head>
+      <body>
+        <table style="width: 100%; border-collapse: collapse; border-bottom: 2px solid #0d1b2a; padding-bottom: 10px; margin-bottom: 14px; border: none;">
+          <tr>
+            <td style="vertical-align: middle; border: none; padding: 0;">
+              <h1 class="title">Reporte Individual de Asistencia Mensual</h1>
+              <p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0f172a;">👤 ${empleado.nombre}</p>
+              <p style="margin: 2px 0 0 0; font-size: 11px; color: #0284c7; font-weight: bold;">📅 ${range.label}</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'}</p>
+            </td>
+            <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
+              ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
+            </td>
+          </tr>
+        </table>
+
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div class="label">Días Laborados</div>
+            <div class="value">${mesData.diasLaborados} de ${range.totalDays}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Turnos Registrados</div>
+            <div class="value">${mesData.turnosTotales}</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Total Horas Mes</div>
+            <div class="value" style="color: #0f172a;">${mesData.totalHorasPeriodoStr}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 18%;">Día / Fecha</th>
+              <th style="width: 12%; text-align: center;">Turno</th>
+              <th style="width: 32%;">Entrada</th>
+              <th style="width: 32%;">Salida</th>
+              <th style="width: 16%; text-align: right;">Duración</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${diasHtml}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Sistema Inttec & Daravisa - Reporte Oficial de Asistencias - Documento Confidencial
+        </div>
+      </body>
+      </html>
+    `;
+
+    const safeName = (empleado.nombre || 'empleado').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    await ReportGenerator._printOrShareHtml(
+      htmlContent,
+      `reporte_asistencia_${safeName}_${range.startStr}.pdf`,
+      `Reporte Asistencia Mensual ${empleado.nombre}`
+    );
+  },
   async exportInventarioToPDF(
     productos: ReportProducto[],
     categorias: ReportCategoria[],
@@ -3190,6 +3620,10 @@ export const ReportGenerator = {
      * Exporta el Reporte General de Asistencia Semanal en formato Excel XLSX
      * Incluye resumen por empleado, horas totales de la semana y el subíndice detallado de cada turno por día
      */
+    /**
+     * Exporta el Reporte General de Asistencia Semanal en formato Excel XLSX
+     * Formato limpio simplificado para RRHH con detalle de turnos por día
+     */
     async exportReporteAsistenciaSemanalGeneralXLSX(
       asistencias: Asistencia[],
       personal: Usuario[],
@@ -3211,25 +3645,17 @@ export const ReportGenerator = {
       );
 
       const headers = [
-        'Semana',
+        'Período',
         'Empleado',
-        'Rol',
-        'Sucursal',
         'Fecha',
         'Día',
-        'Subíndice Turno',
+        'Turno',
         'Hora Entrada',
-        'Dirección Entrada',
+        'Lugar Entrada',
         'Hora Salida',
-        'Dirección Salida',
-        'Duración Turno',
-        'Regulares Turno',
-        'Extras Turno',
+        'Lugar Salida',
         'Total Horas Día',
-        'Extras Día',
-        'Total Horas Semana',
-        'Total Regulares Semana',
-        'Total Extras Semana'
+        'Total Horas Período'
       ];
 
       const rows: any[][] = [];
@@ -3246,8 +3672,6 @@ export const ReportGenerator = {
               rows.push([
                 range.label,
                 emp.nombre,
-                emp.rol || 'EMPLEADO',
-                emp.sucursal || 'N/A',
                 dia.dateStr,
                 dia.dayName,
                 `Turno #${turno.index}`,
@@ -3255,14 +3679,8 @@ export const ReportGenerator = {
                 turno.direccion_entrada || '',
                 turno.hora_salida || 'Pendiente',
                 turno.direccion_salida || '',
-                turno.duracionStr,
-                turno.horasRegularesStr,
-                turno.horasExtraStr,
                 dia.totalHorasStr,
-                dia.horasExtraStr,
-                semanaData.totalHorasSemanaStr,
-                semanaData.totalHorasRegularesStr,
-                semanaData.totalHorasExtraStr
+                semanaData.totalHorasSemanaStr
               ]);
             }
           }
@@ -3272,8 +3690,6 @@ export const ReportGenerator = {
           rows.push([
             range.label,
             emp.nombre,
-            emp.rol || 'EMPLEADO',
-            emp.sucursal || 'N/A',
             '-',
             '-',
             'Sin registros',
@@ -3281,12 +3697,6 @@ export const ReportGenerator = {
             '',
             '-',
             '',
-            '0h 0m',
-            '0h 0m',
-            '0h 0m',
-            '0h 0m',
-            '0h 0m',
-            '0h 0m',
             '0h 0m',
             '0h 0m'
           ]);
@@ -3310,22 +3720,17 @@ export const ReportGenerator = {
       const semanaData = processAsistenciasSemana(asistencias, range.mondayDate);
 
       const headers = [
-        'Semana',
+        'Período',
         'Empleado',
         'Fecha',
         'Día',
-        'Turno #',
+        'Turno',
         'Hora Entrada',
-        'Dirección Entrada',
+        'Lugar Entrada',
         'Hora Salida',
-        'Dirección Salida',
-        'Duración Turno',
-        'Regulares Turno',
-        'Extras Turno',
+        'Lugar Salida',
         'Total Horas Día',
-        'Extras Día',
-        'Total Horas Semana',
-        'Total Extras Semana'
+        'Total Horas Período'
       ];
 
       const rows: any[][] = [];
@@ -3343,13 +3748,8 @@ export const ReportGenerator = {
               turno.direccion_entrada || '',
               turno.hora_salida || 'Pendiente',
               turno.direccion_salida || '',
-              turno.duracionStr,
-              turno.horasRegularesStr,
-              turno.horasExtraStr,
               dia.totalHorasStr,
-              dia.horasExtraStr,
-              semanaData.totalHorasSemanaStr,
-              semanaData.totalHorasExtraStr
+              semanaData.totalHorasSemanaStr
             ]);
           }
         } else {
@@ -3364,12 +3764,7 @@ export const ReportGenerator = {
             '-',
             '',
             '0h 0m',
-            '0h 0m',
-            '0h 0m',
-            '0h 0m',
-            '0h 0m',
-            semanaData.totalHorasSemanaStr,
-            semanaData.totalHorasExtraStr
+            semanaData.totalHorasSemanaStr
           ]);
         }
       }
@@ -3377,6 +3772,159 @@ export const ReportGenerator = {
       const safeName = (empleado.nombre || 'empleado').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
       const targetFileName = fileName || `reporte_asistencia_${safeName}_${range.mondayStr}.xlsx`;
       await ReportGenerator._exportArrayToXLSX('Asistencia Semanal', headers, rows, targetFileName);
+    },
+
+    /**
+     * Exporta el Reporte General de Asistencia Mensual en formato Excel XLSX
+     */
+    async exportReporteAsistenciaMensualGeneralXLSX(
+      asistencias: Asistencia[],
+      personal: Usuario[],
+      monthDateInput?: Date | string | { year: number; month: number },
+      fileName?: string
+    ): Promise<void> {
+      const range = getMonthRange(monthDateInput);
+      const asistenciasPorEmpleado = new Map<string, Asistencia[]>();
+      for (const a of asistencias) {
+        const empId = a.empleado_id;
+        if (!empId) continue;
+        const list = asistenciasPorEmpleado.get(empId) || [];
+        list.push(a);
+        asistenciasPorEmpleado.set(empId, list);
+      }
+
+      const personalTarget = (personal || []).filter(
+        p => p.rol === 'EMPLEADO' || p.rol === 'ADMIN' || asistenciasPorEmpleado.has(p.id)
+      );
+
+      const headers = [
+        'Período',
+        'Empleado',
+        'Fecha',
+        'Día',
+        'Turno',
+        'Hora Entrada',
+        'Lugar Entrada',
+        'Hora Salida',
+        'Lugar Salida',
+        'Total Horas Día',
+        'Total Horas Período'
+      ];
+
+      const rows: any[][] = [];
+
+      for (const emp of personalTarget) {
+        const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
+        const mesData = processAsistenciasMes(asistenciasEmp, range.startDate);
+
+        let tieneRegistros = false;
+        for (const dia of mesData.dias) {
+          if (dia.turnos.length > 0) {
+            tieneRegistros = true;
+            for (const turno of dia.turnos) {
+              rows.push([
+                range.label,
+                emp.nombre,
+                dia.dateStr,
+                dia.dayName,
+                `Turno #${turno.index}`,
+                turno.hora_entrada,
+                turno.direccion_entrada || '',
+                turno.hora_salida || 'Pendiente',
+                turno.direccion_salida || '',
+                dia.totalHorasStr,
+                mesData.totalHorasPeriodoStr
+              ]);
+            }
+          }
+        }
+
+        if (!tieneRegistros) {
+          rows.push([
+            range.label,
+            emp.nombre,
+            '-',
+            '-',
+            'Sin registros',
+            '-',
+            '',
+            '-',
+            '',
+            '0h 0m',
+            '0h 0m'
+          ]);
+        }
+      }
+
+      const targetFileName = fileName || `reporte_asistencia_general_${range.startStr}.xlsx`;
+      await ReportGenerator._exportArrayToXLSX('Asistencia Mensual', headers, rows, targetFileName);
+    },
+
+    /**
+     * Exporta el Reporte Individual de Asistencia Mensual en formato Excel XLSX para un empleado
+     */
+    async exportReporteAsistenciaMensualEmpleadoXLSX(
+      asistencias: Asistencia[],
+      empleado: Usuario,
+      monthDateInput?: Date | string | { year: number; month: number },
+      fileName?: string
+    ): Promise<void> {
+      const range = getMonthRange(monthDateInput);
+      const mesData = processAsistenciasMes(asistencias, range.startDate);
+
+      const headers = [
+        'Período',
+        'Empleado',
+        'Fecha',
+        'Día',
+        'Turno',
+        'Hora Entrada',
+        'Lugar Entrada',
+        'Hora Salida',
+        'Lugar Salida',
+        'Total Horas Día',
+        'Total Horas Período'
+      ];
+
+      const rows: any[][] = [];
+
+      for (const dia of mesData.dias) {
+        if (dia.turnos.length > 0) {
+          for (const turno of dia.turnos) {
+            rows.push([
+              range.label,
+              empleado.nombre,
+              dia.dateStr,
+              dia.dayName,
+              `Turno #${turno.index}`,
+              turno.hora_entrada,
+              turno.direccion_entrada || '',
+              turno.hora_salida || 'Pendiente',
+              turno.direccion_salida || '',
+              dia.totalHorasStr,
+              mesData.totalHorasPeriodoStr
+            ]);
+          }
+        } else {
+          rows.push([
+            range.label,
+            empleado.nombre,
+            dia.dateStr,
+            dia.dayName,
+            '-',
+            '-',
+            '',
+            '-',
+            '',
+            '0h 0m',
+            mesData.totalHorasPeriodoStr
+          ]);
+        }
+      }
+
+      const safeName = (empleado.nombre || 'empleado').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      const targetFileName = fileName || `reporte_asistencia_${safeName}_${range.startStr}.xlsx`;
+      await ReportGenerator._exportArrayToXLSX('Asistencia Mensual', headers, rows, targetFileName);
     },
     async exportInventarioToXLSX(productos: any[], categorias: ReportCategoria[], fileName: string = 'reporte_inventario.xlsx'): Promise<void> {
 

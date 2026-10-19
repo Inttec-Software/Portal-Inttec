@@ -11,10 +11,8 @@ import {
   Platform,
   Alert,
   RefreshControl,
-  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
@@ -39,6 +37,9 @@ import {
   getWeekRange,
   getPreviousWeekMonday,
   getNextWeekMonday,
+  getMonthRange,
+  getPreviousMonthDate,
+  getNextMonthDate,
   formatHoraDisplay,
   formatMinutesToHours,
   processAsistenciasSemana,
@@ -49,8 +50,6 @@ export default function AdminAsistencia() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { user: authUser, company } = useAuth();
-  const { width } = useWindowDimensions();
-  const isDesktop = Platform.OS === 'web' && width >= 900;
 
   const cleanFecha = (f?: string | null) => (f ? String(f).split('T')[0] : '');
 
@@ -59,7 +58,7 @@ export default function AdminAsistencia() {
   const [isLoadingPersonal, setIsLoadingPersonal] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Semana y Día seleccionado
+  // Navegación de período (semana)
   const [selectedMonday, setSelectedMonday] = useState<Date>(() => getWeekRange().mondayDate);
   const [selectedDayStr, setSelectedDayStr] = useState<string | null>(null);
   const [periodoModalVisible, setPeriodoModalVisible] = useState(false);
@@ -77,6 +76,9 @@ export default function AdminAsistencia() {
 
   // Exportación
   const [isExporting, setIsExporting] = useState(false);
+  const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [exportModalTipo, setExportModalTipo] = useState<'semanal' | 'mensual'>('mensual');
+  const [reportMonthDate, setReportMonthDate] = useState<Date>(() => new Date());
 
   // Visor de foto y mapa
   const [viewerVisible, setViewerVisible] = useState(false);
@@ -105,22 +107,12 @@ export default function AdminAsistencia() {
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const [checadorResultMsg, setChecadorResultMsg] = useState('');
   const [checadorResultType, setChecadorResultType] = useState<'entrada' | 'salida'>('entrada');
-  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
-
   const cameraRef = useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const dateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Cargar datos iniciales
-  useEffect(() => {
-    cargarDatosGenerales();
-    if (authUser?.id) {
-      cargarEstadoChecadorAdmin();
-    }
-  }, [company, selectedMonday]);
-
   // Cargar estado de asistencia del admin logueado
-  const cargarEstadoChecadorAdmin = async () => {
+  const cargarEstadoChecadorAdmin = useCallback(async () => {
     if (!authUser?.id) return;
     try {
       setIsLoadingAdminChecador(true);
@@ -131,16 +123,18 @@ export default function AdminAsistencia() {
     } finally {
       setIsLoadingAdminChecador(false);
     }
-  };
+  }, [authUser?.id]);
 
   // Cargar lista de empleados y asistencias de la semana
-  const cargarDatosGenerales = async () => {
+  const cargarDatosGenerales = useCallback(async () => {
     setIsLoadingPersonal(true);
     setIsLoadingAsistencias(true);
 
     try {
       const headers = await getApiHeaders();
-      const range = getWeekRange(selectedMonday);
+      const rangeActivo = getWeekRange(selectedMonday);
+      const startStr = rangeActivo.mondayStr;
+      const endStr = rangeActivo.sundayStr;
 
       // 1. Cargar personal
       let usersList: Usuario[] = [];
@@ -154,17 +148,17 @@ export default function AdminAsistencia() {
           const { data: uData } = await client.from('usuarios').select('*').order('nombre');
           usersList = sortUsuariosByRoleAndName(uData || []);
         }
-      } catch (_) {
+      } catch {
         const client = company === 'daravisa' ? daravisaClient : inttecClient;
         const { data: uData } = await client.from('usuarios').select('*').order('nombre');
         usersList = sortUsuariosByRoleAndName(uData || []);
       }
       setPersonal(usersList);
 
-      // 2. Cargar asistencias de toda la semana
+      // 2. Cargar asistencias de la semana
       try {
         const resAsist = await fetch(
-          `${getApiUrl()}/api/reportes/admin/export/asistencias?startDate=${range.mondayStr}&endDate=${range.sundayStr}`,
+          `${getApiUrl()}/api/reportes/admin/export/asistencias?startDate=${startStr}&endDate=${endStr}`,
           { headers }
         );
         if (resAsist.ok) {
@@ -187,26 +181,44 @@ export default function AdminAsistencia() {
       setIsLoadingAsistencias(false);
       setRefreshing(false);
     }
-  };
+  }, [company, selectedMonday]);
+
+  // Cargar datos iniciales
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    cargarDatosGenerales();
+    if (authUser?.id) {
+      cargarEstadoChecadorAdmin();
+    }
+  }, [cargarDatosGenerales, cargarEstadoChecadorAdmin, authUser?.id]);
 
   const onRefresh = () => {
     setRefreshing(true);
     cargarDatosGenerales();
     cargarEstadoChecadorAdmin();
     if (selectedEmpleado) {
-      cargarAsistenciasEmpleado(selectedEmpleado.id, selectedMonday);
+      cargarAsistenciasEmpleado(
+        selectedEmpleado.id,
+        selectedMonday
+      );
     }
   };
 
   // Cargar asistencias detalladas de un empleado específico
-  const cargarAsistenciasEmpleado = async (empleadoId: string, monday: Date) => {
+  const cargarAsistenciasEmpleado = async (
+    empleadoId: string,
+    refDate: Date = selectedMonday
+  ) => {
     setIsLoadingEmpleadoDetalle(true);
     try {
-      const range = getWeekRange(monday);
+      const rangeActivo = getWeekRange(refDate);
+      const startStr = rangeActivo.mondayStr;
+      const endStr = rangeActivo.sundayStr;
+
       const hist = await AsistenciaService.getHistorialEmpleado(
         empleadoId,
-        range.mondayStr,
-        range.sundayStr
+        startStr,
+        endStr
       );
       setAsistenciasEmpleado((hist || []).map((a: Asistencia) => ({
         ...a,
@@ -227,7 +239,10 @@ export default function AdminAsistencia() {
 
   const handleSelectEmpleado = (emp: Usuario) => {
     setSelectedEmpleado(emp);
-    cargarAsistenciasEmpleado(emp.id, selectedMonday);
+    cargarAsistenciasEmpleado(
+      emp.id,
+      selectedMonday
+    );
   };
 
   const handleBackToList = () => {
@@ -277,9 +292,10 @@ export default function AdminAsistencia() {
     return map;
   }, [allAsistenciasSemana]);
 
-  // Información calculada para cada día de la semana (para la barra interactiva)
+  // Información calculada para cada día (para la barra interactiva)
   const diasSemanaInfo = useMemo(() => {
-    return rangeSemana.days.map((day) => {
+    const days = rangeSemana.days;
+    return days.map((day) => {
       const asistenciasDelDia = allAsistenciasSemana.filter((a) => cleanFecha(a.fecha) === day.dateStr);
       const uniqueEmpleadosCount = new Set(asistenciasDelDia.map((a) => a.empleado_id)).size;
       const enTurnoCount = asistenciasDelDia.filter((a) => a.hora_entrada && !a.hora_salida).length;
@@ -308,7 +324,7 @@ export default function AdminAsistencia() {
 
     return personal.map((emp) => {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-      const semanaProcesada = processAsistenciasSemana(asistenciasEmp, selectedMonday);
+      const periodoProcesado = processAsistenciasSemana(asistenciasEmp, selectedMonday);
 
       // Buscar asistencias del día objetivo (hoy o el seleccionado)
       const asistenciasTargetDia = asistenciasEmp.filter((a) => cleanFecha(a.fecha) === targetFecha);
@@ -349,19 +365,19 @@ export default function AdminAsistencia() {
         fotoEntradaHoy: fotoEntradaDia,
         isViewingToday,
         targetFecha,
-        totalMinutosSemana: semanaProcesada.totalMinutosSemana,
-        totalHorasFormateadas: semanaProcesada.totalHorasSemanaStr,
-        totalMinutosRegulares: semanaProcesada.totalMinutosRegulares,
-        totalHorasRegularesFormateadas: semanaProcesada.totalHorasRegularesStr,
-        totalMinutosExtra: semanaProcesada.totalMinutosExtra,
-        totalHorasExtraFormateadas: semanaProcesada.totalHorasExtraStr,
-        diasTrabajados: semanaProcesada.diasLaborados,
+        totalMinutosSemana: periodoProcesado.totalMinutosSemana,
+        totalHorasFormateadas: periodoProcesado.totalHorasSemanaStr,
+        totalMinutosRegulares: periodoProcesado.totalMinutosRegulares,
+        totalHorasRegularesFormateadas: periodoProcesado.totalHorasRegularesStr,
+        totalMinutosExtra: periodoProcesado.totalMinutosExtra,
+        totalHorasExtraFormateadas: periodoProcesado.totalHorasExtraStr,
+        diasTrabajados: periodoProcesado.diasLaborados,
         asistenciasCount: asistenciasEmp.length,
       };
     });
   }, [personal, asistenciasPorEmpleado, selectedMonday, fechaHoyJornada, selectedDayStr]);
 
-  // Estadísticas del día o de la semana
+  // Estadísticas del día o del período
   const statsHoy = useMemo(() => {
     let enTurno = 0;
     let completados = 0;
@@ -452,7 +468,7 @@ export default function AdminAsistencia() {
         selectedMonday
       );
     } catch (err: any) {
-      Alert.alert('Error al exportar PDF', err.message || 'No se pudo generar el reporte.');
+      Alert.alert('Error al exportar PDF', err.message || 'No se pudo generar el reporte individual.');
     } finally {
       setIsExporting(false);
     }
@@ -468,7 +484,97 @@ export default function AdminAsistencia() {
         selectedMonday
       );
     } catch (err: any) {
-      Alert.alert('Error al exportar Excel', err.message || 'No se pudo generar el archivo.');
+      Alert.alert('Error al exportar Excel', err.message || 'No se pudo generar el archivo individual.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportGeneralMensualPDF = async (monthDate: Date = reportMonthDate) => {
+    setIsExporting(true);
+    try {
+      const rangeMonth = getMonthRange(monthDate);
+      const headers = await getApiHeaders();
+      const res = await fetch(
+        `${getApiUrl()}/api/reportes/admin/export/asistencias?startDate=${rangeMonth.startDateStr}&endDate=${rangeMonth.endDateStr}`,
+        { headers }
+      );
+      if (!res.ok) throw new Error('Error al cargar datos del mes');
+      const asistData = await res.json();
+      await ReportGenerator.exportReporteAsistenciaMensualGeneralPDF(
+        asistData || [],
+        personal,
+        monthDate
+      );
+    } catch (err: any) {
+      Alert.alert('Error al generar PDF Mensual', err.message || 'No se pudo generar el reporte.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportGeneralMensualXLSX = async (monthDate: Date = reportMonthDate) => {
+    setIsExporting(true);
+    try {
+      const rangeMonth = getMonthRange(monthDate);
+      const headers = await getApiHeaders();
+      const res = await fetch(
+        `${getApiUrl()}/api/reportes/admin/export/asistencias?startDate=${rangeMonth.startDateStr}&endDate=${rangeMonth.endDateStr}`,
+        { headers }
+      );
+      if (!res.ok) throw new Error('Error al cargar datos del mes');
+      const asistData = await res.json();
+      await ReportGenerator.exportReporteAsistenciaMensualGeneralXLSX(
+        asistData || [],
+        personal,
+        monthDate
+      );
+    } catch (err: any) {
+      Alert.alert('Error al exportar Excel Mensual', err.message || 'No se pudo generar el archivo.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportIndividualMensualPDF = async (monthDate: Date = reportMonthDate) => {
+    if (!selectedEmpleado) return;
+    setIsExporting(true);
+    try {
+      const rangeMonth = getMonthRange(monthDate);
+      const hist = await AsistenciaService.getHistorialEmpleado(
+        selectedEmpleado.id,
+        rangeMonth.startDateStr,
+        rangeMonth.endDateStr
+      );
+      await ReportGenerator.exportReporteAsistenciaMensualEmpleadoPDF(
+        hist || [],
+        selectedEmpleado,
+        monthDate
+      );
+    } catch (err: any) {
+      Alert.alert('Error al exportar PDF Mensual', err.message || 'No se pudo generar el reporte.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportIndividualMensualXLSX = async (monthDate: Date = reportMonthDate) => {
+    if (!selectedEmpleado) return;
+    setIsExporting(true);
+    try {
+      const rangeMonth = getMonthRange(monthDate);
+      const hist = await AsistenciaService.getHistorialEmpleado(
+        selectedEmpleado.id,
+        rangeMonth.startDateStr,
+        rangeMonth.endDateStr
+      );
+      await ReportGenerator.exportReporteAsistenciaMensualEmpleadoXLSX(
+        hist || [],
+        selectedEmpleado,
+        monthDate
+      );
+    } catch (err: any) {
+      Alert.alert('Error al exportar Excel Mensual', err.message || 'No se pudo generar el archivo.');
     } finally {
       setIsExporting(false);
     }
@@ -605,7 +711,6 @@ export default function AdminAsistencia() {
         setChecadorResultMsg('Salida registrada exitosamente en Inttec y Daravisa');
       }
 
-      setCapturedPhotoUri(photo.uri);
       setChecadorResultType(tipoRegistro);
       setChecadorResultVisible(true);
 
@@ -653,6 +758,7 @@ export default function AdminAsistencia() {
                 style={[styles.quickCheckinBtn, { backgroundColor: isAdminInActiveShift ? '#ea580c' : '#16a34a' }]}
                 onPress={handleOpenChecadorAdmin}
                 activeOpacity={0.8}
+                disabled={isLoadingAdminChecador}
               >
                 <Ionicons name="camera-outline" size={16} color="#fff" />
                 <Text style={styles.quickCheckinBtnText}>
@@ -704,7 +810,7 @@ export default function AdminAsistencia() {
             {/* Acciones de exportación individual */}
             <View style={[styles.exportActionsRow, { borderTopColor: themeColors.border }]}>
               <CustomButton
-                title={isExporting ? 'Generando...' : 'Descargar PDF'}
+                title={isExporting ? 'Generando...' : 'Descargar PDF (Semana)'}
                 onPress={handleExportIndividualPDF}
                 variant="primary"
                 disabled={isExporting}
@@ -712,7 +818,7 @@ export default function AdminAsistencia() {
                 icon={<Ionicons name="document-text-outline" size={16} color="#fff" style={{ marginRight: 6 }} />}
               />
               <CustomButton
-                title={isExporting ? 'Generando...' : 'Descargar Excel'}
+                title={isExporting ? 'Generando...' : 'Descargar Excel (Semana)'}
                 onPress={handleExportIndividualXLSX}
                 variant="success"
                 disabled={isExporting}
@@ -733,6 +839,7 @@ export default function AdminAsistencia() {
               setSelectedMonday(newMonday);
               cargarAsistenciasEmpleado(selectedEmpleado.id, newMonday);
             }}
+            modo="semana"
             onViewFoto={(info) => {
               setActivePreviewUrl(info.url);
               setSelectedAsistenciaInfo(info);
@@ -767,6 +874,9 @@ export default function AdminAsistencia() {
           }}
         />
 
+        {/* Modal de Descarga de Reportes (Semanal o Mensual) */}
+        {renderModalDescargarReportes()}
+
         {/* Modales de checador del admin */}
         {renderModalesChecadorAdmin()}
       </View>
@@ -780,9 +890,9 @@ export default function AdminAsistencia() {
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {/* 1. Header Toolbar Compacto y Unificado */}
       <View style={[styles.headerToolbar, { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border }]}>
-        {/* Fila superior: Navegador de Semanas + Acciones Principales */}
+        {/* Fila superior: Navegador de Período (Semana) + Acciones Principales */}
         <View style={styles.headerTopRow}>
-          {/* Navegador de Semanas Moderno */}
+          {/* Navegador Semanal */}
           <View style={styles.weekNavCompact}>
             <TouchableOpacity
               style={[styles.weekNavBtnMini, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
@@ -849,12 +959,21 @@ export default function AdminAsistencia() {
               ]}
               onPress={handleOpenChecadorAdmin}
               activeOpacity={0.8}
+              disabled={isLoadingAdminChecador}
             >
               <View style={styles.pulseDot} />
               <Ionicons name="camera-outline" size={16} color="#fff" />
               <Text style={styles.quickCheckinBtnText}>
                 {isAdminInActiveShift ? 'Checar Salida Admin' : 'Checar Asistencia'}
               </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.iconBtnHeader, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+              onPress={() => setExportModalVisible(true)}
+              disabled={isExporting}
+            >
+              <Ionicons name="download-outline" size={18} color={themeColors.accent} />
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1287,7 +1406,7 @@ export default function AdminAsistencia() {
                         Semana: <Text style={{ fontWeight: '800', color: themeColors.text }}>{emp.totalHorasFormateadas || '0h 0m'}</Text>
                         {emp.diasTrabajados ? ` (${emp.diasTrabajados} d)` : ''}
                       </Text>
-                      {emp.totalMinutosExtra > 0 && (
+                      {(emp.totalMinutosExtra || 0) > 0 && (
                         <View style={styles.cardExtraHoursBadge}>
                           <Ionicons name="flame" size={12} color="#ea580c" />
                           <Text style={styles.cardExtraHoursText}>+{emp.totalHorasExtraFormateadas} extra</Text>
@@ -1330,10 +1449,185 @@ export default function AdminAsistencia() {
         }}
       />
 
+      {/* Modal de Descarga de Reportes (Semanal o Mensual) */}
+      {renderModalDescargarReportes()}
+
       {/* Modales de checador del admin */}
       {renderModalesChecadorAdmin()}
     </View>
   );
+
+  // ==========================================
+  // MODAL DE DESCARGA DE REPORTES (SEMANAL / MENSUAL)
+  // ==========================================
+  function renderModalDescargarReportes() {
+    return (
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={exportModalVisible}
+        onRequestClose={() => setExportModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, maxWidth: 440, width: '92%', borderRadius: BorderRadius.large, alignSelf: 'center', marginBottom: 'auto', marginTop: 'auto' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                  Descargar Reportes de Asistencia
+                </Text>
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
+                  {selectedEmpleado ? `Empleado: ${selectedEmpleado.nombre}` : 'Reporte General de la Empresa'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setExportModalVisible(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Selector de Modalidad: Semanal vs Mensual */}
+            <View style={{ flexDirection: 'row', backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, padding: 3, borderWidth: 1, borderColor: themeColors.border, gap: 4, marginTop: 12, marginBottom: 14 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  alignItems: 'center',
+                  borderRadius: BorderRadius.small,
+                  backgroundColor: exportModalTipo === 'semanal' ? themeColors.accent : 'transparent',
+                }}
+                onPress={() => setExportModalTipo('semanal')}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: exportModalTipo === 'semanal' ? '#fff' : themeColors.textSecondary }}>
+                  📅 Por Semana
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  alignItems: 'center',
+                  borderRadius: BorderRadius.small,
+                  backgroundColor: exportModalTipo === 'mensual' ? themeColors.accent : 'transparent',
+                }}
+                onPress={() => setExportModalTipo('mensual')}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: exportModalTipo === 'mensual' ? '#fff' : themeColors.textSecondary }}>
+                  🗓️ Por Mes
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Período seleccionado */}
+            {exportModalTipo === 'semanal' ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: themeColors.backgroundElement, padding: 10, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, marginBottom: 18 }}>
+                <TouchableOpacity
+                  onPress={() => setSelectedMonday(getPreviousWeekMonday(selectedMonday))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-back" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+                <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, textAlign: 'center' }}>
+                    {getWeekRange(selectedMonday).label}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setSelectedMonday(getNextWeekMonday(selectedMonday))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: themeColors.backgroundElement, padding: 10, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, marginBottom: 18 }}>
+                <TouchableOpacity
+                  onPress={() => setReportMonthDate(getPreviousMonthDate(reportMonthDate))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-back" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+                <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.accent, textAlign: 'center' }}>
+                    🗓️ {getMonthRange(reportMonthDate).label}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginTop: 1 }}>
+                    {getMonthRange(reportMonthDate).startDateStr} al {getMonthRange(reportMonthDate).endDateStr}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setReportMonthDate(getNextMonthDate(reportMonthDate))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Botones de Descarga */}
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+              <CustomButton
+                title={
+                  isExporting
+                    ? 'Generando...'
+                    : exportModalTipo === 'mensual'
+                    ? 'Descargar PDF'
+                    : 'Descargar PDF'
+                }
+                onPress={async () => {
+                  if (exportModalTipo === 'mensual') {
+                    if (selectedEmpleado) {
+                      await handleExportIndividualMensualPDF(reportMonthDate);
+                    } else {
+                      await handleExportGeneralMensualPDF(reportMonthDate);
+                    }
+                  } else {
+                    if (selectedEmpleado) {
+                      await handleExportIndividualPDF();
+                    } else {
+                      await handleExportGeneralPDF();
+                    }
+                  }
+                  setExportModalVisible(false);
+                }}
+                variant="primary"
+                disabled={isExporting}
+                style={{ flex: 1, height: 42 }}
+                icon={<Ionicons name="document-text-outline" size={17} color="#fff" style={{ marginRight: 6 }} />}
+              />
+              <CustomButton
+                title={
+                  isExporting
+                    ? 'Generando...'
+                    : exportModalTipo === 'mensual'
+                    ? 'Descargar Excel'
+                    : 'Descargar Excel'
+                }
+                onPress={async () => {
+                  if (exportModalTipo === 'mensual') {
+                    if (selectedEmpleado) {
+                      await handleExportIndividualMensualXLSX(reportMonthDate);
+                    } else {
+                      await handleExportGeneralMensualXLSX(reportMonthDate);
+                    }
+                  } else {
+                    if (selectedEmpleado) {
+                      await handleExportIndividualXLSX();
+                    } else {
+                      await handleExportGeneralXLSX();
+                    }
+                  }
+                  setExportModalVisible(false);
+                }}
+                variant="success"
+                disabled={isExporting}
+                style={{ flex: 1, height: 42 }}
+                icon={<Ionicons name="download-outline" size={17} color="#fff" style={{ marginRight: 6 }} />}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
 
   // ==========================================
   // MODALES DEL AUTO-CHECADOR DEL ADMINISTRADOR
@@ -1578,6 +1872,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  modoPillBtn: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   weekNavCompact: {
     flexDirection: 'row',

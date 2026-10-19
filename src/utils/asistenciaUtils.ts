@@ -60,6 +60,8 @@ export interface SemanaAsistencia {
   dias: DiaAsistencia[];
   totalMinutosSemana: number;
   totalHorasSemanaStr: string;
+  totalMinutosPeriodo: number;
+  totalHorasPeriodoStr: string;
   totalMinutosRegulares: number;
   totalHorasRegularesStr: string;
   totalMinutosExtra: number;
@@ -271,6 +273,102 @@ export function getNextWeekMonday(currentMondayDate: Date): Date {
   return next;
 }
 
+export const NOMBRES_MESES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
+export interface MonthRange {
+  startDate: Date;
+  endDate: Date;
+  startStr: string; // YYYY-MM-DD
+  endStr: string;   // YYYY-MM-DD
+  startDateStr: string; // YYYY-MM-DD
+  endDateStr: string;   // YYYY-MM-DD
+  label: string;    // "Octubre 2026"
+  days: WeekDayInfo[];
+  year: number;
+  month: number;    // 0 - 11
+  totalDays: number;
+}
+
+/**
+ * Obtiene el rango completo de un mes dado (primer día al último día)
+ */
+export function getMonthRange(dateInput?: Date | string | { year: number; month: number }): MonthRange {
+  let year: number;
+  let month: number;
+
+  if (dateInput && typeof dateInput === 'object' && 'year' in dateInput && 'month' in dateInput) {
+    year = dateInput.year;
+    month = dateInput.month;
+  } else if (typeof dateInput === 'string') {
+    const parsed = parseLocalYMD(dateInput);
+    year = parsed.getFullYear();
+    month = parsed.getMonth();
+  } else if (dateInput instanceof Date) {
+    year = dateInput.getFullYear();
+    month = dateInput.getMonth();
+  } else {
+    const now = new Date();
+    year = now.getFullYear();
+    month = now.getMonth();
+  }
+
+  const startDate = new Date(year, month, 1);
+  startDate.setHours(0, 0, 0, 0);
+
+  const endDate = new Date(year, month + 1, 0);
+  endDate.setHours(23, 59, 59, 999);
+
+  const startStr = formatDateToLocalYMD(startDate);
+  const endStr = formatDateToLocalYMD(endDate);
+  const todayStr = formatDateToLocalYMD(new Date());
+
+  const daysCount = endDate.getDate();
+  const days: WeekDayInfo[] = [];
+
+  for (let i = 1; i <= daysCount; i++) {
+    const d = new Date(year, month, i);
+    const dateStr = formatDateToLocalYMD(d);
+    const dayOfWeek = d.getDay();
+    const dayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const dayMonth = `${String(i).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}`;
+
+    days.push({
+      dateStr,
+      dayName: NOMBRES_DIAS[dayIndex],
+      shortDate: dayMonth,
+      date: d,
+      isToday: dateStr === todayStr,
+    });
+  }
+
+  const label = `${NOMBRES_MESES[month]} ${year}`;
+
+  return {
+    startDate,
+    endDate,
+    startStr,
+    endStr,
+    startDateStr: startStr,
+    endDateStr: endStr,
+    label,
+    days,
+    year,
+    month,
+    totalDays: daysCount,
+  };
+}
+
+export function getPreviousMonthDate(currentDate: Date): Date {
+  return new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+}
+
+export function getNextMonthDate(currentDate: Date): Date {
+  return new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1);
+}
+
 /**
  * Procesa una lista de asistencias y las organiza en la semana solicitada con cálculo de horas regulares (8 a 6) y horas extras
  */
@@ -411,6 +509,8 @@ export function processAsistenciasSemana(
     dias,
     totalMinutosSemana,
     totalHorasSemanaStr: formatMinutesToHours(totalMinutosSemana),
+    totalMinutosPeriodo: totalMinutosSemana,
+    totalHorasPeriodoStr: formatMinutesToHours(totalMinutosSemana),
     totalMinutosRegulares,
     totalHorasRegularesStr: formatMinutesToHours(totalMinutosRegulares),
     totalMinutosExtra,
@@ -418,4 +518,170 @@ export function processAsistenciasSemana(
     diasLaborados,
     turnosTotales,
   };
+}
+
+export interface PeriodoAsistencia {
+  rangeLabel: string;
+  startStr: string;
+  endStr: string;
+  dias: DiaAsistencia[];
+  totalMinutosPeriodo: number;
+  totalHorasPeriodoStr: string;
+  totalMinutosSemana: number;
+  totalHorasSemanaStr: string;
+  totalMinutosRegulares: number;
+  totalHorasRegularesStr: string;
+  totalMinutosExtra: number;
+  totalHorasExtraStr: string;
+  diasLaborados: number;
+  turnosTotales: number;
+}
+
+/**
+ * Procesa una lista de asistencias para un rango genérico (mes, semana o personalizado)
+ */
+export function processAsistenciasPeriodo(
+  asistencias: Asistencia[],
+  range: { startStr: string; endStr: string; days: WeekDayInfo[]; label: string }
+): PeriodoAsistencia {
+  // Filtrar registros que caigan dentro del rango
+  const asistenciasPeriodo = (asistencias || []).filter((a) => {
+    return a.fecha >= range.startStr && a.fecha <= range.endStr;
+  });
+
+  const porFecha = new Map<string, Asistencia[]>();
+  for (const a of asistenciasPeriodo) {
+    const list = porFecha.get(a.fecha) || [];
+    list.push(a);
+    porFecha.set(a.fecha, list);
+  }
+
+  let totalMinutosPeriodo = 0;
+  let diasLaborados = 0;
+  let turnosTotales = 0;
+
+  const hoyStr = formatDateToLocalYMD(new Date());
+
+  const dias: DiaAsistencia[] = range.days.map((dayInfo) => {
+    const items = porFecha.get(dayInfo.dateStr) || [];
+
+    items.sort((a, b) => {
+      const hA = a.hora_entrada || '';
+      const hB = b.hora_entrada || '';
+      return hA.localeCompare(hB);
+    });
+
+    let minutosDia = 0;
+    let tieneTurnoEnCurso = false;
+
+    const turnos: TurnoAsistencia[] = items.map((item, idx) => {
+      const esDiaPasado = dayInfo.dateStr < hoyStr;
+      const sinSalida = !item.hora_salida;
+      const autoCerrado = sinSalida && esDiaPasado;
+      const enCurso = sinSalida && !esDiaPasado;
+
+      if (enCurso) {
+        tieneTurnoEnCurso = true;
+      }
+
+      const horaSalidaEfectiva = item.hora_salida || (autoCerrado ? '18:00:00' : null);
+
+      let mins = 0;
+      let regMins = 0;
+      let extMins = 0;
+
+      if (horaSalidaEfectiva) {
+        const desglose = calculateTurnoHorasDesglose(item.hora_entrada, horaSalidaEfectiva);
+        mins = desglose.totalMins;
+        regMins = desglose.regularesMins;
+        extMins = desglose.extrasMins;
+      }
+
+      minutosDia += mins;
+      turnosTotales++;
+
+      return {
+        id: item.id,
+        index: idx + 1,
+        hora_entrada: formatHoraDisplay(item.hora_entrada),
+        hora_salida: autoCerrado
+          ? '18:00 (Auto)'
+          : item.hora_salida
+          ? formatHoraDisplay(item.hora_salida)
+          : null,
+        foto_entrada_url: item.foto_entrada_url,
+        foto_salida_url: item.foto_salida_url,
+        direccion_entrada: item.direccion_entrada,
+        direccion_salida: autoCerrado
+          ? 'Cierre automático 6:00 PM (olvido de checada)'
+          : item.direccion_salida,
+        latitud_entrada: item.latitud_entrada,
+        longitud_entrada: item.longitud_entrada,
+        latitud_salida: item.latitud_salida,
+        longitud_salida: item.longitud_salida,
+        minutos: mins,
+        duracionStr: enCurso ? 'En curso' : formatMinutesToHours(mins),
+        minutosRegulares: regMins,
+        horasRegularesStr: formatMinutesToHours(regMins),
+        minutosExtra: extMins,
+        horasExtraStr: formatMinutesToHours(extMins),
+        enCurso,
+        autoCerrado,
+      };
+    });
+
+    if (minutosDia > 0 || turnos.length > 0) {
+      diasLaborados++;
+    }
+
+    totalMinutosPeriodo += minutosDia;
+
+    return {
+      dateStr: dayInfo.dateStr,
+      dayName: dayInfo.dayName,
+      shortDate: dayInfo.shortDate,
+      isToday: dayInfo.isToday,
+      totalMinutos: minutosDia,
+      totalHorasStr: formatMinutesToHours(minutosDia),
+      minutosRegulares: minutosDia,
+      horasRegularesStr: formatMinutesToHours(minutosDia),
+      minutosExtra: 0,
+      horasExtraStr: '0h 0m',
+      turnos,
+      tieneTurnoEnCurso,
+    };
+  });
+
+  return {
+    rangeLabel: range.label,
+    startStr: range.startStr,
+    endStr: range.endStr,
+    dias,
+    totalMinutosPeriodo,
+    totalHorasPeriodoStr: formatMinutesToHours(totalMinutosPeriodo),
+    totalMinutosSemana: totalMinutosPeriodo,
+    totalHorasSemanaStr: formatMinutesToHours(totalMinutosPeriodo),
+    totalMinutosRegulares: totalMinutosPeriodo,
+    totalHorasRegularesStr: formatMinutesToHours(totalMinutosPeriodo),
+    totalMinutosExtra: 0,
+    totalHorasExtraStr: '0h 0m',
+    diasLaborados,
+    turnosTotales,
+  };
+}
+
+/**
+ * Procesa una lista de asistencias agrupadas por el mes solicitado
+ */
+export function processAsistenciasMes(
+  asistencias: Asistencia[],
+  monthDateInput?: Date | string | { year: number; month: number }
+): PeriodoAsistencia {
+  const range = getMonthRange(monthDateInput);
+  return processAsistenciasPeriodo(asistencias, {
+    startStr: range.startStr,
+    endStr: range.endStr,
+    days: range.days,
+    label: range.label,
+  });
 }

@@ -34,7 +34,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
-import { getWeekRange, getPreviousWeekMonday, getNextWeekMonday } from '@/utils/asistenciaUtils';
+import { getWeekRange, getPreviousWeekMonday, getNextWeekMonday, getMonthRange, getPreviousMonthDate, getNextMonthDate } from '@/utils/asistenciaUtils';
 import GastoFotosGallery from '@/components/GastoFotosGallery';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -112,6 +112,7 @@ export default function ReportesScreen() {
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
   const [rejectionFeedback, setRejectionFeedback] = useState('');
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
+  const [feedbackActionType, setFeedbackActionType] = useState<'REJECTED' | 'ACTION_REQUIRED'>('ACTION_REQUIRED');
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
@@ -179,6 +180,8 @@ export default function ReportesScreen() {
   // Filtros específicos para Reporte de Asistencia
   const [asistenciaReportEmpleadoId, setAsistenciaReportEmpleadoId] = useState<string>('todos');
   const [asistenciaSelectedMonday, setAsistenciaSelectedMonday] = useState<Date>(() => getWeekRange().mondayDate);
+  const [asistenciaModo, setAsistenciaModo] = useState<'mes' | 'semana'>('mes');
+  const [asistenciaSelectedMonth, setAsistenciaSelectedMonth] = useState<Date>(() => new Date());
 
   const [isFetchingAsistencias, setIsFetchingAsistencias] = useState(false);
   const [isFetchingInventario, setIsFetchingInventario] = useState(false);
@@ -1530,11 +1533,15 @@ export default function ReportesScreen() {
   const handleExportAsistenciasPDF = async () => {
     setIsFetchingAsistencias(true);
     try {
-      const range = getWeekRange(asistenciaSelectedMonday);
+      const isMes = asistenciaModo === 'mes';
+      const range = isMes ? getMonthRange(asistenciaSelectedMonth) : getWeekRange(asistenciaSelectedMonday);
+      const startStr = isMes ? (range as any).startStr : (range as any).mondayStr;
+      const endStr = isMes ? (range as any).endStr : (range as any).sundayStr;
+
       const headers = await getApiHeaders();
       const params = new URLSearchParams();
-      params.append('startDate', range.mondayStr);
-      params.append('endDate', range.sundayStr);
+      params.append('startDate', startStr);
+      params.append('endDate', endStr);
       if (asistenciaReportEmpleadoId !== 'todos') {
         params.append('empleado_id', asistenciaReportEmpleadoId);
       }
@@ -1543,20 +1550,38 @@ export default function ReportesScreen() {
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
 
-      if (asistenciaReportEmpleadoId === 'todos') {
-        await ReportGenerator.exportReporteAsistenciaSemanalGeneralPDF(
-          data || [],
-          personal,
-          asistenciaSelectedMonday
-        );
+      if (isMes) {
+        if (asistenciaReportEmpleadoId === 'todos') {
+          await ReportGenerator.exportReporteAsistenciaMensualGeneralPDF(
+            data || [],
+            personal,
+            asistenciaSelectedMonth
+          );
+        } else {
+          const emp = personal.find((p) => p.id === asistenciaReportEmpleadoId);
+          if (!emp) throw new Error('Empleado no encontrado');
+          await ReportGenerator.exportReporteAsistenciaMensualEmpleadoPDF(
+            data || [],
+            emp,
+            asistenciaSelectedMonth
+          );
+        }
       } else {
-        const emp = personal.find((p) => p.id === asistenciaReportEmpleadoId);
-        if (!emp) throw new Error('Empleado no encontrado');
-        await ReportGenerator.exportReporteAsistenciaEmpleadoPDF(
-          data || [],
-          emp,
-          asistenciaSelectedMonday
-        );
+        if (asistenciaReportEmpleadoId === 'todos') {
+          await ReportGenerator.exportReporteAsistenciaSemanalGeneralPDF(
+            data || [],
+            personal,
+            asistenciaSelectedMonday
+          );
+        } else {
+          const emp = personal.find((p) => p.id === asistenciaReportEmpleadoId);
+          if (!emp) throw new Error('Empleado no encontrado');
+          await ReportGenerator.exportReporteAsistenciaEmpleadoPDF(
+            data || [],
+            emp,
+            asistenciaSelectedMonday
+          );
+        }
       }
     } catch (err: any) {
       showAlert('Error PDF Asistencia', err.message || 'No se pudo generar el reporte.');
@@ -1568,11 +1593,15 @@ export default function ReportesScreen() {
   const handleExportAsistenciasCSV = async () => {
     setIsFetchingAsistencias(true);
     try {
-      const range = getWeekRange(asistenciaSelectedMonday);
+      const isMes = asistenciaModo === 'mes';
+      const range = isMes ? getMonthRange(asistenciaSelectedMonth) : getWeekRange(asistenciaSelectedMonday);
+      const startStr = isMes ? (range as any).startStr : (range as any).mondayStr;
+      const endStr = isMes ? (range as any).endStr : (range as any).sundayStr;
+
       const headers = await getApiHeaders();
       const params = new URLSearchParams();
-      params.append('startDate', range.mondayStr);
-      params.append('endDate', range.sundayStr);
+      params.append('startDate', startStr);
+      params.append('endDate', endStr);
       if (asistenciaReportEmpleadoId !== 'todos') {
         params.append('empleado_id', asistenciaReportEmpleadoId);
       }
@@ -1581,20 +1610,38 @@ export default function ReportesScreen() {
       if (!res.ok) throw new Error('Error al cargar datos');
       const data = await res.json();
 
-      if (asistenciaReportEmpleadoId === 'todos') {
-        await ReportGenerator.exportReporteAsistenciaSemanalGeneralXLSX(
-          data || [],
-          personal,
-          asistenciaSelectedMonday
-        );
+      if (isMes) {
+        if (asistenciaReportEmpleadoId === 'todos') {
+          await ReportGenerator.exportReporteAsistenciaMensualGeneralXLSX(
+            data || [],
+            personal,
+            asistenciaSelectedMonth
+          );
+        } else {
+          const emp = personal.find((p) => p.id === asistenciaReportEmpleadoId);
+          if (!emp) throw new Error('Empleado no encontrado');
+          await ReportGenerator.exportReporteAsistenciaMensualEmpleadoXLSX(
+            data || [],
+            emp,
+            asistenciaSelectedMonth
+          );
+        }
       } else {
-        const emp = personal.find((p) => p.id === asistenciaReportEmpleadoId);
-        if (!emp) throw new Error('Empleado no encontrado');
-        await ReportGenerator.exportReporteAsistenciaEmpleadoXLSX(
-          data || [],
-          emp,
-          asistenciaSelectedMonday
-        );
+        if (asistenciaReportEmpleadoId === 'todos') {
+          await ReportGenerator.exportReporteAsistenciaSemanalGeneralXLSX(
+            data || [],
+            personal,
+            asistenciaSelectedMonday
+          );
+        } else {
+          const emp = personal.find((p) => p.id === asistenciaReportEmpleadoId);
+          if (!emp) throw new Error('Empleado no encontrado');
+          await ReportGenerator.exportReporteAsistenciaEmpleadoXLSX(
+            data || [],
+            emp,
+            asistenciaSelectedMonday
+          );
+        }
       }
     } catch (err: any) {
       showAlert('Error Excel Asistencia', err.message || 'No se pudo generar el reporte.');
@@ -3061,33 +3108,100 @@ export default function ReportesScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
               <Ionicons name="time-outline" size={28} color={themeColors.accent} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Asistencia Semanal</Text>
+                <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Asistencia</Text>
                 <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                  Total de horas semanales, horas por día y subíndice detallado de turnos.
+                  Total de horas, horas por día y subíndice detallado de turnos laborados.
                 </Text>
               </View>
             </View>
 
-            {/* Selector de Semana */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: themeColors.background, padding: 8, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border }}>
+            {/* Selector de Modalidad (Mes vs Semana) */}
+            <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity
-                onPress={() => setAsistenciaSelectedMonday(getPreviousWeekMonday(asistenciaSelectedMonday))}
-                style={{ padding: 4 }}
+                onPress={() => setAsistenciaModo('mes')}
+                style={{
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingVertical: 7,
+                  borderRadius: BorderRadius.medium,
+                  backgroundColor: asistenciaModo === 'mes' ? themeColors.accent : themeColors.background,
+                  borderWidth: 1,
+                  borderColor: asistenciaModo === 'mes' ? themeColors.accent : themeColors.border,
+                  gap: 6,
+                }}
               >
-                <Ionicons name="chevron-back" size={20} color={themeColors.text} />
-              </TouchableOpacity>
-              <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, textAlign: 'center' }}>
-                  {getWeekRange(asistenciaSelectedMonday).label}
+                <Ionicons name="calendar" size={14} color={asistenciaModo === 'mes' ? '#fff' : themeColors.text} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: asistenciaModo === 'mes' ? '#fff' : themeColors.text }}>
+                  Por Mes
                 </Text>
-              </View>
+              </TouchableOpacity>
+
               <TouchableOpacity
-                onPress={() => setAsistenciaSelectedMonday(getNextWeekMonday(asistenciaSelectedMonday))}
-                style={{ padding: 4 }}
+                onPress={() => setAsistenciaModo('semana')}
+                style={{
+                  flex: 1,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingVertical: 7,
+                  borderRadius: BorderRadius.medium,
+                  backgroundColor: asistenciaModo === 'semana' ? themeColors.accent : themeColors.background,
+                  borderWidth: 1,
+                  borderColor: asistenciaModo === 'semana' ? themeColors.accent : themeColors.border,
+                  gap: 6,
+                }}
               >
-                <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+                <Ionicons name="calendar-outline" size={14} color={asistenciaModo === 'semana' ? '#fff' : themeColors.text} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: asistenciaModo === 'semana' ? '#fff' : themeColors.text }}>
+                  Por Semana
+                </Text>
               </TouchableOpacity>
             </View>
+
+            {/* Navegador del Período (Mes o Semana) */}
+            {asistenciaModo === 'mes' ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: themeColors.background, padding: 8, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border }}>
+                <TouchableOpacity
+                  onPress={() => setAsistenciaSelectedMonth(getPreviousMonthDate(asistenciaSelectedMonth))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-back" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+                <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.text, textAlign: 'center' }}>
+                    {getMonthRange(asistenciaSelectedMonth).label}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setAsistenciaSelectedMonth(getNextMonthDate(asistenciaSelectedMonth))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: themeColors.background, padding: 8, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border }}>
+                <TouchableOpacity
+                  onPress={() => setAsistenciaSelectedMonday(getPreviousWeekMonday(asistenciaSelectedMonday))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-back" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+                <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, textAlign: 'center' }}>
+                    {getWeekRange(asistenciaSelectedMonday).label}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setAsistenciaSelectedMonday(getNextWeekMonday(asistenciaSelectedMonday))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Selector de Tipo / Empleado */}
             <View>
@@ -3138,14 +3252,14 @@ export default function ReportesScreen() {
             {/* Botones de Descarga */}
             <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
               <CustomButton
-                title={asistenciaReportEmpleadoId === 'todos' ? 'PDF General' : 'PDF Individual'}
+                title={`${asistenciaModo === 'mes' ? 'PDF Mes' : 'PDF'} ${asistenciaReportEmpleadoId === 'todos' ? 'General' : 'Individual'}`}
                 onPress={handleExportAsistenciasPDF}
                 style={{ flex: 1, height: 38 }}
                 loading={isFetchingAsistencias}
                 icon={<Ionicons name="document-text-outline" size={16} color="#fff" style={{ marginRight: 6 }} />}
               />
               <CustomButton
-                title={asistenciaReportEmpleadoId === 'todos' ? 'Excel General' : 'Excel Individual'}
+                title={`${asistenciaModo === 'mes' ? 'Excel Mes' : 'Excel'} ${asistenciaReportEmpleadoId === 'todos' ? 'General' : 'Individual'}`}
                 onPress={handleExportAsistenciasCSV}
                 variant="success"
                 style={{ flex: 1, height: 38 }}
@@ -3719,15 +3833,21 @@ export default function ReportesScreen() {
                             />
                             <CustomButton
                               title="Rechazar"
-                              onPress={() => handleUpdateStatus('REJECTED')}
+                              onPress={() => {
+                                setFeedbackActionType('REJECTED');
+                                setShowFeedbackInput(true);
+                              }}
                               variant="danger"
                               style={{ flex: 1 }}
-                              loading={isProcessingAction}
+                              disabled={isProcessingAction}
                             />
                           </View>
                           <CustomButton
                             title="Devolver (Acción Requerida)"
-                            onPress={() => setShowFeedbackInput(true)}
+                            onPress={() => {
+                              setFeedbackActionType('ACTION_REQUIRED');
+                              setShowFeedbackInput(true);
+                            }}
                             variant="secondary"
                             style={{ width: '100%', marginTop: Spacing.one }}
                             disabled={isProcessingAction}
@@ -3754,8 +3874,8 @@ export default function ReportesScreen() {
                       ) : (
                         <View style={styles.feedbackForm}>
                           <CustomInput
-                            label="Duda / Comentario para el Empleado"
-                            placeholder="Escribe la información faltante requerida..."
+                            label={feedbackActionType === 'REJECTED' ? "Motivo de Rechazo del Gasto *" : "Duda / Comentario para el Empleado *"}
+                            placeholder={feedbackActionType === 'REJECTED' ? "Escribe el motivo por el cual se rechaza este gasto..." : "Escribe la información faltante requerida..."}
                             value={rejectionFeedback}
                             onChangeText={setRejectionFeedback}
                             multiline
@@ -3765,14 +3885,18 @@ export default function ReportesScreen() {
                           <View style={styles.rowActions}>
                             <CustomButton
                               title="Cancelar"
-                              onPress={() => setShowFeedbackInput(false)}
+                              onPress={() => {
+                                setShowFeedbackInput(false);
+                                setRejectionFeedback('');
+                              }}
                               variant="secondary"
                               style={{ flex: 1 }}
+                              disabled={isProcessingAction}
                             />
                             <CustomButton
-                              title="Enviar Observación"
-                              onPress={() => handleUpdateStatus('ACTION_REQUIRED')}
-                              variant="warning"
+                              title={feedbackActionType === 'REJECTED' ? "Confirmar Rechazo" : "Enviar Observación"}
+                              onPress={() => handleUpdateStatus(feedbackActionType)}
+                              variant={feedbackActionType === 'REJECTED' ? "danger" : "warning"}
                               style={{ flex: 1.5 }}
                               loading={isProcessingAction}
                             />

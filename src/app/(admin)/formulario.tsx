@@ -14,6 +14,7 @@ import {
   Switch,
   Modal,
   Keyboard,
+  Linking,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
@@ -80,8 +81,7 @@ export default function GastoForm() {
   const [facturado, setFacturado] = useState<boolean | null>(null);
   const [facturaStatus, setFacturaStatus] = useState<'SI' | 'PENDIENTE' | 'NO' | null>(null);
   const [comentarioPendiente, setComentarioPendiente] = useState('');
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [facturasFiles, setFacturasFiles] = useState<{ uri: string; base64: string; ext: string }[]>([]);
+  const [facturaPdf, setFacturaPdf] = useState<{ uri: string; name: string; base64: string } | null>(null);
   const [motivoSinFactura, setMotivoSinFactura] = useState('');
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
 
@@ -453,77 +453,68 @@ export default function GastoForm() {
     }
   };
 
-  // Métodos para seleccionar y capturar factura
-  const _handleCaptureFactura = async () => {
-    const hasPermission = await requestCameraPermission();
-    if (!hasPermission) return;
-    try {
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.7,
-        base64: true,
-      });
-      if (!result.canceled && result.assets?.[0]) {
-        const optimized = await optimizeImage(result.assets[0].uri);
-        setFacturasFiles(prev => [...prev, { uri: optimized.uri, base64: optimized.base64 || '', ext: 'jpg' }]);
-      }
-    } catch (err) {
-      console.error('Invoice camera capture error:', err);
-      if (Platform.OS === 'web') { await handleSelectFacturaGallery(); } else { showAlert('Error', 'No se pudo abrir la cámara.'); }
-    }
-  };
-
-  const handleSelectFacturaGallery = async () => {
-    const hasPermission = await requestLibraryPermission();
-    if (!hasPermission) return;
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.7,
-        base64: true,
-      });
-      if (!result.canceled && result.assets?.[0]) {
-        const optimized = await optimizeImage(result.assets[0].uri);
-        setFacturasFiles(prev => [...prev, { uri: optimized.uri, base64: optimized.base64 || '', ext: 'jpg' }]);
-      }
-    } catch (err) {
-      console.error('Invoice gallery select error:', err);
-      showAlert('Error', 'No se pudo abrir la galería.');
-    }
-  };
-
-  const _handleSelectFacturaDocument = async () => {
+  // Métodos para seleccionar y previsualizar factura en PDF
+  const handleSelectFacturaPdf = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'image/*'],
+        type: 'application/pdf',
         copyToCacheDirectory: true,
       });
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
-        const ext = file.name ? file.name.split('.').pop()?.toLowerCase() || 'jpg' : 'jpg';
+        const isPdf = (file.name ? file.name.toLowerCase().endsWith('.pdf') : false) || file.mimeType === 'application/pdf';
+        if (!isPdf) {
+          showAlert('Formato inválido', 'Por favor selecciona únicamente un archivo en formato PDF (.pdf).');
+          return;
+        }
+
         let base64Str = '';
         if (Platform.OS === 'web') {
-           const res = await fetch(file.uri);
-           const blob = await res.blob();
-           base64Str = await new Promise((resolve, reject) => {
-             const reader = new FileReader();
-             reader.onloadend = () => {
-               if (typeof reader.result === 'string') {
-                 resolve(reader.result.split(',')[1] || '');
-               } else { resolve(''); }
-             };
-             reader.onerror = reject;
-             reader.readAsDataURL(blob);
-           });
+          const res = await fetch(file.uri);
+          const blob = await res.blob();
+          base64Str = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              if (typeof reader.result === 'string') {
+                resolve(reader.result.split(',')[1] || '');
+              } else {
+                resolve('');
+              }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
         } else {
-           base64Str = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+          base64Str = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
         }
-        setFacturasFiles(prev => [...prev, { uri: file.uri, base64: base64Str, ext: ext === 'pdf' ? 'pdf' : 'jpg' }]);
+
+        setFacturaPdf({
+          uri: file.uri,
+          name: file.name || 'factura.pdf',
+          base64: base64Str,
+        });
       }
     } catch (err) {
       console.error('Invoice document select error:', err);
       showAlert('Error', 'No se pudo abrir el selector de documentos.');
     }
+  };
+
+  const handlePreviewPdf = async () => {
+    if (!facturaPdf?.uri) return;
+    try {
+      if (Platform.OS === 'web') {
+        window.open(facturaPdf.uri, '_blank');
+      } else {
+        await Linking.openURL(facturaPdf.uri);
+      }
+    } catch {
+      showAlert('Aviso', 'No se pudo abrir la previsualización del PDF en este dispositivo.');
+    }
+  };
+
+  const handleRemoveFacturaPdf = () => {
+    setFacturaPdf(null);
   };
 
 
@@ -935,30 +926,23 @@ export default function GastoForm() {
         }
         const publicUrl = publicTicketUrls.join(',') || null;
 
-        // Subir factura si se seleccionó una
+        // Subir factura PDF si se adjuntó una
         let publicInvoiceUrl = '';
-        if (facturado && facturasFiles.length > 0) {
+        if (facturado && facturaPdf?.base64) {
           try {
-            const uploadedUrls: string[] = [];
-            for (let i = 0; i < facturasFiles.length; i++) {
-              const f = facturasFiles[i];
-              const ext = f.ext || 'jpg';
-              const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-              const fileName = `${currentUser.id}/factura_${Date.now()}_${i}.${ext}`;
-              const arrayBuffer = f.base64;
+            const fileName = `${currentUser.id}/factura_${Date.now()}.pdf`;
+            const { error: uploadError } = await supabase.storage
+              .from('tickets')
+              .upload(fileName, facturaPdf.base64, { contentType: 'application/pdf', upsert: true });
 
-              const { data: uploadData, error: uploadError } = await supabase.storage
-                .from('tickets')
-                .upload(fileName, arrayBuffer, { contentType: contentType, upsert: true });
-
-              if (!uploadError) {
-                const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-                uploadedUrls.push(urlData.publicUrl);
-              } else {
-                console.warn('Invoice storage upload skipped or failed:', uploadError);
+            if (!uploadError) {
+              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+              if (urlData?.publicUrl) {
+                publicInvoiceUrl = urlData.publicUrl;
               }
+            } else {
+              console.warn('Invoice storage upload skipped or failed:', uploadError);
             }
-            publicInvoiceUrl = uploadedUrls.join(',');
           } catch (invErr) {
             console.warn('Invoice storage upload exception (continuing):', invErr);
           }
@@ -1044,8 +1028,8 @@ export default function GastoForm() {
               base64Foto: ticketPhotosToSync.length > 0 ? ticketPhotosToSync[0].base64 : (imageBase64 || undefined),
               fotoExt: ticketPhotosToSync.length > 0 ? ticketPhotosToSync[0].ext : imageExt,
               base64Fotos: ticketPhotosToSync.length > 0 ? ticketPhotosToSync : undefined,
-              base64Factura: facturasFiles.length > 0 ? JSON.stringify(facturasFiles) : undefined,
-              facturaExt: "json",
+              base64Factura: facturaPdf?.base64 || undefined,
+              facturaExt: facturaPdf?.base64 ? "pdf" : undefined,
               vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
               kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
               litros: esGasolina ? Number(litrosGasolina) : undefined,
@@ -1057,8 +1041,8 @@ export default function GastoForm() {
             base64Foto: ticketPhotosToSync.length > 0 ? ticketPhotosToSync[0].base64 : (imageBase64 || undefined),
             fotoExt: ticketPhotosToSync.length > 0 ? ticketPhotosToSync[0].ext : imageExt,
             base64Fotos: ticketPhotosToSync.length > 0 ? ticketPhotosToSync : undefined,
-            base64Factura: facturasFiles.length > 0 ? JSON.stringify(facturasFiles) : undefined,
-            facturaExt: "json",
+            base64Factura: facturaPdf?.base64 || undefined,
+            facturaExt: facturaPdf?.base64 ? "pdf" : undefined,
             vehiculo_id: esGasolina ? selectedVehiculoId : undefined,
             kilometraje_actual: esGasolina ? Number(kilometrajeActual) : undefined,
             litros: esGasolina ? Number(litrosGasolina) : undefined,
@@ -2443,7 +2427,7 @@ export default function GastoForm() {
                       setFacturado(false);
                       setFacturaStatus('PENDIENTE');
                       setMotivoSinFactura('PENDIENTE_ENTREGA');
-                      setFacturasFiles([]);
+                      setFacturaPdf(null);
                     }}
                     style={[
                       styles.paymentOption,
@@ -2465,7 +2449,7 @@ export default function GastoForm() {
                     onPress={() => {
                       setFacturado(false);
                       setFacturaStatus('NO');
-                      setFacturasFiles([]);
+                      setFacturaPdf(null);
                     }}
                     style={[
                       styles.paymentOption,
@@ -2484,6 +2468,120 @@ export default function GastoForm() {
                   </TouchableOpacity>
                 </View>
               </View>
+
+              {facturado === true && (
+                <View style={{ marginBottom: Spacing.two, marginTop: 4 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <Text style={[styles.selectorLabel, { color: themeColors.text, marginBottom: 0 }]}>
+                      Factura en PDF (Opcional)
+                    </Text>
+                    {facturaPdf && (
+                      <Text style={{ fontSize: 11, color: themeColors.success, fontWeight: '600' }}>
+                        ✓ PDF cargado
+                      </Text>
+                    )}
+                  </View>
+
+                  {facturaPdf ? (
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: themeColors.backgroundElement,
+                        padding: 12,
+                        borderRadius: BorderRadius.medium,
+                        borderWidth: 1,
+                        borderColor: themeColors.accent + '60',
+                        gap: 10,
+                      }}
+                    >
+                      <TouchableOpacity
+                        onPress={handlePreviewPdf}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}
+                        activeOpacity={0.7}
+                      >
+                        <View
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: BorderRadius.small,
+                            backgroundColor: themeColors.danger + '15',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Ionicons name="document-text" size={20} color={themeColors.danger} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            numberOfLines={1}
+                            style={{ color: themeColors.text, fontSize: 13, fontWeight: '700' }}
+                          >
+                            {facturaPdf.name}
+                          </Text>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                            Toca para ver • PDF listo para guardar
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <TouchableOpacity
+                          onPress={handleSelectFacturaPdf}
+                          style={{
+                            padding: 6,
+                            borderRadius: BorderRadius.small,
+                            backgroundColor: themeColors.background,
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          accessibilityLabel="Cambiar PDF"
+                        >
+                          <Ionicons name="swap-horizontal-outline" size={18} color={themeColors.accent} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={handleRemoveFacturaPdf}
+                          style={{
+                            padding: 6,
+                            borderRadius: BorderRadius.small,
+                            backgroundColor: themeColors.danger + '15',
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          accessibilityLabel="Eliminar PDF"
+                        >
+                          <Ionicons name="trash-outline" size={18} color={themeColors.danger} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={handleSelectFacturaPdf}
+                      activeOpacity={0.7}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        backgroundColor: themeColors.backgroundElement,
+                        borderWidth: 1.5,
+                        borderColor: themeColors.border,
+                        borderStyle: 'dashed',
+                        borderRadius: BorderRadius.medium,
+                        paddingVertical: 14,
+                        paddingHorizontal: 16,
+                      }}
+                    >
+                      <Ionicons name="cloud-upload-outline" size={20} color={themeColors.accent} />
+                      <Text style={{ color: themeColors.accent, fontSize: 13, fontWeight: '700' }}>
+                        Adjuntar Factura PDF
+                      </Text>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                        (Opcional)
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
 
               {facturado === false && facturaStatus === 'PENDIENTE' && (
                 <View style={{ marginBottom: Spacing.two }}>

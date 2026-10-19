@@ -20,10 +20,15 @@ import {
   TurnoAsistencia,
   DiaAsistencia,
   SemanaAsistencia,
+  PeriodoAsistencia,
   processAsistenciasSemana,
+  processAsistenciasMes,
   getPreviousWeekMonday,
   getNextWeekMonday,
   getWeekRange,
+  getMonthRange,
+  getPreviousMonthDate,
+  getNextMonthDate,
 } from '@/utils/asistenciaUtils';
 
 interface AsistenciaSemanalCardProps {
@@ -33,6 +38,10 @@ interface AsistenciaSemanalCardProps {
   onRefresh?: () => void;
   selectedMonday: Date;
   onChangeWeek: (newMonday: Date) => void;
+  modo?: 'mes' | 'semana';
+  selectedMonth?: Date;
+  onChangeMonth?: (newMonth: Date) => void;
+  onChangeModo?: (newModo: 'mes' | 'semana') => void;
   isEmployeeView?: boolean;
   onViewFoto?: (info: {
     url: string;
@@ -53,6 +62,10 @@ export default function AsistenciaSemanalCard({
   onRefresh,
   selectedMonday,
   onChangeWeek,
+  modo = 'semana',
+  selectedMonth = new Date(),
+  onChangeMonth,
+  onChangeModo,
   onViewFoto,
   isEmployeeView = false,
 }: AsistenciaSemanalCardProps) {
@@ -61,6 +74,8 @@ export default function AsistenciaSemanalCard({
   const { user } = useAuth();
   const canViewOvertime = !isEmployeeView && (user?.rol === 'ADMIN' || user?.rol === 'DEV');
   const isDev = !isEmployeeView && (user?.rol === 'DEV');
+
+  const isMes = modo === 'mes';
 
   // Estado del modal de selección de período manual
   const [periodoModalVisible, setPeriodoModalVisible] = useState(false);
@@ -78,6 +93,11 @@ export default function AsistenciaSemanalCard({
     return processAsistenciasSemana(asistencias, selectedMonday);
   }, [asistencias, selectedMonday]);
 
+  // Procesar asistencias para el mes seleccionado
+  const mesData: PeriodoAsistencia = useMemo(() => {
+    return processAsistenciasMes(asistencias, selectedMonth);
+  }, [asistencias, selectedMonth]);
+
   const currentWeekMonday = useMemo(() => {
     return getWeekRange().mondayDate;
   }, []);
@@ -89,6 +109,24 @@ export default function AsistenciaSemanalCard({
       selectedMonday.getDate() === currentWeekMonday.getDate()
     );
   }, [selectedMonday, currentWeekMonday]);
+
+  const currentMonthDate = useMemo(() => new Date(), []);
+  const isCurrentMonth = useMemo(() => {
+    return (
+      selectedMonth.getFullYear() === currentMonthDate.getFullYear() &&
+      selectedMonth.getMonth() === currentMonthDate.getMonth()
+    );
+  }, [selectedMonth, currentMonthDate]);
+
+  const activeDias = isMes ? mesData.dias : semanaData.dias;
+  const activeTotalHorasStr = isMes
+    ? mesData.totalHorasPeriodoStr
+    : canViewOvertime
+    ? semanaData.totalHorasSemanaStr
+    : semanaData.totalHorasRegularesStr;
+  const activeDiasLaborados = isMes ? mesData.diasLaborados : semanaData.diasLaborados;
+  const activeTotalDias = isMes ? mesData.dias.length : 7;
+  const activeTurnosTotales = isMes ? mesData.turnosTotales : semanaData.turnosTotales;
 
   const toggleDay = (dateStr: string) => {
     setExpandedDays((prev) => ({
@@ -108,60 +146,145 @@ export default function AsistenciaSemanalCard({
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-      {/* 1. Header con Navegador de Semana */}
-      <View style={[styles.headerContainer, { borderBottomColor: themeColors.border }]}>
-        <View style={styles.navRow}>
+      {/* Selector de Modo (Semana vs Mes) si se provee onChangeModo */}
+      {onChangeModo && (
+        <View style={styles.modoSelectorRow}>
           <TouchableOpacity
-            style={[styles.navBtn, { backgroundColor: themeColors.backgroundSelected }]}
-            onPress={() => onChangeWeek(getPreviousWeekMonday(selectedMonday))}
+            style={[
+              styles.modoBtn,
+              !isMes
+                ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+                : { backgroundColor: themeColors.background, borderColor: themeColors.border },
+            ]}
+            onPress={() => onChangeModo('semana')}
             activeOpacity={0.7}
           >
-            <Ionicons name="chevron-back" size={20} color={themeColors.text} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.weekLabelContainer, { cursor: 'pointer' } as any]}
-            onPress={() => setPeriodoModalVisible(true)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.weekTitleRow}>
-              <Ionicons name="calendar" size={15} color={themeColors.accent} style={{ marginRight: 5 }} />
-              <Text style={[styles.weekTitleText, { color: themeColors.text }]} numberOfLines={1}>
-                Semana {semanaData.range.days[0].shortDate} - {semanaData.range.days[6].shortDate}
-              </Text>
-              <Ionicons name="chevron-down" size={13} color={themeColors.textSecondary} style={{ marginLeft: 3 }} />
-            </View>
-            <Text style={[styles.weekSubtitleText, { color: themeColors.textSecondary }]}>
-              {semanaData.range.mondayDate.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }).toUpperCase()}
+            <Ionicons name="calendar-outline" size={14} color={!isMes ? '#fff' : themeColors.text} />
+            <Text style={[styles.modoBtnText, { color: !isMes ? '#fff' : themeColors.text }]}>
+              Por Semana
             </Text>
-            {isCurrentWeek && (
-              <View style={[styles.currentWeekBadge, { backgroundColor: themeColors.accent + '20' }]}>
-                <Text style={[styles.currentWeekBadgeText, { color: themeColors.accent }]}>Semana Actual</Text>
-              </View>
-            )}
           </TouchableOpacity>
-
           <TouchableOpacity
-            style={[styles.navBtn, { backgroundColor: themeColors.backgroundSelected }]}
-            onPress={() => onChangeWeek(getNextWeekMonday(selectedMonday))}
+            style={[
+              styles.modoBtn,
+              isMes
+                ? { backgroundColor: themeColors.accent, borderColor: themeColors.accent }
+                : { backgroundColor: themeColors.background, borderColor: themeColors.border },
+            ]}
+            onPress={() => onChangeModo('mes')}
             activeOpacity={0.7}
           >
-            <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+            <Ionicons name="calendar" size={14} color={isMes ? '#fff' : themeColors.text} />
+            <Text style={[styles.modoBtnText, { color: isMes ? '#fff' : themeColors.text }]}>
+              Por Mes
+            </Text>
           </TouchableOpacity>
         </View>
+      )}
 
-        {!isCurrentWeek && (
-          <TouchableOpacity
-            style={[styles.backToCurrentBtn, { borderColor: themeColors.accent }]}
-            onPress={() => onChangeWeek(currentWeekMonday)}
-          >
-            <Ionicons name="today-outline" size={14} color={themeColors.accent} style={{ marginRight: 4 }} />
-            <Text style={[styles.backToCurrentText, { color: themeColors.accent }]}>Ir a semana actual</Text>
-          </TouchableOpacity>
+      {/* 1. Header con Navegador de Período (Semana o Mes) */}
+      <View style={[styles.headerContainer, { borderBottomColor: themeColors.border }]}>
+        {isMes ? (
+          <View style={styles.navRow}>
+            <TouchableOpacity
+              style={[styles.navBtn, { backgroundColor: themeColors.backgroundSelected }]}
+              onPress={() => onChangeMonth?.(getPreviousMonthDate(selectedMonth))}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="chevron-back" size={20} color={themeColors.text} />
+            </TouchableOpacity>
+
+            <View style={styles.weekLabelContainer}>
+              <View style={styles.weekTitleRow}>
+                <Ionicons name="calendar" size={15} color={themeColors.accent} style={{ marginRight: 5 }} />
+                <Text style={[styles.weekTitleText, { color: themeColors.text }]} numberOfLines={1}>
+                  {selectedMonth.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }).toUpperCase()}
+                </Text>
+              </View>
+              <Text style={[styles.weekSubtitleText, { color: themeColors.textSecondary }]}>
+                {mesData.rangeLabel}
+              </Text>
+              {isCurrentMonth && (
+                <View style={[styles.currentWeekBadge, { backgroundColor: themeColors.accent + '20' }]}>
+                  <Text style={[styles.currentWeekBadgeText, { color: themeColors.accent }]}>Mes Actual</Text>
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.navBtn, { backgroundColor: themeColors.backgroundSelected }]}
+              onPress={() => onChangeMonth?.(getNextMonthDate(selectedMonth))}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.navRow}>
+            <TouchableOpacity
+              style={[styles.navBtn, { backgroundColor: themeColors.backgroundSelected }]}
+              onPress={() => onChangeWeek(getPreviousWeekMonday(selectedMonday))}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="chevron-back" size={20} color={themeColors.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.weekLabelContainer, { cursor: 'pointer' } as any]}
+              onPress={() => setPeriodoModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.weekTitleRow}>
+                <Ionicons name="calendar" size={15} color={themeColors.accent} style={{ marginRight: 5 }} />
+                <Text style={[styles.weekTitleText, { color: themeColors.text }]} numberOfLines={1}>
+                  Semana {semanaData.range.days[0].shortDate} - {semanaData.range.days[6].shortDate}
+                </Text>
+                <Ionicons name="chevron-down" size={13} color={themeColors.textSecondary} style={{ marginLeft: 3 }} />
+              </View>
+              <Text style={[styles.weekSubtitleText, { color: themeColors.textSecondary }]}>
+                {semanaData.range.mondayDate.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }).toUpperCase()}
+              </Text>
+              {isCurrentWeek && (
+                <View style={[styles.currentWeekBadge, { backgroundColor: themeColors.accent + '20' }]}>
+                  <Text style={[styles.currentWeekBadgeText, { color: themeColors.accent }]}>Semana Actual</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.navBtn, { backgroundColor: themeColors.backgroundSelected }]}
+              onPress={() => onChangeWeek(getNextWeekMonday(selectedMonday))}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {isMes ? (
+          !isCurrentMonth && (
+            <TouchableOpacity
+              style={[styles.backToCurrentBtn, { borderColor: themeColors.accent }]}
+              onPress={() => onChangeMonth?.(new Date())}
+            >
+              <Ionicons name="today-outline" size={14} color={themeColors.accent} style={{ marginRight: 4 }} />
+              <Text style={[styles.backToCurrentText, { color: themeColors.accent }]}>Ir a mes actual</Text>
+            </TouchableOpacity>
+          )
+        ) : (
+          !isCurrentWeek && (
+            <TouchableOpacity
+              style={[styles.backToCurrentBtn, { borderColor: themeColors.accent }]}
+              onPress={() => onChangeWeek(currentWeekMonday)}
+            >
+              <Ionicons name="today-outline" size={14} color={themeColors.accent} style={{ marginRight: 4 }} />
+              <Text style={[styles.backToCurrentText, { color: themeColors.accent }]}>Ir a semana actual</Text>
+            </TouchableOpacity>
+          )
         )}
       </View>
 
-      {/* Modal Selector de Período */}
+      {/* Modal Selector de Período (para vista semanal) */}
       <PeriodoPickerModal
         visible={periodoModalVisible}
         onClose={() => setPeriodoModalVisible(false)}
@@ -169,19 +292,19 @@ export default function AsistenciaSemanalCard({
         onSelectMonday={(newMonday) => onChangeWeek(newMonday)}
       />
 
-      {/* 2. Tarjeta Resumen de Horas de la Semana */}
+      {/* 2. Tarjeta Resumen de Horas */}
       <View style={[styles.summaryCard, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
         <View style={styles.summaryMetricCol}>
           <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TOTAL HORAS</Text>
           <View style={styles.hoursValueRow}>
             <Ionicons name="time" size={16} color={themeColors.text} style={{ marginRight: 4 }} />
             <Text style={[styles.summaryHoursText, { color: themeColors.text }]}>
-              {canViewOvertime ? semanaData.totalHorasSemanaStr : semanaData.totalHorasRegularesStr}
+              {activeTotalHorasStr}
             </Text>
           </View>
         </View>
 
-        {canViewOvertime && (
+        {!isMes && canViewOvertime && (
           <>
             <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
 
@@ -216,25 +339,22 @@ export default function AsistenciaSemanalCard({
           <View style={styles.hoursValueRow}>
             <Ionicons name="briefcase-outline" size={14} color={themeColors.accent} style={{ marginRight: 4 }} />
             <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
-              {semanaData.diasLaborados} / 7
+              {activeDiasLaborados} / {activeTotalDias}
             </Text>
           </View>
         </View>
 
-        {!canViewOvertime && (
-          <>
-            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
-            <View style={styles.summaryMetricCol}>
-              <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TURNOS</Text>
-              <View style={styles.hoursValueRow}>
-                <Ionicons name="layers-outline" size={14} color={themeColors.warning} style={{ marginRight: 4 }} />
-                <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
-                  {semanaData.turnosTotales}
-                </Text>
-              </View>
-            </View>
-          </>
-        )}
+        <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
+
+        <View style={styles.summaryMetricCol}>
+          <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TURNOS</Text>
+          <View style={styles.hoursValueRow}>
+            <Ionicons name="layers-outline" size={14} color={themeColors.warning} style={{ marginRight: 4 }} />
+            <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
+              {activeTurnosTotales}
+            </Text>
+          </View>
+        </View>
       </View>
 
       {isLoading ? (
@@ -244,9 +364,9 @@ export default function AsistenciaSemanalCard({
         </View>
       ) : null}
 
-      {/* 3. Desglose Día por Día (Lunes a Domingo) */}
+      {/* 3. Desglose Día por Día */}
       <View style={styles.daysListContainer}>
-        {semanaData.dias.map((dia) => {
+        {activeDias.map((dia) => {
           const expanded = isDayExpanded(dia);
           const hasTurnos = dia.turnos.length > 0;
 
@@ -598,6 +718,26 @@ const styles = StyleSheet.create({
         boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
       },
     }),
+  },
+  modoSelectorRow: {
+    flexDirection: 'row',
+    marginBottom: Spacing.two,
+    gap: 8,
+  },
+  modoBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    gap: 6,
+  },
+  modoBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   headerContainer: {
     paddingBottom: Spacing.two,
