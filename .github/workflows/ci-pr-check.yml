@@ -2,7 +2,7 @@ name: CI Pull Request Check
 
 on:
   pull_request:
-    branches: [ lightsail/test, lightsail/prod ]
+    branches: [ dev, lightsail/prod ]
 
 jobs:
   test-and-verify:

@@ -3,7 +3,7 @@ name: CD Deploy a AWS Lightsail
 on:
   push:
     branches:
-      - lightsail/test
+      - dev
       - lightsail/prod
 
 jobs:
