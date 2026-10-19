@@ -79,6 +79,9 @@ export default function AdminAsistencia() {
 
   // Exportación
   const [isExporting, setIsExporting] = useState(false);
+  const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [exportModalTipo, setExportModalTipo] = useState<'semanal' | 'mensual'>('mensual');
+  const [reportMonthDate, setReportMonthDate] = useState<Date>(() => new Date());
 
   // Visor de foto y mapa
   const [viewerVisible, setViewerVisible] = useState(false);
@@ -540,6 +543,96 @@ export default function AdminAsistencia() {
     }
   };
 
+  const handleExportGeneralMensualPDF = async (monthDate: Date = reportMonthDate) => {
+    setIsExporting(true);
+    try {
+      const rangeMonth = getMonthRange(monthDate);
+      const headers = await getApiHeaders();
+      const res = await fetch(
+        `${getApiUrl()}/api/reportes/admin/export/asistencias?startDate=${rangeMonth.startDateStr}&endDate=${rangeMonth.endDateStr}`,
+        { headers }
+      );
+      if (!res.ok) throw new Error('Error al cargar datos del mes');
+      const asistData = await res.json();
+      await ReportGenerator.exportReporteAsistenciaMensualGeneralPDF(
+        asistData || [],
+        personal,
+        monthDate
+      );
+    } catch (err: any) {
+      Alert.alert('Error al generar PDF Mensual', err.message || 'No se pudo generar el reporte.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportGeneralMensualXLSX = async (monthDate: Date = reportMonthDate) => {
+    setIsExporting(true);
+    try {
+      const rangeMonth = getMonthRange(monthDate);
+      const headers = await getApiHeaders();
+      const res = await fetch(
+        `${getApiUrl()}/api/reportes/admin/export/asistencias?startDate=${rangeMonth.startDateStr}&endDate=${rangeMonth.endDateStr}`,
+        { headers }
+      );
+      if (!res.ok) throw new Error('Error al cargar datos del mes');
+      const asistData = await res.json();
+      await ReportGenerator.exportReporteAsistenciaMensualGeneralXLSX(
+        asistData || [],
+        personal,
+        monthDate
+      );
+    } catch (err: any) {
+      Alert.alert('Error al exportar Excel Mensual', err.message || 'No se pudo generar el archivo.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportIndividualMensualPDF = async (monthDate: Date = reportMonthDate) => {
+    if (!selectedEmpleado) return;
+    setIsExporting(true);
+    try {
+      const rangeMonth = getMonthRange(monthDate);
+      const hist = await AsistenciaService.getHistorialEmpleado(
+        selectedEmpleado.id,
+        rangeMonth.startDateStr,
+        rangeMonth.endDateStr
+      );
+      await ReportGenerator.exportReporteAsistenciaMensualEmpleadoPDF(
+        hist || [],
+        selectedEmpleado,
+        monthDate
+      );
+    } catch (err: any) {
+      Alert.alert('Error al exportar PDF Mensual', err.message || 'No se pudo generar el reporte.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportIndividualMensualXLSX = async (monthDate: Date = reportMonthDate) => {
+    if (!selectedEmpleado) return;
+    setIsExporting(true);
+    try {
+      const rangeMonth = getMonthRange(monthDate);
+      const hist = await AsistenciaService.getHistorialEmpleado(
+        selectedEmpleado.id,
+        rangeMonth.startDateStr,
+        rangeMonth.endDateStr
+      );
+      await ReportGenerator.exportReporteAsistenciaMensualEmpleadoXLSX(
+        hist || [],
+        selectedEmpleado,
+        monthDate
+      );
+    } catch (err: any) {
+      Alert.alert('Error al exportar Excel Mensual', err.message || 'No se pudo generar el archivo.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // ==========================================
   // LÓGICA DEL CHECADOR DEL ADMINISTRADOR
   // ==========================================
@@ -843,6 +936,9 @@ export default function AdminAsistencia() {
           }}
         />
 
+        {/* Modal de Descarga de Reportes (Semanal o Mensual) */}
+        {renderModalDescargarReportes()}
+
         {/* Modales de checador del admin */}
         {renderModalesChecadorAdmin()}
       </View>
@@ -1031,6 +1127,14 @@ export default function AdminAsistencia() {
               <Text style={styles.quickCheckinBtnText}>
                 {isAdminInActiveShift ? 'Checar Salida Admin' : 'Checar Asistencia'}
               </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.iconBtnHeader, { borderColor: themeColors.border, backgroundColor: themeColors.background }]}
+              onPress={() => setExportModalVisible(true)}
+              disabled={isExporting}
+            >
+              <Ionicons name="download-outline" size={18} color={themeColors.accent} />
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1506,10 +1610,185 @@ export default function AdminAsistencia() {
         }}
       />
 
+      {/* Modal de Descarga de Reportes (Semanal o Mensual) */}
+      {renderModalDescargarReportes()}
+
       {/* Modales de checador del admin */}
       {renderModalesChecadorAdmin()}
     </View>
   );
+
+  // ==========================================
+  // MODAL DE DESCARGA DE REPORTES (SEMANAL / MENSUAL)
+  // ==========================================
+  function renderModalDescargarReportes() {
+    return (
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={exportModalVisible}
+        onRequestClose={() => setExportModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, maxWidth: 440, width: '92%', borderRadius: BorderRadius.large, alignSelf: 'center', marginBottom: 'auto', marginTop: 'auto' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                  Descargar Reportes de Asistencia
+                </Text>
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
+                  {selectedEmpleado ? `Empleado: ${selectedEmpleado.nombre}` : 'Reporte General de la Empresa'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setExportModalVisible(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Selector de Modalidad: Semanal vs Mensual */}
+            <View style={{ flexDirection: 'row', backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, padding: 3, borderWidth: 1, borderColor: themeColors.border, gap: 4, marginTop: 12, marginBottom: 14 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  alignItems: 'center',
+                  borderRadius: BorderRadius.small,
+                  backgroundColor: exportModalTipo === 'semanal' ? themeColors.accent : 'transparent',
+                }}
+                onPress={() => setExportModalTipo('semanal')}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: exportModalTipo === 'semanal' ? '#fff' : themeColors.textSecondary }}>
+                  📅 Por Semana
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  alignItems: 'center',
+                  borderRadius: BorderRadius.small,
+                  backgroundColor: exportModalTipo === 'mensual' ? themeColors.accent : 'transparent',
+                }}
+                onPress={() => setExportModalTipo('mensual')}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: exportModalTipo === 'mensual' ? '#fff' : themeColors.textSecondary }}>
+                  🗓️ Por Mes
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Período seleccionado */}
+            {exportModalTipo === 'semanal' ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: themeColors.backgroundElement, padding: 10, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, marginBottom: 18 }}>
+                <TouchableOpacity
+                  onPress={() => setSelectedMonday(getPreviousWeekMonday(selectedMonday))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-back" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+                <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, textAlign: 'center' }}>
+                    {getWeekRange(selectedMonday).label}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setSelectedMonday(getNextWeekMonday(selectedMonday))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: themeColors.backgroundElement, padding: 10, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, marginBottom: 18 }}>
+                <TouchableOpacity
+                  onPress={() => setReportMonthDate(getPreviousMonthDate(reportMonthDate))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-back" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+                <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.accent, textAlign: 'center' }}>
+                    🗓️ {getMonthRange(reportMonthDate).label}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: themeColors.textSecondary, marginTop: 1 }}>
+                    {getMonthRange(reportMonthDate).startDateStr} al {getMonthRange(reportMonthDate).endDateStr}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setReportMonthDate(getNextMonthDate(reportMonthDate))}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Botones de Descarga */}
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+              <CustomButton
+                title={
+                  isExporting
+                    ? 'Generando...'
+                    : exportModalTipo === 'mensual'
+                    ? 'Descargar PDF'
+                    : 'Descargar PDF'
+                }
+                onPress={async () => {
+                  if (exportModalTipo === 'mensual') {
+                    if (selectedEmpleado) {
+                      await handleExportIndividualMensualPDF(reportMonthDate);
+                    } else {
+                      await handleExportGeneralMensualPDF(reportMonthDate);
+                    }
+                  } else {
+                    if (selectedEmpleado) {
+                      await handleExportIndividualPDF();
+                    } else {
+                      await handleExportGeneralPDF();
+                    }
+                  }
+                  setExportModalVisible(false);
+                }}
+                variant="primary"
+                disabled={isExporting}
+                style={{ flex: 1, height: 42 }}
+                icon={<Ionicons name="document-text-outline" size={17} color="#fff" style={{ marginRight: 6 }} />}
+              />
+              <CustomButton
+                title={
+                  isExporting
+                    ? 'Generando...'
+                    : exportModalTipo === 'mensual'
+                    ? 'Descargar Excel'
+                    : 'Descargar Excel'
+                }
+                onPress={async () => {
+                  if (exportModalTipo === 'mensual') {
+                    if (selectedEmpleado) {
+                      await handleExportIndividualMensualXLSX(reportMonthDate);
+                    } else {
+                      await handleExportGeneralMensualXLSX(reportMonthDate);
+                    }
+                  } else {
+                    if (selectedEmpleado) {
+                      await handleExportIndividualXLSX();
+                    } else {
+                      await handleExportGeneralXLSX();
+                    }
+                  }
+                  setExportModalVisible(false);
+                }}
+                variant="success"
+                disabled={isExporting}
+                style={{ flex: 1, height: 42 }}
+                icon={<Ionicons name="download-outline" size={17} color="#fff" style={{ marginRight: 6 }} />}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
 
   // ==========================================
   // MODALES DEL AUTO-CHECADOR DEL ADMINISTRADOR

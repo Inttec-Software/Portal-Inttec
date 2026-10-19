@@ -109,6 +109,7 @@ export default function AdminGastosScreen() {
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
   const [rejectionFeedback, setRejectionFeedback] = useState('');
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
+  const [feedbackActionType, setFeedbackActionType] = useState<'REJECTED' | 'ACTION_REQUIRED'>('ACTION_REQUIRED');
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerInitialIndex, setViewerInitialIndex] = useState(0);
@@ -923,6 +924,9 @@ export default function AdminGastosScreen() {
       setTempTipoTarjeta((selectedGasto.tipo_tarjeta as any) || (isCard ? 'BBVA' : null));
       const parsed = parseJustificacion(selectedGasto.justificacion);
       setTempComentarios(parsed.justificacion || selectedGasto.justificacion || '');
+    } else if (fieldType === 'comentarios') {
+      const parsed = parseJustificacion(selectedGasto.justificacion);
+      setTempComentarios(parsed.justificacion || selectedGasto.justificacion || '');
     }
 
     setQuickEditFieldModalVisible(true);
@@ -1010,21 +1014,47 @@ export default function AdminGastosScreen() {
           return;
         }
         const tarjetaVal = isTarjeta ? tempTipoTarjeta : null;
+        
+        // Reconstruir la justificación preservando [ALERTA IA] y [Proveedor a agregar] si existían
+        const parsedOld = parseJustificacion(selectedGasto.justificacion);
+        let reconstructedJust = '';
+        if (parsedOld.alerta) {
+          reconstructedJust += `[ALERTA IA: ${parsedOld.alerta}]\n\n`;
+        }
+        if (parsedOld.proveedorSugerido) {
+          reconstructedJust += `[Proveedor a agregar: ${parsedOld.proveedorSugerido}]\n\n`;
+        }
+        reconstructedJust += tempComentarios.trim();
+        const finalJustificacion = reconstructedJust.trim() || null;
+
         updatePayload = {
           metodo_pago: tempMetodoPago,
           tipo_tarjeta: tarjetaVal,
+          justificacion: finalJustificacion,
         };
         localUpdates = {
           metodo_pago: tempMetodoPago,
           tipo_tarjeta: tarjetaVal,
+          justificacion: finalJustificacion,
         };
-        successMsg = 'Método de pago actualizado.';
+        successMsg = 'Método de pago y comentarios actualizados.';
       } else if (quickEditFieldType === 'comentarios') {
+        const parsedOld = parseJustificacion(selectedGasto.justificacion);
+        let reconstructedJust = '';
+        if (parsedOld.alerta) {
+          reconstructedJust += `[ALERTA IA: ${parsedOld.alerta}]\n\n`;
+        }
+        if (parsedOld.proveedorSugerido) {
+          reconstructedJust += `[Proveedor a agregar: ${parsedOld.proveedorSugerido}]\n\n`;
+        }
+        reconstructedJust += tempComentarios.trim();
+        const finalJustificacion = reconstructedJust.trim() || null;
+
         updatePayload = {
-          justificacion: tempComentarios.trim() || null,
+          justificacion: finalJustificacion,
         };
         localUpdates = {
-          justificacion: tempComentarios.trim() || null,
+          justificacion: finalJustificacion,
         };
         successMsg = 'Comentarios actualizados.';
       }
@@ -3393,17 +3423,36 @@ export default function AdminGastosScreen() {
                             </View>
                           </View>
                         )}
+                        {/* Método de Pago */}
                         <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
                           <View style={{ flex: 1, marginRight: Spacing.two }}>
-                            <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Pago / Comentarios</Text>
+                            <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Método de Pago</Text>
                             <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                              Método: {selectedGasto.metodo_pago === 'transferencia' ? 'Transferencia' : selectedGasto.metodo_pago === 'efectivo' ? 'Efectivo' : selectedGasto.metodo_pago === 'tarjeta_debito' ? 'Tarjeta Débito' : selectedGasto.metodo_pago === 'tarjeta_credito' ? 'Tarjeta Crédito' : (selectedGasto.metodo_pago || 'No especificado')} {selectedGasto.tipo_tarjeta ? `(${selectedGasto.tipo_tarjeta})` : ''}
-                              {'\n'}Comentarios: {parsed.justificacion || 'No especificados'}
+                              {selectedGasto.metodo_pago === 'transferencia' ? 'Transferencia' : selectedGasto.metodo_pago === 'efectivo' ? 'Efectivo' : selectedGasto.metodo_pago === 'tarjeta_debito' ? 'Tarjeta Débito' : selectedGasto.metodo_pago === 'tarjeta_credito' ? 'Tarjeta Crédito' : (selectedGasto.metodo_pago || 'No especificado')} {selectedGasto.tipo_tarjeta ? `(${selectedGasto.tipo_tarjeta})` : ''}
                             </Text>
                           </View>
                           {selectedGasto.status === 'APPROVED' && (
                             <TouchableOpacity
                               onPress={() => handleOpenQuickEditField('pago')}
+                              style={styles.quickFieldBtn}
+                            >
+                              <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                              <Text style={styles.quickFieldBtnText}>Cambiar</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+
+                        {/* Comentarios / Justificación */}
+                        <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                          <View style={{ flex: 1, marginRight: Spacing.two }}>
+                            <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Comentarios / Justificación</Text>
+                            <Text style={[styles.detailValue, { color: themeColors.text }]}>
+                              {parsed.justificacion || 'No especificados'}
+                            </Text>
+                          </View>
+                          {selectedGasto.status === 'APPROVED' && (
+                            <TouchableOpacity
+                              onPress={() => handleOpenQuickEditField('comentarios')}
                               style={styles.quickFieldBtn}
                             >
                               <Ionicons name="pencil" size={14} color={themeColors.accent} />
@@ -3711,15 +3760,21 @@ export default function AdminGastosScreen() {
                             />
                             <CustomButton
                               title="Rechazar"
-                              onPress={() => handleUpdateStatus('REJECTED')}
+                              onPress={() => {
+                                setFeedbackActionType('REJECTED');
+                                setShowFeedbackInput(true);
+                              }}
                               variant="danger"
                               style={{ flex: 1 }}
-                              loading={isProcessingAction}
+                              disabled={isProcessingAction}
                             />
                           </View>
                           <CustomButton
                             title="Devolver (Acción Requerida)"
-                            onPress={() => setShowFeedbackInput(true)}
+                            onPress={() => {
+                              setFeedbackActionType('ACTION_REQUIRED');
+                              setShowFeedbackInput(true);
+                            }}
                             variant="secondary"
                             style={{ width: '100%', marginTop: Spacing.one }}
                             disabled={isProcessingAction}
@@ -3746,8 +3801,8 @@ export default function AdminGastosScreen() {
                       ) : (
                         <View style={styles.feedbackForm}>
                           <CustomInput
-                            label="Duda / Comentario para el Empleado"
-                            placeholder="Escribe la información faltante requerida..."
+                            label={feedbackActionType === 'REJECTED' ? "Motivo de Rechazo del Gasto *" : "Duda / Comentario para el Empleado *"}
+                            placeholder={feedbackActionType === 'REJECTED' ? "Escribe el motivo por el cual se rechaza este gasto..." : "Escribe la información faltante requerida..."}
                             value={rejectionFeedback}
                             onChangeText={setRejectionFeedback}
                             multiline
@@ -3757,14 +3812,18 @@ export default function AdminGastosScreen() {
                           <View style={styles.rowActions}>
                             <CustomButton
                               title="Cancelar"
-                              onPress={() => setShowFeedbackInput(false)}
+                              onPress={() => {
+                                setShowFeedbackInput(false);
+                                setRejectionFeedback('');
+                              }}
                               variant="secondary"
                               style={{ flex: 1 }}
+                              disabled={isProcessingAction}
                             />
                             <CustomButton
-                              title="Enviar Observación"
-                              onPress={() => handleUpdateStatus('ACTION_REQUIRED')}
-                              variant="warning"
+                              title={feedbackActionType === 'REJECTED' ? "Confirmar Rechazo" : "Enviar Observación"}
+                              onPress={() => handleUpdateStatus(feedbackActionType)}
+                              variant={feedbackActionType === 'REJECTED' ? "danger" : "warning"}
                               style={{ flex: 1.5 }}
                               loading={isProcessingAction}
                             />
