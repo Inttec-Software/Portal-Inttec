@@ -185,16 +185,20 @@ export const updateGastoStatus = async (req: Request, res: Response) => {
     let actionName = 'UPDATE';
     if (status === 'APPROVED') actionName = 'APPROVE';
     else if (status === 'REJECTED') actionName = 'REJECT';
-    else if (status === 'PENDING') actionName = 'REVERT';
+    else if (status === 'PENDING') actionName = 'UPDATE';
 
     const details = req.body.audit_details || (status === 'PENDING'
       ? `Gasto por ${monto} devuelto a revisión por Admin.`
       : `Gasto por ${monto} revisado por Admin. Estado final: ${status}`);
 
-    await pool.query(
-      `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)`,
-      [actionName, actor_id, id, details]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)`,
+        [actionName, actor_id, id, details]
+      );
+    } catch (auditErr: any) {
+      console.warn('[updateGastoStatus] Error en audit_logs insert:', auditErr.message);
+    }
 
     return res.json({ success: true });
   } catch (error: any) {

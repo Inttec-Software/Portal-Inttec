@@ -518,7 +518,10 @@ export default function AdminGastosScreen() {
         })
       });
 
-      if (!res.ok) throw new Error('Error al actualizar el estado del gasto');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error || 'Error al actualizar el estado del gasto');
+      }
 
       if (oldVentaId) {
         await recalculateVentaTotals(oldVentaId);

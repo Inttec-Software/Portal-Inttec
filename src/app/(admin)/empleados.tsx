@@ -439,16 +439,20 @@ export default function AdminEmpleadosScreen() {
       }
 
       // Generar registro de auditoría
-      await supabase.from('audit_logs').insert([
-        {
-          action: status === 'APPROVED' ? 'APPROVE' : status === 'REJECTED' ? 'REJECT' : status === 'PENDING' ? 'REVERT' : 'UPDATE',
-          actor_id: adminUser.id,
-          target_id: selectedGasto.id,
-          details: status === 'PENDING' 
-            ? `Gasto por ${selectedGasto.monto} devuelto a revisión por Admin.` 
-            : `Gasto por ${selectedGasto.monto} revisado por Admin. Estado final: ${status}`,
-        },
-      ]);
+      try {
+        await supabase.from('audit_logs').insert([
+          {
+            action: status === 'APPROVED' ? 'APPROVE' : status === 'REJECTED' ? 'REJECT' : 'UPDATE',
+            actor_id: adminUser.id,
+            target_id: selectedGasto.id,
+            details: status === 'PENDING' 
+              ? `Gasto por ${selectedGasto.monto} devuelto a revisión por Admin.` 
+              : `Gasto por ${selectedGasto.monto} revisado por Admin. Estado final: ${status}`,
+          },
+        ]);
+      } catch (auditErr: any) {
+        console.warn('[empleados.handleUpdateStatus] Error en audit_logs insert:', auditErr);
+      }
 
       let friendlyStatus = 'Acción Requerida';
       if (status === 'APPROVED') friendlyStatus = 'Aprobado';
