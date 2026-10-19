@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - dev
-      - lightsail/prod
+      - main
 
 jobs:
   deploy:
@@ -13,7 +13,7 @@ jobs:
       - name: Determinar Entorno y Puertos
         id: env_select
         run: |
-          if [[ "${{ github.ref_name }}" == "lightsail/prod" ]]; then
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
             echo "TARGET_ENV=prod" >> $GITHUB_OUTPUT
             echo "API_URL=https://api.inttec.net" >> $GITHUB_OUTPUT
             echo "WEB_DIR=/var/www/portal-prod-web" >> $GITHUB_OUTPUT
