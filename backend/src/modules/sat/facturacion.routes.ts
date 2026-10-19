@@ -128,6 +128,8 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
     const body = req.body || {};
     const { 
       venta_id, 
+      borrador_id,
+      factura_id,
       custom_receptor, 
       cliente_override, 
       custom_condiciones, 
@@ -135,9 +137,14 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       custom_partidas 
     } = body;
 
-    let resolvedVentaId: string | number | null = venta_id
+    const targetDraftId = (borrador_id || factura_id)
+      ? (typeof (borrador_id || factura_id) === 'number' ? (borrador_id || factura_id) : String(borrador_id || factura_id).trim())
+      : null;
+
+    const targetVentaId = venta_id
       ? (typeof venta_id === 'number' ? venta_id : String(venta_id).trim())
       : null;
+
     let venta: any = null;
     let cliente: any = null;
     let partidas: any[] = [];
@@ -151,31 +158,82 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
 
     let isDraftInFacturas = false;
     let existingFactura: any = null;
-    let actualVentaId: string | number | null = null;
+    let actualVentaId: string | number | null = targetVentaId || null;
 
-    if (resolvedVentaId) {
-      // 1. Verificar si es un borrador en facturas_emitidas
+    // 1. Si se especificó explícitamente un borrador (borrador_id / factura_id)
+    if (targetDraftId) {
       const { data: fDB } = await supabaseClient
         .from('facturas_emitidas')
         .select('*')
-        .eq('id', resolvedVentaId)
+        .eq('id', targetDraftId)
         .maybeSingle();
 
-      if (fDB) {
-        isDraftInFacturas = true;
-        existingFactura = fDB;
-        actualVentaId = fDB.venta_id || null;
-      } else {
-        // 2. Si no es borrador en facturas_emitidas, buscar en ventas (origen venta)
-        const { data: vDB } = await supabaseClient
-          .from('ventas')
+      if (!fDB) {
+        throw new Error(`No se encontró el borrador #${targetDraftId} en facturas emitidas`);
+      }
+      if (fDB.cfdi_estado === 'TIMBRADA') {
+        throw new Error(`La factura #${targetDraftId} ya se encuentra timbrada (Folio Fiscal: ${fDB.cfdi_uuid || 'registrado'})`);
+      }
+      isDraftInFacturas = true;
+      existingFactura = fDB;
+      actualVentaId = fDB.venta_id || actualVentaId || null;
+    }
+
+    // 2. Si no se especificó borrador pero sí un venta_id
+    if (!existingFactura && targetVentaId) {
+      // 2.a. Buscar primero en la tabla de ventas operativas
+      const { data: vDB } = await supabaseClient
+        .from('ventas')
+        .select('*')
+        .eq('id', targetVentaId)
+        .maybeSingle();
+
+      if (vDB) {
+        if (vDB.cfdi_estado === 'TIMBRADA') {
+          throw new Error(`La venta #${targetVentaId} ya se encuentra timbrada (Folio Fiscal: ${vDB.cfdi_uuid || 'registrado'})`);
+        }
+        actualVentaId = vDB.id;
+        venta = vDB;
+
+        // Comprobar si ya existe un borrador asociado a esta venta en facturas_emitidas
+        const { data: draftForVenta } = await supabaseClient
+          .from('facturas_emitidas')
           .select('*')
-          .eq('id', resolvedVentaId)
+          .eq('venta_id', vDB.id)
+          .eq('cfdi_estado', 'BORRADOR')
           .maybeSingle();
 
-        if (vDB) {
-          actualVentaId = vDB.id;
-          venta = vDB;
+        if (draftForVenta) {
+          isDraftInFacturas = true;
+          existingFactura = draftForVenta;
+        } else {
+          // Verificar si ya tiene una factura timbrada en facturas_emitidas
+          const { data: timbradaFactura } = await supabaseClient
+            .from('facturas_emitidas')
+            .select('id, cfdi_uuid, serie, folio')
+            .eq('venta_id', vDB.id)
+            .eq('cfdi_estado', 'TIMBRADA')
+            .maybeSingle();
+
+          if (timbradaFactura) {
+            throw new Error(`Esta venta ya cuenta con la factura timbrada ${timbradaFactura.serie || ''}${timbradaFactura.folio || ''} (UUID: ${timbradaFactura.cfdi_uuid || 'registrado'})`);
+          }
+        }
+      } else {
+        // 2.b. Si NO existe en ventas, verificar si es un borrador en facturas_emitidas (compatibilidad hacia atrás)
+        const { data: fDB } = await supabaseClient
+          .from('facturas_emitidas')
+          .select('*')
+          .eq('id', targetVentaId)
+          .maybeSingle();
+
+        if (fDB) {
+          if (fDB.cfdi_estado === 'TIMBRADA') {
+            throw new Error(`La factura ya se encuentra timbrada (Folio Fiscal: ${fDB.cfdi_uuid || 'registrado'})`);
+          }
+          isDraftInFacturas = true;
+          existingFactura = fDB;
+          actualVentaId = fDB.venta_id || null;
         }
       }
     }
@@ -546,7 +604,8 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       fullFolio,
       xml_url: xmlUrl,
       xml: xmlTimbrado,
-      venta_id: resolvedVentaId,
+      venta_id: actualVentaId || null,
+      factura_id: targetFacturaId || null,
       fecha_timbrado: new Date().toISOString()
     });
   } catch (error: any) {
@@ -761,7 +820,8 @@ router.post('/borrador', async (req: Request, res: Response) => {
         orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
         etiqueta: etiquetaFinal,
         notas: draftMetadata,
-        fecha_emision: body.fecha || new Date().toISOString()
+        fecha_emision: body.fecha || new Date().toISOString(),
+        venta_id: body.venta_id || null
       };
 
       const { data: createdFactura, error: insertErr } = await supabaseClient
@@ -883,6 +943,12 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
       .maybeSingle();
 
     if (factura) {
+      if (factura.cfdi_estado === 'TIMBRADA' || factura.cfdi_uuid) {
+        return res.status(400).json({
+          error: `El comprobante #${id} ya fue timbrado ante el SAT (UUID: ${factura.cfdi_uuid || 'registrado'}) y no puede editarse como borrador.`
+        });
+      }
+
       const { data: partidas } = await supabaseClient
         .from('facturas_emitidas_partidas')
         .select('*')
@@ -956,6 +1022,12 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
 
     if (ventaError || !venta) {
       return res.status(404).json({ error: 'Borrador no encontrado' });
+    }
+
+    if (venta.cfdi_estado === 'TIMBRADA' || venta.cfdi_uuid) {
+      return res.status(400).json({
+        error: `La venta #${id} ya fue timbrada ante el SAT (UUID: ${venta.cfdi_uuid || 'registrado'}) y no puede editarse como borrador.`
+      });
     }
 
     const { data: partidas } = await supabaseClient
@@ -1166,6 +1238,7 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
           orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
           etiqueta: etiquetaFinal,
           notas: draftMetadata,
+          ...(body.venta_id !== undefined ? { venta_id: body.venta_id || null } : {}),
           updated_at: new Date().toISOString()
         })
         .eq('id', id);

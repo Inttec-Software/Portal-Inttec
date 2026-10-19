@@ -88,6 +88,7 @@ interface FacturaEmitida {
   origen?: string;
   origenLabel?: string;
   etiqueta?: string;
+  venta_id?: string | number | null;
 }
 
 const REGIMENES_FISCALES = [
@@ -234,6 +235,8 @@ export default function FacturacionScreen() {
   const [clientes, setClientes] = useState<ClienteCatalogo[]>([]);
   const [isLoadingClientes, setIsLoadingClientes] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string | number | null>(null);
+  const [origenVentaId, setOrigenVentaId] = useState<string | number | null>(null);
+  const [origenVentaFolio, setOrigenVentaFolio] = useState<string | null>(null);
   const [clientSuggestions, setClientSuggestions] = useState<ClienteCatalogo[]>([]);
   const [isSearchingClients, setIsSearchingClients] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
@@ -367,6 +370,23 @@ export default function FacturacionScreen() {
             ? JSON.parse(rawData)
             : rawData;
 
+          // Si la venta o cotización ya cuenta con UUID fiscal o estado TIMBRADA, no permitir re-timbrarla:
+          if (data.cfdiUuid || data.cfdi_uuid || data.cfdi_estado === 'TIMBRADA') {
+            const uuidFiscal = data.cfdiUuid || data.cfdi_uuid || 'Registrado';
+            showAlert(
+              'Venta Ya Timbrada',
+              `Esta venta ya cuenta con factura oficial timbrada ante el SAT.\n\nFolio Fiscal (UUID):\n${uuidFiscal}\n\nSerás redirigido al historial para consultar o descargar sus archivos.`
+            );
+            setActiveTab('historial');
+            if (uuidFiscal !== 'Registrado') {
+              setHistorialSearch(uuidFiscal);
+            } else if (data.folioVenta) {
+              setHistorialSearch(data.folioVenta);
+            }
+            router.setParams({ fromCotizacion: 'false', cotizacionData: '', fromVenta: 'false', ventaData: '' });
+            return;
+          }
+
           if (data.clienteNombre || data.cliente_nombre) {
             setClienteNombre(data.clienteNombre || data.cliente_nombre);
           }
@@ -437,8 +457,12 @@ export default function FacturacionScreen() {
           }
 
           if (data.ventaId) {
-            setCurrentDraftId(data.ventaId);
+            setOrigenVentaId(data.ventaId);
+            setOrigenVentaFolio(data.folioVenta || `Venta #${data.ventaId}`);
+            setCurrentDraftId(null);
           } else {
+            setOrigenVentaId(null);
+            setOrigenVentaFolio(null);
             setCurrentDraftId(null);
           }
 
@@ -876,6 +900,8 @@ export default function FacturacionScreen() {
 
   const handleResetForm = () => {
     setCurrentDraftId(null);
+    setOrigenVentaId(null);
+    setOrigenVentaFolio(null);
     setSelectedClientId(null);
     setClienteNombre('');
     setClienteRfc('XAXX010101000');
@@ -940,6 +966,8 @@ export default function FacturacionScreen() {
 
       const draft = data.borrador;
       setCurrentDraftId(draft.id);
+      setOrigenVentaId(null);
+      setOrigenVentaFolio(null);
       setSerie(draft.serie || 'A');
       setFolio(draft.folio || '0000');
       setClienteNombre('');
@@ -1098,6 +1126,14 @@ export default function FacturacionScreen() {
 
   // Modificar un borrador: carga los datos en el formulario y activa currentDraftId
   const handleModificarBorrador = async (factura: FacturaEmitida) => {
+    if (factura.cfdi_estado === 'TIMBRADA' || factura.cfdi_uuid) {
+      showAlert(
+        'Factura Ya Timbrada',
+        `Esta factura ya fue timbrada ante el SAT (Folio Fiscal: ${factura.cfdi_uuid || 'registrado'}). No puede editarse como borrador.`
+      );
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       const headers = await getApiHeaders();
@@ -1110,6 +1146,8 @@ export default function FacturacionScreen() {
       if (!draft) throw new Error('No se recibió la información del borrador');
 
       setCurrentDraftId(draft.id);
+      setOrigenVentaId(draft.venta_id || null);
+      setOrigenVentaFolio(draft.venta_id ? `Venta #${draft.venta_id}` : null);
       setSelectedClientId(draft.cliente_id || draft.receptor?.cliente_id || null);
       setSerie(draft.serie || 'A');
       setFolio(draft.folio || '0000');
@@ -1198,17 +1236,16 @@ export default function FacturacionScreen() {
     }
   };
 
-  // Guardar cambios en el borrador existente preservando el folio reservado
+  // Guardar cambios en el borrador existente o crear uno nuevo a partir del formulario actual
   const handleGuardarBorrador = async () => {
-    if (!currentDraftId) {
-      showAlert('Aviso', 'No hay un borrador activo seleccionado para guardar.');
-      return;
-    }
     try {
       setIsSubmitting(true);
       await syncClienteFiscalData();
       const headers = await getApiHeaders();
-      const payload = {
+      const payload: any = {
+        serie: serie || 'A',
+        folio: folio || undefined,
+        venta_id: origenVentaId || undefined,
         cliente: clienteNombre.trim() || 'PUBLICO EN GENERAL',
         cliente_rfc: clienteRfc.trim().toUpperCase() || 'XAXX010101000',
         cliente_cp: clienteCp.trim() || '31110',
@@ -1232,17 +1269,43 @@ export default function FacturacionScreen() {
         }))
       };
 
-      const res = await fetch(`${getApiUrl()}/api/sat/borrador/${currentDraftId}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify(payload)
-      });
-      const resJson = await res.json().catch(() => ({}));
-      if (!res.ok || !resJson.success) {
-        throw new Error(resJson.error || 'Error al actualizar borrador');
+      if (currentDraftId) {
+        // Actualizar borrador existente
+        const res = await fetch(`${getApiUrl()}/api/sat/borrador/${currentDraftId}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(payload)
+        });
+        const resJson = await res.json().catch(() => ({}));
+        if (!res.ok || !resJson.success) {
+          if (resJson.error && (resJson.error.includes('TIMBRADA') || resJson.error.includes('No se encontró') || resJson.error.includes('no encontrado'))) {
+            setCurrentDraftId(null);
+          }
+          throw new Error(resJson.error || 'Error al actualizar borrador');
+        }
+
+        showAlert('Éxito', `Borrador Folio ${serie}${folio} guardado correctamente.`);
+      } else {
+        // Crear nuevo borrador reservando folio
+        const res = await fetch(`${getApiUrl()}/api/sat/borrador`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload)
+        });
+        const resJson = await res.json().catch(() => ({}));
+        if (!res.ok || !resJson.success) {
+          throw new Error(resJson.error || 'Error al guardar borrador');
+        }
+
+        const draft = resJson.borrador;
+        if (draft?.id) {
+          setCurrentDraftId(draft.id);
+          if (draft.serie) setSerie(draft.serie);
+          if (draft.folio) setFolio(draft.folio);
+        }
+        showAlert('Éxito', `Borrador Folio ${draft?.serie || serie}${draft?.folio || folio} creado y guardado correctamente.`);
       }
 
-      showAlert('Éxito', `Borrador Folio ${serie}${folio} guardado correctamente.`);
       fetchHistorialFacturas();
     } catch (err: any) {
       console.error('Error al guardar borrador:', err);
@@ -1305,7 +1368,10 @@ export default function FacturacionScreen() {
         const res = await fetch(`${getApiUrl()}/api/sat/timbrar-factura`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ venta_id: factura.id })
+          body: JSON.stringify({
+            borrador_id: factura.id,
+            venta_id: factura.venta_id || undefined
+          })
         });
         const resJson = await res.json().catch(() => ({}));
         if (!res.ok || !resJson.success) {
@@ -1374,7 +1440,8 @@ export default function FacturacionScreen() {
     try {
       await syncClienteFiscalData();
       const payload: any = {
-        venta_id: currentDraftId || undefined,
+        borrador_id: currentDraftId || undefined,
+        venta_id: origenVentaId || undefined,
         cliente_override: {
           nombre: clienteNombre.trim().toUpperCase(),
           razon_social: clienteNombre.trim().toUpperCase(),
@@ -1479,6 +1546,9 @@ export default function FacturacionScreen() {
         } catch (_) {}
       }
       console.error('Error al timbrar factura:', errorMsg);
+      if (typeof errorMsg === 'string' && errorMsg.includes('ya se encuentra timbrada')) {
+        setCurrentDraftId(null);
+      }
       showAlert('Error al Timbrar', errorMsg);
     } finally {
       setIsSubmitting(false);
@@ -2428,14 +2498,38 @@ export default function FacturacionScreen() {
               <Text style={{ color: '#0284c7', fontWeight: 'bold', fontSize: 13 }}>Volver al Listado</Text>
             </TouchableOpacity>
 
-            {currentDraftId && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#f59e0b' }}>
-                <Ionicons name="document-text" size={14} color="#d97706" />
-                <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d97706' }}>
-                  Borrador Activo #{currentDraftId} (Folio {serie}{folio})
-                </Text>
-              </View>
-            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {currentDraftId && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#f59e0b' }}>
+                  <Ionicons name="document-text" size={14} color="#d97706" />
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d97706' }}>
+                    Borrador #{currentDraftId} (Folio {serie}{folio})
+                  </Text>
+                </View>
+              )}
+
+              {origenVentaId && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#e0f2fe', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#0284c7' }}>
+                  <Ionicons name="cart-outline" size={14} color="#0284c7" />
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#0369a1' }}>
+                    Origen: {origenVentaFolio || `Venta #${origenVentaId}`}
+                  </Text>
+                </View>
+              )}
+
+              {(currentDraftId || origenVentaId) && (
+                <TouchableOpacity
+                  onPress={() => {
+                    handleResetForm();
+                    showAlert('Formulario Restablecido', 'Se ha limpiado el borrador/venta activo.');
+                  }}
+                  style={[styles.quickSelectBtn, { borderColor: '#ef444450', backgroundColor: '#ef444415', paddingVertical: 6, paddingHorizontal: 10 }]}
+                >
+                  <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
+                  <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Limpiar</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
           {/* Banner de Edición de Borrador si aplica */}
@@ -2447,6 +2541,11 @@ export default function FacturacionScreen() {
                   <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#92400e' }}>
                     Editando Borrador Folio {serie}{folio}
                   </Text>
+                  {origenVentaId && (
+                    <Text style={{ fontSize: 11, color: '#b45309' }}>
+                      Asociado a {origenVentaFolio || `Venta #${origenVentaId}`}
+                    </Text>
+                  )}
                 </View>
               </View>
               <TouchableOpacity
@@ -2455,7 +2554,32 @@ export default function FacturacionScreen() {
                 style={[styles.quickSelectBtn, { borderColor: '#d97706', backgroundColor: '#fef3c7', paddingVertical: 8, paddingHorizontal: 12 }]}
               >
                 <Ionicons name="save-outline" size={16} color="#d97706" />
-                <Text style={{ color: '#d97706', fontSize: 12, fontWeight: 'bold' }}>Guardar Borrador</Text>
+                <Text style={{ color: '#d97706', fontSize: 12, fontWeight: 'bold' }}>Guardar Cambios Borrador</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Banner de Facturación desde Venta si aplica */}
+          {!currentDraftId && origenVentaId && (
+            <View style={[styles.draftBannerContainer, { backgroundColor: '#f0f9ff', borderColor: '#0284c7' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                <Ionicons name="cart" size={24} color="#0284c7" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#0369a1' }}>
+                    Facturando {origenVentaFolio || `Venta #${origenVentaId}`}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: '#0284c7' }}>
+                    Se emitirá la factura fiscal oficial vinculada a esta venta operativa
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={handleGuardarBorrador}
+                disabled={isSubmitting}
+                style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#e0f2fe', paddingVertical: 8, paddingHorizontal: 12 }]}
+              >
+                <Ionicons name="save-outline" size={16} color="#0284c7" />
+                <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: 'bold' }}>Guardar como Borrador</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -3270,16 +3394,16 @@ export default function FacturacionScreen() {
                 <Text style={{ color: '#0284c7', fontWeight: '700', fontSize: 13 }}>Vista Previa / Borrador PDF</Text>
               </TouchableOpacity>
 
-              {currentDraftId && (
-                <TouchableOpacity
-                  onPress={handleGuardarBorrador}
-                  disabled={isSubmitting}
-                  style={[styles.actionBtn, { borderColor: '#f59e0b', backgroundColor: '#fef3c7', flex: 1 }]}
-                >
-                  <Ionicons name="save-outline" size={18} color="#d97706" />
-                  <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 13 }}>Guardar Borrador</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                onPress={handleGuardarBorrador}
+                disabled={isSubmitting}
+                style={[styles.actionBtn, { borderColor: '#f59e0b', backgroundColor: '#fef3c7', flex: 1 }]}
+              >
+                <Ionicons name="save-outline" size={18} color="#d97706" />
+                <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 13 }}>
+                  {currentDraftId ? 'Guardar Cambios Borrador' : 'Guardar como Borrador'}
+                </Text>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={handleTimbrarFactura}
@@ -3292,7 +3416,11 @@ export default function FacturacionScreen() {
                   <>
                     <Ionicons name="receipt-outline" size={18} color="#fff" />
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
-                      {currentDraftId ? 'Timbrar Factura' : 'Emitir y Timbrar Factura Oficial ante SAT'}
+                      {currentDraftId 
+                        ? 'Timbrar Factura (Borrador)' 
+                        : origenVentaId 
+                          ? 'Timbrar Factura de Venta' 
+                          : 'Emitir y Timbrar Factura Oficial ante SAT'}
                     </Text>
                   </>
                 )}
