@@ -28,7 +28,7 @@ import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { base64ToArrayBuffer } from '@/services/sync';
-import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
+import { exportarCotizacionOdooPDF, cleanFolio } from '@/utils/reportGenerator';
 import { formatFriendlyDate } from '@/utils/helpers';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
@@ -585,6 +585,21 @@ export default function VentasScreen() {
 
   const handleFacturarVenta = async (venta: VentaConPago, partidasList: VentaPartida[] = []) => {
     try {
+      if (venta.cfdi_uuid || venta.cfdi_estado === 'TIMBRADA') {
+        showAlert(
+          'Venta Ya Timbrada',
+          `Esta venta ya cuenta con factura oficial timbrada ante el SAT.\n\nFolio Fiscal (UUID):\n${venta.cfdi_uuid || 'Registrado'}\n\nSerás redirigido al historial para consultar o descargar sus archivos fiscales.`
+        );
+        router.push({
+          pathname: '/(admin)/facturacion',
+          params: {
+            tab: 'historial',
+            search: venta.cfdi_uuid || cleanFolio(venta.folio) || String(venta.id)
+          }
+        });
+        return;
+      }
+
       let targetPartidas = partidasList;
       if (!targetPartidas || targetPartidas.length === 0) {
         const { data: dbPartidas } = await supabase
@@ -602,6 +617,8 @@ export default function VentasScreen() {
       const payload = {
         ventaId: venta.id,
         folioVenta: venta.folio || `VTA-${venta.id.toString().slice(0, 8)}`,
+        cfdi_uuid: venta.cfdi_uuid || null,
+        cfdi_estado: venta.cfdi_estado || null,
         clienteNombre: venta.cliente,
         clienteRfc: matchedCliente?.rfc || ventaAny.cliente_rfc || 'XAXX010101000',
         clienteCp: matchedCliente?.codigo_postal || ventaAny.cliente_cp || '32690',
@@ -2518,16 +2535,24 @@ export default function VentasScreen() {
                     
                     {/* Acciones */}
                     <View style={{ width: '12%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 4, overflow: 'visible', zIndex: 10 }}>
-                      <HoverTooltip text={item.cfdi_uuid ? "Ver factura emitida en SAT" : "Facturar venta (CFDI 4.0)"} position="top">
+                      <HoverTooltip text={item.cfdi_uuid ? "Consultar factura SAT timbrada" : "Facturar venta (CFDI 4.0)"} position="top">
                         <TouchableOpacity
                           onPress={(e) => {
                             e.stopPropagation();
                             handleFacturarVenta(item);
                           }}
-                          style={{ padding: 4, backgroundColor: '#7c3aed15', borderColor: '#7c3aed40', borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center' }}
-                          accessibilityLabel="Facturar venta"
+                          style={{
+                            padding: 4,
+                            backgroundColor: item.cfdi_uuid ? '#10b98115' : '#7c3aed15',
+                            borderColor: item.cfdi_uuid ? '#10b98140' : '#7c3aed40',
+                            borderWidth: 1,
+                            borderRadius: 6,
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          accessibilityLabel={item.cfdi_uuid ? "Ver factura emitida" : "Facturar venta"}
                         >
-                          <Ionicons name="receipt-outline" size={14} color="#7c3aed" />
+                          <Ionicons name={item.cfdi_uuid ? "checkmark-done-circle-outline" : "receipt-outline"} size={14} color={item.cfdi_uuid ? "#10b981" : "#7c3aed"} />
                         </TouchableOpacity>
                       </HoverTooltip>
 
@@ -2693,7 +2718,7 @@ export default function VentasScreen() {
 
                 {/* 5. Botones de Acción */}
                 <View style={{ flexDirection: 'row', gap: 6, overflow: 'visible', zIndex: 10 }}>
-                  <HoverTooltip text={item.cfdi_uuid ? "Ver factura emitida en SAT" : "Facturar venta (CFDI 4.0)"} position="top" style={{ flex: 1 }}>
+                  <HoverTooltip text={item.cfdi_uuid ? "Consultar factura SAT timbrada" : "Facturar venta (CFDI 4.0)"} position="top" style={{ flex: 1 }}>
                     <TouchableOpacity
                       onPress={(e) => {
                         e.stopPropagation();
@@ -2701,8 +2726,8 @@ export default function VentasScreen() {
                       }}
                       style={{
                         width: '100%',
-                        backgroundColor: '#7c3aed15',
-                        borderColor: '#7c3aed40',
+                        backgroundColor: item.cfdi_uuid ? '#10b98115' : '#7c3aed15',
+                        borderColor: item.cfdi_uuid ? '#10b98140' : '#7c3aed40',
                         borderWidth: 1,
                         borderRadius: 8,
                         paddingVertical: 8,
@@ -2711,10 +2736,12 @@ export default function VentasScreen() {
                         flexDirection: 'row',
                         gap: 4
                       }}
-                      accessibilityLabel="Facturar esta venta"
+                      accessibilityLabel={item.cfdi_uuid ? "Ver factura emitida" : "Facturar esta venta"}
                     >
-                      <Ionicons name="receipt-outline" size={14} color="#7c3aed" />
-                      <Text style={{ color: '#7c3aed', fontWeight: '700', fontSize: 11 }}>Facturar</Text>
+                      <Ionicons name={item.cfdi_uuid ? "checkmark-done-circle-outline" : "receipt-outline"} size={14} color={item.cfdi_uuid ? "#10b981" : "#7c3aed"} />
+                      <Text style={{ color: item.cfdi_uuid ? "#10b981" : "#7c3aed", fontWeight: '700', fontSize: 11 }}>
+                        {item.cfdi_uuid ? 'Factura SAT' : 'Facturar'}
+                      </Text>
                     </TouchableOpacity>
                   </HoverTooltip>
 
@@ -3407,14 +3434,20 @@ export default function VentasScreen() {
                       handleFacturarVenta(selectedVenta, selectedVentaPartidas);
                     }
                   }}
-                  style={[styles.modalActionBtn, { backgroundColor: '#7c3aed15', borderColor: '#7c3aed' }]}
+                  style={[
+                    styles.modalActionBtn,
+                    {
+                      backgroundColor: selectedVenta?.cfdi_uuid ? '#10b98115' : '#7c3aed15',
+                      borderColor: selectedVenta?.cfdi_uuid ? '#10b981' : '#7c3aed'
+                    }
+                  ]}
                   // @ts-ignore
-                  title={selectedVenta?.cfdi_uuid ? "Ver Factura Emitida en SAT" : "Emitir Factura CFDI 4.0 desde esta venta"}
+                  title={selectedVenta?.cfdi_uuid ? "Consultar Factura Emitida en SAT" : "Emitir Factura CFDI 4.0 desde esta venta"}
                   accessibilityLabel="Facturar Venta"
                 >
-                  <Ionicons name="receipt-outline" size={18} color="#7c3aed" />
-                  <Text style={[styles.modalActionText, { color: '#7c3aed', fontSize: 12 }]}>
-                    {selectedVenta?.cfdi_uuid ? 'Factura SAT' : 'Facturar Venta'}
+                  <Ionicons name={selectedVenta?.cfdi_uuid ? "checkmark-done-circle-outline" : "receipt-outline"} size={18} color={selectedVenta?.cfdi_uuid ? "#10b981" : "#7c3aed"} />
+                  <Text style={[styles.modalActionText, { color: selectedVenta?.cfdi_uuid ? '#10b981' : '#7c3aed', fontSize: 12 }]}>
+                    {selectedVenta?.cfdi_uuid ? 'Ver Factura SAT' : 'Facturar Venta'}
                   </Text>
                 </TouchableOpacity>
 

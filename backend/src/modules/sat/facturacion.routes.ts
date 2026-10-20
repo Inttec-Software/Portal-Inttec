@@ -128,6 +128,8 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
     const body = req.body || {};
     const { 
       venta_id, 
+      borrador_id,
+      factura_id,
       custom_receptor, 
       cliente_override, 
       custom_condiciones, 
@@ -135,9 +137,14 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       custom_partidas 
     } = body;
 
-    let resolvedVentaId: string | number | null = venta_id
+    const targetDraftId = (borrador_id || factura_id)
+      ? (typeof (borrador_id || factura_id) === 'number' ? (borrador_id || factura_id) : String(borrador_id || factura_id).trim())
+      : null;
+
+    const targetVentaId = venta_id
       ? (typeof venta_id === 'number' ? venta_id : String(venta_id).trim())
       : null;
+
     let venta: any = null;
     let cliente: any = null;
     let partidas: any[] = [];
@@ -151,31 +158,82 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
 
     let isDraftInFacturas = false;
     let existingFactura: any = null;
-    let actualVentaId: string | number | null = null;
+    let actualVentaId: string | number | null = targetVentaId || null;
 
-    if (resolvedVentaId) {
-      // 1. Verificar si es un borrador en facturas_emitidas
+    // 1. Si se especificó explícitamente un borrador (borrador_id / factura_id)
+    if (targetDraftId) {
       const { data: fDB } = await supabaseClient
         .from('facturas_emitidas')
         .select('*')
-        .eq('id', resolvedVentaId)
+        .eq('id', targetDraftId)
         .maybeSingle();
 
-      if (fDB) {
-        isDraftInFacturas = true;
-        existingFactura = fDB;
-        actualVentaId = fDB.venta_id || null;
-      } else {
-        // 2. Si no es borrador en facturas_emitidas, buscar en ventas (origen venta)
-        const { data: vDB } = await supabaseClient
-          .from('ventas')
+      if (!fDB) {
+        throw new Error(`No se encontró el borrador #${targetDraftId} en facturas emitidas`);
+      }
+      if (fDB.cfdi_estado === 'TIMBRADA') {
+        throw new Error(`La factura #${targetDraftId} ya se encuentra timbrada (Folio Fiscal: ${fDB.cfdi_uuid || 'registrado'})`);
+      }
+      isDraftInFacturas = true;
+      existingFactura = fDB;
+      actualVentaId = fDB.venta_id || actualVentaId || null;
+    }
+
+    // 2. Si no se especificó borrador pero sí un venta_id
+    if (!existingFactura && targetVentaId) {
+      // 2.a. Buscar primero en la tabla de ventas operativas
+      const { data: vDB } = await supabaseClient
+        .from('ventas')
+        .select('*')
+        .eq('id', targetVentaId)
+        .maybeSingle();
+
+      if (vDB) {
+        if (vDB.cfdi_estado === 'TIMBRADA') {
+          throw new Error(`La venta #${targetVentaId} ya se encuentra timbrada (Folio Fiscal: ${vDB.cfdi_uuid || 'registrado'})`);
+        }
+        actualVentaId = vDB.id;
+        venta = vDB;
+
+        // Comprobar si ya existe un borrador asociado a esta venta en facturas_emitidas
+        const { data: draftForVenta } = await supabaseClient
+          .from('facturas_emitidas')
           .select('*')
-          .eq('id', resolvedVentaId)
+          .eq('venta_id', vDB.id)
+          .eq('cfdi_estado', 'BORRADOR')
           .maybeSingle();
 
-        if (vDB) {
-          actualVentaId = vDB.id;
-          venta = vDB;
+        if (draftForVenta) {
+          isDraftInFacturas = true;
+          existingFactura = draftForVenta;
+        } else {
+          // Verificar si ya tiene una factura timbrada en facturas_emitidas
+          const { data: timbradaFactura } = await supabaseClient
+            .from('facturas_emitidas')
+            .select('id, cfdi_uuid, serie, folio')
+            .eq('venta_id', vDB.id)
+            .eq('cfdi_estado', 'TIMBRADA')
+            .maybeSingle();
+
+          if (timbradaFactura) {
+            throw new Error(`Esta venta ya cuenta con la factura timbrada ${timbradaFactura.serie || ''}${timbradaFactura.folio || ''} (UUID: ${timbradaFactura.cfdi_uuid || 'registrado'})`);
+          }
+        }
+      } else {
+        // 2.b. Si NO existe en ventas, verificar si es un borrador en facturas_emitidas (compatibilidad hacia atrás)
+        const { data: fDB } = await supabaseClient
+          .from('facturas_emitidas')
+          .select('*')
+          .eq('id', targetVentaId)
+          .maybeSingle();
+
+        if (fDB) {
+          if (fDB.cfdi_estado === 'TIMBRADA') {
+            throw new Error(`La factura ya se encuentra timbrada (Folio Fiscal: ${fDB.cfdi_uuid || 'registrado'})`);
+          }
+          isDraftInFacturas = true;
+          existingFactura = fDB;
+          actualVentaId = fDB.venta_id || null;
         }
       }
     }
@@ -425,10 +483,20 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
 
     const etiquetaVal = effectiveCondiciones.etiqueta || body.etiqueta || existingFactura?.etiqueta || null;
 
+    // Preparar notas y dirección del receptor
+    const existingNotas = (existingFactura?.notas && typeof existingFactura.notas === 'object')
+      ? existingFactura.notas
+      : (typeof existingFactura?.notas === 'string' && existingFactura.notas.startsWith('{')
+          ? (() => { try { return JSON.parse(existingFactura.notas); } catch (_) { return {}; } })()
+          : {});
+
+    const direccionFinal = (cliente.direccion || existingNotas.receptor?.direccion || body.cliente_direccion || '').trim();
+
     // Guardar en tabla independiente facturas_emitidas
     const facturaPayload: any = {
       serie: serieFinal,
       folio: folioFinal,
+      cliente_id: cliente.id || existingFactura?.cliente_id || body.cliente_id || null,
       cliente_nombre: cliente.razon_social || cliente.nombre || 'PUBLICO EN GENERAL',
       cliente_rfc: (cliente.rfc || 'XAXX010101000').toUpperCase().trim(),
       cliente_cp: cliente.codigo_postal || '31110',
@@ -449,6 +517,19 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       fecha_emision: new Date().toISOString(),
       orden_compra: effectiveCondiciones.orden_compra || venta.orden_compra || null,
       etiqueta: etiquetaVal ? String(etiquetaVal).trim() : null,
+      notas: {
+        ...existingNotas,
+        receptor: {
+          ...(existingNotas.receptor || {}),
+          nombre: cliente.razon_social || cliente.nombre || 'PUBLICO EN GENERAL',
+          razon_social: cliente.razon_social || cliente.nombre || 'PUBLICO EN GENERAL',
+          rfc: (cliente.rfc || 'XAXX010101000').toUpperCase().trim(),
+          codigo_postal: cliente.codigo_postal || '31110',
+          regimen_fiscal: cliente.regimen_fiscal || '616',
+          uso_cfdi: cliente.uso_cfdi || 'G03',
+          direccion: direccionFinal,
+        }
+      },
       venta_id: actualVentaId || null
     };
 
@@ -519,13 +600,23 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       try {
         const clientUpd: any = {};
         if (cliente.regimen_fiscal) clientUpd.regimen_fiscal = cliente.regimen_fiscal;
-        if (cliente.direccion) clientUpd.direccion = String(cliente.direccion).trim();
+        if (direccionFinal) clientUpd.direccion = direccionFinal;
 
         if (Object.keys(clientUpd).length > 0) {
-          if (cliente.id) {
-            await supabaseClient.from('clientes').update(clientUpd).eq('id', cliente.id);
+          if (facturaPayload.cliente_id) {
+            await supabaseClient.from('clientes').update(clientUpd).eq('id', facturaPayload.cliente_id);
           } else {
-            await supabaseClient.from('clientes').update(clientUpd).eq('rfc', receptorRfc);
+            const { data: updList } = await supabaseClient
+              .from('clientes')
+              .update(clientUpd)
+              .eq('rfc', receptorRfc)
+              .select('id');
+            if ((!updList || updList.length === 0) && (cliente.razon_social || cliente.nombre)) {
+              await supabaseClient
+                .from('clientes')
+                .update(clientUpd)
+                .ilike('nombre', (cliente.razon_social || cliente.nombre).trim());
+            }
           }
         }
       } catch (cUpdErr) {
@@ -546,7 +637,8 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       fullFolio,
       xml_url: xmlUrl,
       xml: xmlTimbrado,
-      venta_id: resolvedVentaId,
+      venta_id: actualVentaId || null,
+      factura_id: targetFacturaId || null,
       fecha_timbrado: new Date().toISOString()
     });
   } catch (error: any) {
@@ -761,7 +853,8 @@ router.post('/borrador', async (req: Request, res: Response) => {
         orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
         etiqueta: etiquetaFinal,
         notas: draftMetadata,
-        fecha_emision: body.fecha || new Date().toISOString()
+        fecha_emision: body.fecha || new Date().toISOString(),
+        venta_id: body.venta_id || null
       };
 
       const { data: createdFactura, error: insertErr } = await supabaseClient
@@ -883,6 +976,12 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
       .maybeSingle();
 
     if (factura) {
+      if (factura.cfdi_estado === 'TIMBRADA' || factura.cfdi_uuid) {
+        return res.status(400).json({
+          error: `El comprobante #${id} ya fue timbrado ante el SAT (UUID: ${factura.cfdi_uuid || 'registrado'}) y no puede editarse como borrador.`
+        });
+      }
+
       const { data: partidas } = await supabaseClient
         .from('facturas_emitidas_partidas')
         .select('*')
@@ -956,6 +1055,12 @@ router.get('/borrador/:id', async (req: Request, res: Response) => {
 
     if (ventaError || !venta) {
       return res.status(404).json({ error: 'Borrador no encontrado' });
+    }
+
+    if (venta.cfdi_estado === 'TIMBRADA' || venta.cfdi_uuid) {
+      return res.status(400).json({
+        error: `La venta #${id} ya fue timbrada ante el SAT (UUID: ${venta.cfdi_uuid || 'registrado'}) y no puede editarse como borrador.`
+      });
     }
 
     const { data: partidas } = await supabaseClient
@@ -1166,6 +1271,7 @@ router.put('/borrador/:id', async (req: Request, res: Response) => {
           orden_compra: body.orden_compra ? String(body.orden_compra).trim() : null,
           etiqueta: etiquetaFinal,
           notas: draftMetadata,
+          ...(body.venta_id !== undefined ? { venta_id: body.venta_id || null } : {}),
           updated_at: new Date().toISOString()
         })
         .eq('id', id);
@@ -1461,9 +1567,19 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
         const cleanFolioVal = cleanFolio(f.folio);
         const fullFolio = `${f.serie || 'A'}${cleanFolioVal}`;
 
+        const dir = f.notas?.receptor?.direccion || f.cliente_direccion || '';
+
         return {
           id: f.id,
           cliente: f.cliente_nombre,
+          cliente_nombre: f.cliente_nombre,
+          cliente_rfc: f.cliente_rfc,
+          cliente_cp: f.cliente_cp,
+          cliente_regimen: f.cliente_regimen,
+          cliente_uso_cfdi: f.cliente_uso_cfdi,
+          cliente_direccion: dir,
+          cliente_id: f.cliente_id,
+          notas: f.notas,
           fecha: f.fecha_emision ? String(f.fecha_emision).slice(0, 10) : '',
           folio: fullFolio,
           cfdi_folio: cleanFolioVal,
@@ -1570,7 +1686,7 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identificador);
     let facturaQuery = supabaseClient
       .from('facturas_emitidas')
-      .select('id, cfdi_uuid, cfdi_xml_url');
+      .select('id, cfdi_uuid, cfdi_xml_url, notas, cliente_id, cliente_nombre, cliente_rfc');
 
     if (isUUID) {
       facturaQuery = facturaQuery.or(`cfdi_uuid.eq.${identificador},id.eq.${identificador}`);
@@ -1600,6 +1716,29 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
       xmlUrl = venta?.cfdi_xml_url;
     }
 
+    // Resolución de dirección del cliente para visualización
+    let resolvedDireccion = factura?.notas?.receptor?.direccion || '';
+    if (!resolvedDireccion && factura?.cliente_id) {
+      try {
+        const { data: cDB } = await supabaseClient
+          .from('clientes')
+          .select('direccion')
+          .eq('id', factura.cliente_id)
+          .maybeSingle();
+        if (cDB?.direccion) resolvedDireccion = cDB.direccion;
+      } catch (_) {}
+    }
+    if (!resolvedDireccion && factura?.cliente_rfc && factura.cliente_rfc !== 'XAXX010101000') {
+      try {
+        const { data: cDB } = await supabaseClient
+          .from('clientes')
+          .select('direccion')
+          .eq('rfc', factura.cliente_rfc)
+          .maybeSingle();
+        if (cDB?.direccion) resolvedDireccion = cDB.direccion;
+      } catch (_) {}
+    }
+
     // 3. Si tiene URL pública de storage, intentar fetch directo
     if (xmlUrl && xmlUrl.startsWith('http')) {
       try {
@@ -1607,7 +1746,7 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
         if (fetchResp.ok) {
           const text = await fetchResp.text();
           if (text && text.includes('<')) {
-            return res.json({ success: true, xml: text });
+            return res.json({ success: true, xml: text, cliente_direccion: resolvedDireccion, notas: factura?.notas || null });
           }
         }
       } catch (_) {}
@@ -1630,7 +1769,7 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
         if (!downErr && fileBlob) {
           const text = await fileBlob.text();
           if (text && text.includes('<')) {
-            return res.json({ success: true, xml: text });
+            return res.json({ success: true, xml: text, cliente_direccion: resolvedDireccion, notas: factura?.notas || null });
           }
         }
       } catch (_) {}
