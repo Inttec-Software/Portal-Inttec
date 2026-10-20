@@ -28,7 +28,7 @@ import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { base64ToArrayBuffer } from '@/services/sync';
-import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
+import { exportarCotizacionOdooPDF, cleanFolio } from '@/utils/reportGenerator';
 import { formatFriendlyDate } from '@/utils/helpers';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
