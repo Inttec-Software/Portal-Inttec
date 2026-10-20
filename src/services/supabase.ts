@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApiHeaders, getApiUrl, invalidateHeaderCache } from './apiHelper';
 import { apiClient } from './apiClient';
 import { Platform } from 'react-native';
+import { COMPANY_BASE_TIMEZONE, detectUserTimezone, embedTimezoneInAddress } from '@/utils/timezoneUtils';
 
 // Permitir Storage en dispositivos nativos (iOS/Android) o en el navegador (Web)
 const isBrowser = Platform.OS !== 'web' || (typeof window !== 'undefined' && typeof window.document !== 'undefined');
@@ -442,37 +443,68 @@ export interface Asistencia {
  */
 export const AsistenciaService = {
   /**
-   * Obtiene la fecha de la jornada laboral en formato YYYY-MM-DD en hora local.
-   * La jornada laboral se reinicia a las 6:00 AM de cada dÃ­a:
-   * - A partir de las 06:00:00 AM: Jornada del dÃ­a actual (siempre pide entrada).
-   * - Antes de las 06:00:00 AM (00:00 - 05:59): Jornada del dÃ­a anterior (permite checar salida de turnos que terminan de madrugada).
+   * Obtiene los componentes de fecha/hora desglosados en una zona horaria específica (ej. America/Tijuana, America/Cancun, etc.)
    */
-  getFechaJornada(date: Date = new Date()): string {
-    const d = new Date(date);
-    if (d.getHours() < 6) {
-      d.setDate(d.getDate() - 1);
-    }
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+  getZonedParts(date: Date = new Date(), timeZone?: string) {
+    const tz = timeZone || detectUserTimezone();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(date);
+    const get = (type: string) => Number(parts.find(p => p.type === type)?.value || 0);
+
+    return {
+      year: get('year'),
+      month: get('month'),
+      day: get('day'),
+      hour: get('hour'),
+      minute: get('minute'),
+      second: get('second'),
+      timeZone: tz,
+    };
   },
 
   /**
-   * Obtiene la hora local formateada en HH:MM:SS
+   * Obtiene la fecha de la jornada laboral en formato YYYY-MM-DD en la zona horaria del empleado.
+   * La jornada laboral se reinicia a las 6:00 AM locales de cada día:
+   * - A partir de las 06:00:00 AM: Jornada del día actual (siempre pide entrada).
+   * - Antes de las 06:00:00 AM (00:00 - 05:59): Jornada del día anterior (permite checar salida de turnos que terminan de madrugada).
    */
-  getHoraLocal(date: Date = new Date()): string {
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
+  getFechaJornada(date: Date = new Date(), timeZone?: string): string {
+    const z = this.getZonedParts(date, timeZone);
+    const localD = new Date(Date.UTC(z.year, z.month - 1, z.day));
+    if (z.hour < 6) {
+      localD.setUTCDate(localD.getUTCDate() - 1);
+    }
+    const y = localD.getUTCFullYear();
+    const m = String(localD.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(localD.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  },
+
+  /**
+   * Obtiene la hora local formateada en HH:MM:SS en la zona horaria correspondiente.
+   */
+  getHoraLocal(date: Date = new Date(), timeZone?: string): string {
+    const z = this.getZonedParts(date, timeZone);
+    const hours = String(z.hour).padStart(2, '0');
+    const minutes = String(z.minute).padStart(2, '0');
+    const seconds = String(z.second).padStart(2, '0');
     return `${hours}:${minutes}:${seconds}`;
   },
 
   /**
    * Obtiene el registro de asistencia de la jornada actual (iniciada a las 6:00 AM) para un empleado.
    */
-  async getRegistroHoy(empleadoId: string): Promise<Asistencia | null> {
-    const fechaJornada = this.getFechaJornada();
+  async getRegistroHoy(empleadoId: string, timeZone?: string): Promise<Asistencia | null> {
+    const fechaJornada = this.getFechaJornada(new Date(), timeZone);
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/asistencias/hoy/${empleadoId}?fecha=${fechaJornada}`, { headers });
     if (!res.ok) throw new Error('Error al obtener registro de asistencia');
@@ -484,18 +516,21 @@ export const AsistenciaService = {
   },
 
   /**
-   * Registra la entrada del empleado.
+   * Registra la entrada del empleado con soporte para múltiples zonas horarias.
    */
   async registrarEntrada(
     empleadoId: string,
     fotoUrl: string,
     latitud: number,
     longitud: number,
-    direccion: string
+    direccion: string,
+    timeZone?: string
   ): Promise<Asistencia> {
+    const resolvedTz = timeZone || detectUserTimezone(latitud, longitud, direccion);
     const ahora = new Date();
-    const horaStr = this.getHoraLocal(ahora);
-    const fechaStr = this.getFechaJornada(ahora);
+    const horaStr = this.getHoraLocal(ahora, resolvedTz);
+    const fechaStr = this.getFechaJornada(ahora, resolvedTz);
+    const direccionConTz = embedTimezoneInAddress(direccion, resolvedTz);
 
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/asistencias/entrada`, {
@@ -508,7 +543,7 @@ export const AsistenciaService = {
         foto_entrada_url: fotoUrl,
         latitud_entrada: latitud,
         longitud_entrada: longitud,
-        direccion_entrada: direccion,
+        direccion_entrada: direccionConTz,
       })
     });
     if (!res.ok) throw new Error('Error al registrar entrada');
@@ -529,11 +564,14 @@ export const AsistenciaService = {
     longitud: number,
     direccion: string,
     empleadoId?: string,
-    fecha?: string
+    fecha?: string,
+    timeZone?: string
   ): Promise<Asistencia> {
+    const resolvedTz = timeZone || detectUserTimezone(latitud, longitud, direccion);
     const ahora = new Date();
-    const horaStr = this.getHoraLocal(ahora);
-    const fechaStr = fecha || this.getFechaJornada(ahora);
+    const horaStr = this.getHoraLocal(ahora, resolvedTz);
+    const fechaStr = fecha || this.getFechaJornada(ahora, resolvedTz);
+    const direccionConTz = embedTimezoneInAddress(direccion, resolvedTz);
 
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/asistencias/salida`, {
@@ -547,7 +585,7 @@ export const AsistenciaService = {
         foto_salida_url: fotoUrl,
         latitud_salida: latitud,
         longitud_salida: longitud,
-        direccion_salida: direccion,
+        direccion_salida: direccionConTz,
       })
     });
     if (!res.ok) throw new Error('Error al registrar salida');

@@ -756,7 +756,7 @@ export default function NuevaCotizacionScreen() {
                   ]}
                 >
                   <Text style={[styles.partidasColHeader, { width: 32, textAlign: 'center' }]}>#</Text>
-                  <Text style={[styles.partidasColHeader, { flex: 1, minWidth: 200 }]}>Producto / Concepto</Text>
+                  <Text style={[styles.partidasColHeader, { flex: 1, minWidth: 260 }]}>Producto / Concepto</Text>
                   <Text style={[styles.partidasColHeader, { width: 120 }]}>Clave SAT</Text>
                   <Text style={[styles.partidasColHeader, { width: 110 }]}>Unidad SAT</Text>
                   <Text style={[styles.partidasColHeader, { width: 100 }]}>Entrega</Text>
@@ -797,7 +797,7 @@ export default function NuevaCotizacionScreen() {
                         </View>
 
                         {/* 2. Producto / Concepto (Línea 1: Nombre + Autocompletado, Línea 2: Descripción adicional) */}
-                        <View style={{ flex: 1, minWidth: 200, paddingRight: 8, position: 'relative', zIndex: activeProductLineId === linea.id ? 99999 : 1, overflow: 'visible' }}>
+                        <View style={{ flex: 1, minWidth: 260, paddingRight: 8, position: 'relative', zIndex: activeProductLineId === linea.id ? 99999 : 1, overflow: 'visible' }}>
                           <View style={[styles.cascadeInputContainer, { backgroundColor: themeColors.backgroundElement, borderColor: activeProductLineId === linea.id ? '#0284c7' : themeColors.border, height: 36, borderRadius: 6, paddingHorizontal: 8 }]}>
                             <TextInput
                               style={[styles.cascadeTextInput, { color: themeColors.text }]}
@@ -848,21 +848,24 @@ export default function NuevaCotizacionScreen() {
                             </View>
                           )}
 
-                          {/* Línea 2: Campo Descripción / Detalles Opcional */}
-                          <View style={{ marginTop: 4 }}>
+                          {/* Línea 2: Campo Descripción / Detalles Opcional (Multilínea estilo Términos y Condiciones) */}
+                          <View style={{ marginTop: 6 }}>
                             <TextInput
                               style={[
                                 styles.partidaDescDetalladaInput,
                                 {
                                   color: themeColors.text,
-                                  backgroundColor: themeColors.backgroundElement + '80',
-                                  borderColor: themeColors.border + '60',
+                                  backgroundColor: themeColors.backgroundElement,
+                                  borderColor: themeColors.border,
                                 },
                               ]}
+                              multiline={true}
+                              numberOfLines={3}
+                              blurOnSubmit={false}
                               value={linea.productoDescripcion || ''}
                               onChangeText={t => handleUpdateLine(linea.id, 'productoDescripcion', t)}
-                              placeholder="Describe los detalles (qué incluye, opcional)..."
-                              placeholderTextColor={themeColors.textSecondary + '70'}
+                              placeholder="Describe los detalles (qué incluye, especificaciones)... Puedes usar Enter para saltos de línea"
+                              placeholderTextColor={themeColors.textSecondary}
                             />
                           </View>
                         </View>
@@ -1413,13 +1416,15 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
   },
   partidaDescDetalladaInput: {
-    fontSize: 11,
-    fontStyle: 'italic',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    fontSize: 12.5,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderRadius: 6,
     borderWidth: 1,
-    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+    minHeight: 68,
+    textAlignVertical: 'top',
+    lineHeight: 18,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', resize: 'vertical' } as any) : {}),
   },
   tableFieldInput: {
     borderWidth: 1,

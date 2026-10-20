@@ -1,4 +1,11 @@
 import { Asistencia } from '@/services/supabase';
+import {
+  extractTimezoneFromRecord,
+  cleanAddressForDisplay,
+  getTimezoneBadgeInfo,
+  TimezoneBadgeInfo,
+  COMPANY_BASE_TIMEZONE,
+} from './timezoneUtils';
 
 export interface WeekDayInfo {
   dateStr: string; // YYYY-MM-DD
@@ -38,6 +45,8 @@ export interface TurnoAsistencia {
   horasExtraStr: string;
   enCurso: boolean;
   autoCerrado?: boolean;
+  timezone?: string | null;
+  timezoneBadge?: TimezoneBadgeInfo | null;
 }
 
 export interface DiaAsistencia {
@@ -445,6 +454,9 @@ export function processAsistenciasSemana(
       minutosDia += mins;
       turnosTotales++;
 
+      const tz = extractTimezoneFromRecord(item);
+      const badge = getTimezoneBadgeInfo(tz);
+
       return {
         id: item.id,
         index: idx + 1,
@@ -456,10 +468,10 @@ export function processAsistenciasSemana(
           : null,
         foto_entrada_url: item.foto_entrada_url,
         foto_salida_url: item.foto_salida_url,
-        direccion_entrada: item.direccion_entrada,
+        direccion_entrada: cleanAddressForDisplay(item.direccion_entrada),
         direccion_salida: autoCerrado
           ? 'Cierre automático 6:00 PM (olvido de checada)'
-          : item.direccion_salida,
+          : cleanAddressForDisplay(item.direccion_salida),
         latitud_entrada: item.latitud_entrada,
         longitud_entrada: item.longitud_entrada,
         latitud_salida: item.latitud_salida,
@@ -472,6 +484,8 @@ export function processAsistenciasSemana(
         horasExtraStr: formatMinutesToHours(extMins),
         enCurso,
         autoCerrado,
+        timezone: tz,
+        timezoneBadge: badge,
       };
     });
 
@@ -600,6 +614,9 @@ export function processAsistenciasPeriodo(
       minutosDia += mins;
       turnosTotales++;
 
+      const tz = extractTimezoneFromRecord(item);
+      const badge = getTimezoneBadgeInfo(tz);
+
       return {
         id: item.id,
         index: idx + 1,
@@ -611,10 +628,10 @@ export function processAsistenciasPeriodo(
           : null,
         foto_entrada_url: item.foto_entrada_url,
         foto_salida_url: item.foto_salida_url,
-        direccion_entrada: item.direccion_entrada,
+        direccion_entrada: cleanAddressForDisplay(item.direccion_entrada),
         direccion_salida: autoCerrado
           ? 'Cierre automático 6:00 PM (olvido de checada)'
-          : item.direccion_salida,
+          : cleanAddressForDisplay(item.direccion_salida),
         latitud_entrada: item.latitud_entrada,
         longitud_entrada: item.longitud_entrada,
         latitud_salida: item.latitud_salida,
@@ -627,6 +644,8 @@ export function processAsistenciasPeriodo(
         horasExtraStr: formatMinutesToHours(extMins),
         enCurso,
         autoCerrado,
+        timezone: tz,
+        timezoneBadge: badge,
       };
     });
 

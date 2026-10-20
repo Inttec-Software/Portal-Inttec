@@ -2881,21 +2881,24 @@ export default function FacturacionScreen() {
                         </TouchableOpacity>
                         </View>
 
-                        {/* Línea 2: Campo Descripción Opcional justo debajo */}
-                        <View style={{ marginTop: 4 }}>
+                        {/* Línea 2: Campo Descripción Opcional justo debajo (Multilínea estilo Términos y Condiciones) */}
+                        <View style={{ marginTop: 6 }}>
                           <TextInput
                             style={[
                               styles.partidaDescDetalladaInput,
                               {
                                 color: themeColors.text,
-                                backgroundColor: themeColors.backgroundElement + '80',
-                                borderColor: themeColors.border + '60',
+                                backgroundColor: themeColors.backgroundElement,
+                                borderColor: themeColors.border,
                               },
                             ]}
+                            multiline={true}
+                            numberOfLines={3}
+                            blurOnSubmit={false}
                             value={item.descripcion_detallada || ''}
                             onChangeText={val => handleUpdatePartida(index, 'descripcion_detallada', val)}
-                            placeholder="Escribe una descripción adicional (opcional)..."
-                            placeholderTextColor={themeColors.textSecondary + '70'}
+                            placeholder="Escribe una descripción adicional (opcional)... Puedes usar Enter para saltos de línea"
+                            placeholderTextColor={themeColors.textSecondary}
                           />
                         </View>
 
@@ -4939,12 +4942,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   partidaDescDetalladaInput: {
-    fontSize: 11,
-    fontStyle: 'italic',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    fontSize: 12.5,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderRadius: 6,
     borderWidth: 1,
+    minHeight: 68,
+    textAlignVertical: 'top',
+    lineHeight: 18,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', resize: 'vertical' } as any) : {}),
   },
   tableFieldInput: {
     borderWidth: 1,

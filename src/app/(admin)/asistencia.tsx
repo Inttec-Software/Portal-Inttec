@@ -44,6 +44,13 @@ import {
   formatMinutesToHours,
   processAsistenciasSemana,
 } from '@/utils/asistenciaUtils';
+import {
+  getTimezoneBadgeInfo,
+  extractTimezoneFromRecord,
+  cleanAddressForDisplay,
+  COMPANY_BASE_TIMEZONE,
+  TimezoneBadgeInfo,
+} from '@/utils/timezoneUtils';
 import { ReportGenerator } from '@/utils/reportGenerator';
 
 export default function AdminAsistencia() {
@@ -253,7 +260,7 @@ export default function AdminAsistencia() {
   // ==========================================
   // PROCESAMIENTO DE ESTADOS POR EMPLEADO Y DÍAS
   // ==========================================
-  const fechaHoyJornada = useMemo(() => AsistenciaService.getFechaJornada(), []);
+  const fechaHoyJornada = useMemo(() => AsistenciaService.getFechaJornada(new Date(), COMPANY_BASE_TIMEZONE), []);
 
   const rangeSemana = useMemo(() => getWeekRange(selectedMonday), [selectedMonday]);
 
@@ -334,12 +341,15 @@ export default function AdminAsistencia() {
       let ultimaSalida: string | null = null;
       let direccionDia: string | null = null;
       let fotoEntradaDia: string | null = null;
+      let timezoneBadge: TimezoneBadgeInfo | null = null;
 
       if (asistenciasTargetDia.length > 0) {
         const sorted = [...asistenciasTargetDia].sort((a, b) =>
           (b.hora_entrada || '').localeCompare(a.hora_entrada || '')
         );
         const lastReg = sorted[0];
+        const tz = extractTimezoneFromRecord(lastReg);
+        timezoneBadge = getTimezoneBadgeInfo(tz);
 
         if (lastReg.hora_entrada && !lastReg.hora_salida) {
           estadoDia = 'EN_TURNO';
@@ -361,8 +371,9 @@ export default function AdminAsistencia() {
         estadoDia,
         ultimaEntrada,
         ultimaSalida,
-        direccionHoy: direccionDia,
+        direccionHoy: direccionDia ? cleanAddressForDisplay(direccionDia) : null,
         fotoEntradaHoy: fotoEntradaDia,
+        timezoneBadge,
         isViewingToday,
         targetFecha,
         totalMinutosSemana: periodoProcesado.totalMinutosSemana,
@@ -1371,9 +1382,18 @@ export default function AdminAsistencia() {
                           {selectedDayInfo ? `Entrada (${selectedDayInfo.dayName.slice(0, 3)}):` : 'Entrada Hoy:'}
                         </Text>
                       </View>
-                      <Text style={[styles.horarioVal, { color: emp.ultimaEntrada ? '#16a34a' : themeColors.textSecondary }]}>
-                        {emp.ultimaEntrada ? formatHoraDisplay(emp.ultimaEntrada) : 'Pendiente'}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={[styles.horarioVal, { color: emp.ultimaEntrada ? '#16a34a' : themeColors.textSecondary }]}>
+                          {emp.ultimaEntrada ? formatHoraDisplay(emp.ultimaEntrada) : 'Pendiente'}
+                        </Text>
+                        {emp.timezoneBadge && (
+                          <View style={{ backgroundColor: emp.timezoneBadge.bgColor, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                            <Text style={{ color: emp.timezoneBadge.color, fontSize: 10, fontWeight: '700' }}>
+                              {emp.timezoneBadge.label} {emp.timezoneBadge.diffText}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
 
                     <View style={styles.horarioRow}>

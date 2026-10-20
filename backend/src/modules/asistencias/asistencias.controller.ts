@@ -386,24 +386,21 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
         horaLocal = timePart;
       } else {
         const now = new Date();
-        const localNowMs = now.getTime() + (now.getTimezoneOffset() * 60000) - (6 * 3600000);
-        const localNow = new Date(localNowMs);
-        fechaJornada = `${localNow.getFullYear()}-${String(localNow.getMonth() + 1).padStart(2, '0')}-${String(localNow.getDate()).padStart(2, '0')}`;
-        horaLocal = `${String(localNow.getHours()).padStart(2, '0')}:${String(localNow.getMinutes()).padStart(2, '0')}:${String(localNow.getSeconds()).padStart(2, '0')}`;
+        const baseTz = process.env.APP_TIMEZONE || 'America/Mexico_City';
+        fechaJornada = now.toLocaleDateString('en-CA', { timeZone: baseTz });
+        horaLocal = now.toLocaleTimeString('en-GB', { timeZone: baseTz });
       }
     } else {
       const now = new Date();
-      const localNowMs = now.getTime() + (now.getTimezoneOffset() * 60000) - (6 * 3600000);
-      const localNow = new Date(localNowMs);
-      fechaJornada = `${localNow.getFullYear()}-${String(localNow.getMonth() + 1).padStart(2, '0')}-${String(localNow.getDate()).padStart(2, '0')}`;
-      horaLocal = `${String(localNow.getHours()).padStart(2, '0')}:${String(localNow.getMinutes()).padStart(2, '0')}:${String(localNow.getSeconds()).padStart(2, '0')}`;
+      const baseTz = process.env.APP_TIMEZONE || 'America/Mexico_City';
+      fechaJornada = now.toLocaleDateString('en-CA', { timeZone: baseTz });
+      horaLocal = now.toLocaleTimeString('en-GB', { timeZone: baseTz });
     }
 
-    // Obtener la fecha de hoy en hora local de México
+    // Obtener la fecha de hoy en hora local oficial de la empresa
     const serverNow = new Date();
-    const serverLocalNowMs = serverNow.getTime() + (serverNow.getTimezoneOffset() * 60000) - (6 * 3600000);
-    const serverLocalNow = new Date(serverLocalNowMs);
-    const serverToday = `${serverLocalNow.getFullYear()}-${String(serverLocalNow.getMonth() + 1).padStart(2, '0')}-${String(serverLocalNow.getDate()).padStart(2, '0')}`;
+    const baseTz = process.env.APP_TIMEZONE || 'America/Mexico_City';
+    const serverToday = serverNow.toLocaleDateString('en-CA', { timeZone: baseTz });
 
     console.log(`\n======================================================`);
     console.log(`📡 [HIKVISION CHECADOR] -> 👤 ${usuario.nombre} (${employeeNo || 'Sin No'})`);
@@ -423,7 +420,7 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
 
     // Validar antigüedad razonable: descartar si viene con más de 1 día en el futuro por desconfiguración del reloj
     const eventTime = new Date(`${fechaJornada}T${horaLocal}`).getTime();
-    const serverTime = serverLocalNow.getTime();
+    const serverTime = serverNow.getTime();
     const diffHours = (serverTime - eventTime) / 3600000;
 
     if (diffHours < -24) {
