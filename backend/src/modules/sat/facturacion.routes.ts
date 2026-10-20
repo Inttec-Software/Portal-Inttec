@@ -483,10 +483,20 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
 
     const etiquetaVal = effectiveCondiciones.etiqueta || body.etiqueta || existingFactura?.etiqueta || null;
 
+    // Preparar notas y dirección del receptor
+    const existingNotas = (existingFactura?.notas && typeof existingFactura.notas === 'object')
+      ? existingFactura.notas
+      : (typeof existingFactura?.notas === 'string' && existingFactura.notas.startsWith('{')
+          ? (() => { try { return JSON.parse(existingFactura.notas); } catch (_) { return {}; } })()
+          : {});
+
+    const direccionFinal = (cliente.direccion || existingNotas.receptor?.direccion || body.cliente_direccion || '').trim();
+
     // Guardar en tabla independiente facturas_emitidas
     const facturaPayload: any = {
       serie: serieFinal,
       folio: folioFinal,
+      cliente_id: cliente.id || existingFactura?.cliente_id || body.cliente_id || null,
       cliente_nombre: cliente.razon_social || cliente.nombre || 'PUBLICO EN GENERAL',
       cliente_rfc: (cliente.rfc || 'XAXX010101000').toUpperCase().trim(),
       cliente_cp: cliente.codigo_postal || '31110',
@@ -507,6 +517,19 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       fecha_emision: new Date().toISOString(),
       orden_compra: effectiveCondiciones.orden_compra || venta.orden_compra || null,
       etiqueta: etiquetaVal ? String(etiquetaVal).trim() : null,
+      notas: {
+        ...existingNotas,
+        receptor: {
+          ...(existingNotas.receptor || {}),
+          nombre: cliente.razon_social || cliente.nombre || 'PUBLICO EN GENERAL',
+          razon_social: cliente.razon_social || cliente.nombre || 'PUBLICO EN GENERAL',
+          rfc: (cliente.rfc || 'XAXX010101000').toUpperCase().trim(),
+          codigo_postal: cliente.codigo_postal || '31110',
+          regimen_fiscal: cliente.regimen_fiscal || '616',
+          uso_cfdi: cliente.uso_cfdi || 'G03',
+          direccion: direccionFinal,
+        }
+      },
       venta_id: actualVentaId || null
     };
 
@@ -577,13 +600,23 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       try {
         const clientUpd: any = {};
         if (cliente.regimen_fiscal) clientUpd.regimen_fiscal = cliente.regimen_fiscal;
-        if (cliente.direccion) clientUpd.direccion = String(cliente.direccion).trim();
+        if (direccionFinal) clientUpd.direccion = direccionFinal;
 
         if (Object.keys(clientUpd).length > 0) {
-          if (cliente.id) {
-            await supabaseClient.from('clientes').update(clientUpd).eq('id', cliente.id);
+          if (facturaPayload.cliente_id) {
+            await supabaseClient.from('clientes').update(clientUpd).eq('id', facturaPayload.cliente_id);
           } else {
-            await supabaseClient.from('clientes').update(clientUpd).eq('rfc', receptorRfc);
+            const { data: updList } = await supabaseClient
+              .from('clientes')
+              .update(clientUpd)
+              .eq('rfc', receptorRfc)
+              .select('id');
+            if ((!updList || updList.length === 0) && (cliente.razon_social || cliente.nombre)) {
+              await supabaseClient
+                .from('clientes')
+                .update(clientUpd)
+                .ilike('nombre', (cliente.razon_social || cliente.nombre).trim());
+            }
           }
         }
       } catch (cUpdErr) {
@@ -1534,9 +1567,19 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
         const cleanFolioVal = cleanFolio(f.folio);
         const fullFolio = `${f.serie || 'A'}${cleanFolioVal}`;
 
+        const dir = f.notas?.receptor?.direccion || f.cliente_direccion || '';
+
         return {
           id: f.id,
           cliente: f.cliente_nombre,
+          cliente_nombre: f.cliente_nombre,
+          cliente_rfc: f.cliente_rfc,
+          cliente_cp: f.cliente_cp,
+          cliente_regimen: f.cliente_regimen,
+          cliente_uso_cfdi: f.cliente_uso_cfdi,
+          cliente_direccion: dir,
+          cliente_id: f.cliente_id,
+          notas: f.notas,
           fecha: f.fecha_emision ? String(f.fecha_emision).slice(0, 10) : '',
           folio: fullFolio,
           cfdi_folio: cleanFolioVal,
@@ -1643,7 +1686,7 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identificador);
     let facturaQuery = supabaseClient
       .from('facturas_emitidas')
-      .select('id, cfdi_uuid, cfdi_xml_url');
+      .select('id, cfdi_uuid, cfdi_xml_url, notas, cliente_id, cliente_nombre, cliente_rfc');
 
     if (isUUID) {
       facturaQuery = facturaQuery.or(`cfdi_uuid.eq.${identificador},id.eq.${identificador}`);
@@ -1673,6 +1716,29 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
       xmlUrl = venta?.cfdi_xml_url;
     }
 
+    // Resolución de dirección del cliente para visualización
+    let resolvedDireccion = factura?.notas?.receptor?.direccion || '';
+    if (!resolvedDireccion && factura?.cliente_id) {
+      try {
+        const { data: cDB } = await supabaseClient
+          .from('clientes')
+          .select('direccion')
+          .eq('id', factura.cliente_id)
+          .maybeSingle();
+        if (cDB?.direccion) resolvedDireccion = cDB.direccion;
+      } catch (_) {}
+    }
+    if (!resolvedDireccion && factura?.cliente_rfc && factura.cliente_rfc !== 'XAXX010101000') {
+      try {
+        const { data: cDB } = await supabaseClient
+          .from('clientes')
+          .select('direccion')
+          .eq('rfc', factura.cliente_rfc)
+          .maybeSingle();
+        if (cDB?.direccion) resolvedDireccion = cDB.direccion;
+      } catch (_) {}
+    }
+
     // 3. Si tiene URL pública de storage, intentar fetch directo
     if (xmlUrl && xmlUrl.startsWith('http')) {
       try {
@@ -1680,7 +1746,7 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
         if (fetchResp.ok) {
           const text = await fetchResp.text();
           if (text && text.includes('<')) {
-            return res.json({ success: true, xml: text });
+            return res.json({ success: true, xml: text, cliente_direccion: resolvedDireccion, notas: factura?.notas || null });
           }
         }
       } catch (_) {}
@@ -1703,7 +1769,7 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
         if (!downErr && fileBlob) {
           const text = await fileBlob.text();
           if (text && text.includes('<')) {
-            return res.json({ success: true, xml: text });
+            return res.json({ success: true, xml: text, cliente_direccion: resolvedDireccion, notas: factura?.notas || null });
           }
         }
       } catch (_) {}

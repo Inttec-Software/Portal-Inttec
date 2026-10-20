@@ -89,6 +89,13 @@ interface FacturaEmitida {
   origenLabel?: string;
   etiqueta?: string;
   venta_id?: string | number | null;
+  cliente_rfc?: string;
+  cliente_cp?: string;
+  cliente_regimen?: string;
+  cliente_uso_cfdi?: string;
+  cliente_direccion?: string;
+  cliente_id?: string | null;
+  notas?: any;
 }
 
 const REGIMENES_FISCALES = [
@@ -1365,12 +1372,14 @@ export default function FacturacionScreen() {
       try {
         setIsSubmitting(true);
         const headers = await getApiHeaders();
+        const dirOverride = (factura.cliente_direccion || (factura as any)?.notas?.receptor?.direccion || '').trim();
         const res = await fetch(`${getApiUrl()}/api/sat/timbrar-factura`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
             borrador_id: factura.id,
-            venta_id: factura.venta_id || undefined
+            venta_id: factura.venta_id || undefined,
+            cliente_override: dirOverride ? { direccion: dirOverride } : undefined
           })
         });
         const resJson = await res.json().catch(() => ({}));
@@ -1664,6 +1673,12 @@ export default function FacturacionScreen() {
       const resp = await fetch(`${getApiUrl()}/api/sat/factura-xml/${factura.cfdi_uuid || factura.id}`, { headers });
       if (resp.ok) {
         const j = await resp.json();
+        if (j.cliente_direccion && !(factura as any).cliente_direccion) {
+          (factura as any).cliente_direccion = j.cliente_direccion;
+        }
+        if (j.notas && !(factura as any).notas) {
+          (factura as any).notas = j.notas;
+        }
         if (j.xml && j.xml.includes('<')) return j.xml;
       }
     } catch (_) {}
@@ -1806,12 +1821,100 @@ export default function FacturacionScreen() {
         };
       }
 
-      const clientDir = ((factura as any)?.cliente_direccion ||
+      let clientDir = (
+        (factura as any)?.cliente_direccion ||
         (factura as any)?.notas?.receptor?.direccion ||
-        clientes.find(c => 
-          (c.rfc && parsed?.customer?.tax_id && c.rfc.trim().toUpperCase() === parsed.customer.tax_id.trim().toUpperCase()) ||
-          (c.nombre && parsed?.customer?.legal_name && c.nombre.trim().toUpperCase() === parsed.customer.legal_name.trim().toUpperCase())
-        )?.direccion || '').trim();
+        (factura as any)?.notas?.cliente_direccion ||
+        ''
+      ).trim();
+
+      const targetRfc = (parsed?.customer?.tax_id || (factura as any)?.cliente_rfc || '').trim().toUpperCase();
+      const targetName = (parsed?.customer?.legal_name || factura.cliente || '').trim();
+
+      // 1. Buscar en memoria del catálogo clientes
+      if (!clientDir && (targetRfc || targetName)) {
+        const found = clientes.find(c => 
+          (c.rfc && targetRfc && c.rfc.trim().toUpperCase() === targetRfc && targetRfc !== 'XAXX010101000') ||
+          (c.nombre && targetName && c.nombre.trim().toUpperCase() === targetName.toUpperCase()) ||
+          (c.razon_social && targetName && c.razon_social.trim().toUpperCase() === targetName.toUpperCase())
+        );
+        if (found?.direccion) {
+          clientDir = found.direccion.trim();
+        }
+      }
+
+      // 2. Si no se encontró y tenemos factura.id, buscar en facturas_emitidas
+      if (!clientDir && factura.id) {
+        try {
+          const activeComp = CompanyService.getActiveCompany();
+          const client = activeComp === 'daravisa' ? daravisaClient : inttecClient;
+          const { data: fDB } = await client
+            .from('facturas_emitidas')
+            .select('notas, cliente_id, cliente_rfc, cliente_nombre')
+            .eq('id', factura.id)
+            .maybeSingle();
+
+          if (fDB?.notas?.receptor?.direccion) {
+            clientDir = String(fDB.notas.receptor.direccion).trim();
+          } else if (fDB?.cliente_id) {
+            const { data: cDB } = await client
+              .from('clientes')
+              .select('direccion')
+              .eq('id', fDB.cliente_id)
+              .maybeSingle();
+            if (cDB?.direccion) clientDir = String(cDB.direccion).trim();
+          }
+        } catch (_) {}
+      }
+
+      // 3. Si aún no se encontró, buscar en la tabla clientes directamente por RFC o Razón Social
+      if (!clientDir) {
+        try {
+          const activeComp = CompanyService.getActiveCompany();
+          const client = activeComp === 'daravisa' ? daravisaClient : inttecClient;
+          
+          if (targetRfc && targetRfc !== 'XAXX010101000') {
+            const { data: cByRfc } = await client
+              .from('clientes')
+              .select('direccion')
+              .eq('rfc', targetRfc)
+              .maybeSingle();
+            if (cByRfc?.direccion) clientDir = String(cByRfc.direccion).trim();
+          }
+
+          if (!clientDir && targetName) {
+            const { data: cByName } = await client
+              .from('clientes')
+              .select('direccion')
+              .or(`nombre.ilike.%${targetName}%,razon_social.ilike.%${targetName}%`)
+              .limit(1)
+              .maybeSingle();
+            if (cByName?.direccion) clientDir = String(cByName.direccion).trim();
+          }
+        } catch (_) {}
+      }
+
+      // 4. Si la factura tiene venta_id, buscar en cotizaciones vinculadas
+      if (!clientDir && factura.venta_id) {
+        try {
+          const activeComp = CompanyService.getActiveCompany();
+          const client = activeComp === 'daravisa' ? daravisaClient : inttecClient;
+          const { data: vDB } = await client
+            .from('ventas')
+            .select('cliente, cotizacion_id')
+            .eq('id', factura.venta_id)
+            .maybeSingle();
+
+          if (vDB?.cotizacion_id) {
+            const { data: cotDB } = await client
+              .from('cotizaciones')
+              .select('cliente_direccion')
+              .eq('id', vDB.cotizacion_id)
+              .maybeSingle();
+            if (cotDB?.cliente_direccion) clientDir = String(cotDB.cliente_direccion).trim();
+          }
+        } catch (_) {}
+      }
 
       if (clientDir && parsed) {
         if (!parsed.customer) {
@@ -1820,9 +1923,7 @@ export default function FacturacionScreen() {
         if (!parsed.customer.address) {
           parsed.customer.address = {};
         }
-        if (!parsed.customer.address.street) {
-          parsed.customer.address.street = clientDir;
-        }
+        parsed.customer.address.street = clientDir;
       }
       if (clientDir && factura) {
         (factura as any).cliente_direccion = clientDir;

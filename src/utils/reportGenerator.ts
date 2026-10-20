@@ -4740,13 +4740,21 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   );
 
   const clientAddressStreet = (
+    (typeof facturaData?.customer?.address === 'string' ? facturaData.customer.address : '') ||
     facturaData?.customer?.address?.street || 
     facturaData?.customer?.address?.calle || 
+    facturaData?.customer?.address?.direccion ||
+    facturaData?.customer?.direccion ||
     facturaData?.receiver?.address?.street || 
     facturaData?.receiver?.address?.calle || 
+    facturaData?.receiver?.address?.direccion ||
+    facturaData?.receiver?.direccion ||
     facturaData?.address?.street || 
+    facturaData?.address?.direccion ||
     venta?.cliente_direccion || 
     venta?.direccion || 
+    venta?.notas?.receptor?.direccion ||
+    venta?.notas?.cliente_direccion ||
     ''
   ).trim();
   const clientAddressExterior = (facturaData?.customer?.address?.exterior || '').trim();
