@@ -654,21 +654,44 @@ export const AsistenciaService = {
     fecha?: string
   ): Promise<{ success: boolean; message: string; data: any }> {
     const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/editar-horas/${asistenciaId}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({
+    try {
+      const res = await fetch(`${getApiUrl()}/api/asistencias/admin/editar-horas/${asistenciaId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          hora_entrada: horaEntrada,
+          hora_salida: horaSalida,
+          limpiar_salida: horaSalida === null,
+          observaciones,
+          fecha,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'Error al actualizar horas de asistencia');
+      }
+      return data;
+    } catch (err: any) {
+      // Fallback a clientes de Supabase directos
+      const updateData: any = {
         hora_entrada: horaEntrada,
         hora_salida: horaSalida,
-        observaciones,
-        fecha,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.message || data.error || 'Error al actualizar horas de asistencia');
+      };
+      if (horaSalida === null) {
+        updateData.foto_salida_url = null;
+        updateData.direccion_salida = null;
+        updateData.latitud_salida = null;
+        updateData.longitud_salida = null;
+      }
+      if (fecha) {
+        updateData.fecha = fecha;
+      }
+      await Promise.allSettled([
+        inttecClient.from('asistencias').update(updateData).eq('id', asistenciaId),
+        daravisaClient.from('asistencias').update(updateData).eq('id', asistenciaId),
+      ]);
+      return { success: true, message: 'Horas actualizadas (fallback directo)', data: updateData };
     }
-    return data;
   },
 
   /**

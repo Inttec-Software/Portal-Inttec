@@ -628,9 +628,12 @@ export const editarHorasAsistencia = async (req: Request, res: Response) => {
 
     let query = 'UPDATE asistencias SET hora_entrada = $1, hora_salida = $2';
     let params: any[] = [cleanHoraEntrada, cleanHoraSalida];
+    if (cleanHoraSalida === null) {
+      query += ', foto_salida_url = NULL, direccion_salida = NULL, latitud_salida = NULL, longitud_salida = NULL';
+    }
     if (fecha) {
-      query += ', fecha = $3';
       params.push(fecha);
+      query += `, fecha = $${params.length}`;
     }
 
     const editorNombre = user.nombre || user.email || 'DEV';

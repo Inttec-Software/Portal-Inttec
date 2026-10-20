@@ -467,15 +467,17 @@ export function processAsistenciasSemana(
           ? formatHoraDisplay(item.hora_salida)
           : null,
         foto_entrada_url: item.foto_entrada_url,
-        foto_salida_url: item.foto_salida_url,
+        foto_salida_url: (enCurso || autoCerrado) ? null : item.foto_salida_url,
         direccion_entrada: cleanAddressForDisplay(item.direccion_entrada),
         direccion_salida: autoCerrado
           ? 'Cierre automático 6:00 PM (olvido de checada)'
+          : enCurso
+          ? null
           : cleanAddressForDisplay(item.direccion_salida),
         latitud_entrada: item.latitud_entrada,
         longitud_entrada: item.longitud_entrada,
-        latitud_salida: item.latitud_salida,
-        longitud_salida: item.longitud_salida,
+        latitud_salida: (enCurso || autoCerrado) ? null : item.latitud_salida,
+        longitud_salida: (enCurso || autoCerrado) ? null : item.longitud_salida,
         minutos: mins,
         duracionStr: enCurso ? 'En curso' : formatMinutesToHours(mins),
         minutosRegulares: regMins,
@@ -627,15 +629,17 @@ export function processAsistenciasPeriodo(
           ? formatHoraDisplay(item.hora_salida)
           : null,
         foto_entrada_url: item.foto_entrada_url,
-        foto_salida_url: item.foto_salida_url,
+        foto_salida_url: (enCurso || autoCerrado) ? null : item.foto_salida_url,
         direccion_entrada: cleanAddressForDisplay(item.direccion_entrada),
         direccion_salida: autoCerrado
           ? 'Cierre automático 6:00 PM (olvido de checada)'
+          : enCurso
+          ? null
           : cleanAddressForDisplay(item.direccion_salida),
         latitud_entrada: item.latitud_entrada,
         longitud_entrada: item.longitud_entrada,
-        latitud_salida: item.latitud_salida,
-        longitud_salida: item.longitud_salida,
+        latitud_salida: (enCurso || autoCerrado) ? null : item.latitud_salida,
+        longitud_salida: (enCurso || autoCerrado) ? null : item.longitud_salida,
         minutos: mins,
         duracionStr: enCurso ? 'En curso' : formatMinutesToHours(mins),
         minutosRegulares: regMins,

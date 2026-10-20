@@ -632,7 +632,7 @@ export default function AsistenciaSemanalCard({
 
                             {/* Foto y Ubicación Salida */}
                             <View style={styles.turnoMetaRow}>
-                              {turno.foto_salida_url ? (
+                              {!turno.enCurso && turno.hora_salida && turno.foto_salida_url ? (
                                 <TouchableOpacity
                                   style={styles.thumbBtn}
                                   activeOpacity={0.8}
