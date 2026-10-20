@@ -89,10 +89,10 @@ export const getClientes = async (req: Request, res: Response) => {
     let values: any[] = [];
 
     if (q) {
-      sql = `SELECT id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi FROM clientes WHERE razon_social ILIKE $1 OR nombre ILIKE $1 OR rfc ILIKE $1 ORDER BY nombre LIMIT 20`;
+      sql = `SELECT id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi, direccion FROM clientes WHERE razon_social ILIKE $1 OR nombre ILIKE $1 OR rfc ILIKE $1 ORDER BY nombre LIMIT 20`;
       values.push(`%${q}%`);
     } else {
-      sql = `SELECT id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi FROM clientes ORDER BY nombre`;
+      sql = `SELECT id, nombre, razon_social, rfc, codigo_postal, regimen_fiscal, uso_cfdi, direccion FROM clientes ORDER BY nombre`;
     }
 
     const { rows } = await pool.query(sql, values);

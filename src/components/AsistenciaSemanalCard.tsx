@@ -547,9 +547,18 @@ export default function AsistenciaSemanalCard({
                                 Entrada
                               </Text>
                             </View>
-                            <Text style={[styles.turnoTimeVal, { color: themeColors.text }]}>
-                              {turno.hora_entrada}
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={[styles.turnoTimeVal, { color: themeColors.text }]}>
+                                {turno.hora_entrada}
+                              </Text>
+                              {turno.timezoneBadge && (
+                                <View style={{ backgroundColor: turno.timezoneBadge.bgColor, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 }}>
+                                  <Text style={{ color: turno.timezoneBadge.color, fontSize: 10, fontWeight: '700' }}>
+                                    {turno.timezoneBadge.label} {turno.timezoneBadge.diffText}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
 
                             {/* Foto y Ubicación Entrada */}
                             <View style={styles.turnoMetaRow}>
@@ -623,7 +632,7 @@ export default function AsistenciaSemanalCard({
 
                             {/* Foto y Ubicación Salida */}
                             <View style={styles.turnoMetaRow}>
-                              {turno.foto_salida_url ? (
+                              {!turno.enCurso && turno.hora_salida && turno.foto_salida_url ? (
                                 <TouchableOpacity
                                   style={styles.thumbBtn}
                                   activeOpacity={0.8}

@@ -88,6 +88,14 @@ interface FacturaEmitida {
   origen?: string;
   origenLabel?: string;
   etiqueta?: string;
+  venta_id?: string | number | null;
+  cliente_rfc?: string;
+  cliente_cp?: string;
+  cliente_regimen?: string;
+  cliente_uso_cfdi?: string;
+  cliente_direccion?: string;
+  cliente_id?: string | null;
+  notas?: any;
 }
 
 const REGIMENES_FISCALES = [
@@ -234,6 +242,8 @@ export default function FacturacionScreen() {
   const [clientes, setClientes] = useState<ClienteCatalogo[]>([]);
   const [isLoadingClientes, setIsLoadingClientes] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string | number | null>(null);
+  const [origenVentaId, setOrigenVentaId] = useState<string | number | null>(null);
+  const [origenVentaFolio, setOrigenVentaFolio] = useState<string | null>(null);
   const [clientSuggestions, setClientSuggestions] = useState<ClienteCatalogo[]>([]);
   const [isSearchingClients, setIsSearchingClients] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
@@ -367,6 +377,23 @@ export default function FacturacionScreen() {
             ? JSON.parse(rawData)
             : rawData;
 
+          // Si la venta o cotización ya cuenta con UUID fiscal o estado TIMBRADA, no permitir re-timbrarla:
+          if (data.cfdiUuid || data.cfdi_uuid || data.cfdi_estado === 'TIMBRADA') {
+            const uuidFiscal = data.cfdiUuid || data.cfdi_uuid || 'Registrado';
+            showAlert(
+              'Venta Ya Timbrada',
+              `Esta venta ya cuenta con factura oficial timbrada ante el SAT.\n\nFolio Fiscal (UUID):\n${uuidFiscal}\n\nSerás redirigido al historial para consultar o descargar sus archivos.`
+            );
+            setActiveTab('historial');
+            if (uuidFiscal !== 'Registrado') {
+              setHistorialSearch(uuidFiscal);
+            } else if (data.folioVenta) {
+              setHistorialSearch(data.folioVenta);
+            }
+            router.setParams({ fromCotizacion: 'false', cotizacionData: '', fromVenta: 'false', ventaData: '' });
+            return;
+          }
+
           if (data.clienteNombre || data.cliente_nombre) {
             setClienteNombre(data.clienteNombre || data.cliente_nombre);
           }
@@ -437,8 +464,12 @@ export default function FacturacionScreen() {
           }
 
           if (data.ventaId) {
-            setCurrentDraftId(data.ventaId);
+            setOrigenVentaId(data.ventaId);
+            setOrigenVentaFolio(data.folioVenta || `Venta #${data.ventaId}`);
+            setCurrentDraftId(null);
           } else {
+            setOrigenVentaId(null);
+            setOrigenVentaFolio(null);
             setCurrentDraftId(null);
           }
 
@@ -876,6 +907,8 @@ export default function FacturacionScreen() {
 
   const handleResetForm = () => {
     setCurrentDraftId(null);
+    setOrigenVentaId(null);
+    setOrigenVentaFolio(null);
     setSelectedClientId(null);
     setClienteNombre('');
     setClienteRfc('XAXX010101000');
@@ -940,6 +973,8 @@ export default function FacturacionScreen() {
 
       const draft = data.borrador;
       setCurrentDraftId(draft.id);
+      setOrigenVentaId(null);
+      setOrigenVentaFolio(null);
       setSerie(draft.serie || 'A');
       setFolio(draft.folio || '0000');
       setClienteNombre('');
@@ -1098,6 +1133,14 @@ export default function FacturacionScreen() {
 
   // Modificar un borrador: carga los datos en el formulario y activa currentDraftId
   const handleModificarBorrador = async (factura: FacturaEmitida) => {
+    if (factura.cfdi_estado === 'TIMBRADA' || factura.cfdi_uuid) {
+      showAlert(
+        'Factura Ya Timbrada',
+        `Esta factura ya fue timbrada ante el SAT (Folio Fiscal: ${factura.cfdi_uuid || 'registrado'}). No puede editarse como borrador.`
+      );
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       const headers = await getApiHeaders();
@@ -1110,6 +1153,8 @@ export default function FacturacionScreen() {
       if (!draft) throw new Error('No se recibió la información del borrador');
 
       setCurrentDraftId(draft.id);
+      setOrigenVentaId(draft.venta_id || null);
+      setOrigenVentaFolio(draft.venta_id ? `Venta #${draft.venta_id}` : null);
       setSelectedClientId(draft.cliente_id || draft.receptor?.cliente_id || null);
       setSerie(draft.serie || 'A');
       setFolio(draft.folio || '0000');
@@ -1198,17 +1243,16 @@ export default function FacturacionScreen() {
     }
   };
 
-  // Guardar cambios en el borrador existente preservando el folio reservado
+  // Guardar cambios en el borrador existente o crear uno nuevo a partir del formulario actual
   const handleGuardarBorrador = async () => {
-    if (!currentDraftId) {
-      showAlert('Aviso', 'No hay un borrador activo seleccionado para guardar.');
-      return;
-    }
     try {
       setIsSubmitting(true);
       await syncClienteFiscalData();
       const headers = await getApiHeaders();
-      const payload = {
+      const payload: any = {
+        serie: serie || 'A',
+        folio: folio || undefined,
+        venta_id: origenVentaId || undefined,
         cliente: clienteNombre.trim() || 'PUBLICO EN GENERAL',
         cliente_rfc: clienteRfc.trim().toUpperCase() || 'XAXX010101000',
         cliente_cp: clienteCp.trim() || '31110',
@@ -1232,17 +1276,43 @@ export default function FacturacionScreen() {
         }))
       };
 
-      const res = await fetch(`${getApiUrl()}/api/sat/borrador/${currentDraftId}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify(payload)
-      });
-      const resJson = await res.json().catch(() => ({}));
-      if (!res.ok || !resJson.success) {
-        throw new Error(resJson.error || 'Error al actualizar borrador');
+      if (currentDraftId) {
+        // Actualizar borrador existente
+        const res = await fetch(`${getApiUrl()}/api/sat/borrador/${currentDraftId}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(payload)
+        });
+        const resJson = await res.json().catch(() => ({}));
+        if (!res.ok || !resJson.success) {
+          if (resJson.error && (resJson.error.includes('TIMBRADA') || resJson.error.includes('No se encontró') || resJson.error.includes('no encontrado'))) {
+            setCurrentDraftId(null);
+          }
+          throw new Error(resJson.error || 'Error al actualizar borrador');
+        }
+
+        showAlert('Éxito', `Borrador Folio ${serie}${folio} guardado correctamente.`);
+      } else {
+        // Crear nuevo borrador reservando folio
+        const res = await fetch(`${getApiUrl()}/api/sat/borrador`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload)
+        });
+        const resJson = await res.json().catch(() => ({}));
+        if (!res.ok || !resJson.success) {
+          throw new Error(resJson.error || 'Error al guardar borrador');
+        }
+
+        const draft = resJson.borrador;
+        if (draft?.id) {
+          setCurrentDraftId(draft.id);
+          if (draft.serie) setSerie(draft.serie);
+          if (draft.folio) setFolio(draft.folio);
+        }
+        showAlert('Éxito', `Borrador Folio ${draft?.serie || serie}${draft?.folio || folio} creado y guardado correctamente.`);
       }
 
-      showAlert('Éxito', `Borrador Folio ${serie}${folio} guardado correctamente.`);
       fetchHistorialFacturas();
     } catch (err: any) {
       console.error('Error al guardar borrador:', err);
@@ -1302,10 +1372,15 @@ export default function FacturacionScreen() {
       try {
         setIsSubmitting(true);
         const headers = await getApiHeaders();
+        const dirOverride = (factura.cliente_direccion || (factura as any)?.notas?.receptor?.direccion || '').trim();
         const res = await fetch(`${getApiUrl()}/api/sat/timbrar-factura`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ venta_id: factura.id })
+          body: JSON.stringify({
+            borrador_id: factura.id,
+            venta_id: factura.venta_id || undefined,
+            cliente_override: dirOverride ? { direccion: dirOverride } : undefined
+          })
         });
         const resJson = await res.json().catch(() => ({}));
         if (!res.ok || !resJson.success) {
@@ -1374,7 +1449,8 @@ export default function FacturacionScreen() {
     try {
       await syncClienteFiscalData();
       const payload: any = {
-        venta_id: currentDraftId || undefined,
+        borrador_id: currentDraftId || undefined,
+        venta_id: origenVentaId || undefined,
         cliente_override: {
           nombre: clienteNombre.trim().toUpperCase(),
           razon_social: clienteNombre.trim().toUpperCase(),
@@ -1479,6 +1555,9 @@ export default function FacturacionScreen() {
         } catch (_) {}
       }
       console.error('Error al timbrar factura:', errorMsg);
+      if (typeof errorMsg === 'string' && errorMsg.includes('ya se encuentra timbrada')) {
+        setCurrentDraftId(null);
+      }
       showAlert('Error al Timbrar', errorMsg);
     } finally {
       setIsSubmitting(false);
@@ -1594,6 +1673,12 @@ export default function FacturacionScreen() {
       const resp = await fetch(`${getApiUrl()}/api/sat/factura-xml/${factura.cfdi_uuid || factura.id}`, { headers });
       if (resp.ok) {
         const j = await resp.json();
+        if (j.cliente_direccion && !(factura as any).cliente_direccion) {
+          (factura as any).cliente_direccion = j.cliente_direccion;
+        }
+        if (j.notas && !(factura as any).notas) {
+          (factura as any).notas = j.notas;
+        }
         if (j.xml && j.xml.includes('<')) return j.xml;
       }
     } catch (_) {}
@@ -1736,12 +1821,100 @@ export default function FacturacionScreen() {
         };
       }
 
-      const clientDir = ((factura as any)?.cliente_direccion ||
+      let clientDir = (
+        (factura as any)?.cliente_direccion ||
         (factura as any)?.notas?.receptor?.direccion ||
-        clientes.find(c => 
-          (c.rfc && parsed?.customer?.tax_id && c.rfc.trim().toUpperCase() === parsed.customer.tax_id.trim().toUpperCase()) ||
-          (c.nombre && parsed?.customer?.legal_name && c.nombre.trim().toUpperCase() === parsed.customer.legal_name.trim().toUpperCase())
-        )?.direccion || '').trim();
+        (factura as any)?.notas?.cliente_direccion ||
+        ''
+      ).trim();
+
+      const targetRfc = (parsed?.customer?.tax_id || (factura as any)?.cliente_rfc || '').trim().toUpperCase();
+      const targetName = (parsed?.customer?.legal_name || factura.cliente || '').trim();
+
+      // 1. Buscar en memoria del catálogo clientes
+      if (!clientDir && (targetRfc || targetName)) {
+        const found = clientes.find(c => 
+          (c.rfc && targetRfc && c.rfc.trim().toUpperCase() === targetRfc && targetRfc !== 'XAXX010101000') ||
+          (c.nombre && targetName && c.nombre.trim().toUpperCase() === targetName.toUpperCase()) ||
+          (c.razon_social && targetName && c.razon_social.trim().toUpperCase() === targetName.toUpperCase())
+        );
+        if (found?.direccion) {
+          clientDir = found.direccion.trim();
+        }
+      }
+
+      // 2. Si no se encontró y tenemos factura.id, buscar en facturas_emitidas
+      if (!clientDir && factura.id) {
+        try {
+          const activeComp = CompanyService.getActiveCompany();
+          const client = activeComp === 'daravisa' ? daravisaClient : inttecClient;
+          const { data: fDB } = await client
+            .from('facturas_emitidas')
+            .select('notas, cliente_id, cliente_rfc, cliente_nombre')
+            .eq('id', factura.id)
+            .maybeSingle();
+
+          if (fDB?.notas?.receptor?.direccion) {
+            clientDir = String(fDB.notas.receptor.direccion).trim();
+          } else if (fDB?.cliente_id) {
+            const { data: cDB } = await client
+              .from('clientes')
+              .select('direccion')
+              .eq('id', fDB.cliente_id)
+              .maybeSingle();
+            if (cDB?.direccion) clientDir = String(cDB.direccion).trim();
+          }
+        } catch (_) {}
+      }
+
+      // 3. Si aún no se encontró, buscar en la tabla clientes directamente por RFC o Razón Social
+      if (!clientDir) {
+        try {
+          const activeComp = CompanyService.getActiveCompany();
+          const client = activeComp === 'daravisa' ? daravisaClient : inttecClient;
+          
+          if (targetRfc && targetRfc !== 'XAXX010101000') {
+            const { data: cByRfc } = await client
+              .from('clientes')
+              .select('direccion')
+              .eq('rfc', targetRfc)
+              .maybeSingle();
+            if (cByRfc?.direccion) clientDir = String(cByRfc.direccion).trim();
+          }
+
+          if (!clientDir && targetName) {
+            const { data: cByName } = await client
+              .from('clientes')
+              .select('direccion')
+              .or(`nombre.ilike.%${targetName}%,razon_social.ilike.%${targetName}%`)
+              .limit(1)
+              .maybeSingle();
+            if (cByName?.direccion) clientDir = String(cByName.direccion).trim();
+          }
+        } catch (_) {}
+      }
+
+      // 4. Si la factura tiene venta_id, buscar en cotizaciones vinculadas
+      if (!clientDir && factura.venta_id) {
+        try {
+          const activeComp = CompanyService.getActiveCompany();
+          const client = activeComp === 'daravisa' ? daravisaClient : inttecClient;
+          const { data: vDB } = await client
+            .from('ventas')
+            .select('cliente, cotizacion_id')
+            .eq('id', factura.venta_id)
+            .maybeSingle();
+
+          if (vDB?.cotizacion_id) {
+            const { data: cotDB } = await client
+              .from('cotizaciones')
+              .select('cliente_direccion')
+              .eq('id', vDB.cotizacion_id)
+              .maybeSingle();
+            if (cotDB?.cliente_direccion) clientDir = String(cotDB.cliente_direccion).trim();
+          }
+        } catch (_) {}
+      }
 
       if (clientDir && parsed) {
         if (!parsed.customer) {
@@ -1750,9 +1923,7 @@ export default function FacturacionScreen() {
         if (!parsed.customer.address) {
           parsed.customer.address = {};
         }
-        if (!parsed.customer.address.street) {
-          parsed.customer.address.street = clientDir;
-        }
+        parsed.customer.address.street = clientDir;
       }
       if (clientDir && factura) {
         (factura as any).cliente_direccion = clientDir;
@@ -2428,14 +2599,38 @@ export default function FacturacionScreen() {
               <Text style={{ color: '#0284c7', fontWeight: 'bold', fontSize: 13 }}>Volver al Listado</Text>
             </TouchableOpacity>
 
-            {currentDraftId && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#f59e0b' }}>
-                <Ionicons name="document-text" size={14} color="#d97706" />
-                <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d97706' }}>
-                  Borrador Activo #{currentDraftId} (Folio {serie}{folio})
-                </Text>
-              </View>
-            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {currentDraftId && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#f59e0b' }}>
+                  <Ionicons name="document-text" size={14} color="#d97706" />
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#d97706' }}>
+                    Borrador #{currentDraftId} (Folio {serie}{folio})
+                  </Text>
+                </View>
+              )}
+
+              {origenVentaId && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#e0f2fe', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#0284c7' }}>
+                  <Ionicons name="cart-outline" size={14} color="#0284c7" />
+                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#0369a1' }}>
+                    Origen: {origenVentaFolio || `Venta #${origenVentaId}`}
+                  </Text>
+                </View>
+              )}
+
+              {(currentDraftId || origenVentaId) && (
+                <TouchableOpacity
+                  onPress={() => {
+                    handleResetForm();
+                    showAlert('Formulario Restablecido', 'Se ha limpiado el borrador/venta activo.');
+                  }}
+                  style={[styles.quickSelectBtn, { borderColor: '#ef444450', backgroundColor: '#ef444415', paddingVertical: 6, paddingHorizontal: 10 }]}
+                >
+                  <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
+                  <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Limpiar</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
           {/* Banner de Edición de Borrador si aplica */}
@@ -2447,6 +2642,11 @@ export default function FacturacionScreen() {
                   <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#92400e' }}>
                     Editando Borrador Folio {serie}{folio}
                   </Text>
+                  {origenVentaId && (
+                    <Text style={{ fontSize: 11, color: '#b45309' }}>
+                      Asociado a {origenVentaFolio || `Venta #${origenVentaId}`}
+                    </Text>
+                  )}
                 </View>
               </View>
               <TouchableOpacity
@@ -2455,7 +2655,32 @@ export default function FacturacionScreen() {
                 style={[styles.quickSelectBtn, { borderColor: '#d97706', backgroundColor: '#fef3c7', paddingVertical: 8, paddingHorizontal: 12 }]}
               >
                 <Ionicons name="save-outline" size={16} color="#d97706" />
-                <Text style={{ color: '#d97706', fontSize: 12, fontWeight: 'bold' }}>Guardar Borrador</Text>
+                <Text style={{ color: '#d97706', fontSize: 12, fontWeight: 'bold' }}>Guardar Cambios Borrador</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Banner de Facturación desde Venta si aplica */}
+          {!currentDraftId && origenVentaId && (
+            <View style={[styles.draftBannerContainer, { backgroundColor: '#f0f9ff', borderColor: '#0284c7' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                <Ionicons name="cart" size={24} color="#0284c7" />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#0369a1' }}>
+                    Facturando {origenVentaFolio || `Venta #${origenVentaId}`}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: '#0284c7' }}>
+                    Se emitirá la factura fiscal oficial vinculada a esta venta operativa
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={handleGuardarBorrador}
+                disabled={isSubmitting}
+                style={[styles.quickSelectBtn, { borderColor: '#0284c7', backgroundColor: '#e0f2fe', paddingVertical: 8, paddingHorizontal: 12 }]}
+              >
+                <Ionicons name="save-outline" size={16} color="#0284c7" />
+                <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: 'bold' }}>Guardar como Borrador</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -2881,21 +3106,24 @@ export default function FacturacionScreen() {
                         </TouchableOpacity>
                         </View>
 
-                        {/* Línea 2: Campo Descripción Opcional justo debajo */}
-                        <View style={{ marginTop: 4 }}>
+                        {/* Línea 2: Campo Descripción Opcional justo debajo (Multilínea estilo Términos y Condiciones) */}
+                        <View style={{ marginTop: 6 }}>
                           <TextInput
                             style={[
                               styles.partidaDescDetalladaInput,
                               {
                                 color: themeColors.text,
-                                backgroundColor: themeColors.backgroundElement + '80',
-                                borderColor: themeColors.border + '60',
+                                backgroundColor: themeColors.backgroundElement,
+                                borderColor: themeColors.border,
                               },
                             ]}
+                            multiline={true}
+                            numberOfLines={3}
+                            blurOnSubmit={false}
                             value={item.descripcion_detallada || ''}
                             onChangeText={val => handleUpdatePartida(index, 'descripcion_detallada', val)}
-                            placeholder="Escribe una descripción adicional (opcional)..."
-                            placeholderTextColor={themeColors.textSecondary + '70'}
+                            placeholder="Escribe una descripción adicional (opcional)... Puedes usar Enter para saltos de línea"
+                            placeholderTextColor={themeColors.textSecondary}
                           />
                         </View>
 
@@ -3267,16 +3495,16 @@ export default function FacturacionScreen() {
                 <Text style={{ color: '#0284c7', fontWeight: '700', fontSize: 13 }}>Vista Previa / Borrador PDF</Text>
               </TouchableOpacity>
 
-              {currentDraftId && (
-                <TouchableOpacity
-                  onPress={handleGuardarBorrador}
-                  disabled={isSubmitting}
-                  style={[styles.actionBtn, { borderColor: '#f59e0b', backgroundColor: '#fef3c7', flex: 1 }]}
-                >
-                  <Ionicons name="save-outline" size={18} color="#d97706" />
-                  <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 13 }}>Guardar Borrador</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                onPress={handleGuardarBorrador}
+                disabled={isSubmitting}
+                style={[styles.actionBtn, { borderColor: '#f59e0b', backgroundColor: '#fef3c7', flex: 1 }]}
+              >
+                <Ionicons name="save-outline" size={18} color="#d97706" />
+                <Text style={{ color: '#d97706', fontWeight: '700', fontSize: 13 }}>
+                  {currentDraftId ? 'Guardar Cambios Borrador' : 'Guardar como Borrador'}
+                </Text>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={handleTimbrarFactura}
@@ -3289,7 +3517,11 @@ export default function FacturacionScreen() {
                   <>
                     <Ionicons name="receipt-outline" size={18} color="#fff" />
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>
-                      {currentDraftId ? 'Timbrar Factura' : 'Emitir y Timbrar Factura Oficial ante SAT'}
+                      {currentDraftId 
+                        ? 'Timbrar Factura (Borrador)' 
+                        : origenVentaId 
+                          ? 'Timbrar Factura de Venta' 
+                          : 'Emitir y Timbrar Factura Oficial ante SAT'}
                     </Text>
                   </>
                 )}
@@ -4939,12 +5171,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   partidaDescDetalladaInput: {
-    fontSize: 11,
-    fontStyle: 'italic',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    fontSize: 12.5,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderRadius: 6,
     borderWidth: 1,
+    minHeight: 68,
+    textAlignVertical: 'top',
+    lineHeight: 18,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', resize: 'vertical' } as any) : {}),
   },
   tableFieldInput: {
     borderWidth: 1,

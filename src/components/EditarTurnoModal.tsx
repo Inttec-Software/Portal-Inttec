@@ -317,7 +317,7 @@ export default function EditarTurnoModal({
                 <View style={[styles.openShiftNotice, { backgroundColor: themeColors.warning + '12', borderColor: themeColors.warning + '30' }]}>
                   <Ionicons name="time-outline" size={16} color={themeColors.warning} style={{ marginRight: 6 }} />
                   <Text style={[styles.openShiftNoticeText, { color: themeColors.warning }]}>
-                    Este turno se guardará sin hora de salida (en curso).
+                    Este turno se guardará sin hora de salida (en curso) y se eliminará la foto de salida previa.
                   </Text>
                 </View>
               )}
