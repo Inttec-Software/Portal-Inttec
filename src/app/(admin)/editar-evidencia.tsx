@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  Keyboard,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -43,6 +44,37 @@ export default function EvidenciaForm() {
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Estados de Validación y Posicionamiento de Scroll Suave
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const mainScrollRef = useRef<ScrollView>(null);
+  const fieldPositions = useRef<Record<string, number>>({});
+  const stepContainerY = useRef<number>(0);
+
+  const scrollToFirstError = (errors: Record<string, string>) => {
+    let targetKey: string | null = null;
+    if (errors['cliente']) {
+      targetKey = 'cliente';
+    } else if (errors['sucursal']) {
+      targetKey = 'sucursal';
+    } else {
+      for (let i = 0; i < trabajos.length; i++) {
+        if (errors['desc_' + i] || errors['sol_' + i]) {
+          targetKey = 'trabajo_' + i;
+          break;
+        }
+      }
+    }
+
+    if (targetKey && fieldPositions.current[targetKey] !== undefined) {
+      Keyboard.dismiss();
+      const targetY = stepContainerY.current + fieldPositions.current[targetKey];
+      mainScrollRef.current?.scrollTo({
+        y: Math.max(0, targetY - 20),
+        animated: true,
+      });
+    }
+  };
 
   // Estados del Sistema de Borradores
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
@@ -975,15 +1007,32 @@ export default function EvidenciaForm() {
 
   const nextStep = async () => {
     if (currentStep === 1) {
+      const errors: Record<string, string> = {};
       if (!selectedCliente) {
-        Alert.alert('Validación', 'Por favor selecciona el cliente.');
+        errors['cliente'] = 'Por favor selecciona el cliente.';
+      } else {
+        const clienteSucursales = sucursalesCliente.filter(s => s.cliente_id === selectedCliente);
+        if (clienteSucursales.length > 0 && !selectedSucursal) {
+          errors['sucursal'] = 'Por favor selecciona la sucursal.';
+        }
+      }
+
+      trabajos.forEach((t, i) => {
+        if (!t.descripcion.trim()) {
+          errors['desc_' + i] = 'La situación encontrada es obligatoria.';
+        }
+        if (!t.solucion.trim()) {
+          errors['sol_' + i] = 'La solución aplicada es obligatoria.';
+        }
+      });
+
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(errors);
+        scrollToFirstError(errors);
         return;
       }
-      const hasEmptyFields = trabajos.some(t => !t.descripcion.trim() || !t.solucion.trim());
-      if (hasEmptyFields) {
-        Alert.alert('Validación', 'Por favor llena la situación y la solución para todos los trabajos.');
-        return;
-      }
+
+      setFormErrors({});
 
       setLoadingTitle('Optimizando con IA ✨');
       setLoadingMessage('Mejorando la redacción técnica de los reportes...');
@@ -1250,6 +1299,7 @@ export default function EvidenciaForm() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
+          ref={mainScrollRef}
           style={{ flex: 1 }}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -1375,7 +1425,7 @@ export default function EvidenciaForm() {
 
           {/* PASO 1: Información del Servicio */}
           {currentStep === 1 && (
-            <View style={styles.stepContainer}>
+            <View style={styles.stepContainer} onLayout={(e) => { stepContainerY.current = e.nativeEvent.layout.y; }}>
               <Text style={[styles.sectionTitle, { color: themeColors.text }]}>
                 1. Detalles de la Intervención
               </Text>
@@ -1385,10 +1435,10 @@ export default function EvidenciaForm() {
 
               
               {/* Selector de Cliente */}
-              <View style={[styles.customDropdownContainer, { marginBottom: Spacing.four, zIndex: 100 }]}>
+              <View onLayout={(e) => { fieldPositions.current['cliente'] = e.nativeEvent.layout.y; }} style={[styles.customDropdownContainer, { marginBottom: Spacing.four, zIndex: 100 }]}>
                 <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
                 <TouchableOpacity
-                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, padding: 12, borderRadius: 8, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                  style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: formErrors['cliente'] ? themeColors.danger : themeColors.border, padding: 12, borderRadius: 8, borderWidth: formErrors['cliente'] ? 1.5 : 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
                   onPress={() => {
                     setShowCliDropdown(!showCliDropdown);
                     setShowSucursalDropdown(false);
@@ -1399,6 +1449,11 @@ export default function EvidenciaForm() {
                   </Text>
                   <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                 </TouchableOpacity>
+                {!!formErrors['cliente'] && (
+                  <Text style={{ color: themeColors.danger, fontSize: 12, marginTop: 4, fontWeight: '500' }}>
+                    {formErrors['cliente']}
+                  </Text>
+                )}
                 {showCliDropdown && (
                   <View style={{ width: '100%', zIndex: 100 }}>
                     <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, borderWidth: 1, borderRadius: 8, marginTop: 4 }]}>
@@ -1425,6 +1480,12 @@ export default function EvidenciaForm() {
                                 setSelectedSucursal(''); // reset
                                 setShowCliDropdown(false);
                                 setClienteSearch('');
+                                setFormErrors(prev => {
+                                  const copy = { ...prev };
+                                  delete copy['cliente'];
+                                  delete copy['sucursal'];
+                                  return copy;
+                                });
                               }}
                             >
                               <Ionicons name="business-outline" size={24} color={themeColors.primary} />
@@ -1439,10 +1500,10 @@ export default function EvidenciaForm() {
 
               {/* Selector de Sucursal */}
               {selectedCliente !== '' && (
-                <View style={[styles.customDropdownContainer, { marginBottom: Spacing.four, zIndex: 90 }]}>
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal</Text>
+                <View onLayout={(e) => { fieldPositions.current['sucursal'] = e.nativeEvent.layout.y; }} style={[styles.customDropdownContainer, { marginBottom: Spacing.four, zIndex: 90 }]}>
+                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal *</Text>
                   <TouchableOpacity
-                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, padding: 12, borderRadius: 8, borderWidth: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                    style={[styles.dropdownTrigger, { backgroundColor: themeColors.backgroundElement, borderColor: formErrors['sucursal'] ? themeColors.danger : themeColors.border, padding: 12, borderRadius: 8, borderWidth: formErrors['sucursal'] ? 1.5 : 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
                     onPress={() => {
                       setShowSucursalDropdown(!showSucursalDropdown);
                       setShowCliDropdown(false);
@@ -1453,6 +1514,11 @@ export default function EvidenciaForm() {
                     </Text>
                     <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
                   </TouchableOpacity>
+                  {!!formErrors['sucursal'] && (
+                    <Text style={{ color: themeColors.danger, fontSize: 12, marginTop: 4, fontWeight: '500' }}>
+                      {formErrors['sucursal']}
+                    </Text>
+                  )}
                   {showSucursalDropdown && (
                     <View style={{ width: '100%', zIndex: 90 }}>
                       <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, borderWidth: 1, borderRadius: 8, marginTop: 4 }]}>
@@ -1479,6 +1545,12 @@ export default function EvidenciaForm() {
                                   setSelectedSucursal(suc.id);
                                   setShowSucursalDropdown(false);
                                   setSucursalSearch('');
+                                  setFormErrors(prev => {
+                                    if (!prev['sucursal']) return prev;
+                                    const copy = { ...prev };
+                                    delete copy['sucursal'];
+                                    return copy;
+                                  });
                                 }}
                               >
                                 <Ionicons name="storefront-outline" size={24} color={themeColors.primary} />
@@ -1499,13 +1571,19 @@ export default function EvidenciaForm() {
 
 
               {trabajos.map((trabajo, index) => (
-                <View key={index} style={{ marginBottom: Spacing.four, borderLeftWidth: 3, borderLeftColor: themeColors.accent, paddingLeft: Spacing.two }}>
+                <View key={index} onLayout={(e) => { fieldPositions.current['trabajo_' + index] = e.nativeEvent.layout.y; }} style={{ marginBottom: Spacing.four, borderLeftWidth: 3, borderLeftColor: (formErrors['desc_' + index] || formErrors['sol_' + index]) ? themeColors.danger : themeColors.accent, paddingLeft: Spacing.two }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.two }}>
                     <Text style={{ fontSize: 15, fontWeight: '700', color: themeColors.text }}>Trabajo / Arreglo #{index + 1}</Text>
                     {trabajos.length > 1 && (
                       <TouchableOpacity
                         onPress={() => {
                           setTrabajos(prev => prev.filter((_, i) => i !== index));
+                          setFormErrors(prev => {
+                            const copy = { ...prev };
+                            delete copy['desc_' + index];
+                            delete copy['sol_' + index];
+                            return copy;
+                          });
                         }}
                         style={{ padding: 4 }}
                       >
@@ -1537,8 +1615,16 @@ export default function EvidenciaForm() {
                     <CustomInput
                       placeholder="Ej. Cambio de cableado eléctrico, mantenimiento de bomba, etc."
                       value={trabajo.descripcion}
+                      error={formErrors['desc_' + index]}
                       onChangeText={(val) => {
                         setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, descripcion: val, ia_desc_run: false } : t));
+                        if (formErrors['desc_' + index] && val.trim().length > 0) {
+                          setFormErrors(prev => {
+                            const copy = { ...prev };
+                            delete copy['desc_' + index];
+                            return copy;
+                          });
+                        }
                       }}
                       multiline
                       numberOfLines={3}
@@ -1594,8 +1680,16 @@ export default function EvidenciaForm() {
                     <CustomInput
                       placeholder="Ej. Se reemplazó el fusible dañado y se aisló el cableado..."
                       value={trabajo.solucion}
+                      error={formErrors['sol_' + index]}
                       onChangeText={(val) => {
                         setTrabajos(prev => prev.map((t, i) => i === index ? { ...t, solucion: val, ia_sol_run: false } : t));
+                        if (formErrors['sol_' + index] && val.trim().length > 0) {
+                          setFormErrors(prev => {
+                            const copy = { ...prev };
+                            delete copy['sol_' + index];
+                            return copy;
+                          });
+                        }
                       }}
                       multiline
                       numberOfLines={2}
