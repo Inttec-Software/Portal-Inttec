@@ -60,6 +60,16 @@ const preparePdfImage = async (uriOrBase64: string): Promise<string> => {
   const clean = uriOrBase64.trim();
   if (!clean) return '';
 
+  // Las URLs blob: de sesiones viejas o generadas en otros clientes no se pueden cargar
+  if (clean.startsWith('blob:')) {
+    try {
+      const res = await fetch(clean);
+      if (!res.ok) return '';
+    } catch {
+      return '';
+    }
+  }
+
   try {
     let inputUri = clean;
     
@@ -98,8 +108,11 @@ const preparePdfImage = async (uriOrBase64: string): Promise<string> => {
     return manipulated.uri || clean;
   } catch (err) {
     console.warn('Could not downsample image for PDF, returning fallback:', err);
-    if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('file:') || clean.startsWith('content:') || clean.startsWith('blob:')) {
+    if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('file:') || clean.startsWith('content:')) {
       return clean;
+    }
+    if (clean.startsWith('blob:')) {
+      return '';
     }
     return `data:image/jpeg;base64,${clean}`;
   }
