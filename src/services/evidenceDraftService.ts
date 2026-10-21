@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { logger } from '@/utils/logger';
+import { WebBlobStorage } from '@/utils/webBlobStorage';
 
 export interface EvidenceDraftTrabajo {
   descripcion: string;
@@ -72,6 +74,88 @@ export const sanitizeTrabajosForDraft = (trabajos: EvidenceDraftTrabajo[]): Evid
   });
 };
 
+/**
+ * Rehidrata las imágenes de un borrador en Web desde IndexedDB si la sesión del navegador se reinició.
+ * Esto asegura que los Blob URLs siempre sean válidos y frescos al cargar un borrador.
+ */
+export const hydrateDraftMedia = async (draft: EvidenceDraft): Promise<EvidenceDraft> => {
+  if (Platform.OS !== 'web' || !draft || !Array.isArray(draft.trabajos)) {
+    return draft;
+  }
+
+  const hydratedTrabajos = await Promise.all(
+    draft.trabajos.map(async (t, i) => {
+      let antesImg = t.antesImg;
+      if (antesImg?.uri) {
+        if (!antesImg.uri.startsWith('http') || antesImg.uri.startsWith('blob:')) {
+          const freshUrl = await WebBlobStorage.getDraftMediaUrl(draft.id, `t${i}_antes`);
+          if (freshUrl) {
+            antesImg = { uri: freshUrl, base64: null };
+          } else if (antesImg.uri.startsWith('blob:')) {
+            // Verificar si el blob antiguo sigue vivo en memoria
+            try {
+              const res = await fetch(antesImg.uri);
+              if (!res.ok) antesImg = undefined;
+            } catch {
+              antesImg = undefined;
+            }
+          }
+        }
+      }
+
+      let despuesImg = t.despuesImg;
+      if (despuesImg?.uri) {
+        if (!despuesImg.uri.startsWith('http') || despuesImg.uri.startsWith('blob:')) {
+          const freshUrl = await WebBlobStorage.getDraftMediaUrl(draft.id, `t${i}_despues`);
+          if (freshUrl) {
+            despuesImg = { uri: freshUrl, base64: null };
+          } else if (despuesImg.uri.startsWith('blob:')) {
+            try {
+              const res = await fetch(despuesImg.uri);
+              if (!res.ok) despuesImg = undefined;
+            } catch {
+              despuesImg = undefined;
+            }
+          }
+        }
+      }
+
+      const fotosAdicionales = await Promise.all(
+        (t.fotosAdicionales || []).map(async (extra, extraIdx) => {
+          if (!extra?.uri) return null;
+          if (extra.uri.startsWith('http') && !extra.uri.startsWith('blob:')) {
+            return extra;
+          }
+          const freshUrl = await WebBlobStorage.getDraftMediaUrl(draft.id, `t${i}_extra_${extraIdx}`);
+          if (freshUrl) {
+            return { uri: freshUrl, base64: null };
+          }
+          if (extra.uri.startsWith('blob:')) {
+            try {
+              const res = await fetch(extra.uri);
+              if (res.ok) return extra;
+            } catch {}
+            return null;
+          }
+          return extra;
+        })
+      );
+
+      return {
+        ...t,
+        antesImg,
+        despuesImg,
+        fotosAdicionales: fotosAdicionales.filter((f): f is { uri: string; base64: string | null } => f !== null),
+      };
+    })
+  );
+
+  return {
+    ...draft,
+    trabajos: hydratedTrabajos,
+  };
+};
+
 export const EvidenceDraftService = {
   getStorageKey(userId: string, company: string): string {
     return `${STORAGE_PREFIX}${userId}_${company || 'inttec'}`;
@@ -84,12 +168,16 @@ export const EvidenceDraftService = {
       if (!data) return [];
       const parsed: EvidenceDraft[] = JSON.parse(data);
       if (!Array.isArray(parsed)) return [];
-      return parsed
+      
+      const sanitized = parsed
         .map(d => ({
           ...d,
           trabajos: sanitizeTrabajosForDraft(d.trabajos || []),
         }))
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+      // Rehidratar medios locales en Web
+      return await Promise.all(sanitized.map(d => hydrateDraftMedia(d)));
     } catch (err) {
       logger.error('[EvidenceDraftService] Error obteniendo borradores:', err);
       return [];
@@ -98,7 +186,8 @@ export const EvidenceDraftService = {
 
   async getDraftById(userId: string, company: string, draftId: string): Promise<EvidenceDraft | null> {
     const drafts = await this.getDrafts(userId, company);
-    return drafts.find(d => d.id === draftId) || null;
+    const found = drafts.find(d => d.id === draftId);
+    return found || null;
   },
 
   async getLatestDraft(userId: string, company: string): Promise<EvidenceDraft | null> {
@@ -115,10 +204,36 @@ export const EvidenceDraftService = {
     }
   ): Promise<EvidenceDraft> {
     try {
-      const drafts = await this.getDrafts(userId, company);
+      const key = this.getStorageKey(userId, company);
+      const data = await AsyncStorage.getItem(key);
+      const drafts: EvidenceDraft[] = data ? JSON.parse(data) : [];
+
       const now = new Date().toISOString();
       const draftId = draftData.id || `draft_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const sanitizedTrabajos = sanitizeTrabajosForDraft(draftData.trabajos || []);
+
+      // En Web, persistir los blobs en IndexedDB local sin tocar S3 ni llenar el quota de 5MB de localStorage
+      if (Platform.OS === 'web' && Array.isArray(draftData.trabajos)) {
+        await Promise.all(
+          draftData.trabajos.map(async (t, i) => {
+            if (t.antesImg?.uri && (t.antesImg.uri.startsWith('blob:') || t.antesImg.uri.startsWith('data:'))) {
+              await WebBlobStorage.saveDraftMedia(draftId, `t${i}_antes`, t.antesImg.uri);
+            }
+            if (t.despuesImg?.uri && (t.despuesImg.uri.startsWith('blob:') || t.despuesImg.uri.startsWith('data:'))) {
+              await WebBlobStorage.saveDraftMedia(draftId, `t${i}_despues`, t.despuesImg.uri);
+            }
+            if (Array.isArray(t.fotosAdicionales)) {
+              await Promise.all(
+                t.fotosAdicionales.map(async (extra, extraIdx) => {
+                  if (extra?.uri && (extra.uri.startsWith('blob:') || extra.uri.startsWith('data:'))) {
+                    await WebBlobStorage.saveDraftMedia(draftId, `t${i}_extra_${extraIdx}`, extra.uri);
+                  }
+                })
+              );
+            }
+          })
+        );
+      }
 
       const existingIndex = drafts.findIndex(d => d.id === draftId);
       const originalCreatedAt = (existingIndex >= 0 && drafts[existingIndex]?.createdAt)
@@ -157,12 +272,10 @@ export const EvidenceDraftService = {
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         .slice(0, MAX_SAVED_DRAFTS);
 
-      const key = this.getStorageKey(userId, company);
       try {
         await AsyncStorage.setItem(key, JSON.stringify(sortedClean));
       } catch (storageErr) {
         logger.warn('[EvidenceDraftService] AsyncStorage quota warning, pruning old drafts:', storageErr);
-        // Fallback: save only the latest 3 drafts if quota is tight
         const pruned = sortedClean.slice(0, 3);
         await AsyncStorage.setItem(key, JSON.stringify(pruned));
       }
@@ -176,10 +289,16 @@ export const EvidenceDraftService = {
 
   async deleteDraft(userId: string, company: string, draftId: string): Promise<void> {
     try {
-      const drafts = await this.getDrafts(userId, company);
-      const filtered = drafts.filter(d => d.id !== draftId);
       const key = this.getStorageKey(userId, company);
+      const data = await AsyncStorage.getItem(key);
+      const drafts: EvidenceDraft[] = data ? JSON.parse(data) : [];
+      const filtered = drafts.filter(d => d.id !== draftId);
       await AsyncStorage.setItem(key, JSON.stringify(filtered));
+
+      // Limpiar fotos de IndexedDB en Web
+      if (Platform.OS === 'web') {
+        await WebBlobStorage.deleteDraftMedia(draftId);
+      }
     } catch (err) {
       logger.error('[EvidenceDraftService] Error eliminando borrador:', err);
       throw err;
@@ -190,6 +309,11 @@ export const EvidenceDraftService = {
     try {
       const key = this.getStorageKey(userId, company);
       await AsyncStorage.removeItem(key);
+
+      // Limpiar todas las fotos en IndexedDB
+      if (Platform.OS === 'web') {
+        await WebBlobStorage.clearAllDraftMedia();
+      }
     } catch (err) {
       logger.error('[EvidenceDraftService] Error limpiando borradores:', err);
     }
