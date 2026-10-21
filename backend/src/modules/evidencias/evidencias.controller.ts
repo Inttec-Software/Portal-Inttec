@@ -74,6 +74,17 @@ export const getInventarioColaboradores = async (req: Request, res: Response) =>
   }
 };
 
+// Helper para evitar que cadenas temporales (blob:, file:, ph:) se guarden en la base de datos
+const sanitizeEvidenceUrl = (url: any): string | null => {
+  if (typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('blob:') || trimmed.startsWith('file:') || trimmed.startsWith('ph:') || trimmed.startsWith('content:')) {
+    return null;
+  }
+  return trimmed;
+};
+
 // 2. POST /api/evidencias
 export const crearEvidencia = async (req: Request, res: Response) => {
   try {
@@ -104,6 +115,20 @@ export const crearEvidencia = async (req: Request, res: Response) => {
         trabajosPayload = JSON.parse(descripcion_trabajo);
       }
     } catch (e) {}
+
+    let finalDescripcionTrabajo = descripcion_trabajo;
+    if (Array.isArray(trabajosPayload) && trabajosPayload.length > 0) {
+      for (const t of trabajosPayload) {
+        if (t) {
+          t.antesImg = sanitizeEvidenceUrl(t.antesImg);
+          t.despuesImg = sanitizeEvidenceUrl(t.despuesImg);
+          if (Array.isArray(t.fotosAdicionales)) {
+            t.fotosAdicionales = t.fotosAdicionales.map(sanitizeEvidenceUrl).filter(Boolean);
+          }
+        }
+      }
+      finalDescripcionTrabajo = JSON.stringify(trabajosPayload);
+    }
 
     // 1. Agrupar y calcular uso total por (empleado_id + material) para soportar múltiples colaboradores
     const materialUsage: Record<string, { 
@@ -170,9 +195,14 @@ export const crearEvidencia = async (req: Request, res: Response) => {
       ? materiales_usados
       : (materiales_usados ? JSON.stringify(materiales_usados) : null);
 
-    const cleanFotosAdicionales = Array.isArray(fotos_adicionales_urls)
+    const cleanFotosAdicionales = (Array.isArray(fotos_adicionales_urls)
       ? fotos_adicionales_urls
-      : (fotos_adicionales_urls ? [fotos_adicionales_urls] : []);
+      : (fotos_adicionales_urls ? [fotos_adicionales_urls] : []))
+      .map(sanitizeEvidenceUrl)
+      .filter(Boolean);
+
+    const cleanFotoAntesUrl = sanitizeEvidenceUrl(foto_antes_url);
+    const cleanFotoDespuesUrl = sanitizeEvidenceUrl(foto_despues_url);
 
     const cleanColaboradores = typeof colaboradores === 'string'
       ? colaboradores
@@ -183,7 +213,7 @@ export const crearEvidencia = async (req: Request, res: Response) => {
       const { rows } = await pool.query(
         `INSERT INTO evidencias (empleado_id, empleado_nombre, cliente, descripcion_trabajo, materiales_usados, observaciones, foto_antes_url, foto_despues_url, fotos_adicionales_urls, colaboradores)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-        [user.id, user.nombre, cliente, descripcion_trabajo, cleanMateriales, observaciones, foto_antes_url, foto_despues_url, cleanFotosAdicionales, cleanColaboradores]
+        [user.id, user.nombre, cliente, finalDescripcionTrabajo, cleanMateriales, observaciones, cleanFotoAntesUrl, cleanFotoDespuesUrl, cleanFotosAdicionales, cleanColaboradores]
       );
       evidenciaData = rows[0];
     } catch (e: any) {
@@ -192,7 +222,7 @@ export const crearEvidencia = async (req: Request, res: Response) => {
         const { rows } = await pool.query(
           `INSERT INTO evidencias (empleado_id, empleado_nombre, cliente, descripcion_trabajo, materiales_usados, observaciones, foto_antes_url, foto_despues_url, fotos_adicionales_urls)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-          [user.id, user.nombre, cliente, descripcion_trabajo, cleanMateriales, observaciones, foto_antes_url, foto_despues_url, cleanFotosAdicionales]
+          [user.id, user.nombre, cliente, finalDescripcionTrabajo, cleanMateriales, observaciones, cleanFotoAntesUrl, cleanFotoDespuesUrl, cleanFotosAdicionales]
         );
         evidenciaData = rows[0];
       } else {
@@ -295,13 +325,37 @@ export const actualizarEvidencia = async (req: Request, res: Response) => {
       colaboradores,
     } = req.body;
 
+    let finalDescripcionTrabajo = descripcion_trabajo;
+    try {
+      if (descripcion_trabajo) {
+        const parsedTrabajos = JSON.parse(descripcion_trabajo);
+        if (Array.isArray(parsedTrabajos) && parsedTrabajos.length > 0) {
+          for (const t of parsedTrabajos) {
+            if (t) {
+              t.antesImg = sanitizeEvidenceUrl(t.antesImg);
+              t.despuesImg = sanitizeEvidenceUrl(t.despuesImg);
+              if (Array.isArray(t.fotosAdicionales)) {
+                t.fotosAdicionales = t.fotosAdicionales.map(sanitizeEvidenceUrl).filter(Boolean);
+              }
+            }
+          }
+          finalDescripcionTrabajo = JSON.stringify(parsedTrabajos);
+        }
+      }
+    } catch {}
+
     const cleanMateriales = typeof materiales_usados === 'string'
       ? materiales_usados
       : (materiales_usados ? JSON.stringify(materiales_usados) : null);
 
-    const cleanFotosAdicionales = Array.isArray(fotos_adicionales_urls)
+    const cleanFotosAdicionales = (Array.isArray(fotos_adicionales_urls)
       ? fotos_adicionales_urls
-      : (fotos_adicionales_urls ? [fotos_adicionales_urls] : []);
+      : (fotos_adicionales_urls ? [fotos_adicionales_urls] : []))
+      .map(sanitizeEvidenceUrl)
+      .filter(Boolean);
+
+    const cleanFotoAntesUrl = sanitizeEvidenceUrl(foto_antes_url);
+    const cleanFotoDespuesUrl = sanitizeEvidenceUrl(foto_despues_url);
 
     const cleanColaboradores = typeof colaboradores === 'string'
       ? colaboradores
@@ -314,7 +368,7 @@ export const actualizarEvidencia = async (req: Request, res: Response) => {
           cliente = $1, descripcion_trabajo = $2, materiales_usados = $3, observaciones = $4, 
           foto_antes_url = $5, foto_despues_url = $6, fotos_adicionales_urls = $7, colaboradores = $8
          WHERE id = $9 RETURNING *`,
-        [cliente, descripcion_trabajo, cleanMateriales, observaciones, foto_antes_url, foto_despues_url, cleanFotosAdicionales, cleanColaboradores, id]
+        [cliente, finalDescripcionTrabajo, cleanMateriales, observaciones, cleanFotoAntesUrl, cleanFotoDespuesUrl, cleanFotosAdicionales, cleanColaboradores, id]
       );
       resultData = rows[0];
     } catch (e: any) {
@@ -324,7 +378,7 @@ export const actualizarEvidencia = async (req: Request, res: Response) => {
             cliente = $1, descripcion_trabajo = $2, materiales_usados = $3, observaciones = $4, 
             foto_antes_url = $5, foto_despues_url = $6, fotos_adicionales_urls = $7
            WHERE id = $8 RETURNING *`,
-          [cliente, descripcion_trabajo, cleanMateriales, observaciones, foto_antes_url, foto_despues_url, cleanFotosAdicionales, id]
+          [cliente, finalDescripcionTrabajo, cleanMateriales, observaciones, cleanFotoAntesUrl, cleanFotoDespuesUrl, cleanFotosAdicionales, id]
         );
         resultData = rows[0];
       } else {
