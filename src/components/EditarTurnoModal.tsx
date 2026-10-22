@@ -47,9 +47,9 @@ export default function EditarTurnoModal({
 
   useEffect(() => {
     if (turno && visible) {
-      // Limpiar formatos "+00" si los tuviera
+      // Limpiar formatos "+00" o "(Auto)" si los tuviera
       const cleanIn = (turno.hora_entrada || '').split('+')[0].trim();
-      const cleanOut = (turno.hora_salida || '').split('+')[0].trim();
+      const cleanOut = (turno.hora_salida || '').replace(/\s*\(Auto\)/i, '').split('+')[0].trim();
       
       setHoraEntrada(cleanIn || '08:00:00');
       setHoraSalida(cleanOut || '');
