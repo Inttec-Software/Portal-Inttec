@@ -7,7 +7,7 @@ import { Platform, Alert } from 'react-native';
 import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
 import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
-import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay } from './asistenciaUtils';
+import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay, isAutoCerradoAsistencia } from './asistenciaUtils';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
 // Esto evita ~959 KB en el bundle principal de la app
@@ -955,11 +955,12 @@ export const ReportGenerator = {
         a.empleado_nombre ||
         a.usuario_nombre ||
         'Desconocido';
+      const isAuto = isAutoCerradoAsistencia(a);
       const fecha = a.fecha || '';
-      const horaEntrada = a.hora_entrada || '--:--';
+      const horaEntrada = a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : '--:--';
       const dirEntrada = a.direccion_entrada || 'N/A';
-      const horaSalida = a.hora_salida || '--:--';
-      const dirSalida = a.direccion_salida || 'N/A';
+      const horaSalida = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : '--:--');
+      const dirSalida = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || 'N/A');
 
       tableRows += `
         <tr>
@@ -1354,7 +1355,7 @@ export const ReportGenerator = {
             <div style="display: flex; gap: 8px; align-items: center;">
               <span style="font-size: 10px; color: #64748b;">Días: <b>${semanaData.diasLaborados}/7</b></span>
               <span style="background-color: #dcfce7; color: #15803d; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
-                Regulares: ${semanaData.totalHorasRegularesStr}
+                Regulares (48h): ${semanaData.totalHorasRegularesStr}
               </span>
               ${semanaData.totalMinutosExtra > 0 ? `
                 <span style="background-color: #ffedd5; color: #c2410c; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
@@ -1478,7 +1479,7 @@ export const ReportGenerator = {
             <div class="value" style="color: #0f172a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Horas Regulares (8-6)</div>
+            <div class="label">Horas Regulares (48h)</div>
             <div class="value" style="color: #16a34a;">${formatMinutesToHours(totalMinutosRegularesEmpresa)}</div>
           </div>
           <div class="summary-card">
@@ -1649,7 +1650,7 @@ export const ReportGenerator = {
               <h1 class="title">Reporte Individual de Asistencia</h1>
               <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">👤 ${empleado.nombre}</p>
               <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
-              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Horario: 08:00 - 18:00</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Jornada: 48 hrs</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
@@ -1663,7 +1664,7 @@ export const ReportGenerator = {
             <div class="value" style="color: #0f172a; font-size: 17px;">${semanaData.totalHorasSemanaStr}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Horas Regulares (8-6)</div>
+            <div class="label">Horas Regulares (48h)</div>
             <div class="value" style="color: #16a34a; font-size: 17px;">${semanaData.totalHorasRegularesStr}</div>
           </div>
           <div class="summary-card">
@@ -3611,7 +3612,10 @@ export const ReportGenerator = {
                 a.empleado_nombre ||
                 a.usuario_nombre ||
                 'Desconocido';
-              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada || 'Sin registro', a.direccion_entrada || '', a.hora_salida || 'Sin registro', a.direccion_salida || '' ];
+              const isAuto = isAutoCerradoAsistencia(a);
+              const horaSalidaVal = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : 'Sin registro');
+              const dirSalidaVal = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || '');
+              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : 'Sin registro', a.direccion_entrada || '', horaSalidaVal, dirSalidaVal ];
             });
             await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
     },

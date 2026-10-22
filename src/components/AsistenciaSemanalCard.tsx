@@ -29,6 +29,7 @@ import {
   getMonthRange,
   getPreviousMonthDate,
   getNextMonthDate,
+  formatContadorJornada48,
 } from '@/utils/asistenciaUtils';
 
 interface AsistenciaSemanalCardProps {
@@ -121,9 +122,7 @@ export default function AsistenciaSemanalCard({
   const activeDias = isMes ? mesData.dias : semanaData.dias;
   const activeTotalHorasStr = isMes
     ? mesData.totalHorasPeriodoStr
-    : canViewOvertime
-    ? semanaData.totalHorasSemanaStr
-    : semanaData.totalHorasRegularesStr;
+    : semanaData.totalHorasSemanaStr;
   const activeDiasLaborados = isMes ? mesData.diasLaborados : semanaData.diasLaborados;
   const activeTotalDias = isMes ? mesData.dias.length : 7;
   const activeTurnosTotales = isMes ? mesData.turnosTotales : semanaData.turnosTotales;
@@ -297,40 +296,12 @@ export default function AsistenciaSemanalCard({
         <View style={styles.summaryMetricCol}>
           <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TOTAL HORAS</Text>
           <View style={styles.hoursValueRow}>
-            <Ionicons name="time" size={16} color={themeColors.text} style={{ marginRight: 4 }} />
-            <Text style={[styles.summaryHoursText, { color: themeColors.text }]}>
-              {activeTotalHorasStr}
+            <Ionicons name="time" size={16} color={!isMes && semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text} style={{ marginRight: 4 }} />
+            <Text style={[styles.summaryHoursText, { color: !isMes && semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text }]}>
+              {isMes ? activeTotalHorasStr : formatContadorJornada48(semanaData.totalMinutosRegulares)}
             </Text>
           </View>
         </View>
-
-        {!isMes && canViewOvertime && (
-          <>
-            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
-
-            <View style={styles.summaryMetricCol}>
-              <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>REGULARES (8-6)</Text>
-              <View style={styles.hoursValueRow}>
-                <Ionicons name="business-outline" size={14} color={themeColors.success} style={{ marginRight: 4 }} />
-                <Text style={[styles.summarySecondaryText, { color: themeColors.success, fontWeight: '800' }]}>
-                  {semanaData.totalHorasRegularesStr}
-                </Text>
-              </View>
-            </View>
-
-            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
-
-            <View style={styles.summaryMetricCol}>
-              <Text style={[styles.summaryMetricLabel, { color: semanaData.totalMinutosExtra > 0 ? '#ea580c' : themeColors.textSecondary }]}>HORAS EXTRAS</Text>
-              <View style={styles.hoursValueRow}>
-                <Ionicons name="flame" size={15} color={semanaData.totalMinutosExtra > 0 ? '#ea580c' : themeColors.textSecondary} style={{ marginRight: 4 }} />
-                <Text style={[styles.summaryHoursText, { color: semanaData.totalMinutosExtra > 0 ? '#ea580c' : themeColors.textSecondary }]}>
-                  {semanaData.totalHorasExtraStr}
-                </Text>
-              </View>
-            </View>
-          </>
-        )}
 
         <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
 
@@ -347,11 +318,25 @@ export default function AsistenciaSemanalCard({
         <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
 
         <View style={styles.summaryMetricCol}>
-          <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TURNOS</Text>
+          <Text style={[styles.summaryMetricLabel, { color: (!isMes && semanaData.totalMinutosExtra > 0) ? '#ea580c' : themeColors.textSecondary }]}>
+            HORAS EXTRAS
+          </Text>
           <View style={styles.hoursValueRow}>
-            <Ionicons name="layers-outline" size={14} color={themeColors.warning} style={{ marginRight: 4 }} />
-            <Text style={[styles.summarySecondaryText, { color: themeColors.text }]}>
-              {activeTurnosTotales}
+            <Ionicons
+              name="flame"
+              size={15}
+              color={(!isMes && semanaData.totalMinutosExtra > 0) ? '#ea580c' : themeColors.textSecondary}
+              style={{ marginRight: 4 }}
+            />
+            <Text
+              style={[
+                styles.summaryHoursText,
+                { color: (!isMes && semanaData.totalMinutosExtra > 0) ? '#ea580c' : themeColors.textSecondary },
+              ]}
+            >
+              {isMes
+                ? (mesData.totalMinutosExtra > 0 ? `+${mesData.totalHorasExtraStr}` : '0h extra')
+                : (semanaData.totalMinutosExtra > 0 ? `+${semanaData.totalHorasExtraStr}` : '0h extra')}
             </Text>
           </View>
         </View>
@@ -531,7 +516,7 @@ export default function AsistenciaSemanalCard({
                                   { color: turno.enCurso ? themeColors.warning : themeColors.success },
                                 ]}
                               >
-                                {turno.enCurso ? 'En curso' : (canViewOvertime ? turno.duracionStr : turno.horasRegularesStr)}
+                                {turno.enCurso ? 'En curso' : turno.duracionStr}
                               </Text>
                             </View>
                           </View>
@@ -621,18 +606,27 @@ export default function AsistenciaSemanalCard({
                                 Salida
                               </Text>
                             </View>
-                            <Text
-                              style={[
-                                styles.turnoTimeVal,
-                                { color: turno.hora_salida ? themeColors.text : themeColors.warning },
-                              ]}
-                            >
-                              {turno.hora_salida || 'Pendiente'}
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <Text
+                                style={[
+                                  styles.turnoTimeVal,
+                                  { color: turno.hora_salida ? themeColors.text : themeColors.warning },
+                                ]}
+                              >
+                                {turno.hora_salida || 'Pendiente'}
+                              </Text>
+                              {turno.autoCerrado && (
+                                <View style={{ backgroundColor: '#ffedd5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#fdba74' }}>
+                                  <Text style={{ color: '#c2410c', fontSize: 10, fontWeight: '700' }}>
+                                    Automático
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
 
                             {/* Foto y Ubicación Salida */}
                             <View style={styles.turnoMetaRow}>
-                              {!turno.enCurso && turno.hora_salida && turno.foto_salida_url ? (
+                              {!turno.enCurso && !turno.autoCerrado && turno.hora_salida && turno.foto_salida_url ? (
                                 <TouchableOpacity
                                   style={styles.thumbBtn}
                                   activeOpacity={0.8}
@@ -664,9 +658,15 @@ export default function AsistenciaSemanalCard({
                                     ⏳ En curso
                                   </Text>
                                 </View>
+                              ) : turno.autoCerrado ? (
+                                <View style={[styles.turnoPendingBox, { backgroundColor: '#fff7ed', borderColor: '#fdba74', borderWidth: 1 }]}>
+                                  <Text style={[styles.turnoPendingText, { color: '#c2410c', fontWeight: '600' }]}>
+                                    ⏰ Cierre automático a las 6:00 PM (olvido de checada)
+                                  </Text>
+                                </View>
                               ) : null}
 
-                              {turno.direccion_salida ? (
+                              {turno.direccion_salida && !turno.autoCerrado ? (
                                 <Text
                                   style={[styles.turnoAddressText, { color: themeColors.textSecondary }]}
                                   numberOfLines={2}

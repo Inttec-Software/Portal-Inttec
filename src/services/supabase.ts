@@ -435,6 +435,8 @@ export interface Asistencia {
   latitud_salida?: number | null;
   longitud_salida?: number | null;
   direccion_salida?: string | null;
+  descripcion?: string | null;
+  autoCerrado?: boolean;
   creado_en?: string;
 }
 
