@@ -28,6 +28,7 @@ import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { base64ToArrayBuffer } from '@/services/sync';
+import { VentasTableSkeleton, VentasCardsListSkeleton } from '@/components/skeleton';
 import { exportarCotizacionOdooPDF, cleanFolio } from '@/utils/reportGenerator';
 import { formatFriendlyDate } from '@/utils/helpers';
 import StepIndicator from '@/components/StepIndicator';
@@ -2464,10 +2465,17 @@ export default function VentasScreen() {
       )}
 
       {isLoadingHistorial ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando historial...</Text>
-        </View>
+        isDesktop ? (
+          <ScrollView style={{ flex: 1 }}>
+            {renderScreenHeader()}
+            <VentasTableSkeleton count={8} />
+          </ScrollView>
+        ) : (
+          <ScrollView style={{ flex: 1 }}>
+            {renderScreenHeader()}
+            <VentasCardsListSkeleton count={5} />
+          </ScrollView>
+        )
       ) : ventasHistorial.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="receipt-outline" size={48} color={themeColors.textSecondary} />
