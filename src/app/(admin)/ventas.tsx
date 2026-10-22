@@ -35,6 +35,7 @@ import { formatFriendlyDate } from '@/utils/helpers';
 import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
+import PaginationControls from '@/components/PaginationControls';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -367,6 +368,13 @@ export default function VentasScreen() {
   const [filterDate, setFilterDate] = useState<Date | null>(null);
   const [showFilterDatePicker, setShowFilterDatePicker] = useState(false);
 
+  // === Paginación Historial ===
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalVentasCount, setTotalVentasCount] = useState(0);
+  const [debouncedHistorialSearch, setDebouncedHistorialSearch] = useState('');
+
   // === Edición y Detalle de Ventas ===
   const [selectedVenta, setSelectedVenta] = useState<VentaConPago | null>(null);
   const [selectedVentaPartidas, setSelectedVentaPartidas] = useState<VentaPartida[]>([]);
@@ -518,12 +526,32 @@ export default function VentasScreen() {
       // 1. Intentar API backend (/api/ventas/historial)
       try {
         const headers = await getApiHeaders();
-        const res = await fetch(`${getApiUrl()}/api/ventas/historial`, { headers });
+        let formattedDate = '';
+        if (filterDate) {
+          const dd = String(filterDate.getDate()).padStart(2, '0');
+          const mm = String(filterDate.getMonth() + 1).padStart(2, '0');
+          const yyyy = filterDate.getFullYear();
+          formattedDate = `${yyyy}-${mm}-${dd}`;
+        }
+        const queryParams = new URLSearchParams({
+          page: String(currentPage),
+          limit: String(pageSize),
+          search: debouncedHistorialSearch,
+          fecha: formattedDate,
+        });
+        const res = await fetch(`${getApiUrl()}/api/ventas/historial?${queryParams.toString()}`, { headers });
         if (res.ok) {
           const data = await res.json();
           if (data && Array.isArray(data.ventas)) {
             ModuleCache.set('ventas_historial', data.ventas);
             setVentasHistorial(data.ventas);
+            if (data.pagination) {
+              setTotalPages(data.pagination.totalPages || 1);
+              setTotalVentasCount(data.pagination.total || 0);
+            } else {
+              setTotalPages(1);
+              setTotalVentasCount(data.ventas.length);
+            }
             return;
           }
         }
@@ -547,10 +575,25 @@ export default function VentasScreen() {
     }
   };
 
-  const handleRefreshHistorial = () => {
+const handleRefreshHistorial = () => {
     setIsRefreshingHistorial(true);
     loadHistorial(true);
   };
+
+// Debounce para búsqueda en ventas
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedHistorialSearch(historialSearch);
+      setCurrentPage(1);
+    }, 350);
+    return () => clearTimeout(handler);
+  }, [historialSearch]);
+
+  useEffect(() => {
+    if (currentUser && activeTab === 'historial') {
+      loadHistorial();
+    }
+  }, [currentUser, activeTab, currentPage, pageSize, debouncedHistorialSearch, filterDate]);
 
   const loadPagosForSelectedVenta = async (ventaId: string, currentVentaObj?: VentaConPago) => {
     setIsLoadingPagos(true);
@@ -2439,6 +2482,7 @@ export default function VentasScreen() {
                   if (parts.length === 3) {
                     const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
                     setFilterDate(d);
+                    setCurrentPage(1);
                   }
                 }
               }
@@ -2448,7 +2492,7 @@ export default function VentasScreen() {
         {filterDate && (
           <HoverTooltip text="Quitar filtro de fecha y ver todas" position="bottom">
             <TouchableOpacity
-              onPress={() => setFilterDate(null)}
+              onPress={() => { setFilterDate(null); setCurrentPage(1); }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={{ marginLeft: 4 }}
               accessibilityLabel="Quitar filtro de fecha"
@@ -2466,7 +2510,7 @@ export default function VentasScreen() {
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
           onValueChange={(event: any, selectedDate?: Date) => {
             if (Platform.OS === 'android') setShowFilterDatePicker(false);
-            if (selectedDate) setFilterDate(selectedDate);
+            if (selectedDate) { setFilterDate(selectedDate); setCurrentPage(1); }
           }}
           onDismiss={() => setShowFilterDatePicker(false)}
           maximumDate={new Date()}
@@ -2518,6 +2562,7 @@ export default function VentasScreen() {
                 onPress={() => {
                   setHistorialSearch('');
                   setFilterDate(null);
+                  setCurrentPage(1);
                 }}
                 style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}
                 accessibilityLabel="Restablecer filtros y búsqueda"
@@ -2533,6 +2578,19 @@ export default function VentasScreen() {
           refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
         >
           <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={totalVentasCount}
+              itemsPerPage={pageSize}
+              onPageChange={(p) => setCurrentPage(p)}
+              onItemsPerPageChange={(s) => {
+                setPageSize(s);
+                setCurrentPage(1);
+              }}
+              isLoading={isLoadingHistorial}
+              style={{ marginBottom: Spacing.two }}
+            />
             <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Cliente</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Sucursal</Text>
@@ -2863,6 +2921,23 @@ export default function VentasScreen() {
               </TouchableOpacity>
             );
           }}
+          ListFooterComponent={
+            totalVentasCount > pageSize ? (
+              <PaginationControls
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={totalVentasCount}
+                itemsPerPage={pageSize}
+                onPageChange={(p) => setCurrentPage(p)}
+                onItemsPerPageChange={(s) => {
+                  setPageSize(s);
+                  setCurrentPage(1);
+                }}
+                isLoading={isLoadingHistorial}
+                style={{ marginTop: Spacing.two }}
+              />
+            ) : null
+          }
           refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
         />
       )}

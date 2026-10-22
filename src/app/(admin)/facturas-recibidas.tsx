@@ -24,6 +24,7 @@ import { parseCfdiXml } from '@/utils/xmlParser';
 import { exportFacturaCfdiToPdf } from '@/utils/cfdiPdfGenerator';
 import { ModuleCache } from '@/services/moduleCache';
 import { FacturasKpiGridSkeleton, FacturasListSkeleton } from '@/components/skeleton';
+import PaginationControls from '@/components/PaginationControls';
 
 interface FacturaRecibida {
   id: string;
@@ -209,6 +210,8 @@ export default function FacturasRecibidasScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPeriodo, setFilterPeriodo] = useState<'mes_actual' | 'mes_anterior' | 'todos'>('todos');
   const [filterEstado, setFilterEstado] = useState<'todos' | 'VIGENTE' | 'CANCELADO'>('todos');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   // Modales
   const [selectedFactura, setSelectedFactura] = useState<FacturaRecibida | null>(null);
@@ -330,6 +333,17 @@ export default function FacturasRecibidasScreen() {
       return matchText && matchEstado && matchPeriodo;
     });
   }, [facturas, searchQuery, filterEstado, filterPeriodo]);
+
+  // Paginación
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterEstado, filterPeriodo]);
+
+  const totalPages = Math.ceil(filteredFacturas.length / pageSize) || 1;
+  const paginatedFacturas = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredFacturas.slice(start, start + pageSize);
+  }, [filteredFacturas, currentPage, pageSize]);
 
   // Cálculos de Resumen KPI
   const kpis = useMemo(() => {
@@ -1085,8 +1099,9 @@ export default function FacturasRecibidasScreen() {
         ) : isDesktop ? (
           renderDesktopTable()
         ) : (
-          <View style={styles.facturasList}>
-            {filteredFacturas.map((f) => (
+          <>
+            <View style={styles.facturasList}>
+            {paginatedFacturas.map((f) => (
               <TouchableOpacity
                 key={f.id}
                 style={[styles.facturaCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
@@ -1153,6 +1168,24 @@ export default function FacturasRecibidasScreen() {
               </TouchableOpacity>
             ))}
           </View>
+
+          {filteredFacturas.length > 0 && (
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredFacturas.length}
+              itemsPerPage={pageSize}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={(newSize: number) => {
+                setPageSize(newSize);
+                setCurrentPage(1);
+              }}
+              itemsPerPageOptions={[20, 25, 50, 100]}
+              isLoading={loading}
+              style={{ marginTop: 12, marginBottom: 24 }}
+            />
+          )}
+          </>
         )}
       </ScrollView>
 

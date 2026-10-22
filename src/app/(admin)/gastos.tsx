@@ -30,6 +30,7 @@ import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
 import { getWeekRange, getPreviousWeekMonday, getNextWeekMonday } from '@/utils/asistenciaUtils';
 import ExpenseCard from '@/components/ExpenseCard';
 import { GastosTableSkeleton, GastosCardsListSkeleton } from '@/components/skeleton';
+import PaginationControls from '@/components/PaginationControls';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -78,6 +79,20 @@ export default function AdminGastosScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
   const [facturaFilter, setFacturaFilter] = useState<'TODOS' | 'FACTURADOS' | 'PENDIENTE_ENTREGA' | 'NO_FACTURADOS'>('TODOS');
+
+  // Paginación
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [backendTotals, setBackendTotals] = useState<{
+    totalPendientes: number;
+    totalAprobados: number;
+    countPendientes: number;
+    countAprobados: number;
+  } | null>(null);
+  const catalogsLoadedRef = React.useRef(false);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
 
   // Buscador y Filtro por Calendario (Día Único o Rango de Fechas)
   const [searchQuery, setSearchQuery] = useState('');
@@ -346,12 +361,23 @@ export default function AdminGastosScreen() {
     try {
       const headers = await getApiHeaders();
       const apiUrl = getApiUrl();
-      const fetchUrl = `${apiUrl}/api/reportes/admin/all`;
+      const skipCat = catalogsLoadedRef.current;
+      const queryParams = new URLSearchParams({
+        page: String(currentPage),
+        limit: String(pageSize),
+        tab: activeTab,
+        facturaFilter,
+        search: debouncedSearchQuery,
+        startDate: startDateFilter || '',
+        endDate: endDateFilter || '',
+        skipCatalogs: skipCat ? 'true' : 'false',
+      });
+      const fetchUrl = `${apiUrl}/api/reportes/admin/all?${queryParams.toString()}`;
 
       // Ejecutar la petición principal y catálogos en paralelo
       const [res, catRes] = await Promise.all([
         fetch(fetchUrl, { headers }),
-        fetch(`${apiUrl}/api/reportes/form-catalogs`, { headers }).catch(() => null),
+        !skipCat ? fetch(`${apiUrl}/api/reportes/form-catalogs`, { headers }).catch(() => null) : Promise.resolve(null),
       ]);
       
       if (res.status === 401) {
@@ -368,10 +394,26 @@ export default function AdminGastosScreen() {
       const data = await res.json();
 
       setGastos(data.gastos || []);
-      setProveedoresCatalog(data.proveedores || []);
-      setPersonal(sortUsuariosByRoleAndName(data.usuarios || []));
-      setVehiculos(data.vehiculos || []);
-      setRegistrosGasolina(data.gasLogs || []);
+      if (data.pagination) {
+        setTotalPages(data.pagination.totalPages || 1);
+        setTotalCount(data.pagination.total || 0);
+      } else {
+        setTotalPages(1);
+        setTotalCount((data.gastos || []).length);
+      }
+      if (data.totals) {
+        setBackendTotals(data.totals);
+      }
+      if (!skipCat) {
+        if (data.proveedores) setProveedoresCatalog(data.proveedores);
+        if (data.usuarios) setPersonal(sortUsuariosByRoleAndName(data.usuarios));
+        if (data.vehiculos) setVehiculos(data.vehiculos);
+        if (data.registrosGasolina || data.gasLogs) setRegistrosGasolina(data.registrosGasolina || data.gasLogs || []);
+        catalogsLoadedRef.current = true;
+      }
+
+
+
 
       // Procesar catálogos que se ejecutaron en paralelo
       if (catRes && catRes.ok) {
@@ -392,7 +434,23 @@ export default function AdminGastosScreen() {
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }, [gastos.length]);
+  }, [currentPage, pageSize, activeTab, facturaFilter, debouncedSearchQuery, startDateFilter, endDateFilter]);
+
+  // Debounce de búsqueda para consulta al servidor
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+      setCurrentPage(1);
+    }, 350);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  // Recargar al cambiar de página, tamaño, pestaña o filtros
+  useEffect(() => {
+    if (adminUser) {
+      refreshData();
+    }
+  }, [adminUser, refreshData]);
 
   useEffect(() => {
     const checkAdmin = async () => {
@@ -402,7 +460,8 @@ export default function AdminGastosScreen() {
         return;
       }
       setAdminUser(user);
-      await refreshData();
+
+
     };
 
     checkAdmin();
@@ -544,7 +603,7 @@ export default function AdminGastosScreen() {
       setSelectedGasto(null);
       setRejectionFeedback('');
       setShowFeedbackInput(false);
-      await refreshData();
+
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo procesar la acción de revisión.');
     } finally {
@@ -744,7 +803,7 @@ export default function AdminGastosScreen() {
       setSelectedGasto(null);
       setRejectionFeedback('');
       setShowFeedbackInput(false);
-      await refreshData();
+
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo aprobar el gasto.');
     } finally {
@@ -1515,7 +1574,7 @@ export default function AdminGastosScreen() {
       setNewUserPassword('');
       setNewUserPhone('');
       setNewUserRole('EMPLEADO');
-      await refreshData();
+
     } catch (err: any) {
       showAlert('Error al registrar', err.message || 'No se pudo registrar el nuevo usuario.');
     } finally {
@@ -1560,7 +1619,7 @@ export default function AdminGastosScreen() {
       showAlert('Éxito', 'Información de personal actualizada correctamente.');
       setEditUserModalVisible(false);
       setEditingUser(null);
-      await refreshData();
+
     } catch (err: any) {
       showAlert('Error al actualizar', err.message || 'No se pudo guardar la información.');
     } finally {
@@ -1574,7 +1633,7 @@ export default function AdminGastosScreen() {
       try {
         await CatalogService.eliminarUsuario(id);
         showAlert('Éxito', 'Personal eliminado.');
-        await refreshData();
+  
       } catch (err: any) {
         if (err?.code === '23503' || err?.message?.includes('23503')) {
           showAlert('Error al eliminar', 'No se puede eliminar a este empleado porque tiene gastos o evidencias de trabajo registradas. Para no alterar el historial contable e informes pasados de la empresa, te sugerimos editar su perfil y cambiar sus accesos (correo/contraseña) si deseas inhabilitar su cuenta.');
@@ -1646,7 +1705,7 @@ export default function AdminGastosScreen() {
       setNewVehiculoNumEcon('');
       setEditingVehiculo(null);
       setVehiculoModalVisible(false);
-      await refreshData();
+
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo guardar el vehículo.');
     } finally {
@@ -1669,7 +1728,7 @@ export default function AdminGastosScreen() {
       try {
         await VehiculoService.eliminarVehiculo(id);
         showAlert('Éxito', 'Vehículo eliminado.');
-        await refreshData();
+  
       } catch (err: any) {
         showAlert('Error', err.message || 'No se pudo eliminar el vehículo. Es posible que tenga registros de gasolina vinculados.');
       }
@@ -1695,7 +1754,7 @@ export default function AdminGastosScreen() {
     try {
       await VehiculoService.actualizarVehiculo(veh.id, { activo: !veh.activo });
       showAlert('Éxito', `Vehículo ${!veh.activo ? 'activado' : 'desactivado'} correctamente.`);
-      await refreshData();
+
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo cambiar el estado del vehículo.');
     }
@@ -1821,17 +1880,31 @@ export default function AdminGastosScreen() {
   // Exportar reportes
   const handleExportPDF = async () => {
     try {
-      await ReportGenerator.exportToPDF(gastos, `Historial General de Gastos`);
+      setIsLoading(true);
+      const headers = await getApiHeaders();
+      const exportUrl = `${getApiUrl()}/api/reportes/admin/export/gastos?startDate=${startDateFilter || ''}&endDate=${endDateFilter || ''}`;
+      const res = await fetch(exportUrl, { headers });
+      const exportGastos = res.ok ? await res.json() : gastos;
+      await ReportGenerator.exportToPDF(exportGastos, `Historial General de Gastos`);
     } catch (err: any) {
       Alert.alert('Error PDF', err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleExportCSV = async () => {
     try {
-      await ReportGenerator.exportToXLSX(gastos, `historial_gastos_${company === 'daravisa' ? 'daravisa' : 'inttec'}.xlsx`);
+      setIsLoading(true);
+      const headers = await getApiHeaders();
+      const exportUrl = `${getApiUrl()}/api/reportes/admin/export/gastos?startDate=${startDateFilter || ''}&endDate=${endDateFilter || ''}`;
+      const res = await fetch(exportUrl, { headers });
+      const exportGastos = res.ok ? await res.json() : gastos;
+      await ReportGenerator.exportToXLSX(exportGastos, `historial_gastos_${company === 'daravisa' ? 'daravisa' : 'inttec'}.xlsx`);
     } catch (err: any) {
       Alert.alert('Error Excel', err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -2037,8 +2110,8 @@ export default function AdminGastosScreen() {
   }, [gastos, searchQuery, startDateFilter, endDateFilter]);
 
   // Filtrados por Pestañas y Facturación
-  const pendingGastos = filteredGastos.filter((g) => g.status === 'PENDING');
-  const historyGastos = filteredGastos.filter((g) => {
+  const pendingGastos = activeTab === 'pendientes' ? gastos : filteredGastos.filter((g) => g.status === 'PENDING');
+  const historyGastos = activeTab === 'historial' ? gastos : filteredGastos.filter((g) => {
     const isHistoryStatus = g.status === 'APPROVED' || g.status === 'REJECTED' || g.status === 'ACTION_REQUIRED';
     if (!isHistoryStatus) return false;
     
@@ -2053,8 +2126,8 @@ export default function AdminGastosScreen() {
   });
 
   // Totales
-  const totalPendientes = pendingGastos.reduce((sum, g) => sum + Number(g.monto), 0);
-  const totalAprobados = filteredGastos.filter((g) => g.status === 'APPROVED').reduce((sum, g) => sum + Number(g.monto), 0);
+  const totalPendientes = backendTotals ? backendTotals.totalPendientes : pendingGastos.reduce((sum, g) => sum + Number(g.monto), 0);
+  const totalAprobados = backendTotals ? backendTotals.totalAprobados : filteredGastos.filter((g) => g.status === 'APPROVED').reduce((sum, g) => sum + Number(g.monto), 0);
 
   const formatCurrency = (monto: number) => {
     return new Intl.NumberFormat('es-MX', {
@@ -2260,25 +2333,25 @@ export default function AdminGastosScreen() {
       {/* Segmented Control Tabs */}
       <View style={[styles.tabsSegmentedContainer, { backgroundColor: themeColors.border }]}>
         <TouchableOpacity
-          onPress={() => setActiveTab('pendientes')}
+          onPress={() => { if (activeTab !== 'pendientes') { setActiveTab('pendientes'); setCurrentPage(1); } }}
           style={[
             styles.tabSegment,
             activeTab === 'pendientes' && { backgroundColor: themeColors.backgroundElement }
           ]}
         >
           <Text style={[styles.tabSegmentText, { color: activeTab === 'pendientes' ? themeColors.text : themeColors.textSecondary, fontWeight: activeTab === 'pendientes' ? 'bold' : '600' }]}>
-            Revisar ({pendingGastos.length})
+            Revisar ({backendTotals ? backendTotals.countPendientes : pendingGastos.length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          onPress={() => setActiveTab('historial')}
+          onPress={() => { if (activeTab !== 'historial') { setActiveTab('historial'); setCurrentPage(1); } }}
           style={[
             styles.tabSegment,
             activeTab === 'historial' && { backgroundColor: themeColors.backgroundElement }
           ]}
         >
           <Text style={[styles.tabSegmentText, { color: activeTab === 'historial' ? themeColors.text : themeColors.textSecondary, fontWeight: activeTab === 'historial' ? 'bold' : '600' }]}>
-            Historial ({historyGastos.length})
+            Historial ({activeTab === 'historial' ? totalCount : (backendTotals ? backendTotals.countAprobados : historyGastos.length)})
           </Text>
         </TouchableOpacity>
       </View>
@@ -2323,6 +2396,19 @@ export default function AdminGastosScreen() {
               <ScrollView style={{ flex: 1 }}>
                 {renderScreenHeader()}
                 <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
+                  <PaginationControls
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={totalCount}
+                    itemsPerPage={pageSize}
+                    onPageChange={(p) => setCurrentPage(p)}
+                    onItemsPerPageChange={(s) => {
+                      setPageSize(s);
+                      setCurrentPage(1);
+                    }}
+                    isLoading={isLoading}
+                    style={{ marginBottom: Spacing.two }}
+                  />
                   <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
                     <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
                     <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Empleado</Text>
@@ -2415,6 +2501,23 @@ export default function AdminGastosScreen() {
               <FlatList scrollEnabled={true} style={{ flex: 1 }}
                 ListHeaderComponent={renderScreenHeader()}
                 data={pendingGastos}
+                ListFooterComponent={
+                  totalCount > pageSize ? (
+                    <PaginationControls
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      totalItems={totalCount}
+                      itemsPerPage={pageSize}
+                      onPageChange={(p) => setCurrentPage(p)}
+                      onItemsPerPageChange={(s) => {
+                        setPageSize(s);
+                        setCurrentPage(1);
+                      }}
+                      isLoading={isLoading}
+                      style={{ marginHorizontal: Spacing.three, marginBottom: Spacing.four }}
+                    />
+                  ) : null
+                }
                 initialNumToRender={8}
                 maxToRenderPerBatch={8}
                 windowSize={5}
@@ -2450,25 +2553,25 @@ export default function AdminGastosScreen() {
             <>
               <View style={{ flexDirection: 'row', marginHorizontal: Spacing.three, marginBottom: Spacing.two, marginTop: Spacing.one, backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, overflow: 'hidden', borderWidth: 1, borderColor: themeColors.border }}>
                 <TouchableOpacity
-                  onPress={() => setFacturaFilter('TODOS')}
+                  onPress={() => { setFacturaFilter('TODOS'); setCurrentPage(1); }}
                   style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: facturaFilter === 'TODOS' ? themeColors.accent + '20' : 'transparent' }}
                 >
                   <Text style={{ fontSize: 10, fontWeight: facturaFilter === 'TODOS' ? 'bold' : '600', color: facturaFilter === 'TODOS' ? themeColors.accent : themeColors.textSecondary }}>TODOS</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setFacturaFilter('FACTURADOS')}
+                  onPress={() => { setFacturaFilter('FACTURADOS'); setCurrentPage(1); }}
                   style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: facturaFilter === 'FACTURADOS' ? themeColors.accent + '20' : 'transparent', borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}
                 >
                   <Text style={{ fontSize: 10, fontWeight: facturaFilter === 'FACTURADOS' ? 'bold' : '600', color: facturaFilter === 'FACTURADOS' ? themeColors.accent : themeColors.textSecondary }}>FACTURADOS</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setFacturaFilter('PENDIENTE_ENTREGA')}
+                  onPress={() => { setFacturaFilter('PENDIENTE_ENTREGA'); setCurrentPage(1); }}
                   style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: facturaFilter === 'PENDIENTE_ENTREGA' ? themeColors.warning + '20' : 'transparent', borderRightWidth: 1, borderColor: themeColors.border }}
                 >
                   <Text style={{ fontSize: 10, fontWeight: facturaFilter === 'PENDIENTE_ENTREGA' ? 'bold' : '600', color: facturaFilter === 'PENDIENTE_ENTREGA' ? themeColors.warning : themeColors.textSecondary }}>PEND. ENTREGAR</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => setFacturaFilter('NO_FACTURADOS')}
+                  onPress={() => { setFacturaFilter('NO_FACTURADOS'); setCurrentPage(1); }}
                   style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: facturaFilter === 'NO_FACTURADOS' ? themeColors.danger + '20' : 'transparent' }}
                 >
                   <Text style={{ fontSize: 10, fontWeight: facturaFilter === 'NO_FACTURADOS' ? 'bold' : '600', color: facturaFilter === 'NO_FACTURADOS' ? themeColors.danger : themeColors.textSecondary }}>NO FACTURADOS</Text>
@@ -2478,7 +2581,20 @@ export default function AdminGastosScreen() {
                 <ScrollView style={{ flex: 1 }}>
                   {renderScreenHeader()}
                   <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
-                    <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
+                    <PaginationControls
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={totalCount}
+                    itemsPerPage={pageSize}
+                    onPageChange={(p) => setCurrentPage(p)}
+                    onItemsPerPageChange={(s) => {
+                      setPageSize(s);
+                      setCurrentPage(1);
+                    }}
+                    isLoading={isLoading}
+                    style={{ marginBottom: Spacing.two }}
+                  />
+                  <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
                       <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Categoría</Text>
                       <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Empleado</Text>
                       <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '14%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
@@ -2581,6 +2697,23 @@ export default function AdminGastosScreen() {
               <FlatList scrollEnabled={true} style={{ flex: 1 }}
                 ListHeaderComponent={renderScreenHeader()}
                   data={historyGastos}
+                  ListFooterComponent={
+                    totalCount > pageSize ? (
+                      <PaginationControls
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalItems={totalCount}
+                        itemsPerPage={pageSize}
+                        onPageChange={(p) => setCurrentPage(p)}
+                        onItemsPerPageChange={(s) => {
+                          setPageSize(s);
+                          setCurrentPage(1);
+                        }}
+                        isLoading={isLoading}
+                        style={{ marginHorizontal: Spacing.three, marginBottom: Spacing.four }}
+                      />
+                    ) : null
+                  }
                   initialNumToRender={8}
                   maxToRenderPerBatch={8}
                   windowSize={5}

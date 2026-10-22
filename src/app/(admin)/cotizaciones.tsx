@@ -14,6 +14,7 @@ import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleCache } from '@/services/moduleCache';
 import { CotizacionesTableSkeleton, CotizacionesCardsListSkeleton } from '@/components/skeleton';
+import PaginationControls from '@/components/PaginationControls';
 const getStatusConfig = (estado: string, isDark: boolean) => {
   const norm = (estado || '').toLowerCase().trim();
   switch(norm) {
@@ -227,6 +228,8 @@ export default function CotizacionesListScreen() {
   const [isLoading, setIsLoading] = useState(() => !cachedCotizaciones);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
@@ -258,6 +261,16 @@ export default function CotizacionesListScreen() {
       (cot.vendedor && cot.vendedor.toLowerCase().includes(query))
     );
   });
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  const totalPages = Math.ceil(filteredCotizaciones.length / pageSize) || 1;
+  const paginatedCotizaciones = React.useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredCotizaciones.slice(start, start + pageSize);
+  }, [filteredCotizaciones, currentPage, pageSize]);
 
   const fetchCotizaciones = async (silent = false) => {
     if (!silent && !ModuleCache.has('cotizaciones_list')) {
@@ -562,8 +575,8 @@ export default function CotizacionesListScreen() {
             </Text>
           </View>
         ) : (
-          filteredCotizaciones.map((cot, index) => {
-            const sequentialId = 1532 + (filteredCotizaciones.length - 1 - index);
+          paginatedCotizaciones.map((cot, index) => {
+            const sequentialId = 1532 + (filteredCotizaciones.length - 1 - ((currentPage - 1) * pageSize + index));
             const firstLineName = cot.lineas?.[0]?.productoNombre || 'Sin referencia';
             const estadoDisplay = getDisplayEstado(cot.estado);
             const config = getStatusConfig(estadoDisplay, scheme === 'dark');
@@ -653,6 +666,22 @@ export default function CotizacionesListScreen() {
           <ScrollView style={styles.desktopScrollView}>
             <View style={{ paddingHorizontal: 20, paddingVertical: 8 }}>
               {renderDesktopTable()}
+              {filteredCotizaciones.length > 0 && (
+                <PaginationControls
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={filteredCotizaciones.length}
+                  itemsPerPage={pageSize}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(newSize: number) => {
+                    setPageSize(newSize);
+                    setCurrentPage(1);
+                  }}
+                  itemsPerPageOptions={[20, 25, 50, 100]}
+                  isLoading={isLoading}
+                  style={{ marginTop: 14, marginBottom: 24 }}
+                />
+              )}
             </View>
           </ScrollView>
         </View>
@@ -721,7 +750,7 @@ export default function CotizacionesListScreen() {
                   </Text>
                 </View>
               ) : (
-                filteredCotizaciones.map((cot) => (
+                paginatedCotizaciones.map((cot) => (
                   <View key={cot.id} style={styles.card}>
                     {/* Header: Folio & Status Badge */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -800,6 +829,23 @@ export default function CotizacionesListScreen() {
                     </View>
                   </View>
                 ))
+              )}
+
+              {filteredCotizaciones.length > 0 && (
+                <PaginationControls
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={filteredCotizaciones.length}
+                  itemsPerPage={pageSize}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(newSize: number) => {
+                    setPageSize(newSize);
+                    setCurrentPage(1);
+                  }}
+                  itemsPerPageOptions={[20, 25, 50, 100]}
+                  isLoading={isLoading}
+                  style={{ marginTop: 14, marginBottom: 20 }}
+                />
               )}
             </ScrollView>
           )}

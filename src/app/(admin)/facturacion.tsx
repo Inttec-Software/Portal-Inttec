@@ -28,6 +28,7 @@ import { exportarFacturaOdooPDF, exportarReciboPagoPDF, generarReciboPagoHTML, c
 import FacturaPreviewModal from '@/components/FacturaPreviewModal';
 import { FacturacionTableSkeleton, FacturacionCardsListSkeleton } from '@/components/skeleton';
 import { normalizeText } from '@/utils/helpers';
+import PaginationControls from '@/components/PaginationControls';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Sharing from 'expo-sharing';
 import { cacheDirectory, writeAsStringAsync } from 'expo-file-system/legacy';
@@ -374,6 +375,8 @@ export default function FacturacionScreen() {
   const [isLoadingComplementos, setIsLoadingComplementos] = useState(false);
   const [complementosSearch, setComplementosSearch] = useState('');
   const [filtroEstadoPago, setFiltroEstadoPago] = useState<'TODAS' | 'TIMBRADA' | 'CANCELADA'>('TODAS');
+  const [paginaActualPagos, setPaginaActualPagos] = useState(1);
+  const [registrosPorPaginaPagos, setRegistrosPorPaginaPagos] = useState(25);
 
   // Modal Nuevo Complemento de Pago
   const [isPagoModalOpen, setIsPagoModalOpen] = useState(false);
@@ -2464,6 +2467,16 @@ export default function FacturacionScreen() {
     });
   }, [complementosList, filtroEstadoPago, complementosSearch]);
 
+  useEffect(() => {
+    setPaginaActualPagos(1);
+  }, [complementosSearch, filtroEstadoPago]);
+
+  const totalPaginasPagos = Math.ceil(complementosFiltrados.length / registrosPorPaginaPagos) || 1;
+  const complementosPaginados = useMemo(() => {
+    const start = (paginaActualPagos - 1) * registrosPorPaginaPagos;
+    return complementosFiltrados.slice(start, start + registrosPorPaginaPagos);
+  }, [complementosFiltrados, paginaActualPagos, registrosPorPaginaPagos]);
+
   const clientesPagoFiltrados = useMemo(() => {
     if (!searchClientePago.trim()) return clientes;
     const q = normalizeText(searchClientePago);
@@ -4175,6 +4188,23 @@ export default function FacturacionScreen() {
                   })}
                 </View>
 
+                {complementosFiltrados.length > 0 && (
+                  <PaginationControls
+                    currentPage={paginaActualPagos}
+                    totalPages={totalPaginasPagos}
+                    totalItems={complementosFiltrados.length}
+                    itemsPerPage={registrosPorPaginaPagos}
+                    onPageChange={setPaginaActualPagos}
+                    onItemsPerPageChange={(newSize) => {
+                      setRegistrosPorPaginaPagos(newSize);
+                      setPaginaActualPagos(1);
+                    }}
+                    itemsPerPageOptions={[20, 25, 50, 100]}
+                    isLoading={isLoadingComplementos}
+                    style={{ marginTop: 14 }}
+                  />
+                )}
+
                 {/* Botón "+ Agregar una línea" estilo Odoo al pie de la tabla */}
                 <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: themeColors.border + '50', paddingTop: 8 }}>
                   <TouchableOpacity
@@ -4982,45 +5012,21 @@ export default function FacturacionScreen() {
               )}
 
               {/* Paginación Inferior */}
-              {facturasFiltradas.length > registrosPorPagina && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingHorizontal: 4 }}>
-                  <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
-                    Mostrando {inicioRegistro} a {finRegistro} de {facturasFiltradas.length} facturas
-                  </Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <TouchableOpacity
-                      onPress={() => setPaginaActual(p => Math.max(1, p - 1))}
-                      disabled={paginaActual <= 1}
-                      style={[
-                        styles.pageBtn,
-                        {
-                          opacity: paginaActual <= 1 ? 0.35 : 1,
-                          borderColor: themeColors.border,
-                          backgroundColor: themeColors.backgroundElement,
-                        }
-                      ]}
-                    >
-                      <Ionicons name="chevron-back" size={15} color={themeColors.text} />
-                    </TouchableOpacity>
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, paddingHorizontal: 4 }}>
-                      Página {paginaActual} de {totalPaginas}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))}
-                      disabled={paginaActual >= totalPaginas}
-                      style={[
-                        styles.pageBtn,
-                        {
-                          opacity: paginaActual >= totalPaginas ? 0.35 : 1,
-                          borderColor: themeColors.border,
-                          backgroundColor: themeColors.backgroundElement,
-                        }
-                      ]}
-                    >
-                      <Ionicons name="chevron-forward" size={15} color={themeColors.text} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
+              {facturasFiltradas.length > 0 && (
+                <PaginationControls
+                  currentPage={paginaActual}
+                  totalPages={totalPaginas}
+                  totalItems={facturasFiltradas.length}
+                  itemsPerPage={registrosPorPagina}
+                  onPageChange={setPaginaActual}
+                  onItemsPerPageChange={(newSize) => {
+                    setRegistrosPorPagina(newSize);
+                    setPaginaActual(1);
+                  }}
+                  itemsPerPageOptions={[20, 25, 50, 100]}
+                  isLoading={isLoadingHistorial}
+                  style={{ marginTop: 14 }}
+                />
               )}
             </ScrollView>
           )}
@@ -5161,7 +5167,7 @@ export default function FacturacionScreen() {
           ) : (
             <ScrollView style={{ flex: 1 }}>
               <View style={{ gap: 10 }}>
-                {complementosFiltrados.map((comp) => {
+                {complementosPaginados.map((comp) => {
                   const isCanceled = comp.cfdi_estado === 'CANCELADA';
                   const doctos = comp.complementos_pago_doctos || [];
                   const cleanFolioVal = cleanFolio(comp.folio) || '--';
