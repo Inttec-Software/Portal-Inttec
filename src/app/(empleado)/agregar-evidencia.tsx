@@ -859,7 +859,7 @@ export default function EvidenciaForm() {
     }
 
     // Si ya es un URL público de Supabase/S3 o web (no localhost ni blob), no se necesita Base64 para subir
-    if ((photo.uri.startsWith('http://') || photo.uri.startsWith('https://')) && !photo.uri.includes('localhost') && !photo.uri.includes('127.0.0.1')) {
+    if ((photo.uri.startsWith('http://') || photo.uri.startsWith('https://')) && !photo.uri.startsWith('blob:') && !photo.uri.includes('localhost') && !photo.uri.includes('127.0.0.1')) {
       return null;
     }
 
@@ -889,27 +889,36 @@ export default function EvidenciaForm() {
         [{ resize: { width: 1280 } }],
         { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
       );
-      return manipulated.base64 || null;
+      if (manipulated.base64) return manipulated.base64;
     } catch (err) {
       console.warn('Error reading photo base64 with ImageManipulator:', err);
-      // Fallback secundario para web
-      if (Platform.OS === 'web') {
-        try {
-          const response = await fetch(photo.uri);
-          const blob = await response.blob();
-          return await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const dataUrl = reader.result as string;
-              resolve(dataUrl.split('base64,')[1] || null as any);
-            };
-            reader.onerror = () => resolve(null as any);
-            reader.readAsDataURL(blob);
-          });
-        } catch (e) {}
-      }
-      return null;
     }
+
+    // Fallback para web
+    if (Platform.OS === 'web') {
+      try {
+        const response = await fetch(photo.uri);
+        const blob = await response.blob();
+        return await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const dataUrl = reader.result as string;
+            resolve(dataUrl.split('base64,')[1] || null as any);
+          };
+          reader.onerror = () => resolve(null as any);
+          reader.readAsDataURL(blob);
+        });
+      } catch (e) {}
+    } else {
+      // Fallback para móvil nativo (iOS / Android) usando expo-file-system
+      try {
+        const { readAsStringAsync, EncodingType } = await import('expo-file-system/legacy');
+        const b64 = await readAsStringAsync(photo.uri, { encoding: EncodingType.Base64 });
+        if (b64) return b64;
+      } catch (e) {}
+    }
+
+    return null;
   };
 
   const handleSaveToDatabase = async () => {
@@ -969,6 +978,9 @@ export default function EvidenciaForm() {
       let fotoDespuesUrl: string | null = null;
       const allFotosAdicionalesUrls: string[] = [];
 
+      const isRemotePublicUrl = (url?: string | null) =>
+        Boolean(url && (url.startsWith('http://') || url.startsWith('https://')) && !url.startsWith('blob:'));
+
       // Subir fotos de cada trabajo (antes, despues y fotos adicionales de cada trabajo)
       const trabajosPayload = [];
       for (let i = 0; i < trabajos.length; i++) {
@@ -976,26 +988,28 @@ export default function EvidenciaForm() {
         let antesUrl: string | null = null;
         let despuesUrl: string | null = null;
 
-        if (t.antesImg?.uri?.startsWith('http')) {
-          antesUrl = t.antesImg.uri;
+        if (isRemotePublicUrl(t.antesImg?.uri)) {
+          antesUrl = t.antesImg!.uri;
           if (i === 0) fotoAntesUrl = antesUrl;
-        } else if (t.antesImg) {
+        } else if (t.antesImg?.uri) {
           const b64 = await getPhotoBase64(t.antesImg);
-          if (b64) {
-            antesUrl = await uploadPhoto(b64, `t${i}_antes`);
-            if (i === 0) fotoAntesUrl = antesUrl;
+          if (!b64) {
+            throw new Error(`La fotografía del "Antes" en el Trabajo #${i + 1} no se pudo procesar o expiró. Por favor selecciónala de nuevo antes de guardar.`);
           }
+          antesUrl = await uploadPhoto(b64, `t${i}_antes`);
+          if (i === 0) fotoAntesUrl = antesUrl;
         }
 
-        if (t.despuesImg?.uri?.startsWith('http')) {
-          despuesUrl = t.despuesImg.uri;
+        if (isRemotePublicUrl(t.despuesImg?.uri)) {
+          despuesUrl = t.despuesImg!.uri;
           if (i === 0) fotoDespuesUrl = despuesUrl;
-        } else if (t.despuesImg) {
+        } else if (t.despuesImg?.uri) {
           const b64 = await getPhotoBase64(t.despuesImg);
-          if (b64) {
-            despuesUrl = await uploadPhoto(b64, `t${i}_despues`);
-            if (i === 0) fotoDespuesUrl = despuesUrl;
+          if (!b64) {
+            throw new Error(`La fotografía del "Después" en el Trabajo #${i + 1} no se pudo procesar o expiró. Por favor selecciónala de nuevo antes de guardar.`);
           }
+          despuesUrl = await uploadPhoto(b64, `t${i}_despues`);
+          if (i === 0) fotoDespuesUrl = despuesUrl;
         }
 
         // Subir fotos adicionales de este trabajo con concurrencia de 4
@@ -1007,18 +1021,19 @@ export default function EvidenciaForm() {
             const chunk = extras.slice(j, j + CONCURRENCY);
             const urls = await Promise.all(
               chunk.map(async (extra, chunkIdx) => {
-                if (extra.uri?.startsWith('http')) {
+                if (!extra?.uri) return null;
+                if (isRemotePublicUrl(extra.uri)) {
                   return extra.uri;
                 }
                 const b64 = await getPhotoBase64(extra);
-                if (b64) {
-                  return await uploadPhoto(b64, `t${i}_extra_${j + chunkIdx}`);
+                if (!b64) {
+                  throw new Error(`Una fotografía adicional en el Trabajo #${i + 1} (foto ${j + chunkIdx + 1}) no se pudo procesar o expiró. Por favor selecciónala de nuevo.`);
                 }
-                return (extra.uri && !extra.uri.startsWith('blob:')) ? extra.uri : null;
+                return await uploadPhoto(b64, `t${i}_extra_${j + chunkIdx}`);
               })
             );
             urls.forEach(u => {
-              if (u) {
+              if (u && isRemotePublicUrl(u)) {
                 jobExtrasUrls.push(u);
                 allFotosAdicionalesUrls.push(u);
               }
@@ -1026,13 +1041,14 @@ export default function EvidenciaForm() {
           }
         }
 
+        // Garantizar que NUNCA se envíe una URL de tipo blob: o file: a la base de datos
         trabajosPayload.push({
           descripcion: t.descripcion.trim(),
           materiales: t.materiales.trim() || null,
           materiales_usados: t.materiales_usados || [],
           solucion: t.solucion.trim() || null,
-          antesImg: antesUrl || t.antesImg?.uri || null,
-          despuesImg: despuesUrl || t.despuesImg?.uri || null,
+          antesImg: antesUrl || (isRemotePublicUrl(t.antesImg?.uri) ? t.antesImg!.uri : null),
+          despuesImg: despuesUrl || (isRemotePublicUrl(t.despuesImg?.uri) ? t.despuesImg!.uri : null),
           fotosAdicionales: jobExtrasUrls,
         });
       }
