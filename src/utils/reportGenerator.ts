@@ -4141,6 +4141,10 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     }).join('');
   };
 
+  const hasIva = (Number(cotizacion.iva || 0) > 0) || (cotizacion.lineas || []).some(l => Number(l.impuestoPorcentaje || 0) > 0);
+  const uniqueTaxes = Array.from(new Set((cotizacion.lineas || []).map(l => Number(l.impuestoPorcentaje || 0)).filter(p => p > 0)));
+  const ivaLabel = uniqueTaxes.length === 1 ? `IVA ${uniqueTaxes[0]}%` : 'IVA';
+
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -4310,11 +4314,11 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
           <table class="table table-red mt-4">
               <thead>
                   <tr>
-                      <th width="40%" style="text-align: left;">DESCRIPCIÓN</th>
-                      <th width="15%" class="text-center">ENTREGA</th>
+                      <th width="${hasIva ? '40%' : '48%'}" style="text-align: left;">DESCRIPCIÓN</th>
+                      <th width="${hasIva ? '15%' : '17%'}" class="text-center">ENTREGA</th>
                       <th class="text-center">CANT</th>
                       <th class="text-end">PRECIO UNIT</th>
-                      <th class="text-center">IVA</th>
+                      ${hasIva ? '<th class="text-center">IVA</th>' : ''}
                       <th class="text-end">IMPORTE</th>
                   </tr>
               </thead>
@@ -4329,10 +4333,10 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
                           </td>
                           <td class="text-center">${Number(linea.cantidad || 0).toFixed(1)}</td>
                           <td class="text-end">$ ${formatMoney(linea.precioUnitario)}</td>
-                          
+                          ${hasIva ? `
                           <td class="text-center">
-                              ${linea.impuestoPorcentaje}%
-                          </td>
+                              ${linea.impuestoPorcentaje || 0}%
+                          </td>` : ''}
 
                           <td class="text-end">$ ${formatMoney(linea.importe)}</td>
                       </tr>
@@ -4359,7 +4363,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
               <div class="col-5">
                   <table class="table-totals">
                       <tr><td>Subtotal</td><td class="text-end">$ ${formatMoney(cotizacion.subtotal)}</td></tr>
-                      <tr><td>IVA 16%</td><td class="text-end">$ ${formatMoney(cotizacion.iva)}</td></tr>
+                      ${hasIva ? `<tr><td>${ivaLabel}</td><td class="text-end">$ ${formatMoney(cotizacion.iva)}</td></tr>` : ''}
                       <tr>
                           <td>TOTAL</td>
                           <td class="text-end">$ ${formatMoney(cotizacion.total)}</td>
