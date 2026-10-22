@@ -98,6 +98,7 @@ function ActionButtonWithTooltip({
   tooltip,
   onPress,
   isCircular = false,
+  align = 'center',
 }: {
   icon: string;
   iconSize?: number;
@@ -106,11 +107,12 @@ function ActionButtonWithTooltip({
   tooltip: string;
   onPress: () => void;
   isCircular?: boolean;
+  align?: 'center' | 'left' | 'right';
 }) {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
-    <View style={{ position: 'relative', alignItems: 'center' }}>
+    <View style={{ position: 'relative', alignItems: 'center', zIndex: isHovered ? 99999 : 1 }}>
       <Pressable
         onPress={onPress}
         onHoverIn={() => setIsHovered(true)}
@@ -123,6 +125,7 @@ function ActionButtonWithTooltip({
           pressed && { opacity: 0.7 },
           isHovered && { transform: [{ scale: 1.15 }] }
         ]}
+        accessibilityLabel={tooltip}
       >
         <Ionicons name={icon as any} size={iconSize} color={color} />
       </Pressable>
@@ -130,25 +133,77 @@ function ActionButtonWithTooltip({
       {isHovered && Platform.OS === 'web' && (
         <View
           pointerEvents="none"
-          style={{
-            position: 'absolute',
-            bottom: '125%',
-            backgroundColor: '#0f172a',
-            paddingVertical: 4,
-            paddingHorizontal: 8,
-            borderRadius: 6,
-            zIndex: 99999,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.25,
-            shadowRadius: 4,
-            elevation: 10,
-            alignSelf: 'center',
-          }}
+          style={[
+            {
+              position: 'absolute',
+              bottom: 34,
+              backgroundColor: '#0f172a',
+              paddingHorizontal: 10,
+              paddingVertical: 5,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: '#334155',
+              zIndex: 999999,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.4,
+              shadowRadius: 5,
+              elevation: 12,
+              pointerEvents: 'none',
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+            align === 'right'
+              ? { right: -2 }
+              : align === 'left'
+              ? { left: -2 }
+              : { alignSelf: 'center' },
+            Platform.select({
+              web: {
+                width: 'max-content',
+                minWidth: 'max-content',
+                whiteSpace: 'nowrap',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+              } as any,
+            }),
+          ]}
         >
-          <Text style={{ color: '#ffffff', fontSize: 11, fontWeight: '700', textAlign: 'center' }} numberOfLines={1}>
+          <Text
+            style={[
+              {
+                color: '#f8fafc',
+                fontSize: 11,
+                fontWeight: '700',
+                textAlign: 'center',
+              },
+              Platform.select({
+                web: {
+                  whiteSpace: 'nowrap',
+                  wordBreak: 'keep-all',
+                } as any,
+              }),
+            ]}
+            numberOfLines={1}
+          >
             {tooltip}
           </Text>
+
+          {/* Flecha indicadora */}
+          <View
+            style={{
+              position: 'absolute',
+              top: '100%',
+              width: 0,
+              height: 0,
+              borderLeftWidth: 4,
+              borderRightWidth: 4,
+              borderTopWidth: 4,
+              borderLeftColor: 'transparent',
+              borderRightColor: 'transparent',
+              borderTopColor: '#0f172a',
+              ...(align === 'right' ? { right: 10 } : align === 'left' ? { left: 10 } : { alignSelf: 'center' }),
+            }}
+          />
         </View>
       )}
     </View>
@@ -181,7 +236,18 @@ export default function CotizacionesListScreen() {
     }, [])
   );
 
+  const [filtroEstado, setFiltroEstado] = useState<string>('TODAS');
+
   const filteredCotizaciones = cotizaciones.filter((cot) => {
+    if (filtroEstado !== 'TODAS') {
+      const normEstado = (cot.estado || 'borrador').toLowerCase().trim();
+      const normFiltro = filtroEstado.toLowerCase().trim();
+      if (normFiltro === 'cotización' || normFiltro === 'cotizacion') {
+        if (normEstado !== 'cotización' && normEstado !== 'cotizacion' && normEstado !== 'borrador') return false;
+      } else if (!normEstado.includes(normFiltro)) {
+        return false;
+      }
+    }
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
@@ -428,6 +494,33 @@ export default function CotizacionesListScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Chips de Estado ERP */}
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          {(['TODAS', 'COTIZACIÓN', 'ENVIADA', 'APROBADA'] as const).map((est) => (
+            <TouchableOpacity
+              key={est}
+              onPress={() => setFiltroEstado(est)}
+              style={[
+                styles.chipBtn,
+                {
+                  borderColor: filtroEstado === est ? themeColors.accent : themeColors.border,
+                  backgroundColor: filtroEstado === est ? themeColors.accent + '20' : themeColors.background,
+                },
+              ]}
+            >
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: filtroEstado === est ? '800' : '500',
+                  color: filtroEstado === est ? themeColors.accent : themeColors.textSecondary,
+                }}
+              >
+                {est}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
       <View style={styles.desktopToolbarRight}>
         <TouchableOpacity 
@@ -511,7 +604,7 @@ export default function CotizacionesListScreen() {
                     <ActionButtonWithTooltip icon="chatbubble-ellipses-outline" color={themeColors.textSecondary} tooltip="Notas y Comentarios" onPress={() => handleComments(cot)} />
                     <ActionButtonWithTooltip icon={expandedRowId === cot.id ? "chevron-up" : "chevron-down"} color={themeColors.textSecondary} tooltip={expandedRowId === cot.id ? "Ocultar Partidas" : "Ver Partidas"} onPress={() => toggleRowExpansion(cot.id)} />
                     <ActionButtonWithTooltip icon="cash-outline" color={themeColors.primary} tooltip="Convertir a Venta" onPress={() => handleConvertirVenta(cot)} />
-                    <ActionButtonWithTooltip icon="trash-outline" color={themeColors.danger} tooltip="Eliminar Cotización" onPress={() => handleDelete(cot.id)} />
+                    <ActionButtonWithTooltip icon="trash-outline" color={themeColors.danger} tooltip="Eliminar Cotización" align="right" onPress={() => handleDelete(cot.id)} />
                   </View>
                 </Pressable>
 
@@ -883,6 +976,12 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '700',
+  },
+  chipBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
   },
   menuRightButton: {
     flexDirection: 'column',

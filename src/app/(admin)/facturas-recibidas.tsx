@@ -14,6 +14,7 @@ import {
   RefreshControl,
   useWindowDimensions,
   Linking,
+  Pressable,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
@@ -43,6 +44,8 @@ interface FacturaRecibida {
   pdf_url?: string;
   conceptos_json?: any[];
   created_at: string;
+  serie?: string;
+  folio?: string;
 }
 
 interface SatSolicitud {
@@ -65,11 +68,136 @@ const showAlert = (title: string, message: string) => {
   }
 };
 
+function TableTooltipButton({
+  icon,
+  color,
+  bgColor,
+  borderColor,
+  tooltip,
+  onPress,
+  disabled,
+  align = 'center',
+}: {
+  icon: any;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  tooltip: string;
+  onPress: () => void;
+  disabled?: boolean;
+  align?: 'center' | 'left' | 'right';
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <View style={{ position: 'relative', alignItems: 'center', zIndex: hovered ? 99999 : 1 }}>
+      <Pressable
+        onPress={(e) => {
+          e.stopPropagation?.();
+          if (!disabled) onPress();
+        }}
+        onHoverIn={() => setHovered(true)}
+        onHoverOut={() => setHovered(false)}
+        style={({ hovered: isHover }: any) => [
+          styles.tableActionIconBtn,
+          {
+            borderColor: isHover || hovered ? color : borderColor,
+            backgroundColor: isHover || hovered ? color + '28' : bgColor,
+            transform: [{ scale: isHover || hovered ? 1.1 : 1 }],
+            opacity: disabled ? 0.4 : 1,
+          },
+        ]}
+        accessibilityLabel={tooltip}
+      >
+        <Ionicons name={icon} size={15} color={color} />
+      </Pressable>
+
+      {hovered && Platform.OS === 'web' && (
+        <View
+          style={[
+            {
+              position: 'absolute',
+              bottom: 34,
+              backgroundColor: '#0f172a',
+              paddingHorizontal: 10,
+              paddingVertical: 5,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: '#334155',
+              zIndex: 999999,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.4,
+              shadowRadius: 5,
+              elevation: 12,
+              pointerEvents: 'none',
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+            align === 'right'
+              ? { right: -2 }
+              : align === 'left'
+              ? { left: -2 }
+              : { alignSelf: 'center' },
+            Platform.select({
+              web: {
+                width: 'max-content',
+                minWidth: 'max-content',
+                whiteSpace: 'nowrap',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+              } as any,
+            }),
+          ]}
+        >
+          <Text
+            style={[
+              {
+                color: '#f8fafc',
+                fontSize: 11,
+                fontWeight: '700',
+                textAlign: 'center',
+              },
+              Platform.select({
+                web: {
+                  whiteSpace: 'nowrap',
+                  wordBreak: 'keep-all',
+                } as any,
+              }),
+            ]}
+            numberOfLines={1}
+          >
+            {tooltip}
+          </Text>
+
+          {/* Flecha indicadora hacia el botón */}
+          <View
+            style={{
+              position: 'absolute',
+              top: '100%',
+              width: 0,
+              height: 0,
+              borderLeftWidth: 4,
+              borderRightWidth: 4,
+              borderTopWidth: 4,
+              borderLeftColor: 'transparent',
+              borderRightColor: 'transparent',
+              borderTopColor: '#0f172a',
+              ...(align === 'right' ? { right: 10 } : align === 'left' ? { left: 10 } : { alignSelf: 'center' }),
+            }}
+          />
+        </View>
+      )}
+    </View>
+  );
+}
+
 export default function FacturasRecibidasScreen() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
-  const isMobile = width < 768;
+  const isDesktop = Platform.OS === 'web' && width >= 1024;
+  const isMobile = !isDesktop;
+  const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
 
   const cachedFacturas = ModuleCache.get<FacturaRecibida[]>('facturas_recibidas');
   const [loading, setLoading] = useState(() => !cachedFacturas);
@@ -429,56 +557,342 @@ export default function FacturasRecibidasScreen() {
     }
   };
 
+  // SUB-HEADER BAR (EXCLUSIVO ESCRITORIO WEB)
+  const renderDesktopToolbar = () => (
+    <View style={[styles.desktopToolbar, { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border }]}>
+      <View style={styles.desktopToolbarLeft}>
+        <View style={[styles.calculatorCircle, { backgroundColor: '#0284c7' }]}>
+          <Ionicons name="receipt-outline" size={16} color="#fff" />
+        </View>
+        <Text style={[styles.desktopModuleTitle, { color: themeColors.text }]}>Facturas Recibidas</Text>
+        <View style={styles.countBadge}>
+          <Text style={styles.countBadgeText}>{filteredFacturas.length}</Text>
+        </View>
+        <View style={[styles.desktopSearchContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+          <Ionicons name="search" size={15} color={themeColors.textSecondary} style={{ marginRight: 2 }} />
+          <TextInput
+            style={[styles.desktopSearchInput, { color: themeColors.text }]}
+            placeholder="Buscar proveedor, RFC o UUID..."
+            placeholderTextColor={themeColors.textSecondary + '80'}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={{ padding: 2 }}>
+              <Ionicons name="close-circle" size={14} color={themeColors.textSecondary} />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Chips de Estado SAT */}
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          {[
+            { id: 'todos', label: 'TODAS' },
+            { id: 'VIGENTE', label: 'VIGENTES' },
+            { id: 'CANCELADO', label: 'CANCELADAS' }
+          ].map((est) => (
+            <TouchableOpacity
+              key={est.id}
+              onPress={() => setFilterEstado(est.id as any)}
+              style={[
+                styles.chipBtn,
+                {
+                  borderColor: filterEstado === est.id ? '#0284c7' : themeColors.border,
+                  backgroundColor: filterEstado === est.id ? '#0284c720' : themeColors.background,
+                },
+              ]}
+            >
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: filterEstado === est.id ? '800' : '500',
+                  color: filterEstado === est.id ? '#0284c7' : themeColors.textSecondary,
+                }}
+              >
+                {est.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Chips de Período */}
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', marginLeft: 4 }}>
+          {[
+            { id: 'mes_actual', label: 'Mes Actual' },
+            { id: 'mes_anterior', label: 'Mes Anterior' },
+            { id: 'todos', label: 'Todo el año' }
+          ].map((per) => (
+            <TouchableOpacity
+              key={per.id}
+              onPress={() => setFilterPeriodo(per.id as any)}
+              style={[
+                styles.chipBtn,
+                {
+                  borderColor: filterPeriodo === per.id ? themeColors.textSecondary : themeColors.border,
+                  backgroundColor: filterPeriodo === per.id ? themeColors.border + '40' : 'transparent',
+                },
+              ]}
+            >
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: filterPeriodo === per.id ? '700' : '500',
+                  color: filterPeriodo === per.id ? themeColors.text : themeColors.textSecondary,
+                }}
+              >
+                {per.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.desktopToolbarRight}>
+        <TouchableOpacity
+          style={[styles.addToolbarBtn, { backgroundColor: '#3b5998' }]}
+          onPress={() => {
+            fetchSatSolicitudes();
+            setShowSolicitudesModal(true);
+          }}
+        >
+          <Ionicons name="list-outline" size={15} color="#fff" />
+          <Text style={styles.addToolbarBtnText}>Solicitudes</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.addToolbarBtn, { backgroundColor: '#10ac84' }]}
+          onPress={() => setShowSyncModal(true)}
+          disabled={syncingSat}
+        >
+          {syncingSat ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="sync-outline" size={15} color="#fff" />
+              <Text style={styles.addToolbarBtnText}>Sincronizar SAT</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.addToolbarBtn, { backgroundColor: '#0284c7' }]}
+          onPress={() => setShowImportModal(true)}
+        >
+          <Ionicons name="add-circle-outline" size={16} color="#fff" />
+          <Text style={styles.addToolbarBtnText}>Importar XML</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // TABLA DE FACTURAS RECIBIDAS DE ALTA FIDELIDAD (WEB/DESKTOP)
+  const renderDesktopTable = () => (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ width: '100%' }}>
+      <View style={[styles.tableContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+        {/* Encabezado de la Tabla */}
+        <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
+          <Text style={[styles.tableHeaderCell, { width: '10%', textAlign: 'center', color: themeColors.text }]}>Folio / Serie</Text>
+          <Text style={[styles.tableHeaderCell, { width: '10%', textAlign: 'center', color: themeColors.text }]}>Fecha</Text>
+          <Text style={[styles.tableHeaderCell, { width: '24%', textAlign: 'left', paddingHorizontal: 6, color: themeColors.text }]}>Proveedor / Emisor</Text>
+          <Text style={[styles.tableHeaderCell, { width: '18%', textAlign: 'left', paddingHorizontal: 6, color: themeColors.text }]}>UUID Fiscal</Text>
+          <Text style={[styles.tableHeaderCell, { width: '7%', textAlign: 'center', color: themeColors.text }]}>Moneda</Text>
+          <Text style={[styles.tableHeaderCell, { width: '11%', textAlign: 'center', color: themeColors.text }]}>Estado SAT</Text>
+          <Text style={[styles.tableHeaderCell, { width: '10%', textAlign: 'right', paddingRight: 8, color: themeColors.text }]}>Total</Text>
+          <Text style={[styles.tableHeaderCell, { width: '10%', textAlign: 'center', color: themeColors.text }]}>Acciones</Text>
+        </View>
+
+        {/* Filas */}
+        {filteredFacturas.map((f) => {
+          const isCanceled = f.estado_sat === 'CANCELADO';
+          const folioStr = f.folio ? (f.serie ? `${f.serie}-${f.folio}` : f.folio) : (f.serie || (f.uuid ? f.uuid.substring(0, 8).toUpperCase() : '--'));
+
+          return (
+            <Pressable
+              key={f.id}
+              onPress={() => {
+                setSelectedFactura(f);
+                setShowDetailModal(true);
+              }}
+              onHoverIn={() => setHoveredRowId(f.id)}
+              onHoverOut={() => setHoveredRowId(null)}
+              style={[
+                styles.tableRow,
+                { borderBottomColor: themeColors.border },
+                hoveredRowId === f.id && { backgroundColor: (themeColors as any).backgroundSelected || '#0284c715' },
+              ]}
+            >
+              {/* Folio / Serie */}
+              <View style={{ width: '10%', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#0284c7' }}>
+                  {folioStr}
+                </Text>
+              </View>
+
+              {/* Fecha */}
+              <Text style={[styles.tableCell, { width: '10%', textAlign: 'center', color: themeColors.textSecondary }]}>
+                {formatDate(f.fecha_emision)}
+              </Text>
+
+              {/* Proveedor / Emisor */}
+              <View style={{ width: '24%', paddingHorizontal: 6, justifyContent: 'center' }}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }} numberOfLines={1}>
+                  {f.nombre_emisor || 'Proveedor General'}
+                </Text>
+                <Text style={{ fontSize: 10, color: themeColors.textSecondary }} numberOfLines={1}>
+                  RFC: {f.rfc_emisor || '--'}
+                </Text>
+              </View>
+
+              {/* UUID Fiscal */}
+              <View style={{ width: '18%', paddingHorizontal: 6, justifyContent: 'center' }}>
+                <Text
+                  style={{
+                    fontSize: 10.5,
+                    color: themeColors.textSecondary,
+                    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                  }}
+                  numberOfLines={1}
+                >
+                  {f.uuid || '--'}
+                </Text>
+              </View>
+
+              {/* Moneda */}
+              <Text style={[styles.tableCell, { width: '7%', textAlign: 'center', color: themeColors.textSecondary }]}>
+                {f.moneda || 'MXN'}
+              </Text>
+
+              {/* Estado SAT */}
+              <View style={{ width: '11%', alignItems: 'center', justifyContent: 'center' }}>
+                <View
+                  style={[
+                    styles.badge,
+                    {
+                      backgroundColor: isCanceled ? '#ef444418' : '#10b98118',
+                      borderColor: isCanceled ? '#ef444450' : '#10b98150',
+                      borderWidth: 1,
+                      paddingVertical: 2,
+                      paddingHorizontal: 8,
+                      borderRadius: 10,
+                      marginTop: 0,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      fontWeight: '800',
+                      color: isCanceled ? '#ef4444' : '#10b981',
+                    }}
+                  >
+                    {f.estado_sat || 'VIGENTE'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Total */}
+              <View style={{ width: '10%', alignItems: 'flex-end', paddingRight: 8, justifyContent: 'center' }}>
+                <Text style={{ fontSize: 12.5, fontWeight: '700', color: themeColors.text }}>
+                  {formatCurrency(f.total)}
+                </Text>
+              </View>
+
+              {/* Acciones */}
+              <View style={{ width: '10%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <TableTooltipButton
+                  icon="eye-outline"
+                  color="#0284c7"
+                  bgColor="#0284c715"
+                  borderColor="#0284c750"
+                  tooltip="Ver Detalle"
+                  onPress={() => {
+                    setSelectedFactura(f);
+                    setShowDetailModal(true);
+                  }}
+                />
+                <TableTooltipButton
+                  icon="document-text-outline"
+                  color="#ef4444"
+                  bgColor="#ef444415"
+                  borderColor="#ef444450"
+                  tooltip="Descargar PDF SAT"
+                  onPress={() => handleExportPdf(f)}
+                  disabled={exportingPdfId === f.id}
+                  align={f.xml_url ? 'center' : 'right'}
+                />
+                {f.xml_url ? (
+                  <TableTooltipButton
+                    icon="code-download-outline"
+                    color="#10b981"
+                    bgColor="#10b98115"
+                    borderColor="#10b98150"
+                    tooltip="Descargar XML"
+                    align="right"
+                    onPress={() => handleOpenXmlUrl(f.xml_url)}
+                  />
+                ) : null}
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+    </ScrollView>
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+      {isDesktop && renderDesktopToolbar()}
+
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, isDesktop && { paddingHorizontal: 20, paddingTop: 14 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={themeColors.accent} />}
       >
-        {/* Cabecera y Título */}
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1, minWidth: 260 }}>
-            <Text style={[styles.title, { color: themeColors.text }]}>Facturas Recibidas</Text>
-            <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
-              Comprobantes fiscales (CFDI 4.0) emitidos por proveedores hacia la empresa
-            </Text>
-          </View>
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: '#3b5998' }]}
-              onPress={() => {
-                fetchSatSolicitudes();
-                setShowSolicitudesModal(true);
-              }}
-            >
-              <Ionicons name="list-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-              <Text style={styles.actionBtnText}>Estado de Solicitudes</Text>
-            </TouchableOpacity>
+        {!isDesktop && (
+          /* Cabecera y Título Móvil */
+          <View style={styles.headerRow}>
+            <View style={{ flex: 1, minWidth: 260 }}>
+              <Text style={[styles.title, { color: themeColors.text }]}>Facturas Recibidas</Text>
+              <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>
+                Comprobantes fiscales (CFDI 4.0) emitidos por proveedores hacia la empresa
+              </Text>
+            </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: '#3b5998' }]}
+                onPress={() => {
+                  fetchSatSolicitudes();
+                  setShowSolicitudesModal(true);
+                }}
+              >
+                <Ionicons name="list-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.actionBtnText}>Estado de Solicitudes</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: themeColors.accent }]}
-              onPress={() => setShowImportModal(true)}
-            >
-              <Ionicons name="add-circle-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-              <Text style={styles.actionBtnText}>Importar XML</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: themeColors.accent }]}
+                onPress={() => setShowImportModal(true)}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.actionBtnText}>Importar XML</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: '#10ac84' }]}
-              onPress={() => setShowSyncModal(true)}
-              disabled={syncingSat}
-            >
-              {syncingSat ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="sync-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-                  <Text style={styles.actionBtnText}>Sincronizar SAT</Text>
-                </>
-              )}
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: '#10ac84' }]}
+                onPress={() => setShowSyncModal(true)}
+                disabled={syncingSat}
+              >
+                {syncingSat ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="sync-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={styles.actionBtnText}>Sincronizar SAT</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Barra Informativa de Sincronización Automática SAT */}
         <View style={[styles.autoSyncBar, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
@@ -566,74 +980,76 @@ export default function FacturasRecibidasScreen() {
           </View>
         </View>
 
-        {/* Buscador y Filtros */}
-        <View style={[styles.filtersContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-          <View style={[styles.searchBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
-            <Ionicons name="search-outline" size={18} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
-            <TextInput
-              style={[styles.searchInput, { color: themeColors.text }]}
-              placeholder="Buscar por Proveedor, RFC o UUID..."
-              placeholderTextColor={themeColors.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            {searchQuery !== '' && (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }}>
-            <View style={styles.pillsRow}>
-              {/* Filtro Período */}
-              <TouchableOpacity
-                style={[styles.pill, filterPeriodo === 'mes_actual' && { backgroundColor: themeColors.accent }]}
-                onPress={() => setFilterPeriodo('mes_actual')}
-              >
-                <Text style={[styles.pillText, { color: filterPeriodo === 'mes_actual' ? '#fff' : themeColors.text }]}>Mes Actual</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.pill, filterPeriodo === 'mes_anterior' && { backgroundColor: themeColors.accent }]}
-                onPress={() => setFilterPeriodo('mes_anterior')}
-              >
-                <Text style={[styles.pillText, { color: filterPeriodo === 'mes_anterior' ? '#fff' : themeColors.text }]}>Mes Anterior</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.pill, filterPeriodo === 'todos' && { backgroundColor: themeColors.accent }]}
-                onPress={() => setFilterPeriodo('todos')}
-              >
-                <Text style={[styles.pillText, { color: filterPeriodo === 'todos' ? '#fff' : themeColors.text }]}>Todos los períodos</Text>
-              </TouchableOpacity>
-
-              <View style={styles.divider} />
-
-              {/* Filtro Estatus */}
-              <TouchableOpacity
-                style={[styles.pill, filterEstado === 'todos' && { backgroundColor: themeColors.accent }]}
-                onPress={() => setFilterEstado('todos')}
-              >
-                <Text style={[styles.pillText, { color: filterEstado === 'todos' ? '#fff' : themeColors.text }]}>Todos los estados</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.pill, filterEstado === 'VIGENTE' && { backgroundColor: '#1dd1a1' }]}
-                onPress={() => setFilterEstado('VIGENTE')}
-              >
-                <Text style={[styles.pillText, { color: filterEstado === 'VIGENTE' ? '#fff' : themeColors.text }]}>Vigentes</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.pill, filterEstado === 'CANCELADO' && { backgroundColor: '#ff6b6b' }]}
-                onPress={() => setFilterEstado('CANCELADO')}
-              >
-                <Text style={[styles.pillText, { color: filterEstado === 'CANCELADO' ? '#fff' : themeColors.text }]}>Canceladas</Text>
-              </TouchableOpacity>
+        {!isDesktop && (
+          /* Buscador y Filtros Móvil */
+          <View style={[styles.filtersContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+            <View style={[styles.searchBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+              <Ionicons name="search-outline" size={18} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
+              <TextInput
+                style={[styles.searchInput, { color: themeColors.text }]}
+                placeholder="Buscar por Proveedor, RFC o UUID..."
+                placeholderTextColor={themeColors.textSecondary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery !== '' && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+                </TouchableOpacity>
+              )}
             </View>
-          </ScrollView>
-        </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }}>
+              <View style={styles.pillsRow}>
+                {/* Filtro Período */}
+                <TouchableOpacity
+                  style={[styles.pill, filterPeriodo === 'mes_actual' && { backgroundColor: themeColors.accent }]}
+                  onPress={() => setFilterPeriodo('mes_actual')}
+                >
+                  <Text style={[styles.pillText, { color: filterPeriodo === 'mes_actual' ? '#fff' : themeColors.text }]}>Mes Actual</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.pill, filterPeriodo === 'mes_anterior' && { backgroundColor: themeColors.accent }]}
+                  onPress={() => setFilterPeriodo('mes_anterior')}
+                >
+                  <Text style={[styles.pillText, { color: filterPeriodo === 'mes_anterior' ? '#fff' : themeColors.text }]}>Mes Anterior</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.pill, filterPeriodo === 'todos' && { backgroundColor: themeColors.accent }]}
+                  onPress={() => setFilterPeriodo('todos')}
+                >
+                  <Text style={[styles.pillText, { color: filterPeriodo === 'todos' ? '#fff' : themeColors.text }]}>Todos los períodos</Text>
+                </TouchableOpacity>
+
+                <View style={styles.divider} />
+
+                {/* Filtro Estatus */}
+                <TouchableOpacity
+                  style={[styles.pill, filterEstado === 'todos' && { backgroundColor: themeColors.accent }]}
+                  onPress={() => setFilterEstado('todos')}
+                >
+                  <Text style={[styles.pillText, { color: filterEstado === 'todos' ? '#fff' : themeColors.text }]}>Todos los estados</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.pill, filterEstado === 'VIGENTE' && { backgroundColor: '#1dd1a1' }]}
+                  onPress={() => setFilterEstado('VIGENTE')}
+                >
+                  <Text style={[styles.pillText, { color: filterEstado === 'VIGENTE' ? '#fff' : themeColors.text }]}>Vigentes</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.pill, filterEstado === 'CANCELADO' && { backgroundColor: '#ff6b6b' }]}
+                  onPress={() => setFilterEstado('CANCELADO')}
+                >
+                  <Text style={[styles.pillText, { color: filterEstado === 'CANCELADO' ? '#fff' : themeColors.text }]}>Canceladas</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        )}
 
         {/* Lista de Facturas */}
         {loading ? (
@@ -661,9 +1077,11 @@ export default function FacturasRecibidasScreen() {
             <Ionicons name="document-text-outline" size={48} color={themeColors.textSecondary} />
             <Text style={[styles.emptyTitle, { color: themeColors.text }]}>No se encontraron facturas recibidas</Text>
             <Text style={[styles.emptySubtitle, { color: themeColors.textSecondary }]}>
-              Utiliza el botón "Importar XML" para cargar facturas de proveedores o sincroniza directamente con el SAT.
+              {searchQuery ? 'No se encontraron facturas con esa búsqueda.' : 'Utiliza el botón "Importar XML" para cargar facturas de proveedores o sincroniza directamente con el SAT.'}
             </Text>
           </View>
+        ) : isDesktop ? (
+          renderDesktopTable()
         ) : (
           <View style={styles.facturasList}>
             {filteredFacturas.map((f) => (
@@ -1429,6 +1847,131 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 12,
+  },
+
+  /* Desktop ERP Toolbar & Table Styles */
+  desktopToolbar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  desktopToolbarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  calculatorCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  desktopModuleTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  countBadge: {
+    backgroundColor: '#0284c720',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  countBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0284c7',
+  },
+  desktopSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    width: 250,
+    marginLeft: 4,
+    gap: 6,
+  },
+  desktopSearchInput: {
+    flex: 1,
+    fontSize: 12,
+    padding: 0,
+    ...Platform.select({
+      web: {
+        outlineStyle: 'none',
+      } as any,
+    }),
+  },
+  chipBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  desktopToolbarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  addToolbarBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 7,
+  },
+  addToolbarBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  tableContainer: {
+    width: '100%',
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.02)',
+      },
+    }),
+  },
+  tableHeaderRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    width: '100%',
+  },
+  tableHeaderCell: {
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    width: '100%',
+  },
+  tableCell: {
+    fontSize: 12,
+  },
+  tableActionIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 
