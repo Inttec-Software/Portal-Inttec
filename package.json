@@ -71,10 +71,12 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "db:up": "docker compose up -d",
-    "db:down": "docker compose down",
-    "db:reset": "docker compose down -v && docker compose up -d",
-    "db:logs": "docker compose logs -f"
+    "db:up": "docker-compose up -d",
+    "db:down": "docker-compose down",
+    "db:reset": "docker-compose down -v && docker-compose up -d",
+    "db:logs": "docker-compose logs -f",
+    "db:pull": "node ./scripts/pull-cloud-db.js",
+    "db:pull:bash": "bash ./scripts/pull-cloud-db.sh"
   },
   "private": true,
   "allowScripts": {
