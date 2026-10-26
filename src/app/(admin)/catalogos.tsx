@@ -74,6 +74,7 @@ export default function CatalogosManager() {
   const [selectedClientForSucursales, setSelectedClientForSucursales] = useState<ClienteItem | null>(null);
   const [clientSucursales, setClientSucursales] = useState<any[]>([]);
   const [newSucursalName, setNewSucursalName] = useState('');
+  const [sucursalSearchQuery, setSucursalSearchQuery] = useState('');
   const [isSavingSucursal, setIsSavingSucursal] = useState(false);
   const [isLoadingSucursales, setIsLoadingSucursales] = useState(false);
 
@@ -311,6 +312,8 @@ export default function CatalogosManager() {
 
   const handleOpenSucursales = async (cliente: ClienteItem) => {
     setSelectedClientForSucursales(cliente);
+    setSucursalSearchQuery('');
+    setNewSucursalName('');
     setSucursalesModalVisible(true);
     await loadClientSucursales(cliente.id);
   };
@@ -1022,27 +1025,68 @@ export default function CatalogosManager() {
         animationType="fade"
         transparent={true}
         visible={sucursalesModalVisible}
-        onRequestClose={() => setSucursalesModalVisible(false)}
+        onRequestClose={() => {
+          setSucursalesModalVisible(false);
+          setSucursalSearchQuery('');
+        }}
       >
         <View style={[styles.modalOverlay, isDesktop && { justifyContent: 'center', alignItems: 'center' }]}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background }, isDesktop ? { width: 500, borderRadius: BorderRadius.large, height: 'auto', maxHeight: '90%', padding: Spacing.four } : { height: '70%' }]}>
+          <View
+            style={[
+              styles.modalContent,
+              { backgroundColor: themeColors.background },
+              isDesktop
+                ? {
+                    width: 540,
+                    maxWidth: '92%',
+                    borderRadius: BorderRadius.large,
+                    height: 620,
+                    maxHeight: '90%',
+                    padding: Spacing.four,
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }
+                : {
+                    height: '80%',
+                    maxHeight: '85%',
+                    padding: Spacing.four,
+                    display: 'flex',
+                    flexDirection: 'column',
+                  },
+            ]}
+          >
+            {/* Modal Header */}
             <View style={styles.modalHeader}>
-              <View>
-                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Sucursales</Text>
-                <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>Cliente: {selectedClientForSucursales?.nombre}</Text>
+              <View style={{ flex: 1, marginRight: Spacing.two }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="business" size={20} color={themeColors.primary} />
+                  <Text style={[styles.modalTitle, { color: themeColors.text }]}>Sucursales</Text>
+                </View>
+                <Text style={{ color: themeColors.textSecondary, fontSize: 13, marginTop: 2 }} numberOfLines={1}>
+                  Cliente: <Text style={{ fontWeight: '600', color: themeColors.text }}>{selectedClientForSucursales?.nombre}</Text>
+                </Text>
               </View>
-              <TouchableOpacity onPress={() => setSucursalesModalVisible(false)}>
+              <TouchableOpacity
+                onPress={() => {
+                  setSucursalesModalVisible(false);
+                  setSucursalSearchQuery('');
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
                 <Ionicons name="close" size={24} color={themeColors.text} />
               </TouchableOpacity>
             </View>
 
-            <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.three }}>
+            {/* Agregar Nueva Sucursal */}
+            <View style={{ flexDirection: 'row', gap: Spacing.two, marginBottom: Spacing.two }}>
               <View style={{ flex: 1 }}>
                 <CustomInput
                   placeholder="Nueva sucursal..."
                   value={newSucursalName}
                   onChangeText={setNewSucursalName}
-                  iconName="business-outline"
+                  iconName="add-circle-outline"
+                  returnKeyType="done"
+                  onSubmitEditing={handleAddSucursal}
                 />
               </View>
               <TouchableOpacity
@@ -1054,7 +1098,8 @@ export default function CatalogosManager() {
                   alignItems: 'center',
                   paddingHorizontal: Spacing.three,
                   borderRadius: BorderRadius.medium,
-                  opacity: (!newSucursalName.trim() || isSavingSucursal) ? 0.5 : 1
+                  height: 50,
+                  opacity: (!newSucursalName.trim() || isSavingSucursal) ? 0.5 : 1,
                 }}
               >
                 {isSavingSucursal ? (
@@ -1065,40 +1110,126 @@ export default function CatalogosManager() {
               </TouchableOpacity>
             </View>
 
+            {/* Barra de Búsqueda de Sucursales */}
+            <View style={{ marginBottom: Spacing.two }}>
+              <CustomInput
+                placeholder="Buscar sucursal..."
+                value={sucursalSearchQuery}
+                onChangeText={setSucursalSearchQuery}
+                iconName="search-outline"
+              />
+            </View>
+
+            {/* Contador de Sucursales y Acción de Limpiar */}
+            {(() => {
+              const query = sucursalSearchQuery.trim().toLowerCase();
+              const filtered = clientSucursales.filter((s) =>
+                s.nombre?.toLowerCase().includes(query)
+              );
+
+              return (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.two, paddingHorizontal: 2 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    {isLoadingSucursales
+                      ? 'Cargando...'
+                      : query
+                      ? `Resultados: ${filtered.length} de ${clientSucursales.length}`
+                      : `Total: ${clientSucursales.length} ${clientSucursales.length === 1 ? 'sucursal' : 'sucursales'}`}
+                  </Text>
+                  {!!query && (
+                    <TouchableOpacity onPress={() => setSucursalSearchQuery('')}>
+                      <Text style={{ fontSize: 12, color: themeColors.accent, fontWeight: '600' }}>Limpiar filtro</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })()}
+
+            {/* Lista con Scroll */}
             {isLoadingSucursales ? (
-              <View style={{ padding: Spacing.four, alignItems: 'center' }}>
-                <ActivityIndicator color={themeColors.primary} />
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.four }}>
+                <ActivityIndicator size="large" color={themeColors.primary} />
+                <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.two, fontSize: 13 }}>
+                  Cargando sucursales...
+                </Text>
               </View>
             ) : (
-              <FlatList scrollEnabled={false}
-                data={clientSucursales}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={{ paddingBottom: Spacing.four }}
-                ListEmptyComponent={
-                  <Text style={{ textAlign: 'center', color: themeColors.textSecondary, marginTop: Spacing.three }}>
-                    No hay sucursales registradas para este cliente.
-                  </Text>
-                }
-                renderItem={({ item }) => (
-                  <View style={[styles.listItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, marginBottom: Spacing.one, padding: Spacing.two }]}>
-                    <Text style={{ color: themeColors.text, flex: 1 }}>{item.nombre}</Text>
-                    <TouchableOpacity onPress={() => {
-                      if (Platform.OS === 'web') {
-                        if (window.confirm('¿Seguro que deseas eliminar esta sucursal?')) {
-                          handleDeleteSucursal(item.id);
-                        }
-                      } else {
-                        Alert.alert('Confirmar', '¿Eliminar esta sucursal?', [
-                          { text: 'Cancelar', style: 'cancel' },
-                          { text: 'Eliminar', style: 'destructive', onPress: () => handleDeleteSucursal(item.id) }
-                        ]);
+              (() => {
+                const query = sucursalSearchQuery.trim().toLowerCase();
+                const filtered = clientSucursales.filter((s) =>
+                  s.nombre?.toLowerCase().includes(query)
+                );
+
+                return (
+                  <View style={{ flex: 1, minHeight: 0 }}>
+                    <FlatList
+                      data={filtered}
+                      keyExtractor={(item) => String(item.id)}
+                      style={{ flex: 1 }}
+                      scrollEnabled={true}
+                      showsVerticalScrollIndicator={true}
+                      persistentScrollbar={true}
+                      keyboardShouldPersistTaps="handled"
+                      contentContainerStyle={{
+                        paddingBottom: Spacing.four,
+                        flexGrow: filtered.length === 0 ? 1 : undefined,
+                      }}
+                      ListEmptyComponent={
+                        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.five }}>
+                          <Ionicons
+                            name={clientSucursales.length === 0 ? 'business-outline' : 'search-outline'}
+                            size={40}
+                            color={themeColors.textSecondary}
+                            style={{ opacity: 0.5, marginBottom: Spacing.two }}
+                          />
+                          <Text style={{ textAlign: 'center', color: themeColors.textSecondary, fontSize: 14 }}>
+                            {clientSucursales.length === 0
+                              ? 'No hay sucursales registradas para este cliente.'
+                              : `No se encontraron sucursales para "${sucursalSearchQuery}".`}
+                          </Text>
+                        </View>
                       }
-                    }}>
-                      <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
-                    </TouchableOpacity>
+                      renderItem={({ item }) => (
+                        <View
+                          style={[
+                            styles.listItem,
+                            {
+                              backgroundColor: themeColors.backgroundElement,
+                              borderColor: themeColors.border,
+                              marginBottom: Spacing.one,
+                              padding: Spacing.two,
+                            },
+                          ]}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: Spacing.two }}>
+                            <Ionicons name="location-outline" size={16} color={themeColors.primary} />
+                            <Text style={{ color: themeColors.text, flex: 1, fontSize: 14, fontWeight: '500' }}>
+                              {item.nombre}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (Platform.OS === 'web') {
+                                if (window.confirm(`¿Seguro que deseas eliminar la sucursal "${item.nombre}"?`)) {
+                                  handleDeleteSucursal(item.id);
+                                }
+                              } else {
+                                Alert.alert('Confirmar', `¿Eliminar la sucursal "${item.nombre}"?`, [
+                                  { text: 'Cancelar', style: 'cancel' },
+                                  { text: 'Eliminar', style: 'destructive', onPress: () => handleDeleteSucursal(item.id) },
+                                ]);
+                              }
+                            }}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    />
                   </View>
-                )}
-              />
+                );
+              })()
             )}
           </View>
         </View>
