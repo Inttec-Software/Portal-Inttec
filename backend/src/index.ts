@@ -148,7 +148,9 @@ app.use('/api/query', queryRoutes);
 // Ruta de prueba para verificar conexión a la base de datos PostgreSQL pura
 import { getDbPool } from './config/database';
 
-app.get('/api/test-db', async (req, res) => {
+import { verifyToken } from './middlewares/auth.middleware';
+
+app.get('/api/test-db', verifyToken, async (req, res) => {
   try {
     const { company, env } = (req as any).tenant;
     const pool = getDbPool(company, env);
@@ -175,8 +177,7 @@ app.get('/api/test-db', async (req, res) => {
 // Ruta base
 app.get('/', (req, res) => {
   res.json({
-    message: 'Backend Node.js activo',
-    tenant: (req as any).tenant || 'Not specified'
+    ok: true
   });
 });
 

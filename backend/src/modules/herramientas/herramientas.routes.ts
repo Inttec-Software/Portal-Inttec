@@ -17,8 +17,12 @@ import {
   getTrazabilidadHerramienta,
   importarHerramientasExcel,
 } from './herramientas.controller';
+import { verifyToken } from '../../middlewares/auth.middleware';
 
 const router = Router();
+
+// Rutas protegidas por JWT
+router.use(verifyToken);
 
 // Catálogo Maestro y Trazabilidad
 router.get('/', getHerramientas);

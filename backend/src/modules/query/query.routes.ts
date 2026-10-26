@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { getSupabaseClient } from '../../config/supabase';
+import { verifyToken } from '../../middlewares/auth.middleware';
 
 const router = Router();
+
+// Proteger consultas directas con JWT
+router.use(verifyToken);
 
 router.post('/', async (req, res) => {
   try {
