@@ -20,6 +20,7 @@ import { AuthService, supabase } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import CustomButton from '@/components/CustomButton';
+import { InventarioListSkeleton } from '@/components/skeleton';
 
 type InventarioItem = {
   id: string;
@@ -573,8 +574,10 @@ export default function DevolucionesEmpleadoScreen() {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { backgroundColor: themeColors.background, justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={themeColors.primary} />
+      <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+        <ScrollView style={{ flex: 1 }}>
+          <InventarioListSkeleton isMobile={true} count={5} />
+        </ScrollView>
       </View>
     );
   }

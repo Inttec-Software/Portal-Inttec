@@ -30,6 +30,7 @@ import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
 import { getWeekRange, getPreviousWeekMonday, getNextWeekMonday } from '@/utils/asistenciaUtils';
 import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import ExpenseCard from '@/components/ExpenseCard';
+import { EmpleadosTableSkeleton, EmpleadosCardsListSkeleton } from '@/components/skeleton';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -104,6 +105,33 @@ export default function AdminEmpleadosScreen() {
   // Modales de Acceso Rápido (Botones Extra)
   const [personalModalVisible, setPersonalModalVisible] = useState(false);
   const [reportsModalVisible, setReportsModalVisible] = useState(false);
+
+  // Modal de Inventario de Material Asignado al Empleado
+  const [empInvModalVisible, setEmpInvModalVisible] = useState(false);
+  const [selectedEmpForInv, setSelectedEmpForInv] = useState<Usuario | null>(null);
+  const [empInvData, setEmpInvData] = useState<any[]>([]);
+  const [isLoadingEmpInv, setIsLoadingEmpInv] = useState(false);
+
+  const handleOpenEmployeeInventory = async (emp: Usuario) => {
+    setSelectedEmpForInv(emp);
+    setEmpInvModalVisible(true);
+    setIsLoadingEmpInv(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/inventario/inventarios-empleados?empleadoId=${emp.id}`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setEmpInvData(data.inventario || []);
+      } else {
+        setEmpInvData([]);
+      }
+    } catch (e: any) {
+      console.warn('Error fetching employee inventory:', e);
+      setEmpInvData([]);
+    } finally {
+      setIsLoadingEmpInv(false);
+    }
+  };
 
   // Modal de Detalle/Revisión de Gasto
   const [selectedGasto, setSelectedGasto] = useState<Gasto | null>(null);
@@ -2071,10 +2099,13 @@ export default function AdminEmpleadosScreen() {
 
       {/* Contents based on tab */}
       {isLoading ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando datos...</Text>
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          {isDesktop ? (
+            <EmpleadosTableSkeleton isHistorial={activeTab === 'historial'} count={8} />
+          ) : (
+            <EmpleadosCardsListSkeleton count={6} />
+          )}
+        </ScrollView>
       ) : (
         <View style={{ flex: 1 }}>
           {/* REVISAR PENDIENTES */}
@@ -2739,6 +2770,13 @@ export default function AdminEmpleadosScreen() {
                       </Text>
                     </View>
                     <View style={styles.userCardButtons}>
+                      <TouchableOpacity 
+                        onPress={() => handleOpenEmployeeInventory(item)} 
+                        style={styles.userRowBtn}
+                        {...(Platform.OS === 'web' ? { title: "Ver inventario de material asignado" } as any : {})}
+                      >
+                        <Ionicons name="cube-outline" size={18} color="#3B82F6" />
+                      </TouchableOpacity>
                       <TouchableOpacity onPress={() => handleOpenAsistencia(item)} style={styles.userRowBtn}>
                         <Ionicons name="time-outline" size={18} color={themeColors.success} />
                       </TouchableOpacity>
@@ -2766,6 +2804,112 @@ export default function AdminEmpleadosScreen() {
             >
               <Ionicons name="person-add" size={24} color="#ffffff" />
             </TouchableOpacity>
+
+      {/* MODAL: INVENTARIO DE MATERIAL ASIGNADO AL EMPLEADO */}
+      <Modal
+        statusBarTranslucent={true}
+        animationType="fade"
+        transparent={true}
+        visible={empInvModalVisible}
+        onRequestClose={() => setEmpInvModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, maxHeight: '80%', width: '90%', maxWidth: 540, borderRadius: 16 }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ backgroundColor: '#3B82F620', padding: 6, borderRadius: 8 }}>
+                  <Ionicons name="cube" size={20} color="#3B82F6" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: themeColors.text }}>
+                    Material Asignado / Camioneta
+                  </Text>
+                  <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                    {selectedEmpForInv?.nombre || 'Empleado'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setEmpInvModalVisible(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {isLoadingEmpInv ? (
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color={themeColors.primary} />
+                <Text style={{ marginTop: 10, color: themeColors.textSecondary, fontSize: 13 }}>Cargando material del empleado...</Text>
+              </View>
+            ) : empInvData.length === 0 ? (
+              <View style={{ padding: 30, alignItems: 'center' }}>
+                <Ionicons name="cube-outline" size={40} color={themeColors.textSecondary} />
+                <Text style={{ color: themeColors.text, fontWeight: 'bold', fontSize: 14, marginTop: 10 }}>Sin Material en Custodia</Text>
+                <Text style={{ color: themeColors.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                  Este colaborador no tiene material registrado en su inventario actualmente.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={{ padding: Spacing.three }} showsVerticalScrollIndicator={false}>
+                <View style={{ gap: 8 }}>
+                  {empInvData.map((item, idx) => (
+                    <View
+                      key={idx}
+                      style={{
+                        backgroundColor: themeColors.background,
+                        borderRadius: 8,
+                        padding: 12,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 13 }}>
+                          {item.producto_nombre}
+                        </Text>
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                          SKU: {item.producto_sku || '-'} • {item.categoria_nombre || 'Sin Categoría'}
+                        </Text>
+                        {(item.cantidad_nuevo > 0 || item.cantidad_usado > 0 || item.cantidad_por_revisar > 0) && (
+                          <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                            {item.cantidad_nuevo > 0 && <Text style={{ fontSize: 10, color: '#10B981', fontWeight: '700' }}>🟢 {item.cantidad_nuevo} nuevas</Text>}
+                            {item.cantidad_usado > 0 && <Text style={{ fontSize: 10, color: '#D97706', fontWeight: '700' }}>🟡 {item.cantidad_usado} usadas</Text>}
+                            {item.cantidad_por_revisar > 0 && <Text style={{ fontSize: 10, color: '#DC2626', fontWeight: '700' }}>🔴 {item.cantidad_por_revisar} por revisar</Text>}
+                          </View>
+                        )}
+                      </View>
+                      <View style={{ backgroundColor: '#2563EB20', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+                        <Text style={{ color: '#2563EB', fontWeight: '800', fontSize: 13 }}>
+                          {item.cantidad_disponible} {item.producto_unidad}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+            )}
+
+            <View style={{ flexDirection: 'row', paddingTop: Spacing.three, borderTopWidth: 1, borderTopColor: themeColors.border, gap: 10 }}>
+              <CustomButton
+                title="Cerrar"
+                variant="secondary"
+                onPress={() => setEmpInvModalVisible(false)}
+                style={{ flex: 1 }}
+              />
+              <CustomButton
+                title="📦 Gestionar en Inventario"
+                onPress={() => {
+                  setEmpInvModalVisible(false);
+                  router.push('/(admin)/inventario' as any);
+                }}
+                style={{ flex: 1.4, backgroundColor: '#2563EB' }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* MODAL 2 EXTRA: REPORTES */}
       <Modal statusBarTranslucent={true}
         animationType="slide"

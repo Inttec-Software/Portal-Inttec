@@ -12,6 +12,7 @@ import { Image } from 'expo-image';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
+import { EvidenciasCardsListSkeleton } from '@/components/skeleton';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 
 export default function MisEvidenciasHistorial() {
@@ -183,9 +184,9 @@ export default function MisEvidenciasHistorial() {
       )}
 
       {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          <EvidenciasCardsListSkeleton count={5} />
+        </ScrollView>
       ) : evidencias.length === 0 ? (
         <View style={styles.center}>
           <Ionicons name="document-text-outline" size={64} color={themeColors.border} />

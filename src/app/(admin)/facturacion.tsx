@@ -26,6 +26,7 @@ import CustomButton from '@/components/CustomButton';
 import { parseCFDIXML } from '@/utils/cfdiParser';
 import { exportarFacturaOdooPDF, exportarReciboPagoPDF, generarReciboPagoHTML, cleanFolio } from '@/utils/reportGenerator';
 import FacturaPreviewModal from '@/components/FacturaPreviewModal';
+import { FacturacionTableSkeleton, FacturacionCardsListSkeleton } from '@/components/skeleton';
 import { normalizeText } from '@/utils/helpers';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Sharing from 'expo-sharing';
@@ -4305,10 +4306,7 @@ export default function FacturacionScreen() {
         isDesktop ? (
           <View style={{ flex: 1 }}>
             {isLoadingHistorial ? (
-              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                <ActivityIndicator size="large" color="#0284c7" />
-                <Text style={{ color: themeColors.textSecondary, marginTop: 8 }}>Cargando facturas emitidas...</Text>
-              </View>
+              <FacturacionTableSkeleton count={8} />
             ) : facturasFiltradas.length === 0 ? (
               <View style={[styles.emptyContainer, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement, margin: 20 }]}>
                 <Ionicons name="receipt-outline" size={48} color={themeColors.textSecondary} />
@@ -4446,10 +4444,7 @@ export default function FacturacionScreen() {
           </View>
 
           {isLoadingHistorial ? (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <ActivityIndicator size="large" color="#0284c7" />
-              <Text style={{ color: themeColors.textSecondary, marginTop: 8 }}>Cargando facturas emitidas...</Text>
-            </View>
+            <FacturacionCardsListSkeleton count={6} />
           ) : facturasFiltradas.length === 0 ? (
             <View style={[styles.emptyContainer, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}>
               <Ionicons name="receipt-outline" size={48} color={themeColors.textSecondary} />

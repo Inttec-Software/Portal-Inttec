@@ -22,6 +22,7 @@ import { SyncService, OfflineGastoItem } from '@/services/sync';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { TareasService } from '@/services/tareasService';
 import ExpenseCard from '@/components/ExpenseCard';
+import { GastosCardsListSkeleton } from '@/components/skeleton';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -892,10 +893,9 @@ export default function EmpleadoGastos() {
 
       {/* List */}
       {isLoading ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando gastos...</Text>
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          <GastosCardsListSkeleton count={5} />
+        </ScrollView>
       ) : (
         <FlatList
           initialNumToRender={8}

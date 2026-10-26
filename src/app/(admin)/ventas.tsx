@@ -17,6 +17,7 @@ import {
   Pressable,
   Linking,
   Keyboard,
+  RefreshControl,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -360,7 +361,8 @@ export default function VentasScreen() {
   const cachedVentas = ModuleCache.get<VentaConPago[]>('ventas_historial');
   const [activeTab, setActiveTab] = useState<'registrar' | 'historial'>('historial');
   const [ventasHistorial, setVentasHistorial] = useState<VentaConPago[]>(() => cachedVentas || []);
-  const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
+  const [isLoadingHistorial, setIsLoadingHistorial] = useState<boolean>(() => !cachedVentas || cachedVentas.length === 0);
+  const [isRefreshingHistorial, setIsRefreshingHistorial] = useState(false);
   const [historialSearch, setHistorialSearch] = useState('');
   const [filterDate, setFilterDate] = useState<Date | null>(null);
   const [showFilterDatePicker, setShowFilterDatePicker] = useState(false);
@@ -410,7 +412,7 @@ export default function VentasScreen() {
       setCurrentUser(user);
 
       // Cargar historial de ventas inicialmente
-      loadHistorial(true);
+      loadHistorial(Boolean(cachedVentas && cachedVentas.length > 0));
 
       // Cargar catálogo de clientes y sucursales
       try {
@@ -509,7 +511,7 @@ export default function VentasScreen() {
 
   // === Cargar Historial ===
   const loadHistorial = async (silent = false) => {
-    if (!silent && !ModuleCache.has('ventas_historial')) {
+    if (!silent) {
       setIsLoadingHistorial(true);
     }
     try {
@@ -541,7 +543,13 @@ export default function VentasScreen() {
       console.error('Error loading sales history:', err);
     } finally {
       setIsLoadingHistorial(false);
+      setIsRefreshingHistorial(false);
     }
+  };
+
+  const handleRefreshHistorial = () => {
+    setIsRefreshingHistorial(true);
+    loadHistorial(true);
   };
 
   const loadPagosForSelectedVenta = async (ventaId: string, currentVentaObj?: VentaConPago) => {
@@ -2368,6 +2376,7 @@ export default function VentasScreen() {
 
   const renderHistorial = () => (
     <View style={{ flex: 1 }}>
+      {renderScreenHeader()}
       {/* Buscador */}
       <View
         style={[
@@ -2466,45 +2475,63 @@ export default function VentasScreen() {
 
       {isLoadingHistorial ? (
         isDesktop ? (
-          <ScrollView style={{ flex: 1 }}>
-            {renderScreenHeader()}
+          <ScrollView
+            style={{ flex: 1 }}
+            refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+          >
             <VentasTableSkeleton count={8} />
           </ScrollView>
         ) : (
-          <ScrollView style={{ flex: 1 }}>
-            {renderScreenHeader()}
+          <ScrollView
+            style={{ flex: 1 }}
+            refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+          >
             <VentasCardsListSkeleton count={5} />
           </ScrollView>
         )
       ) : ventasHistorial.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="receipt-outline" size={48} color={themeColors.textSecondary} />
-          <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-            No hay ventas registradas aún.
-          </Text>
-        </View>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexGrow: 1 }}
+          refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+        >
+          <View style={styles.emptyContainer}>
+            <Ionicons name="receipt-outline" size={48} color={themeColors.textSecondary} />
+            <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
+              No hay ventas registradas aún.
+            </Text>
+          </View>
+        </ScrollView>
       ) : ventasFiltradas.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="search-outline" size={48} color={themeColors.textSecondary} />
-          <Text style={[styles.emptyText, { color: themeColors.textSecondary, marginTop: Spacing.one }]}>
-            No se encontraron ventas que coincidan con los criterios de búsqueda.
-          </Text>
-          <HoverTooltip text="Restablecer filtros y mostrar todas las ventas" position="bottom">
-            <TouchableOpacity
-              onPress={() => {
-                setHistorialSearch('');
-                setFilterDate(null);
-              }}
-              style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}
-              accessibilityLabel="Restablecer filtros y búsqueda"
-            >
-              <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>Limpiar búsqueda</Text>
-            </TouchableOpacity>
-          </HoverTooltip>
-        </View>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexGrow: 1 }}
+          refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+        >
+          <View style={styles.emptyContainer}>
+            <Ionicons name="search-outline" size={48} color={themeColors.textSecondary} />
+            <Text style={[styles.emptyText, { color: themeColors.textSecondary, marginTop: Spacing.one }]}>
+              No se encontraron ventas que coincidan con los criterios de búsqueda.
+            </Text>
+            <HoverTooltip text="Restablecer filtros y mostrar todas las ventas" position="bottom">
+              <TouchableOpacity
+                onPress={() => {
+                  setHistorialSearch('');
+                  setFilterDate(null);
+                }}
+                style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}
+                accessibilityLabel="Restablecer filtros y búsqueda"
+              >
+                <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>Limpiar búsqueda</Text>
+              </TouchableOpacity>
+            </HoverTooltip>
+          </View>
+        </ScrollView>
       ) : isDesktop ? (
-        <ScrollView style={{ flex: 1 }}>
-          {renderScreenHeader()}
+        <ScrollView
+          style={{ flex: 1 }}
+          refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+        >
           <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
             <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Cliente</Text>
@@ -2642,7 +2669,6 @@ export default function VentasScreen() {
         </ScrollView>
       ) : (
         <FlatList scrollEnabled={true} style={{ flex: 1 }}
-          ListHeaderComponent={renderScreenHeader()}
           data={ventasFiltradas}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
@@ -2837,8 +2863,7 @@ export default function VentasScreen() {
               </TouchableOpacity>
             );
           }}
-          refreshing={isLoadingHistorial}
-          onRefresh={loadHistorial}
+          refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
         />
       )}
     </View>

@@ -21,6 +21,7 @@ import { CatalogoItem, SubcategoriaItem, ClienteItem, ProveedorItem, supabase } 
 import { CatalogService } from '@/services/catalogService';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
+import { CatalogosListSkeleton } from '@/components/skeleton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -609,10 +610,10 @@ export default function CatalogosManager() {
       <View style={isDesktop ? { maxWidth: 800, width: '100%', alignSelf: 'center', flex: 1, paddingHorizontal: Spacing.two } : { flex: 1 }}>
       {/* List */}
       {isLoading ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando catálogo...</Text>
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          {renderScreenHeader()}
+          <CatalogosListSkeleton count={6} />
+        </ScrollView>
       ) : (
         <FlatList scrollEnabled={true} style={{ flex: 1 }} ListHeaderComponent={renderScreenHeader()}
           data={

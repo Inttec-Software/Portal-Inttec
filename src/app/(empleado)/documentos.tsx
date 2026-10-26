@@ -19,6 +19,7 @@ import { DocumentoService, DocumentoFirmado, supabase } from '@/services/supabas
 import { PdfDocumentoService } from '@/services/pdfDocumentoService';
 import SignatureCanvasModal from '@/components/SignatureCanvasModal';
 import CustomButton from '@/components/CustomButton';
+import { DocumentosListSkeleton } from '@/components/skeleton';
 import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -313,10 +314,7 @@ export default function EmpleadoDocumentosScreen() {
 
       {/* Lista */}
       {isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ marginTop: 12, color: themeColors.textSecondary }}>Cargando documentos...</Text>
-        </View>
+        <DocumentosListSkeleton count={5} />
       ) : (
         <FlatList
           data={listaActual}

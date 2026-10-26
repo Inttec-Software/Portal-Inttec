@@ -27,6 +27,7 @@ import { Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, Asi
 import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
 import ExpenseCard from '@/components/ExpenseCard';
+import { ReportesTableSkeleton, ReportesCardsListSkeleton } from '@/components/skeleton';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -2094,10 +2095,13 @@ export default function ReportesScreen() {
 
       {/* Contents based on tab */}
       {isLoading ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando datos...</Text>
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          {isDesktop ? (
+            <ReportesTableSkeleton isHistorial={activeTab === 'historial'} count={8} />
+          ) : (
+            <ReportesCardsListSkeleton count={6} />
+          )}
+        </ScrollView>
       ) : (
         <View style={{ flex: 1 }}>
           {/* REVISAR PENDIENTES */}

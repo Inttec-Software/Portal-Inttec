@@ -3949,6 +3949,44 @@ export const ReportGenerator = {
             });
             await ReportGenerator._exportArrayToXLSX('Inventario', headers, rows, fileName);
     },
+    async exportInventarioEmpleadosToXLSX(items: any[], fileName: string = 'reporte_material_en_empleados.xlsx'): Promise<void> {
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error('No hay materiales en inventarios de empleados para exportar.');
+      }
+      const headers = [
+        'Empleado / Custodio',
+        'Rol',
+        'Email',
+        'Producto',
+        'SKU',
+        'Categoría',
+        'Cantidad Total',
+        'Nuevas',
+        'Usadas',
+        'Por Revisar / Dañado',
+        'Unidad',
+        'Precio Unitario (MXN)',
+        'Valor Estimado (MXN)',
+        'Última Actualización'
+      ];
+      const rows = items.map((it: any) => [
+        it.empleado_nombre || 'Empleado',
+        it.empleado_rol || 'EMPLEADO',
+        it.empleado_email || '-',
+        it.producto_nombre || 'Producto',
+        it.producto_sku || '-',
+        it.categoria_nombre || 'Sin Categoría',
+        Number(it.cantidad_disponible || 0),
+        Number(it.cantidad_nuevo || 0),
+        Number(it.cantidad_usado || 0),
+        Number(it.cantidad_por_revisar || 0),
+        it.producto_unidad || 'pza',
+        Number(it.producto_precio || 0),
+        Number(it.valor_estimado || 0),
+        it.updated_at ? new Date(it.updated_at).toLocaleDateString('es-MX') : '-'
+      ]);
+      await ReportGenerator._exportArrayToXLSX('Material en Empleados', headers, rows, fileName);
+    },
     async exportConsumosToXLSX(consumos: any[], fileName: string = 'reporte_consumos.xlsx'): Promise<void> {
 
             if (consumos.length === 0) {

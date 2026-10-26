@@ -30,6 +30,7 @@ import {
 } from '@/services/supabase';
 import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
+import { AsistenciaGridSkeleton } from '@/components/skeleton';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import CustomButton from '@/components/CustomButton';
@@ -1285,12 +1286,7 @@ export default function AdminAsistencia() {
 
         {/* 5. Lista de Empleados con sus Horarios y Estado */}
         {isLoadingPersonal || isLoadingAsistencias ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={themeColors.primary} />
-            <Text style={[styles.loadingText, { color: themeColors.textSecondary }]}>
-              Cargando registros de asistencia del personal...
-            </Text>
-          </View>
+          <AsistenciaGridSkeleton count={6} />
         ) : filteredEmpleados.length === 0 ? (
           <View style={[styles.emptyCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
             <Ionicons name="person-outline" size={48} color={themeColors.textSecondary} />

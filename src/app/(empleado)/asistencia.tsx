@@ -20,6 +20,7 @@ import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import { EmpleadoAsistenciaSkeleton } from '@/components/skeleton';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -373,10 +374,13 @@ export default function EmpleadoAsistencia() {
 
   if (isLoading) {
     return (
-      <View style={[styles.loaderContainer, { backgroundColor: themeColors.background }]}>
-        <ActivityIndicator size="large" color={themeColors.accent} />
-        <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando...</Text>
-      </View>
+      <LinearGradient colors={gradientColors} style={{ flex: 1 }}>
+        <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+          <ScrollView contentContainerStyle={styles.mainContent}>
+            <EmpleadoAsistenciaSkeleton />
+          </ScrollView>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 

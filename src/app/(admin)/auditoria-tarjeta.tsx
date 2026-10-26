@@ -28,6 +28,7 @@ import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { GeminiService, CardTransaction, CardStatementResult } from '@/services/gemini';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import GastoFotosGallery from '@/components/GastoFotosGallery';
+import { AuditoriaTarjetaSkeleton } from '@/components/skeleton';
 import { useAuth } from '@/context/AuthContext';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -891,10 +892,9 @@ export default function AuditoriaTarjetaScreen() {
       <View style={{ flex: 1 }}>
         {renderCardFilter()}
         {isLoadingHistorial ? (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.six }}>
-            <ActivityIndicator size="large" color={themeColors.accent} />
-            <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando historial...</Text>
-          </View>
+          <ScrollView style={{ flex: 1 }}>
+            <AuditoriaTarjetaSkeleton count={4} />
+          </ScrollView>
         ) : filteredAuditorias.length === 0 ? (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: Spacing.six, gap: Spacing.two }}>
             <Ionicons name="folder-open-outline" size={48} color={themeColors.textSecondary} />
