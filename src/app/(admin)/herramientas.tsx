@@ -20,6 +20,7 @@ import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import CustomButton from '@/components/CustomButton';
 import { normalizeText } from '@/utils/helpers';
 import CustomInput from '@/components/CustomInput';
+import { HerramientasGridSkeleton } from '@/components/skeleton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
@@ -631,12 +632,39 @@ export default function AdminHerramientasScreen() {
   if (isLoading) {
     return (
       <View style={[styles.container, { backgroundColor: themeColors.background }]}>
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.primary} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.two }}>
-            Cargando módulo de herramientas...
-          </Text>
+        {/* Header */}
+        <View style={[styles.headerContainer, { borderBottomColor: themeColors.border }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]}>Gestión de Herramientas</Text>
+            <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary }]}>
+              Catálogo maestro, Kits personales, Kits de Vehículos y Checklists diarios
+            </Text>
+          </View>
         </View>
+
+        {/* Tabs */}
+        <View style={[styles.tabsRow, { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border }]}>
+          <View style={[styles.tabButton, { borderBottomColor: themeColors.primary, borderBottomWidth: 3 }]}>
+            <Ionicons name="build-outline" size={18} color={themeColors.primary} />
+            <Text style={[styles.tabButtonText, { color: themeColors.primary }]}>Catálogo</Text>
+          </View>
+          <View style={styles.tabButton}>
+            <Ionicons name="person-outline" size={18} color={themeColors.textSecondary} />
+            <Text style={[styles.tabButtonText, { color: themeColors.textSecondary }]}>Kits Empleados</Text>
+          </View>
+          <View style={styles.tabButton}>
+            <Ionicons name="car-outline" size={18} color={themeColors.textSecondary} />
+            <Text style={[styles.tabButtonText, { color: themeColors.textSecondary }]}>Kits Vehículos</Text>
+          </View>
+          <View style={styles.tabButton}>
+            <Ionicons name="checkbox-outline" size={18} color={themeColors.textSecondary} />
+            <Text style={[styles.tabButtonText, { color: themeColors.textSecondary }]}>Checklists</Text>
+          </View>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <HerramientasGridSkeleton isMobile={isMobile} count={6} />
+        </ScrollView>
       </View>
     );
   }

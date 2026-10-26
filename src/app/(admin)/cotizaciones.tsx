@@ -13,6 +13,7 @@ import { Cotizacion } from '@/types/ventas';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleCache } from '@/services/moduleCache';
+import { CotizacionesTableSkeleton, CotizacionesCardsListSkeleton } from '@/components/skeleton';
 const getStatusConfig = (estado: string, isDark: boolean) => {
   const norm = (estado || '').toLowerCase().trim();
   switch(norm) {
@@ -552,7 +553,9 @@ export default function CotizacionesListScreen() {
         </View>
 
         {/* Cuerpo de la Tabla */}
-        {filteredCotizaciones.length === 0 ? (
+        {isLoading ? (
+          <CotizacionesTableSkeleton count={8} />
+        ) : filteredCotizaciones.length === 0 ? (
           <View style={styles.noResultsTable}>
             <Text style={{ color: '#888', textAlign: 'center', padding: 24 }}>
               {searchQuery ? 'No se encontraron cotizaciones con esa búsqueda.' : 'No hay cotizaciones registradas aún.'}
@@ -701,8 +704,8 @@ export default function CotizacionesListScreen() {
           </View>
 
           {isLoading ? (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <ActivityIndicator size="large" color={themeColors.primary} />
+            <View style={{ padding: Spacing.three, paddingBottom: 100 }}>
+              <CotizacionesCardsListSkeleton count={5} />
             </View>
           ) : (
             <ScrollView

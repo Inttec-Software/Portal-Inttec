@@ -20,6 +20,7 @@ import { AuthService, Usuario, Evidencia, supabase } from '@/services/supabase';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
+import { EvidenciasTableSkeleton, EvidenciasCardsListSkeleton } from '@/components/skeleton';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -183,12 +184,25 @@ export default function AdminEvidenciasScreen() {
 
       {/* Listado de Reportes */}
       {isLoading ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>
-            Cargando evidencias...
-          </Text>
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          <View style={styles.header}>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
+            <View style={{ width: 40 }} />
+          </View>
+          <View style={styles.searchContainer}>
+            <CustomInput
+              placeholder="Buscar por cliente, descripción, material o técnico..."
+              value=""
+              editable={false}
+              iconName="search-outline"
+            />
+          </View>
+          {isDesktop ? (
+            <EvidenciasTableSkeleton count={8} />
+          ) : (
+            <EvidenciasCardsListSkeleton count={6} />
+          )}
+        </ScrollView>
       ) : isDesktop ? (
         <ScrollView style={{ flex: 1 }}>
           {/* Header */}

@@ -9,6 +9,7 @@ import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
 import { Cotizacion, CotizacionLinea } from '@/types/ventas';
 import { exportarCotizacionOdooPDF } from '@/utils/reportGenerator';
 import { ThemedText } from '@/components/themed-text';
+import { DescripcionProductoEditor } from '@/components/cotizaciones/DescripcionProductoEditor';
 import {} from '@/services/supabase';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -848,24 +849,13 @@ export default function NuevaCotizacionScreen() {
                             </View>
                           )}
 
-                          {/* Línea 2: Campo Descripción / Detalles Opcional (Multilínea estilo Términos y Condiciones) */}
+                          {/* Línea 2: Campo Descripción / Detalles Enriquecido con formato para el PDF */}
                           <View style={{ marginTop: 6 }}>
-                            <TextInput
-                              style={[
-                                styles.partidaDescDetalladaInput,
-                                {
-                                  color: themeColors.text,
-                                  backgroundColor: themeColors.backgroundElement,
-                                  borderColor: themeColors.border,
-                                },
-                              ]}
-                              multiline={true}
-                              numberOfLines={3}
-                              blurOnSubmit={false}
+                            <DescripcionProductoEditor
                               value={linea.productoDescripcion || ''}
                               onChangeText={t => handleUpdateLine(linea.id, 'productoDescripcion', t)}
-                              placeholder="Describe los detalles (qué incluye, especificaciones)... Puedes usar Enter para saltos de línea"
-                              placeholderTextColor={themeColors.textSecondary}
+                              productoNombre={linea.productoNombre}
+                              placeholder="Describe los detalles (qué incluye, especificaciones)... Puedes usar **negrita**, • viñetas o 1. listas"
                             />
                           </View>
                         </View>

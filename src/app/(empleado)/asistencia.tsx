@@ -20,13 +20,14 @@ import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import { EmpleadoAsistenciaSkeleton } from '@/components/skeleton';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '@/context/AuthContext';
 import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
-import { getWeekRange, formatHoraDisplay } from '@/utils/asistenciaUtils';
+import { getWeekRange, formatHoraDisplay, isAutoCerradoAsistencia } from '@/utils/asistenciaUtils';
 
 export default function EmpleadoAsistencia() {
   const router = useRouter();
@@ -373,10 +374,13 @@ export default function EmpleadoAsistencia() {
 
   if (isLoading) {
     return (
-      <View style={[styles.loaderContainer, { backgroundColor: themeColors.background }]}>
-        <ActivityIndicator size="large" color={themeColors.accent} />
-        <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando...</Text>
-      </View>
+      <LinearGradient colors={gradientColors} style={{ flex: 1 }}>
+        <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+          <ScrollView contentContainerStyle={styles.mainContent}>
+            <EmpleadoAsistenciaSkeleton />
+          </ScrollView>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
@@ -413,14 +417,25 @@ export default function EmpleadoAsistencia() {
           )}
 
           {registroHoy?.hora_entrada && registroHoy?.hora_salida && (
-            <View style={[styles.checadorStatusCard, { backgroundColor: themeColors.success + '10', borderColor: themeColors.success }]}>
-              <Ionicons name="checkmark-done-circle" size={20} color={themeColors.success} />
+            <View style={[styles.checadorStatusCard, { backgroundColor: isAutoCerradoAsistencia(registroHoy) ? '#fff7ed' : themeColors.success + '10', borderColor: isAutoCerradoAsistencia(registroHoy) ? '#fdba74' : themeColors.success }]}>
+              <Ionicons name={isAutoCerradoAsistencia(registroHoy) ? 'alert-circle' : 'checkmark-done-circle'} size={20} color={isAutoCerradoAsistencia(registroHoy) ? '#c2410c' : themeColors.success} />
               <View style={{ marginLeft: 8, flex: 1 }}>
-                <Text style={[styles.checadorStatusText, { color: themeColors.success, fontWeight: '700' }]}>
-                  Último turno: {formatHoraDisplay(registroHoy.hora_entrada)} - {formatHoraDisplay(registroHoy.hora_salida)}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <Text style={[styles.checadorStatusText, { color: isAutoCerradoAsistencia(registroHoy) ? '#c2410c' : themeColors.success, fontWeight: '700' }]}>
+                    Último turno: {formatHoraDisplay(registroHoy.hora_entrada)} - {isAutoCerradoAsistencia(registroHoy) ? '18:00 (Auto)' : formatHoraDisplay(registroHoy.hora_salida)}
+                  </Text>
+                  {isAutoCerradoAsistencia(registroHoy) && (
+                    <View style={{ backgroundColor: '#ffedd5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#fdba74' }}>
+                      <Text style={{ color: '#c2410c', fontSize: 10, fontWeight: '700' }}>
+                        Automático
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
-                  Listo para registrar una nueva entrada si inicias otro turno.
+                  {isAutoCerradoAsistencia(registroHoy)
+                    ? 'Se cerró automáticamente a las 6:00 PM por olvido de checada. Puedes registrar una nueva entrada si inicias otro turno.'
+                    : 'Listo para registrar una nueva entrada si inicias otro turno.'}
                 </Text>
               </View>
             </View>

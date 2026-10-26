@@ -30,6 +30,7 @@ import {
 } from '@/services/supabase';
 import { getApiUrl, getApiHeaders } from '@/services/apiHelper';
 import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
+import { AsistenciaGridSkeleton } from '@/components/skeleton';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import CustomButton from '@/components/CustomButton';
@@ -43,6 +44,8 @@ import {
   formatHoraDisplay,
   formatMinutesToHours,
   processAsistenciasSemana,
+  isAutoCerradoAsistencia,
+  formatContadorJornada48,
 } from '@/utils/asistenciaUtils';
 import {
   getTimezoneBadgeInfo,
@@ -339,6 +342,7 @@ export default function AdminAsistencia() {
       let estadoDia: 'EN_TURNO' | 'COMPLETADO' | 'SIN_REGISTRO' = 'SIN_REGISTRO';
       let ultimaEntrada: string | null = null;
       let ultimaSalida: string | null = null;
+      let isAutoCerrado = false;
       let direccionDia: string | null = null;
       let fotoEntradaDia: string | null = null;
       let timezoneBadge: TimezoneBadgeInfo | null = null;
@@ -351,17 +355,37 @@ export default function AdminAsistencia() {
         const tz = extractTimezoneFromRecord(lastReg);
         timezoneBadge = getTimezoneBadgeInfo(tz);
 
+        const esDiaPasado = targetFecha < fechaHoyJornada;
+        const autoCerrado = isAutoCerradoAsistencia({
+          ...lastReg,
+          fecha: targetFecha,
+        }, fechaHoyJornada);
+
         if (lastReg.hora_entrada && !lastReg.hora_salida) {
-          estadoDia = 'EN_TURNO';
-          ultimaEntrada = lastReg.hora_entrada;
-          direccionDia = lastReg.direccion_entrada || null;
-          fotoEntradaDia = lastReg.foto_entrada_url || null;
+          if (esDiaPasado || autoCerrado) {
+            estadoDia = 'COMPLETADO';
+            ultimaEntrada = lastReg.hora_entrada;
+            ultimaSalida = '18:00 (Auto)';
+            isAutoCerrado = true;
+            direccionDia = 'Cierre automático 6:00 PM (olvido de checada)';
+            fotoEntradaDia = lastReg.foto_entrada_url || null;
+          } else {
+            estadoDia = 'EN_TURNO';
+            ultimaEntrada = lastReg.hora_entrada;
+            direccionDia = lastReg.direccion_entrada || null;
+            fotoEntradaDia = lastReg.foto_entrada_url || null;
+          }
         } else if (lastReg.hora_entrada && lastReg.hora_salida) {
           estadoDia = 'COMPLETADO';
           ultimaEntrada = lastReg.hora_entrada;
-          ultimaSalida = lastReg.hora_salida;
-          direccionDia = lastReg.direccion_salida || lastReg.direccion_entrada || null;
-          fotoEntradaDia = lastReg.foto_salida_url || lastReg.foto_entrada_url || null;
+          isAutoCerrado = autoCerrado;
+          ultimaSalida = autoCerrado ? '18:00 (Auto)' : lastReg.hora_salida;
+          direccionDia = autoCerrado
+            ? 'Cierre automático 6:00 PM (olvido de checada)'
+            : (lastReg.direccion_salida || lastReg.direccion_entrada || null);
+          fotoEntradaDia = autoCerrado
+            ? lastReg.foto_entrada_url || null
+            : (lastReg.foto_salida_url || lastReg.foto_entrada_url || null);
         }
       }
 
@@ -371,6 +395,7 @@ export default function AdminAsistencia() {
         estadoDia,
         ultimaEntrada,
         ultimaSalida,
+        isAutoCerrado,
         direccionHoy: direccionDia ? cleanAddressForDisplay(direccionDia) : null,
         fotoEntradaHoy: fotoEntradaDia,
         timezoneBadge,
@@ -1261,12 +1286,7 @@ export default function AdminAsistencia() {
 
         {/* 5. Lista de Empleados con sus Horarios y Estado */}
         {isLoadingPersonal || isLoadingAsistencias ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={themeColors.primary} />
-            <Text style={[styles.loadingText, { color: themeColors.textSecondary }]}>
-              Cargando registros de asistencia del personal...
-            </Text>
-          </View>
+          <AsistenciaGridSkeleton count={6} />
         ) : filteredEmpleados.length === 0 ? (
           <View style={[styles.emptyCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
             <Ionicons name="person-outline" size={48} color={themeColors.textSecondary} />
@@ -1280,6 +1300,12 @@ export default function AdminAsistencia() {
             {filteredEmpleados.map((emp) => {
               const isEnTurno = emp.estadoHoy === 'EN_TURNO';
               const isCompletado = emp.estadoHoy === 'COMPLETADO';
+              const minsReg = emp.totalMinutosRegulares || 0;
+              const minsExtra = emp.totalMinutosExtra || 0;
+              const pctReg = Math.min(100, Math.max(0, (minsReg / 2880) * 100));
+              const isJornadaCompleta = minsReg >= 2880;
+              const hasExtraHours = minsExtra > 0;
+              const pctExtra = hasExtraHours ? Math.min(100, Math.max(8, (minsExtra / (12 * 60)) * 100)) : 0;
 
               return (
                 <TouchableOpacity
@@ -1403,9 +1429,18 @@ export default function AdminAsistencia() {
                           {selectedDayInfo ? `Salida (${selectedDayInfo.dayName.slice(0, 3)}):` : 'Salida Hoy:'}
                         </Text>
                       </View>
-                      <Text style={[styles.horarioVal, { color: emp.ultimaSalida ? '#ef4444' : themeColors.textSecondary }]}>
-                        {emp.ultimaSalida ? formatHoraDisplay(emp.ultimaSalida) : isEnTurno ? 'En curso...' : 'Sin registro'}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <Text style={[styles.horarioVal, { color: emp.ultimaSalida ? '#ef4444' : themeColors.textSecondary }]}>
+                          {emp.ultimaSalida ? formatHoraDisplay(emp.ultimaSalida) : isEnTurno ? 'En curso...' : 'Sin registro'}
+                        </Text>
+                        {emp.isAutoCerrado && (
+                          <View style={{ backgroundColor: '#ffedd5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#fdba74' }}>
+                            <Text style={{ color: '#c2410c', fontSize: 10, fontWeight: '700' }}>
+                              Automático
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
 
                     {emp.direccionHoy && (
@@ -1418,20 +1453,61 @@ export default function AdminAsistencia() {
                     )}
                   </View>
 
+                  {/* Resumen de Horas (Jornada y Horas Extra) */}
+                  <View style={[styles.cardHoursGrid, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                    {/* Campo Izquierdo: Total Horas (0/48 hrs) */}
+                    <View style={styles.cardHoursCol}>
+                      <Text style={[styles.cardHoursLabel, { color: themeColors.textSecondary }]}>
+                        TOTAL HORAS
+                      </Text>
+                      <View style={styles.cardHoursValueRow}>
+                        <Ionicons
+                          name="time"
+                          size={16}
+                          color={isJornadaCompleta ? '#16a34a' : themeColors.text}
+                          style={{ marginRight: 5 }}
+                        />
+                        <Text style={[styles.cardHoursMainText, { color: isJornadaCompleta ? '#16a34a' : themeColors.text }]}>
+                          {formatContadorJornada48(minsReg)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Divisor vertical */}
+                    <View style={[styles.cardHoursDivider, { backgroundColor: themeColors.border }]} />
+
+                    {/* Campo Derecho: Horas Extra */}
+                    <View style={styles.cardHoursCol}>
+                      <Text style={[styles.cardHoursLabel, { color: hasExtraHours ? '#ea580c' : themeColors.textSecondary }]}>
+                        HORAS EXTRA
+                      </Text>
+                      <View style={styles.cardHoursValueRow}>
+                        <Ionicons
+                          name="flame"
+                          size={16}
+                          color={hasExtraHours ? '#ea580c' : themeColors.textSecondary}
+                          style={{ marginRight: 5 }}
+                        />
+                        <Text
+                          style={[
+                            styles.cardHoursMainText,
+                            { color: hasExtraHours ? '#ea580c' : themeColors.textSecondary },
+                          ]}
+                        >
+                          {hasExtraHours ? `+${emp.totalHorasExtraFormateadas}` : '0h extra'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
                   {/* Footer con resumen semanal y botón de detalle */}
                   <View style={styles.employeeCardFooter}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1 }}>
-                      <Ionicons name="time-outline" size={15} color={themeColors.textSecondary} />
+                      <Ionicons name="time-outline" size={14} color={themeColors.textSecondary} />
                       <Text style={[styles.semanaHorasText, { color: themeColors.textSecondary }]}>
-                        Semana: <Text style={{ fontWeight: '800', color: themeColors.text }}>{emp.totalHorasFormateadas || '0h 0m'}</Text>
+                        Total semana: <Text style={{ fontWeight: '800', color: themeColors.text }}>{emp.totalHorasFormateadas || '0h 0m'}</Text>
                         {emp.diasTrabajados ? ` (${emp.diasTrabajados} d)` : ''}
                       </Text>
-                      {(emp.totalMinutosExtra || 0) > 0 && (
-                        <View style={styles.cardExtraHoursBadge}>
-                          <Ionicons name="flame" size={12} color="#ea580c" />
-                          <Text style={styles.cardExtraHoursText}>+{emp.totalHorasExtraFormateadas} extra</Text>
-                        </View>
-                      )}
                     </View>
 
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -2272,10 +2348,47 @@ const styles = StyleSheet.create({
     fontSize: 10,
     flex: 1,
   },
+  cardHoursGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  cardHoursCol: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardHoursLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  cardHoursValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardHoursMainText: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  cardHoursDivider: {
+    width: 1,
+    height: 30,
+  },
   employeeCardFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 4,
   },
   semanaHorasText: {
     fontSize: 12,

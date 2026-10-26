@@ -23,6 +23,7 @@ import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { parseCfdiXml } from '@/utils/xmlParser';
 import { exportFacturaCfdiToPdf } from '@/utils/cfdiPdfGenerator';
 import { ModuleCache } from '@/services/moduleCache';
+import { FacturasKpiGridSkeleton, FacturasListSkeleton } from '@/components/skeleton';
 
 interface FacturaRecibida {
   id: string;
@@ -948,37 +949,41 @@ export default function FacturasRecibidasScreen() {
         )}
 
         {/* KPI Cards */}
-        <View style={styles.kpiGrid}>
-          <View style={[styles.kpiCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-            <View style={[styles.kpiIcon, { backgroundColor: '#54a0ff15' }]}>
-              <Ionicons name="cash-outline" size={24} color="#54a0ff" />
+        {loading ? (
+          <FacturasKpiGridSkeleton />
+        ) : (
+          <View style={styles.kpiGrid}>
+            <View style={[styles.kpiCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+              <View style={[styles.kpiIcon, { backgroundColor: '#54a0ff15' }]}>
+                <Ionicons name="cash-outline" size={24} color="#54a0ff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.kpiLabel, { color: themeColors.textSecondary }]}>Monto Total Recibido</Text>
+                <Text style={[styles.kpiValue, { color: themeColors.text }]}>{formatCurrency(kpis.totalMonto)}</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.kpiLabel, { color: themeColors.textSecondary }]}>Monto Total Recibido</Text>
-              <Text style={[styles.kpiValue, { color: themeColors.text }]}>{formatCurrency(kpis.totalMonto)}</Text>
-            </View>
-          </View>
 
-          <View style={[styles.kpiCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-            <View style={[styles.kpiIcon, { backgroundColor: '#1dd1a115' }]}>
-              <Ionicons name="document-text-outline" size={24} color="#1dd1a1" />
+            <View style={[styles.kpiCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+              <View style={[styles.kpiIcon, { backgroundColor: '#1dd1a115' }]}>
+                <Ionicons name="document-text-outline" size={24} color="#1dd1a1" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.kpiLabel, { color: themeColors.textSecondary }]}>Facturas Vigentes</Text>
+                <Text style={[styles.kpiValue, { color: themeColors.text }]}>{kpis.countVigentes} de {kpis.countTotal}</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.kpiLabel, { color: themeColors.textSecondary }]}>Facturas Vigentes</Text>
-              <Text style={[styles.kpiValue, { color: themeColors.text }]}>{kpis.countVigentes} de {kpis.countTotal}</Text>
-            </View>
-          </View>
 
-          <View style={[styles.kpiCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-            <View style={[styles.kpiIcon, { backgroundColor: '#ff6b6b15' }]}>
-              <Ionicons name="close-circle-outline" size={24} color="#ff6b6b" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.kpiLabel, { color: themeColors.textSecondary }]}>Canceladas</Text>
-              <Text style={[styles.kpiValue, { color: themeColors.text }]}>{kpis.countCanceladas}</Text>
+            <View style={[styles.kpiCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+              <View style={[styles.kpiIcon, { backgroundColor: '#ff6b6b15' }]}>
+                <Ionicons name="close-circle-outline" size={24} color="#ff6b6b" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.kpiLabel, { color: themeColors.textSecondary }]}>Canceladas</Text>
+                <Text style={[styles.kpiValue, { color: themeColors.text }]}>{kpis.countCanceladas}</Text>
+              </View>
             </View>
           </View>
-        </View>
+        )}
 
         {!isDesktop && (
           /* Buscador y Filtros Móvil */
@@ -1053,10 +1058,7 @@ export default function FacturasRecibidasScreen() {
 
         {/* Lista de Facturas */}
         {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={themeColors.accent} />
-            <Text style={[styles.loadingText, { color: themeColors.textSecondary }]}>Cargando comprobantes...</Text>
-          </View>
+          <FacturasListSkeleton count={6} />
         ) : tableMissing ? (
           <View style={[styles.emptyContainer, { backgroundColor: themeColors.backgroundElement, borderColor: '#feca57' }]}>
             <Ionicons name="warning-outline" size={48} color="#feca57" />

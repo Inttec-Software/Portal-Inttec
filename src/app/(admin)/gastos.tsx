@@ -29,6 +29,7 @@ import { ReportGenerator } from '@/utils/reportGenerator';
 import AsistenciaSemanalCard from '@/components/AsistenciaSemanalCard';
 import { getWeekRange, getPreviousWeekMonday, getNextWeekMonday } from '@/utils/asistenciaUtils';
 import ExpenseCard from '@/components/ExpenseCard';
+import { GastosTableSkeleton, GastosCardsListSkeleton } from '@/components/skeleton';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -2290,10 +2291,30 @@ export default function AdminGastosScreen() {
 
       {/* Contents based on tab */}
       {isLoading ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando datos...</Text>
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          {renderScreenHeader()}
+          {activeTab === 'historial' && (
+            <View style={{ flexDirection: 'row', marginHorizontal: Spacing.three, marginBottom: Spacing.two, marginTop: Spacing.one, backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, overflow: 'hidden', borderWidth: 1, borderColor: themeColors.border }}>
+              <View style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: facturaFilter === 'TODOS' ? themeColors.accent + '20' : 'transparent' }}>
+                <Text style={{ fontSize: 10, fontWeight: facturaFilter === 'TODOS' ? 'bold' : '600', color: facturaFilter === 'TODOS' ? themeColors.accent : themeColors.textSecondary }}>TODOS</Text>
+              </View>
+              <View style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}>
+                <Text style={{ fontSize: 10, fontWeight: '600', color: themeColors.textSecondary }}>FACTURADOS</Text>
+              </View>
+              <View style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRightWidth: 1, borderColor: themeColors.border }}>
+                <Text style={{ fontSize: 10, fontWeight: '600', color: themeColors.textSecondary }}>PEND. ENTREGAR</Text>
+              </View>
+              <View style={{ flex: 1, paddingVertical: 8, alignItems: 'center' }}>
+                <Text style={{ fontSize: 10, fontWeight: '600', color: themeColors.textSecondary }}>NO FACTURADOS</Text>
+              </View>
+            </View>
+          )}
+          {isDesktop ? (
+            <GastosTableSkeleton isHistorial={activeTab === 'historial'} count={8} />
+          ) : (
+            <GastosCardsListSkeleton count={6} />
+          )}
+        </ScrollView>
       ) : (
         <View style={{ flex: 1 }}>
           {/* REVISAR PENDIENTES */}

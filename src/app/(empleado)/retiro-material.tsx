@@ -25,6 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
+import { InventarioListSkeleton } from '@/components/skeleton';
 import SignatureCanvasModal from '@/components/SignatureCanvasModal';
 import { normalizeText } from '@/utils/helpers';
 import { useHeaderAction } from '@/context/HeaderActionContext';
@@ -585,10 +586,9 @@ export default function RetiroMaterialScreen() {
       </View>
 
       {isLoading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={themeColors.primary} />
-          <Text style={{ marginTop: 10, color: themeColors.textSecondary }}>Cargando catálogo...</Text>
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          <InventarioListSkeleton isMobile={true} count={6} />
+        </ScrollView>
       ) : (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: Spacing.three, paddingBottom: 100 }}>
           {filteredProductos.length === 0 ? (

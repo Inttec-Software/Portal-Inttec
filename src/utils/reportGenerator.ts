@@ -7,7 +7,7 @@ import { Platform, Alert } from 'react-native';
 import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
 import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
-import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay } from './asistenciaUtils';
+import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay, isAutoCerradoAsistencia } from './asistenciaUtils';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
 // Esto evita ~959 KB en el bundle principal de la app
@@ -955,11 +955,12 @@ export const ReportGenerator = {
         a.empleado_nombre ||
         a.usuario_nombre ||
         'Desconocido';
+      const isAuto = isAutoCerradoAsistencia(a);
       const fecha = a.fecha || '';
-      const horaEntrada = a.hora_entrada || '--:--';
+      const horaEntrada = a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : '--:--';
       const dirEntrada = a.direccion_entrada || 'N/A';
-      const horaSalida = a.hora_salida || '--:--';
-      const dirSalida = a.direccion_salida || 'N/A';
+      const horaSalida = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : '--:--');
+      const dirSalida = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || 'N/A');
 
       tableRows += `
         <tr>
@@ -1354,7 +1355,7 @@ export const ReportGenerator = {
             <div style="display: flex; gap: 8px; align-items: center;">
               <span style="font-size: 10px; color: #64748b;">Días: <b>${semanaData.diasLaborados}/7</b></span>
               <span style="background-color: #dcfce7; color: #15803d; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
-                Regulares: ${semanaData.totalHorasRegularesStr}
+                Regulares (48h): ${semanaData.totalHorasRegularesStr}
               </span>
               ${semanaData.totalMinutosExtra > 0 ? `
                 <span style="background-color: #ffedd5; color: #c2410c; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
@@ -1478,7 +1479,7 @@ export const ReportGenerator = {
             <div class="value" style="color: #0f172a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Horas Regulares (8-6)</div>
+            <div class="label">Horas Regulares (48h)</div>
             <div class="value" style="color: #16a34a;">${formatMinutesToHours(totalMinutosRegularesEmpresa)}</div>
           </div>
           <div class="summary-card">
@@ -1649,7 +1650,7 @@ export const ReportGenerator = {
               <h1 class="title">Reporte Individual de Asistencia</h1>
               <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">👤 ${empleado.nombre}</p>
               <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
-              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Horario: 08:00 - 18:00</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Jornada: 48 hrs</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
@@ -1663,7 +1664,7 @@ export const ReportGenerator = {
             <div class="value" style="color: #0f172a; font-size: 17px;">${semanaData.totalHorasSemanaStr}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Horas Regulares (8-6)</div>
+            <div class="label">Horas Regulares (48h)</div>
             <div class="value" style="color: #16a34a; font-size: 17px;">${semanaData.totalHorasRegularesStr}</div>
           </div>
           <div class="summary-card">
@@ -3611,7 +3612,10 @@ export const ReportGenerator = {
                 a.empleado_nombre ||
                 a.usuario_nombre ||
                 'Desconocido';
-              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada || 'Sin registro', a.direccion_entrada || '', a.hora_salida || 'Sin registro', a.direccion_salida || '' ];
+              const isAuto = isAutoCerradoAsistencia(a);
+              const horaSalidaVal = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : 'Sin registro');
+              const dirSalidaVal = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || '');
+              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : 'Sin registro', a.direccion_entrada || '', horaSalidaVal, dirSalidaVal ];
             });
             await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
     },
@@ -3945,6 +3949,44 @@ export const ReportGenerator = {
             });
             await ReportGenerator._exportArrayToXLSX('Inventario', headers, rows, fileName);
     },
+    async exportInventarioEmpleadosToXLSX(items: any[], fileName: string = 'reporte_material_en_empleados.xlsx'): Promise<void> {
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error('No hay materiales en inventarios de empleados para exportar.');
+      }
+      const headers = [
+        'Empleado / Custodio',
+        'Rol',
+        'Email',
+        'Producto',
+        'SKU',
+        'Categoría',
+        'Cantidad Total',
+        'Nuevas',
+        'Usadas',
+        'Por Revisar / Dañado',
+        'Unidad',
+        'Precio Unitario (MXN)',
+        'Valor Estimado (MXN)',
+        'Última Actualización'
+      ];
+      const rows = items.map((it: any) => [
+        it.empleado_nombre || 'Empleado',
+        it.empleado_rol || 'EMPLEADO',
+        it.empleado_email || '-',
+        it.producto_nombre || 'Producto',
+        it.producto_sku || '-',
+        it.categoria_nombre || 'Sin Categoría',
+        Number(it.cantidad_disponible || 0),
+        Number(it.cantidad_nuevo || 0),
+        Number(it.cantidad_usado || 0),
+        Number(it.cantidad_por_revisar || 0),
+        it.producto_unidad || 'pza',
+        Number(it.producto_precio || 0),
+        Number(it.valor_estimado || 0),
+        it.updated_at ? new Date(it.updated_at).toLocaleDateString('es-MX') : '-'
+      ]);
+      await ReportGenerator._exportArrayToXLSX('Material en Empleados', headers, rows, fileName);
+    },
     async exportConsumosToXLSX(consumos: any[], fileName: string = 'reporte_consumos.xlsx'): Promise<void> {
 
             if (consumos.length === 0) {
@@ -4115,30 +4157,86 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     });
   };
   
+  const escapeHtml = (text: string) => {
+    return (text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  const formatInlineText = (text: string) => {
+    let escaped = escapeHtml(text);
+    // Convert **bold** o *bold* a <strong> negro puro
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\*([^*\n]+?)\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\b_([^_]+?)_\b/g, '<em style="color: #333;">$1</em>');
+    return escaped;
+  };
+
   const renderDescription = (name: string, description: string) => {
-    const fullText = (name || '') + (description ? '\n' + description : '');
-    const parts = fullText.split('\n');
-    return parts.map((part, part_index) => {
-      const clean_part = part.trim();
-      if (clean_part === '') return '<br/>';
-      
-      if (part_index === 0) {
-        const innerHtml = `<span style="font-size: 10.5px; color: #555;">${clean_part.replace(/\*/g, '')}</span>`;
-        return `<div style="display: block; margin-bottom: 4px;">${innerHtml}</div>`;
-      } else {
-        const chunks = clean_part.split('*');
-        const innerHtml = chunks.map((chunk, chunk_index) => {
-          if (chunk_index % 2 === 0) {
-            return `<span style="font-size: 10.5px; color: #555;">${chunk}</span>`;
-          } else {
-            return `<strong style="color: #333; font-size: 10.5px;">${chunk}</strong>`;
-          }
-        }).join('');
-        return `<div style="display: block; margin-bottom: 2px; padding-left: 10px; text-indent: -10px;">
-                  <span style="font-size: 12px; color: #555; margin-right: 3px;">&bull;</span>${innerHtml}
+    let html = '';
+
+    // 1. Título / Nombre del producto en negrita negra
+    if (name && name.trim()) {
+      html += `<div style="font-weight: 700; font-size: 11px; color: #111; line-height: 1.35; margin-bottom: 4px;">${escapeHtml(name.trim())}</div>`;
+    }
+
+    if (!description || !description.trim()) {
+      return html || '<span style="color: #999; font-style: italic;">Sin descripción</span>';
+    }
+
+    const trimmedDesc = description.trim();
+
+    // 2. Si la descripción ya es HTML (generada por el editor WYSIWYG con <ul>, <li>, <b>, etc.)
+    const isHtml = /<[a-z][\s\S]*>/i.test(trimmedDesc);
+    if (isHtml) {
+      // Limpiar y asegurar que las negritas y listas sean negras
+      const styledHtml = trimmedDesc
+        .replace(/<b\b/gi, '<b style="color: #111; font-weight: bold;"')
+        .replace(/<strong\b/gi, '<strong style="color: #111; font-weight: bold;"')
+        .replace(/<ul\b/gi, '<ul style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<ol\b/gi, '<ol style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<li\b/gi, '<li style="margin-bottom: 2px; font-size: 10px; color: #333; line-height: 1.35;"');
+
+      return html + `<div style="font-size: 10px; color: #333; line-height: 1.35;">${styledHtml}</div>`;
+    }
+
+    // 3. Si la descripción es texto plano o Markdown
+    const lines = trimmedDesc.split('\n');
+    const parsedLines = lines.map((rawLine) => {
+      const line = rawLine.trim();
+      if (!line) {
+        return '<div style="height: 4px;"></div>';
+      }
+
+      // Viñetas: •, -, *, +
+      const bulletMatch = line.match(/^([•\-\*\+])\s+(.*)$/);
+      if (bulletMatch) {
+        const itemContent = formatInlineText(bulletMatch[2]);
+        return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 10px; color: #333; line-height: 1.35;">
+                  <span style="display: inline-block; width: 12px; min-width: 12px; color: #333; font-weight: bold; font-size: 11px; line-height: 1.2;">&bull;</span>
+                  <div style="flex: 1;">${itemContent}</div>
                 </div>`;
       }
+
+      // Lista numerada: 1., 2), etc.
+      const numberMatch = line.match(/^(\d+[\.\-\)])\s+(.*)$/);
+      if (numberMatch) {
+        const numPrefix = escapeHtml(numberMatch[1]);
+        const itemContent = formatInlineText(numberMatch[2]);
+        return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 10px; color: #333; line-height: 1.35;">
+                  <span style="display: inline-block; width: 16px; min-width: 16px; color: #333; font-weight: 700; font-size: 9.5px; line-height: 1.3;">${numPrefix}</span>
+                  <div style="flex: 1;">${itemContent}</div>
+                </div>`;
+      }
+
+      // Párrafo normal (incluyendo negritas negras)
+      return `<div style="margin-bottom: 2px; font-size: 10px; color: #333; line-height: 1.35;">${formatInlineText(line)}</div>`;
     }).join('');
+
+    return html + parsedLines;
   };
 
   const hasIva = (Number(cotizacion.iva || 0) > 0) || (cotizacion.lineas || []).some(l => Number(l.impuestoPorcentaje || 0) > 0);
@@ -4314,31 +4412,31 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
           <table class="table table-red mt-4">
               <thead>
                   <tr>
-                      <th width="${hasIva ? '40%' : '48%'}" style="text-align: left;">DESCRIPCIÓN</th>
-                      <th width="${hasIva ? '15%' : '17%'}" class="text-center">ENTREGA</th>
-                      <th class="text-center">CANT</th>
-                      <th class="text-end">PRECIO UNIT</th>
-                      ${hasIva ? '<th class="text-center">IVA</th>' : ''}
-                      <th class="text-end">IMPORTE</th>
+                      <th width="${hasIva ? '60%' : '67%'}" style="text-align: left; padding-left: 10px;">DESCRIPCIÓN</th>
+                      <th width="${hasIva ? '8%' : '9%'}" class="text-center" style="white-space: nowrap;">ENTREGA</th>
+                      <th width="${hasIva ? '6%' : '6%'}" class="text-center" style="white-space: nowrap;">CANT</th>
+                      <th width="${hasIva ? '11%' : '9%'}" class="text-center" style="white-space: nowrap;">PRECIO UNIT</th>
+                      ${hasIva ? '<th width="5%" class="text-center" style="white-space: nowrap;">IVA</th>' : ''}
+                      <th width="${hasIva ? '10%' : '9%'}" class="text-center" style="white-space: nowrap;">IMPORTE</th>
                   </tr>
               </thead>
               <tbody>
                   ${cotizacion.lineas.map(linea => `
                       <tr>
-                          <td>
+                          <td style="padding: 6px 10px;">
                               ${renderDescription(linea.productoNombre, linea.productoDescripcion)}
                           </td>
-                          <td class="text-center">
+                          <td class="text-center" style="white-space: nowrap;">
                               ${linea.tiempoEntrega || ''}
                           </td>
-                          <td class="text-center">${Number(linea.cantidad || 0).toFixed(1)}</td>
-                          <td class="text-end">$ ${formatMoney(linea.precioUnitario)}</td>
+                          <td class="text-center" style="white-space: nowrap;">${Number(linea.cantidad || 0).toFixed(1)}</td>
+                          <td class="text-center" style="white-space: nowrap;">$ ${formatMoney(linea.precioUnitario)}</td>
                           ${hasIva ? `
-                          <td class="text-center">
+                          <td class="text-center" style="white-space: nowrap;">
                               ${linea.impuestoPorcentaje || 0}%
                           </td>` : ''}
 
-                          <td class="text-end">$ ${formatMoney(linea.importe)}</td>
+                          <td class="text-center" style="white-space: nowrap;">$ ${formatMoney(linea.importe)}</td>
                       </tr>
                   `).join('')}
               </tbody>

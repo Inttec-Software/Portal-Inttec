@@ -17,6 +17,7 @@ import { ReportGenerator } from '@/utils/reportGenerator';
 import { formatFriendlyDate } from '@/utils/helpers';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
+import { VehiculosListSkeleton } from '@/components/skeleton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
@@ -178,10 +179,9 @@ export default function AdminVehiculosScreen() {
       </View>
 
       {isLoading ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando datos...</Text>
-        </View>
+        <ScrollView contentContainerStyle={{ padding: Spacing.two }} style={{ flex: 1 }}>
+          <VehiculosListSkeleton count={5} />
+        </ScrollView>
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: Spacing.four }} style={{ flex: 1 }}>
           {vehiculoModalVisible ? (

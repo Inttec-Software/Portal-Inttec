@@ -17,6 +17,7 @@ import {
   Pressable,
   Linking,
   Keyboard,
+  RefreshControl,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -28,6 +29,7 @@ import { GeminiService } from '@/services/gemini';
 import { CatalogService } from '@/services/catalogService';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { base64ToArrayBuffer } from '@/services/sync';
+import { VentasTableSkeleton, VentasCardsListSkeleton } from '@/components/skeleton';
 import { exportarCotizacionOdooPDF, cleanFolio } from '@/utils/reportGenerator';
 import { formatFriendlyDate } from '@/utils/helpers';
 import StepIndicator from '@/components/StepIndicator';
@@ -183,8 +185,34 @@ const showAlert = (title: string, message: string) => {
   }
 };
 
-const formatCurrency = (val: number) =>
-  '$' + val.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/**
+ * Formatea montos monetarios agregando comas para separar miles y millones ($1,234,567.89).
+ * Convierte de forma segura números, strings numéricos, null o undefined.
+ */
+export const formatCurrency = (val: number | string | null | undefined): string => {
+  if (val === undefined || val === null || val === '') return '$0.00';
+  const num = typeof val === 'number' ? val : Number(val);
+  if (isNaN(num)) return '$0.00';
+
+  const isNegative = num < 0;
+  const absNum = Math.abs(num);
+  const parts = absNum.toFixed(2).split('.');
+  // Separación explícita de miles y millones con comas
+  const integerWithCommas = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${isNegative ? '-' : ''}$${integerWithCommas}.${parts[1]}`;
+};
+
+export const formatNumberWithCommas = (val: number | string | null | undefined, decimals: number = 2): string => {
+  if (val === undefined || val === null || val === '') return '0.00';
+  const num = typeof val === 'number' ? val : Number(val);
+  if (isNaN(num)) return '0.00';
+
+  const isNegative = num < 0;
+  const absNum = Math.abs(num);
+  const parts = absNum.toFixed(decimals).split('.');
+  const integerWithCommas = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${isNegative ? '-' : ''}${integerWithCommas}${decimals > 0 ? '.' + parts[1] : ''}`;
+};
 
 const getTimestampFileName = (userId: string, ext: string) => {
   return `ventas/${userId}/${Date.now()}_factura.${ext}`;
@@ -264,14 +292,19 @@ const buildVentaSearchableText = (v: VentaConPago): string => {
     v.cfdi_uuid || '',
     v.precio_total_facturado !== undefined ? String(v.precio_total_facturado) : '',
     v.precio_total_facturado !== undefined ? formatCurrency(v.precio_total_facturado) : '',
+    v.precio_total_facturado !== undefined ? formatNumberWithCommas(v.precio_total_facturado) : '',
     v.total_pagado !== undefined ? String(v.total_pagado) : '',
     v.total_pagado !== undefined ? formatCurrency(v.total_pagado) : '',
+    v.total_pagado !== undefined ? formatNumberWithCommas(v.total_pagado) : '',
     v.saldo_pendiente !== undefined ? String(v.saldo_pendiente) : '',
     v.saldo_pendiente !== undefined ? formatCurrency(v.saldo_pendiente) : '',
+    v.saldo_pendiente !== undefined ? formatNumberWithCommas(v.saldo_pendiente) : '',
     v.costo_total !== undefined ? String(v.costo_total) : '',
     v.costo_total !== undefined ? formatCurrency(v.costo_total) : '',
+    v.costo_total !== undefined ? formatNumberWithCommas(v.costo_total) : '',
     v.utilidad_bruta !== undefined ? String(v.utilidad_bruta) : '',
     v.utilidad_bruta !== undefined ? formatCurrency(v.utilidad_bruta) : '',
+    v.utilidad_bruta !== undefined ? formatNumberWithCommas(v.utilidad_bruta) : '',
     ...getDateSearchStrings(v.fecha),
     ...getDateSearchStrings(v.fecha_ultimo_pago),
     ...getDateSearchStrings(v.created_at),
@@ -328,7 +361,8 @@ export default function VentasScreen() {
   const cachedVentas = ModuleCache.get<VentaConPago[]>('ventas_historial');
   const [activeTab, setActiveTab] = useState<'registrar' | 'historial'>('historial');
   const [ventasHistorial, setVentasHistorial] = useState<VentaConPago[]>(() => cachedVentas || []);
-  const [isLoadingHistorial, setIsLoadingHistorial] = useState(false);
+  const [isLoadingHistorial, setIsLoadingHistorial] = useState<boolean>(() => !cachedVentas || cachedVentas.length === 0);
+  const [isRefreshingHistorial, setIsRefreshingHistorial] = useState(false);
   const [historialSearch, setHistorialSearch] = useState('');
   const [filterDate, setFilterDate] = useState<Date | null>(null);
   const [showFilterDatePicker, setShowFilterDatePicker] = useState(false);
@@ -378,7 +412,7 @@ export default function VentasScreen() {
       setCurrentUser(user);
 
       // Cargar historial de ventas inicialmente
-      loadHistorial(true);
+      loadHistorial(Boolean(cachedVentas && cachedVentas.length > 0));
 
       // Cargar catálogo de clientes y sucursales
       try {
@@ -477,7 +511,7 @@ export default function VentasScreen() {
 
   // === Cargar Historial ===
   const loadHistorial = async (silent = false) => {
-    if (!silent && !ModuleCache.has('ventas_historial')) {
+    if (!silent) {
       setIsLoadingHistorial(true);
     }
     try {
@@ -509,7 +543,13 @@ export default function VentasScreen() {
       console.error('Error loading sales history:', err);
     } finally {
       setIsLoadingHistorial(false);
+      setIsRefreshingHistorial(false);
     }
+  };
+
+  const handleRefreshHistorial = () => {
+    setIsRefreshingHistorial(true);
+    loadHistorial(true);
   };
 
   const loadPagosForSelectedVenta = async (ventaId: string, currentVentaObj?: VentaConPago) => {
@@ -2336,6 +2376,7 @@ export default function VentasScreen() {
 
   const renderHistorial = () => (
     <View style={{ flex: 1 }}>
+      {renderScreenHeader()}
       {/* Buscador */}
       <View
         style={[
@@ -2433,39 +2474,64 @@ export default function VentasScreen() {
       )}
 
       {isLoadingHistorial ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>Cargando historial...</Text>
-        </View>
+        isDesktop ? (
+          <ScrollView
+            style={{ flex: 1 }}
+            refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+          >
+            <VentasTableSkeleton count={8} />
+          </ScrollView>
+        ) : (
+          <ScrollView
+            style={{ flex: 1 }}
+            refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+          >
+            <VentasCardsListSkeleton count={5} />
+          </ScrollView>
+        )
       ) : ventasHistorial.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="receipt-outline" size={48} color={themeColors.textSecondary} />
-          <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-            No hay ventas registradas aún.
-          </Text>
-        </View>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexGrow: 1 }}
+          refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+        >
+          <View style={styles.emptyContainer}>
+            <Ionicons name="receipt-outline" size={48} color={themeColors.textSecondary} />
+            <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
+              No hay ventas registradas aún.
+            </Text>
+          </View>
+        </ScrollView>
       ) : ventasFiltradas.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="search-outline" size={48} color={themeColors.textSecondary} />
-          <Text style={[styles.emptyText, { color: themeColors.textSecondary, marginTop: Spacing.one }]}>
-            No se encontraron ventas que coincidan con los criterios de búsqueda.
-          </Text>
-          <HoverTooltip text="Restablecer filtros y mostrar todas las ventas" position="bottom">
-            <TouchableOpacity
-              onPress={() => {
-                setHistorialSearch('');
-                setFilterDate(null);
-              }}
-              style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}
-              accessibilityLabel="Restablecer filtros y búsqueda"
-            >
-              <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>Limpiar búsqueda</Text>
-            </TouchableOpacity>
-          </HoverTooltip>
-        </View>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexGrow: 1 }}
+          refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+        >
+          <View style={styles.emptyContainer}>
+            <Ionicons name="search-outline" size={48} color={themeColors.textSecondary} />
+            <Text style={[styles.emptyText, { color: themeColors.textSecondary, marginTop: Spacing.one }]}>
+              No se encontraron ventas que coincidan con los criterios de búsqueda.
+            </Text>
+            <HoverTooltip text="Restablecer filtros y mostrar todas las ventas" position="bottom">
+              <TouchableOpacity
+                onPress={() => {
+                  setHistorialSearch('');
+                  setFilterDate(null);
+                }}
+                style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}
+                accessibilityLabel="Restablecer filtros y búsqueda"
+              >
+                <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>Limpiar búsqueda</Text>
+              </TouchableOpacity>
+            </HoverTooltip>
+          </View>
+        </ScrollView>
       ) : isDesktop ? (
-        <ScrollView style={{ flex: 1 }}>
-          {renderScreenHeader()}
+        <ScrollView
+          style={{ flex: 1 }}
+          refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
+        >
           <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
             <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '13%', fontWeight: 'bold' }]}>Cliente</Text>
@@ -2474,9 +2540,9 @@ export default function VentasScreen() {
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Referencia</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold' }]}>Proyecto</Text>
               <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Estado Pago</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Total Venta</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right' }]}>Pagado / Saldo</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold', textAlign: 'right' }]}>Utilidad</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right', paddingRight: 8 }]}>Total Venta</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold', textAlign: 'right', paddingRight: 8 }]}>Pagado / Saldo</Text>
+              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '8%', fontWeight: 'bold', textAlign: 'right', paddingRight: 4 }]}>Utilidad</Text>
               <View style={{ width: '12%', alignItems: 'center' }}>
                 <Text style={{ fontSize: 11, fontWeight: 'bold', color: themeColors.text }}>Acciones</Text>
               </View>
@@ -2519,10 +2585,10 @@ export default function VentasScreen() {
                       </View>
                     </View>
 
-                    <Text style={[styles.tableCell, { width: '11%', fontWeight: '700', color: themeColors.accent, textAlign: 'right' }]} numberOfLines={1}>{formatCurrency(item.precio_total_facturado)}</Text>
+                    <Text style={[styles.tableCell, { width: '11%', fontWeight: '700', color: themeColors.accent, textAlign: 'right', paddingRight: 8 }]} numberOfLines={1}>{formatCurrency(item.precio_total_facturado)}</Text>
                     
                     {/* Pagado / Saldo Pendiente */}
-                    <View style={{ width: '11%', alignItems: 'flex-end', justifyContent: 'center' }}>
+                    <View style={{ width: '11%', alignItems: 'flex-end', justifyContent: 'center', paddingRight: 8 }}>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.success }} numberOfLines={1}>
                         {formatCurrency(totalPag)}
                       </Text>
@@ -2531,7 +2597,7 @@ export default function VentasScreen() {
                       </Text>
                     </View>
 
-                    <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right' }]} numberOfLines={1}>{formatCurrency(item.utilidad_bruta)}</Text>
+                    <Text style={[styles.tableCell, { width: '8%', fontWeight: '700', color: isProfit ? themeColors.success : themeColors.danger, textAlign: 'right', paddingRight: 4 }]} numberOfLines={1}>{formatCurrency(item.utilidad_bruta)}</Text>
                     
                     {/* Acciones */}
                     <View style={{ width: '12%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 4, overflow: 'visible', zIndex: 10 }}>
@@ -2603,7 +2669,6 @@ export default function VentasScreen() {
         </ScrollView>
       ) : (
         <FlatList scrollEnabled={true} style={{ flex: 1 }}
-          ListHeaderComponent={renderScreenHeader()}
           data={ventasFiltradas}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
@@ -2686,8 +2751,8 @@ export default function VentasScreen() {
                 ) : null}
 
                 {/* 4. Totales y Saldos de Pago */}
-                <View style={[styles.historialTotals, { marginBottom: 8, backgroundColor: themeColors.background, borderColor: themeColors.border + '40', borderWidth: 1, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8 }]}>
-                  <View style={{ alignItems: 'flex-start', flex: 1 }}>
+                <View style={[styles.historialTotals, { marginBottom: 8, backgroundColor: themeColors.background, borderColor: themeColors.border + '40', borderWidth: 1, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8, gap: 6 }]}>
+                  <View style={{ alignItems: 'flex-start', flex: 0.9 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>FECHA</Text>
                     <Text style={[styles.historialFecha, { color: themeColors.text, fontSize: 11, fontWeight: '700', marginTop: 1 }]}>{formatFriendlyDate(item.fecha)}</Text>
                     {item.fecha_ultimo_pago && (
@@ -2696,21 +2761,21 @@ export default function VentasScreen() {
                       </Text>
                     )}
                   </View>
-                  <View style={{ alignItems: 'center', flex: 1 }}>
+                  <View style={{ alignItems: 'center', flex: 1.1, paddingHorizontal: 2 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>TOTAL</Text>
-                    <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '800', marginTop: 1 }}>
+                    <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '800', marginTop: 1 }} numberOfLines={1}>
                       {formatCurrency(item.precio_total_facturado)}
                     </Text>
-                    <Text style={{ color: themeColors.success, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
+                    <Text style={{ color: themeColors.success, fontSize: 10, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>
                       Pag: {formatCurrency(totalPag)}
                     </Text>
                   </View>
-                  <View style={{ alignItems: 'flex-end', flex: 1 }}>
+                  <View style={{ alignItems: 'flex-end', flex: 1.1, paddingLeft: 2 }}>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 9, fontWeight: '700' }}>SALDO PEND.</Text>
-                    <Text style={{ color: saldoPen > 0 ? themeColors.danger : themeColors.success, fontSize: 12, fontWeight: '800', marginTop: 1 }}>
+                    <Text style={{ color: saldoPen > 0 ? themeColors.danger : themeColors.success, fontSize: 12, fontWeight: '800', marginTop: 1 }} numberOfLines={1}>
                       {formatCurrency(saldoPen)}
                     </Text>
-                    <Text style={{ color: isProfit ? themeColors.success : themeColors.danger, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
+                    <Text style={{ color: isProfit ? themeColors.success : themeColors.danger, fontSize: 10, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>
                       Util: {formatCurrency(item.utilidad_bruta)}
                     </Text>
                   </View>
@@ -2798,8 +2863,7 @@ export default function VentasScreen() {
               </TouchableOpacity>
             );
           }}
-          refreshing={isLoadingHistorial}
-          onRefresh={loadHistorial}
+          refreshControl={<RefreshControl refreshing={isRefreshingHistorial} onRefresh={handleRefreshHistorial} tintColor={themeColors.accent} />}
         />
       )}
     </View>
@@ -3044,19 +3108,19 @@ export default function VentasScreen() {
 
                     return (
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', padding: 12, borderRadius: 10, marginBottom: 12, borderWidth: 1, borderColor: themeColors.border }}>
-                        <View style={{ alignItems: 'center', flex: 1 }}>
+                        <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
                           <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>TOTAL VENTA</Text>
                           <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
                             {formatCurrency(selectedVenta.precio_total_facturado)}
                           </Text>
                         </View>
-                        <View style={{ alignItems: 'center', flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}>
+                        <View style={{ alignItems: 'center', flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border, paddingHorizontal: 6 }}>
                           <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>TOTAL PAGADO</Text>
                           <Text style={{ color: themeColors.success, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
                             {formatCurrency(totalPag)}
                           </Text>
                         </View>
-                        <View style={{ alignItems: 'center', flex: 1 }}>
+                        <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
                           <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>SALDO PENDIENTE</Text>
                           <Text style={{ color: saldoPen > 0 ? themeColors.danger : themeColors.success, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
                             {formatCurrency(saldoPen)}
@@ -3125,6 +3189,11 @@ export default function VentasScreen() {
                           placeholderTextColor={themeColors.textSecondary}
                           keyboardType="numeric"
                         />
+                        {Number(pagoMonto) > 0 && (
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.success, marginTop: 3 }}>
+                            {formatCurrency(pagoMonto)}
+                          </Text>
+                        )}
                       </View>
 
                       <View style={{ flex: 1 }}>
@@ -3629,19 +3698,19 @@ export default function VentasScreen() {
                   </View>
 
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)', padding: 12, borderRadius: 10, marginTop: 12, borderWidth: 1, borderColor: themeColors.border }}>
-                    <View style={{ alignItems: 'center', flex: 1 }}>
+                    <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
                       <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>TOTAL VENTA</Text>
                       <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
                         {formatCurrency(selectedVenta.precio_total_facturado)}
                       </Text>
                     </View>
-                    <View style={{ alignItems: 'center', flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}>
+                    <View style={{ alignItems: 'center', flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border, paddingHorizontal: 6 }}>
                       <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>PAGADO</Text>
                       <Text style={{ color: themeColors.success, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
                         {formatCurrency(selectedVentaPagos.reduce((s, p) => s + (Number(p.monto) || 0), 0))}
                       </Text>
                     </View>
-                    <View style={{ alignItems: 'center', flex: 1 }}>
+                    <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
                       <Text style={{ color: themeColors.textSecondary, fontSize: 10, fontWeight: '700' }}>SALDO PENDIENTE</Text>
                       <Text style={{ color: (selectedVenta.saldo_pendiente || 0) > 0 ? themeColors.danger : themeColors.success, fontSize: 13, fontWeight: '800', marginTop: 2 }}>
                         {formatCurrency(selectedVenta.saldo_pendiente !== undefined ? selectedVenta.saldo_pendiente : Math.max(0, selectedVenta.precio_total_facturado - selectedVentaPagos.reduce((s, p) => s + (Number(p.monto) || 0), 0)))}
@@ -3667,6 +3736,11 @@ export default function VentasScreen() {
                         placeholderTextColor={themeColors.textSecondary}
                         keyboardType="numeric"
                       />
+                      {Number(pagoMonto) > 0 && (
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.success, marginTop: 3 }}>
+                          {formatCurrency(pagoMonto)}
+                        </Text>
+                      )}
                     </View>
 
                     <View style={{ flex: 1 }}>
