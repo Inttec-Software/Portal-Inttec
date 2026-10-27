@@ -36,6 +36,7 @@ import StepIndicator from '@/components/StepIndicator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
 import PaginationControls from '@/components/PaginationControls';
+import { stripHtmlToPlainText } from '@/components/FormattedDescription';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -471,7 +472,8 @@ export default function VentasScreen() {
           
           if (data.lineas && Array.isArray(data.lineas)) {
              const partidasUI: PartidaEditable[] = data.lineas.map((l: any, idx: number) => {
-               const desc = [l.productoNombre, l.productoDescripcion].filter(Boolean).join(' - ');
+               const cleanDesc = stripHtmlToPlainText(l.productoDescripcion);
+               const desc = [l.productoNombre, cleanDesc].filter(Boolean).join(' - ');
                return {
                  id: `cot_${Date.now()}_${idx}`,
                  descripcion: desc || 'Sin descripción',

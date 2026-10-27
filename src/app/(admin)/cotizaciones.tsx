@@ -15,6 +15,7 @@ import { useAuth } from '@/context/AuthContext';
 import { ModuleCache } from '@/services/moduleCache';
 import { CotizacionesTableSkeleton, CotizacionesCardsListSkeleton } from '@/components/skeleton';
 import PaginationControls from '@/components/PaginationControls';
+import FormattedDescription, { stripHtmlToPlainText } from '@/components/FormattedDescription';
 const getStatusConfig = (estado: string, isDark: boolean) => {
   const norm = (estado || '').toLowerCase().trim();
   switch(norm) {
@@ -458,7 +459,8 @@ export default function CotizacionesListScreen() {
   };
 
   const handleComments = (cot: any) => {
-    const comments = cot.lineas?.[0]?.productoDescripcion || 'Sin comentarios registrados.';
+    const rawComments = cot.lineas?.[0]?.productoDescripcion;
+    const comments = rawComments ? stripHtmlToPlainText(rawComments) : 'Sin comentarios registrados.';
     if (Platform.OS === 'web') {
       window.alert(`Notas y descripción de Cotización ${cot.folio}:\n\n${comments}`);
     } else {
@@ -632,7 +634,13 @@ export default function CotizacionesListScreen() {
                       cot.lineas.map((linea: any, lIndex: number) => (
                         <View key={lIndex} style={styles.detailLineItem}>
                           <Text style={{ width: '40%', fontWeight: '500', color: themeColors.text }}>{linea.productoNombre}</Text>
-                          <Text style={{ width: '30%', color: themeColors.textSecondary, fontSize: 13 }}>{linea.productoDescripcion}</Text>
+                          <View style={{ width: '30%', paddingRight: 8 }}>
+                            <FormattedDescription
+                              content={linea.productoDescripcion}
+                              style={{ color: themeColors.textSecondary, fontSize: 13, lineHeight: 18 }}
+                              boldColor={themeColors.text}
+                            />
+                          </View>
                           <Text style={{ width: '10%', textAlign: 'right', color: themeColors.textSecondary }}>Cant: {linea.cantidad}</Text>
                           <Text style={{ width: '10%', textAlign: 'right', color: themeColors.textSecondary }}>P.U: {formatearMoneda(linea.precioUnitario)}</Text>
                           <Text style={{ width: '10%', textAlign: 'right', fontWeight: 'bold', color: themeColors.text }}>{formatearMoneda(linea.importe || (linea.cantidad * linea.precioUnitario))}</Text>
@@ -1126,7 +1134,7 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: themeColors.border,
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   detailFooter: {
     marginTop: 12,
