@@ -83,6 +83,7 @@ app.use((req, res, next) => {
 
 // 1. HTTP Security Headers (Helmet)
 app.use(helmet());
+app.disable('x-powered-by');
 
 // 2. Rate Limiting (Protección contra DDoS y Brute Force) - Excluir checador físico Hikvision
 const apiLimiter = rateLimit({
@@ -95,8 +96,27 @@ const apiLimiter = rateLimit({
 });
 app.use('/api/', apiLimiter);
 
+// Límite estricto de intentos de inicio de sesión contra fuerza bruta
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  message: { error: 'Demasiados intentos de inicio de sesión. Por seguridad, intente de nuevo en 15 minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use('/api/auth/login', loginLimiter);
+
 const corsOptions: cors.CorsOptions = {
-  origin: '*',
+  origin: (origin, callback) => {
+    // Permitir llamadas sin origin (Expo Go móvil, apps nativas, server-to-server)
+    if (!origin) return callback(null, true);
+    // Permitir cualquier subdominio de inttec.net
+    if (/^https?:\/\/([a-zA-Z0-9-]+\.)*inttec\.net(:\d+)?$/.test(origin)) return callback(null, true);
+    // Permitir localhost e IPs locales de desarrollo LAN para Expo
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin)) return callback(null, true);
+    if ((process.env.APP_ENV || '').toLowerCase() === 'development') return callback(null, true);
+    return callback(new Error('Bloqueado por política CORS'));
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
     'Content-Type',
@@ -106,7 +126,8 @@ const corsOptions: cors.CorsOptions = {
     'x-tenant-company',
     'x-tenant-env',
     'x-query-client'
-  ]
+  ],
+  credentials: true
 };
 
 app.use(cors(corsOptions));
