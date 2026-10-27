@@ -123,6 +123,9 @@ export default function AsistenciaSemanalCard({
   const activeTotalHorasStr = isMes
     ? mesData.totalHorasPeriodoStr
     : semanaData.totalHorasSemanaStr;
+  const activeTotalMinutos = isMes
+    ? mesData.totalMinutosPeriodo
+    : semanaData.totalMinutosSemana;
   const activeDiasLaborados = isMes ? mesData.diasLaborados : semanaData.diasLaborados;
   const activeTotalDias = isMes ? mesData.dias.length : 7;
   const activeTurnosTotales = isMes ? mesData.turnosTotales : semanaData.turnosTotales;
@@ -296,12 +299,47 @@ export default function AsistenciaSemanalCard({
         <View style={styles.summaryMetricCol}>
           <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>TOTAL HORAS</Text>
           <View style={styles.hoursValueRow}>
-            <Ionicons name="time" size={16} color={!isMes && semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text} style={{ marginRight: 4 }} />
-            <Text style={[styles.summaryHoursText, { color: !isMes && semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text }]}>
-              {isMes ? activeTotalHorasStr : formatContadorJornada48(semanaData.totalMinutosRegulares)}
+            <Ionicons
+              name="time"
+              size={15}
+              color={activeTotalMinutos >= 2880 ? '#16a34a' : themeColors.text}
+              style={{ marginRight: 4 }}
+            />
+            <Text
+              style={[
+                styles.summaryHoursText,
+                { color: activeTotalMinutos >= 2880 ? '#16a34a' : themeColors.text },
+              ]}
+            >
+              {activeTotalHorasStr}
             </Text>
           </View>
         </View>
+
+        {!isMes && (
+          <>
+            <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
+            <View style={styles.summaryMetricCol}>
+              <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>JORNADA</Text>
+              <View style={styles.hoursValueRow}>
+                <Ionicons
+                  name="calendar-outline"
+                  size={14}
+                  color={semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.summaryHoursText,
+                    { color: semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text },
+                  ]}
+                >
+                  {formatContadorJornada48(semanaData.totalMinutosRegulares)}
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
 
         <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
 
@@ -840,7 +878,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   summaryHoursText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '800',
   },
   summarySecondaryText: {
