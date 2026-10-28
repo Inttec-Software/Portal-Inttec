@@ -59,7 +59,7 @@ export const registrarEntrada = async (req: Request, res: Response) => {
     // Auto-cierre de turnos anteriores abiertos (olvidos de checada): fijar salida a las 18:00:00
     if (payload.empleado_id && payload.fecha) {
       try {
-        const updateQuery = `UPDATE asistencias SET hora_salida = '18:00:00' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`;
+        const updateQuery = `UPDATE asistencias SET hora_salida = '18:00:00', descripcion = 'Cierre automático 6:00 PM (olvido de checada)', direccion_salida = 'Cierre automático 6:00 PM (olvido de checada)' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`;
         await Promise.allSettled([
           poolInttec.query(updateQuery, [payload.empleado_id, payload.fecha]),
           poolDaravisa.query(updateQuery, [payload.empleado_id, payload.fecha]),
@@ -478,11 +478,12 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
       // Auto-cierre de turnos anteriores abiertos de días pasados
       const autoClosePayload = {
         hora_salida: '18:00:00',
-        descripcion: 'Cierre automático 6:00 PM (olvido de checada)'
+        descripcion: 'Cierre automático 6:00 PM (olvido de checada)',
+        direccion_salida: 'Cierre automático 6:00 PM (olvido de checada)',
       };
       await Promise.allSettled([
-        poolInttec.query("UPDATE asistencias SET hora_salida = $1, descripcion = $2 WHERE empleado_id = $3 AND fecha < $4 AND hora_salida IS NULL", [autoClosePayload.hora_salida, autoClosePayload.descripcion, empleadoId, fechaJornada]),
-        poolDaravisa.query("UPDATE asistencias SET hora_salida = $1, descripcion = $2 WHERE empleado_id = $3 AND fecha < $4 AND hora_salida IS NULL", [autoClosePayload.hora_salida, autoClosePayload.descripcion, empleadoId, fechaJornada]),
+        poolInttec.query("UPDATE asistencias SET hora_salida = $1, descripcion = $2, direccion_salida = $3 WHERE empleado_id = $4 AND fecha < $5 AND hora_salida IS NULL", [autoClosePayload.hora_salida, autoClosePayload.descripcion, autoClosePayload.direccion_salida, empleadoId, fechaJornada]),
+        poolDaravisa.query("UPDATE asistencias SET hora_salida = $1, descripcion = $2, direccion_salida = $3 WHERE empleado_id = $4 AND fecha < $5 AND hora_salida IS NULL", [autoClosePayload.hora_salida, autoClosePayload.descripcion, autoClosePayload.direccion_salida, empleadoId, fechaJornada]),
       ]);
 
       const entradaPayload = {

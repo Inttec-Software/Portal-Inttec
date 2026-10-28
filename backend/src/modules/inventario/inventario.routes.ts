@@ -16,7 +16,9 @@ import {
   hardDeleteProducto,
   getMovimientosInventario,
   getFirmaMovimiento,
-  eliminarMovimiento
+  eliminarMovimiento,
+  getInventarioTodosEmpleados,
+  devolverMaterialAdmin
 } from './inventario.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -52,6 +54,8 @@ router.post('/importar', invMutate, guardarImportacion);
 router.get('/verificar-folio', verificarFolioFactura);
 router.post('/catalogos/:tipo', invMutate, crearCatalogo);
 router.get('/empleado/:id/retribuciones', cacheMiddleware(15), getEmpleadoRetribuciones);
+router.get('/inventarios-empleados', getInventarioTodosEmpleados);
+router.post('/devolver-personal', invMutate, devolverMaterialAdmin);
 
 export default router;
 

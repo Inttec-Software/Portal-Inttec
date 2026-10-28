@@ -42,7 +42,6 @@ example
 # generated native folders
 /ios
 /android
-/docker
 
 # logs & temp reports
 *.log

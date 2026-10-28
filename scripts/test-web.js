@@ -192,7 +192,7 @@ async function runFrontendTests() {
   
   try {
     browser = await chromium.launch({
-      headless: false,
+      headless: process.env.HEADLESS !== 'false',
       args: ['--start-maximized']
     });
     context = await browser.newContext({ viewport: null });

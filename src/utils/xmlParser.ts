@@ -20,6 +20,9 @@ export interface FacturaParsed {
   rfcEmisor: string;
   nombreEmisor: string;
   rfcReceptor: string;
+  nombreReceptor?: string;
+  rfcPac?: string;
+  fechaCertificacionSat?: string;
   fechaEmision: string;
   subtotal: number;
   descuento: number;
@@ -28,6 +31,7 @@ export interface FacturaParsed {
   retencionIva: number;
   total: number;
   moneda: string;
+  tipoCambio?: number;
   tipoComprobante: string; // 'I', 'E', 'P', 'N', 'T'
   estadoSat: string;
   conceptos: ConceptoParsed[];
@@ -62,10 +66,24 @@ export function parseCfdiXml(xmlString: string): FacturaParsed {
 
   // Receptor
   let rfcReceptor = '';
+  let nombreReceptor = '';
   const receptorTagMatch = xmlString.match(/<cfdi:Receptor\s+([^>]+)>/i);
   if (receptorTagMatch && receptorTagMatch[1]) {
     const rfcRecM = receptorTagMatch[1].match(/\bRfc="([^"]+)"/i);
     if (rfcRecM) rfcReceptor = rfcRecM[1].trim().toUpperCase();
+    const nomRecM = receptorTagMatch[1].match(/\bNombre="([^"]+)"/i);
+    if (nomRecM) nombreReceptor = nomRecM[1].trim();
+  }
+
+  // Timbre Fiscal Digital (PAC y Fecha Certificación)
+  let rfcPac = '';
+  let fechaCertificacionSat = '';
+  const tfdTagMatch = xmlString.match(/<tfd:TimbreFiscalDigital\s+([^>]+)>/i);
+  if (tfdTagMatch && tfdTagMatch[1]) {
+    const rfcPacM = tfdTagMatch[1].match(/\bRfcProvCertif="([^"]+)"/i);
+    if (rfcPacM) rfcPac = rfcPacM[1].trim().toUpperCase();
+    const fechaTimbradoM = tfdTagMatch[1].match(/\bFechaTimbrado="([^"]+)"/i);
+    if (fechaTimbradoM) fechaCertificacionSat = fechaTimbradoM[1].trim();
   }
 
   // Comprobante atributos (usar límites de palabra \b para no confundir Total con SubTotal)
@@ -75,11 +93,13 @@ export function parseCfdiXml(xmlString: string): FacturaParsed {
   const totalMatch = xmlString.match(/\bTotal="([^"]+)"/i);
   const monedaMatch = xmlString.match(/\bMoneda="([^"]+)"/i);
   const tipoMatch = xmlString.match(/\bTipoDeComprobante="([^"]+)"/i);
+  const tipoCambioMatch = xmlString.match(/\bTipoCambio="([^"]+)"/i);
 
   const subtotal = subtotalMatch ? parseFloat(subtotalMatch[1]) : 0;
   const descuento = descuentoMatch ? parseFloat(descuentoMatch[1]) : 0;
   const total = totalMatch ? parseFloat(totalMatch[1]) : 0;
   const moneda = monedaMatch ? monedaMatch[1].trim().toUpperCase() : 'MXN';
+  const tipoCambio = tipoCambioMatch ? parseFloat(tipoCambioMatch[1]) || 1 : 1;
   const tipoComprobante = tipoMatch ? tipoMatch[1].trim().toUpperCase() : 'I';
   const fechaEmision = fechaMatch ? fechaMatch[1] : new Date().toISOString();
 
@@ -130,6 +150,9 @@ export function parseCfdiXml(xmlString: string): FacturaParsed {
     rfcEmisor,
     nombreEmisor,
     rfcReceptor,
+    nombreReceptor: nombreReceptor || undefined,
+    rfcPac: rfcPac || undefined,
+    fechaCertificacionSat: fechaCertificacionSat || undefined,
     fechaEmision,
     subtotal,
     descuento,
@@ -138,6 +161,7 @@ export function parseCfdiXml(xmlString: string): FacturaParsed {
     retencionIva,
     total,
     moneda,
+    tipoCambio,
     tipoComprobante,
     estadoSat: 'VIGENTE',
     conceptos,

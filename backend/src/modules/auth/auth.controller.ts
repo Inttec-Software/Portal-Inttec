@@ -49,7 +49,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const secret = process.env.JWT_SECRET || 'super_secret_jwt_key_cambiar_en_produccion';
+    const secret = process.env.JWT_SECRET || process.env.JWT_SCRET || 'super_secret_jwt_key_cambiar_en_produccion';
     
     const token = jwt.sign(
       { 

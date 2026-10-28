@@ -20,6 +20,8 @@ import { AuthService, Usuario, Evidencia, supabase } from '@/services/supabase';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
+import { EvidenciasTableSkeleton, EvidenciasCardsListSkeleton } from '@/components/skeleton';
+import PaginationControls from '@/components/PaginationControls';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -40,6 +42,8 @@ export default function AdminEvidenciasScreen() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Modal de Detalles
@@ -122,6 +126,16 @@ export default function AdminEvidenciasScreen() {
     return result;
   }, [searchQuery, selectedEmployeeId, evidencias]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedEmployeeId]);
+
+  const totalPages = Math.ceil(filteredEvidencias.length / pageSize) || 1;
+  const paginatedEvidencias = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredEvidencias.slice(start, start + pageSize);
+  }, [filteredEvidencias, currentPage, pageSize]);
+
   const parseTrabajosList = (descStr: string) => {
     if (!descStr) return [];
     if (descStr.trim().startsWith('[')) {
@@ -183,12 +197,25 @@ export default function AdminEvidenciasScreen() {
 
       {/* Listado de Reportes */}
       {isLoading ? (
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-          <Text style={{ color: themeColors.textSecondary, marginTop: Spacing.one }}>
-            Cargando evidencias...
-          </Text>
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          <View style={styles.header}>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
+            <View style={{ width: 40 }} />
+          </View>
+          <View style={styles.searchContainer}>
+            <CustomInput
+              placeholder="Buscar por cliente, descripción, material o técnico..."
+              value=""
+              editable={false}
+              iconName="search-outline"
+            />
+          </View>
+          {isDesktop ? (
+            <EvidenciasTableSkeleton count={8} />
+          ) : (
+            <EvidenciasCardsListSkeleton count={6} />
+          )}
+        </ScrollView>
       ) : isDesktop ? (
         <ScrollView style={{ flex: 1 }}>
           {/* Header */}
@@ -261,7 +288,7 @@ export default function AdminEvidenciasScreen() {
                 <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>No hay evidencias registradas.</Text>
               </View>
             ) : (
-              filteredEvidencias.map((item) => (
+              paginatedEvidencias.map((item) => (
                 <Pressable
                   key={item.id}
                   onPress={() => {
@@ -290,6 +317,23 @@ export default function AdminEvidenciasScreen() {
               ))
             )}
             </View>
+
+            {filteredEvidencias.length > 0 && (
+              <PaginationControls
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={filteredEvidencias.length}
+                itemsPerPage={pageSize}
+                onPageChange={setCurrentPage}
+                onItemsPerPageChange={(newSize: number) => {
+                  setPageSize(newSize);
+                  setCurrentPage(1);
+                }}
+                itemsPerPageOptions={[20, 25, 50, 100]}
+                isLoading={isLoading}
+                style={{ marginTop: 14, marginBottom: 24 }}
+              />
+            )}
           </View>
         </ScrollView>
       ) : (
@@ -353,9 +397,27 @@ export default function AdminEvidenciasScreen() {
           maxToRenderPerBatch={8}
           windowSize={5}
           removeClippedSubviews={true}
-          data={filteredEvidencias}
+          data={paginatedEvidencias}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          ListFooterComponent={
+            filteredEvidencias.length > 0 ? (
+              <PaginationControls
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={filteredEvidencias.length}
+                itemsPerPage={pageSize}
+                onPageChange={setCurrentPage}
+                onItemsPerPageChange={(newSize: number) => {
+                  setPageSize(newSize);
+                  setCurrentPage(1);
+                }}
+                itemsPerPageOptions={[20, 25, 50, 100]}
+                isLoading={isLoading}
+                style={{ marginTop: 14, marginBottom: 24 }}
+              />
+            ) : null
+          }
           refreshing={isRefreshing}
           onRefresh={() => refreshData(true)}
           renderItem={({ item }) => (

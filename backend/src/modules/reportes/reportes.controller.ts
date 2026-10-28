@@ -41,6 +41,167 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
+    const isPaginated = req.query.page !== undefined || (req.query.limit !== undefined && req.query.limit !== 'all');
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.max(1, Math.min(200, parseInt(req.query.limit as string, 10) || 25));
+    const offset = (page - 1) * limit;
+
+    const tab = req.query.tab as string; // 'pendientes' | 'historial' | 'todos'
+    const facturaFilter = req.query.facturaFilter as string; // 'TODOS' | 'FACTURADOS' | 'PENDIENTE_ENTREGA' | 'NO_FACTURADOS'
+    const search = (req.query.search as string || '').trim();
+    const startDate = (req.query.startDate as string || '').trim();
+    const endDate = (req.query.endDate as string || '').trim();
+    const skipCatalogs = req.query.skipCatalogs === 'true' || req.query.skipCatalogs === '1';
+
+    if (isPaginated) {
+      // 1. Condiciones base para filtros globales (fechas y búsqueda)
+      const baseConditions: string[] = [];
+      const baseParams: any[] = [];
+
+      if (startDate) {
+        baseParams.push(startDate);
+        baseConditions.push(`COALESCE(g.fecha_comprobante::text, substring(g.created_at::text, 1, 10)) >= $${baseParams.length}`);
+      }
+      if (endDate) {
+        baseParams.push(endDate);
+        baseConditions.push(`COALESCE(g.fecha_comprobante::text, substring(g.created_at::text, 1, 10)) <= $${baseParams.length}`);
+      }
+
+      if (search) {
+        baseParams.push(`%${search}%`);
+        const pIdx = baseParams.length;
+
+        const numericQuery = search.replace(/[$,\s]/g, '');
+        let amountMatchSql = '';
+        if (numericQuery && !isNaN(Number(numericQuery))) {
+          baseParams.push(`%${numericQuery}%`);
+          amountMatchSql = ` OR g.monto::text LIKE $${baseParams.length}`;
+        }
+
+        baseConditions.push(`(
+          g.empleado_nombre ILIKE $${pIdx} OR
+          g.detalle_servicio_proyecto ILIKE $${pIdx} OR
+          g.motivo_sin_factura ILIKE $${pIdx} OR
+          EXISTS (SELECT 1 FROM proveedores p WHERE p.id = g.proveedor_id AND (p.nombre ILIKE $${pIdx} OR p.rfc ILIKE $${pIdx})) OR
+          EXISTS (SELECT 1 FROM clientes cl WHERE cl.id = g.cliente_id AND cl.nombre ILIKE $${pIdx}) OR
+          EXISTS (SELECT 1 FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id AND sc.nombre ILIKE $${pIdx}) OR
+          EXISTS (SELECT 1 FROM subcategorias sub WHERE sub.id = g.subcategoria_id AND sub.nombre ILIKE $${pIdx}) OR
+          EXISTS (
+            SELECT 1 FROM subcategorias sub 
+            JOIN categorias cat ON cat.id = sub.categoria_id 
+            WHERE sub.id = g.subcategoria_id AND cat.nombre ILIKE $${pIdx}
+          )
+          ${amountMatchSql}
+        )`);
+      }
+
+      const baseWhereSql = baseConditions.length > 0 ? `WHERE ${baseConditions.join(' AND ')}` : '';
+
+      // 2. Condiciones específicas para la vista activa (tab y facturación)
+      const viewConditions = [...baseConditions];
+      const viewParams = [...baseParams];
+
+      if (tab === 'pendientes') {
+        viewConditions.push(`g.status = 'PENDING'`);
+      } else if (tab === 'historial') {
+        viewConditions.push(`g.status IN ('APPROVED', 'REJECTED', 'ACTION_REQUIRED')`);
+        
+        if (facturaFilter === 'FACTURADOS') {
+          viewConditions.push(`g.facturado = true`);
+        } else if (facturaFilter === 'PENDIENTE_ENTREGA') {
+          viewConditions.push(`(g.facturado IS NOT TRUE AND UPPER(COALESCE(g.motivo_sin_factura, '')) LIKE '%PENDIENTE%')`);
+        } else if (facturaFilter === 'NO_FACTURADOS') {
+          viewConditions.push(`(g.facturado IS NOT TRUE AND (g.motivo_sin_factura IS NULL OR UPPER(g.motivo_sin_factura) NOT LIKE '%PENDIENTE%'))`);
+        }
+      }
+
+      const viewWhereSql = viewConditions.length > 0 ? `WHERE ${viewConditions.join(' AND ')}` : '';
+
+      // 3. Ejecutar consultas en paralelo
+      const queryPromises: Promise<any>[] = [
+        // Totales globales según filtros base
+        pool.query(`
+          SELECT 
+            COUNT(*) FILTER (WHERE g.status = 'PENDING') AS count_pendientes,
+            COALESCE(SUM(g.monto) FILTER (WHERE g.status = 'PENDING'), 0) AS total_pendientes,
+            COUNT(*) FILTER (WHERE g.status = 'APPROVED') AS count_aprobados,
+            COALESCE(SUM(g.monto) FILTER (WHERE g.status = 'APPROVED'), 0) AS total_aprobados
+          FROM gastos g
+          ${baseWhereSql}
+        `, baseParams),
+
+        // Total de registros para la paginación de la vista
+        pool.query(`SELECT COUNT(*) AS total_count FROM gastos g ${viewWhereSql}`, viewParams),
+
+        // Gastos paginados
+        pool.query(`
+          SELECT g.*,
+            (SELECT row_to_json(s_obj) FROM (
+              SELECT s.id, s.nombre, s.categoria_id,
+                     (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
+              FROM subcategorias s WHERE s.id = g.subcategoria_id
+            ) s_obj) as subcategoria_rel,
+            (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
+            (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
+            (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
+            (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel
+          FROM gastos g
+          ${viewWhereSql}
+          ORDER BY g.created_at DESC
+          LIMIT $${viewParams.length + 1} OFFSET $${viewParams.length + 2}
+        `, [...viewParams, limit, offset])
+      ];
+
+      if (!skipCatalogs) {
+        queryPromises.push(
+          pool.query('SELECT * FROM usuarios ORDER BY nombre'),
+          pool.query('SELECT * FROM vehiculos WHERE activo = true ORDER BY marca'),
+          pool.query(`
+            SELECT rg.*, 
+                   (SELECT row_to_json(v_obj) FROM (SELECT marca, modelo FROM vehiculos v WHERE v.id = rg.vehiculo_id) v_obj) as vehiculos
+            FROM registro_gasolina rg
+            ORDER BY rg.created_at DESC
+            LIMIT 250
+          `),
+          pool.query('SELECT id, nombre, rfc FROM proveedores ORDER BY nombre')
+        );
+      }
+
+      const results = await Promise.all(queryPromises);
+      const totalsRow = results[0].rows[0] || {};
+      const totalCount = parseInt(results[1].rows[0]?.total_count || '0', 10);
+      const rawGastos = results[2].rows || [];
+      const enrichedGastos = rawGastos.map(formatGasto);
+
+      const usersRes = !skipCatalogs ? results[3] : null;
+      const vehiculosRes = !skipCatalogs ? results[4] : null;
+      const gasolinaRes = !skipCatalogs ? results[5] : null;
+      const provRes = !skipCatalogs ? results[6] : null;
+
+      return res.json({
+        gastos: enrichedGastos,
+        pagination: {
+          page,
+          limit,
+          total: totalCount,
+          totalPages: Math.ceil(totalCount / limit) || 1,
+        },
+        totals: {
+          totalPendientes: Number(totalsRow.total_pendientes) || 0,
+          totalAprobados: Number(totalsRow.total_aprobados) || 0,
+          countPendientes: Number(totalsRow.count_pendientes) || 0,
+          countAprobados: Number(totalsRow.count_aprobados) || 0,
+        },
+        ...(skipCatalogs ? {} : {
+          usuarios: usersRes?.rows || [],
+          vehiculos: vehiculosRes?.rows || [],
+          registrosGasolina: gasolinaRes?.rows || [],
+          proveedores: provRes?.rows || [],
+        })
+      });
+    }
+
+    // Ruta de compatibilidad no paginada (si se llama sin page ni limit)
     const limitQuery = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
     let limitSql = '';
     if (limitQuery && !isNaN(limitQuery) && limitQuery > 0) {

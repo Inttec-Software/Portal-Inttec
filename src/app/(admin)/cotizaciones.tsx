@@ -13,6 +13,9 @@ import { Cotizacion } from '@/types/ventas';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 import { ModuleCache } from '@/services/moduleCache';
+import { CotizacionesTableSkeleton, CotizacionesCardsListSkeleton } from '@/components/skeleton';
+import PaginationControls from '@/components/PaginationControls';
+import FormattedDescription, { stripHtmlToPlainText } from '@/components/FormattedDescription';
 const getStatusConfig = (estado: string, isDark: boolean) => {
   const norm = (estado || '').toLowerCase().trim();
   switch(norm) {
@@ -98,6 +101,7 @@ function ActionButtonWithTooltip({
   tooltip,
   onPress,
   isCircular = false,
+  align = 'center',
 }: {
   icon: string;
   iconSize?: number;
@@ -106,11 +110,12 @@ function ActionButtonWithTooltip({
   tooltip: string;
   onPress: () => void;
   isCircular?: boolean;
+  align?: 'center' | 'left' | 'right';
 }) {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
-    <View style={{ position: 'relative', alignItems: 'center' }}>
+    <View style={{ position: 'relative', alignItems: 'center', zIndex: isHovered ? 99999 : 1 }}>
       <Pressable
         onPress={onPress}
         onHoverIn={() => setIsHovered(true)}
@@ -123,6 +128,7 @@ function ActionButtonWithTooltip({
           pressed && { opacity: 0.7 },
           isHovered && { transform: [{ scale: 1.15 }] }
         ]}
+        accessibilityLabel={tooltip}
       >
         <Ionicons name={icon as any} size={iconSize} color={color} />
       </Pressable>
@@ -130,25 +136,77 @@ function ActionButtonWithTooltip({
       {isHovered && Platform.OS === 'web' && (
         <View
           pointerEvents="none"
-          style={{
-            position: 'absolute',
-            bottom: '125%',
-            backgroundColor: '#0f172a',
-            paddingVertical: 4,
-            paddingHorizontal: 8,
-            borderRadius: 6,
-            zIndex: 99999,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.25,
-            shadowRadius: 4,
-            elevation: 10,
-            alignSelf: 'center',
-          }}
+          style={[
+            {
+              position: 'absolute',
+              bottom: 34,
+              backgroundColor: '#0f172a',
+              paddingHorizontal: 10,
+              paddingVertical: 5,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: '#334155',
+              zIndex: 999999,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.4,
+              shadowRadius: 5,
+              elevation: 12,
+              pointerEvents: 'none',
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+            align === 'right'
+              ? { right: -2 }
+              : align === 'left'
+              ? { left: -2 }
+              : { alignSelf: 'center' },
+            Platform.select({
+              web: {
+                width: 'max-content',
+                minWidth: 'max-content',
+                whiteSpace: 'nowrap',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+              } as any,
+            }),
+          ]}
         >
-          <Text style={{ color: '#ffffff', fontSize: 11, fontWeight: '700', textAlign: 'center' }} numberOfLines={1}>
+          <Text
+            style={[
+              {
+                color: '#f8fafc',
+                fontSize: 11,
+                fontWeight: '700',
+                textAlign: 'center',
+              },
+              Platform.select({
+                web: {
+                  whiteSpace: 'nowrap',
+                  wordBreak: 'keep-all',
+                } as any,
+              }),
+            ]}
+            numberOfLines={1}
+          >
             {tooltip}
           </Text>
+
+          {/* Flecha indicadora */}
+          <View
+            style={{
+              position: 'absolute',
+              top: '100%',
+              width: 0,
+              height: 0,
+              borderLeftWidth: 4,
+              borderRightWidth: 4,
+              borderTopWidth: 4,
+              borderLeftColor: 'transparent',
+              borderRightColor: 'transparent',
+              borderTopColor: '#0f172a',
+              ...(align === 'right' ? { right: 10 } : align === 'left' ? { left: 10 } : { alignSelf: 'center' }),
+            }}
+          />
         </View>
       )}
     </View>
@@ -171,6 +229,8 @@ export default function CotizacionesListScreen() {
   const [isLoading, setIsLoading] = useState(() => !cachedCotizaciones);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
@@ -181,7 +241,18 @@ export default function CotizacionesListScreen() {
     }, [])
   );
 
+  const [filtroEstado, setFiltroEstado] = useState<string>('TODAS');
+
   const filteredCotizaciones = cotizaciones.filter((cot) => {
+    if (filtroEstado !== 'TODAS') {
+      const normEstado = (cot.estado || 'borrador').toLowerCase().trim();
+      const normFiltro = filtroEstado.toLowerCase().trim();
+      if (normFiltro === 'cotización' || normFiltro === 'cotizacion') {
+        if (normEstado !== 'cotización' && normEstado !== 'cotizacion' && normEstado !== 'borrador') return false;
+      } else if (!normEstado.includes(normFiltro)) {
+        return false;
+      }
+    }
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
@@ -191,6 +262,16 @@ export default function CotizacionesListScreen() {
       (cot.vendedor && cot.vendedor.toLowerCase().includes(query))
     );
   });
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  const totalPages = Math.ceil(filteredCotizaciones.length / pageSize) || 1;
+  const paginatedCotizaciones = React.useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredCotizaciones.slice(start, start + pageSize);
+  }, [filteredCotizaciones, currentPage, pageSize]);
 
   const fetchCotizaciones = async (silent = false) => {
     if (!silent && !ModuleCache.has('cotizaciones_list')) {
@@ -378,7 +459,8 @@ export default function CotizacionesListScreen() {
   };
 
   const handleComments = (cot: any) => {
-    const comments = cot.lineas?.[0]?.productoDescripcion || 'Sin comentarios registrados.';
+    const rawComments = cot.lineas?.[0]?.productoDescripcion;
+    const comments = rawComments ? stripHtmlToPlainText(rawComments) : 'Sin comentarios registrados.';
     if (Platform.OS === 'web') {
       window.alert(`Notas y descripción de Cotización ${cot.folio}:\n\n${comments}`);
     } else {
@@ -428,6 +510,33 @@ export default function CotizacionesListScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Chips de Estado ERP */}
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          {(['TODAS', 'COTIZACIÓN', 'ENVIADA', 'APROBADA'] as const).map((est) => (
+            <TouchableOpacity
+              key={est}
+              onPress={() => setFiltroEstado(est)}
+              style={[
+                styles.chipBtn,
+                {
+                  borderColor: filtroEstado === est ? themeColors.accent : themeColors.border,
+                  backgroundColor: filtroEstado === est ? themeColors.accent + '20' : themeColors.background,
+                },
+              ]}
+            >
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: filtroEstado === est ? '800' : '500',
+                  color: filtroEstado === est ? themeColors.accent : themeColors.textSecondary,
+                }}
+              >
+                {est}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
       <View style={styles.desktopToolbarRight}>
         <TouchableOpacity 
@@ -459,15 +568,17 @@ export default function CotizacionesListScreen() {
         </View>
 
         {/* Cuerpo de la Tabla */}
-        {filteredCotizaciones.length === 0 ? (
+        {isLoading ? (
+          <CotizacionesTableSkeleton count={8} />
+        ) : filteredCotizaciones.length === 0 ? (
           <View style={styles.noResultsTable}>
             <Text style={{ color: '#888', textAlign: 'center', padding: 24 }}>
               {searchQuery ? 'No se encontraron cotizaciones con esa búsqueda.' : 'No hay cotizaciones registradas aún.'}
             </Text>
           </View>
         ) : (
-          filteredCotizaciones.map((cot, index) => {
-            const sequentialId = 1532 + (filteredCotizaciones.length - 1 - index);
+          paginatedCotizaciones.map((cot, index) => {
+            const sequentialId = 1532 + (filteredCotizaciones.length - 1 - ((currentPage - 1) * pageSize + index));
             const firstLineName = cot.lineas?.[0]?.productoNombre || 'Sin referencia';
             const estadoDisplay = getDisplayEstado(cot.estado);
             const config = getStatusConfig(estadoDisplay, scheme === 'dark');
@@ -511,7 +622,7 @@ export default function CotizacionesListScreen() {
                     <ActionButtonWithTooltip icon="chatbubble-ellipses-outline" color={themeColors.textSecondary} tooltip="Notas y Comentarios" onPress={() => handleComments(cot)} />
                     <ActionButtonWithTooltip icon={expandedRowId === cot.id ? "chevron-up" : "chevron-down"} color={themeColors.textSecondary} tooltip={expandedRowId === cot.id ? "Ocultar Partidas" : "Ver Partidas"} onPress={() => toggleRowExpansion(cot.id)} />
                     <ActionButtonWithTooltip icon="cash-outline" color={themeColors.primary} tooltip="Convertir a Venta" onPress={() => handleConvertirVenta(cot)} />
-                    <ActionButtonWithTooltip icon="trash-outline" color={themeColors.danger} tooltip="Eliminar Cotización" onPress={() => handleDelete(cot.id)} />
+                    <ActionButtonWithTooltip icon="trash-outline" color={themeColors.danger} tooltip="Eliminar Cotización" align="right" onPress={() => handleDelete(cot.id)} />
                   </View>
                 </Pressable>
 
@@ -523,7 +634,13 @@ export default function CotizacionesListScreen() {
                       cot.lineas.map((linea: any, lIndex: number) => (
                         <View key={lIndex} style={styles.detailLineItem}>
                           <Text style={{ width: '40%', fontWeight: '500', color: themeColors.text }}>{linea.productoNombre}</Text>
-                          <Text style={{ width: '30%', color: themeColors.textSecondary, fontSize: 13 }}>{linea.productoDescripcion}</Text>
+                          <View style={{ width: '30%', paddingRight: 8 }}>
+                            <FormattedDescription
+                              content={linea.productoDescripcion}
+                              style={{ color: themeColors.textSecondary, fontSize: 13, lineHeight: 18 }}
+                              boldColor={themeColors.text}
+                            />
+                          </View>
                           <Text style={{ width: '10%', textAlign: 'right', color: themeColors.textSecondary }}>Cant: {linea.cantidad}</Text>
                           <Text style={{ width: '10%', textAlign: 'right', color: themeColors.textSecondary }}>P.U: {formatearMoneda(linea.precioUnitario)}</Text>
                           <Text style={{ width: '10%', textAlign: 'right', fontWeight: 'bold', color: themeColors.text }}>{formatearMoneda(linea.importe || (linea.cantidad * linea.precioUnitario))}</Text>
@@ -557,6 +674,22 @@ export default function CotizacionesListScreen() {
           <ScrollView style={styles.desktopScrollView}>
             <View style={{ paddingHorizontal: 20, paddingVertical: 8 }}>
               {renderDesktopTable()}
+              {filteredCotizaciones.length > 0 && (
+                <PaginationControls
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={filteredCotizaciones.length}
+                  itemsPerPage={pageSize}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(newSize: number) => {
+                    setPageSize(newSize);
+                    setCurrentPage(1);
+                  }}
+                  itemsPerPageOptions={[20, 25, 50, 100]}
+                  isLoading={isLoading}
+                  style={{ marginTop: 14, marginBottom: 24 }}
+                />
+              )}
             </View>
           </ScrollView>
         </View>
@@ -608,8 +741,8 @@ export default function CotizacionesListScreen() {
           </View>
 
           {isLoading ? (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <ActivityIndicator size="large" color={themeColors.primary} />
+            <View style={{ padding: Spacing.three, paddingBottom: 100 }}>
+              <CotizacionesCardsListSkeleton count={5} />
             </View>
           ) : (
             <ScrollView
@@ -625,7 +758,7 @@ export default function CotizacionesListScreen() {
                   </Text>
                 </View>
               ) : (
-                filteredCotizaciones.map((cot) => (
+                paginatedCotizaciones.map((cot) => (
                   <View key={cot.id} style={styles.card}>
                     {/* Header: Folio & Status Badge */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -704,6 +837,23 @@ export default function CotizacionesListScreen() {
                     </View>
                   </View>
                 ))
+              )}
+
+              {filteredCotizaciones.length > 0 && (
+                <PaginationControls
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={filteredCotizaciones.length}
+                  itemsPerPage={pageSize}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(newSize: number) => {
+                    setPageSize(newSize);
+                    setCurrentPage(1);
+                  }}
+                  itemsPerPageOptions={[20, 25, 50, 100]}
+                  isLoading={isLoading}
+                  style={{ marginTop: 14, marginBottom: 20 }}
+                />
               )}
             </ScrollView>
           )}
@@ -884,6 +1034,12 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  chipBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
   menuRightButton: {
     flexDirection: 'column',
     alignItems: 'center',
@@ -978,7 +1134,7 @@ const getStyles = (themeColors: any) => StyleSheet.create({
     paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: themeColors.border,
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   detailFooter: {
     marginTop: 12,

@@ -23,6 +23,7 @@ import {} from '@/services/supabase';
 import { TareasService } from '@/services/tareasService';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import EditarTareaModal from '@/components/EditarTareaModal';
+import { TareasListSkeleton } from '@/components/skeleton';
 
 export default function TareasScreen() {
   const router = useRouter();
@@ -394,9 +395,9 @@ export default function TareasScreen() {
 
       {/* CONTENT LIST */}
       {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={themeColors.accent} />
-        </View>
+        <ScrollView style={{ flex: 1 }}>
+          <TareasListSkeleton count={6} />
+        </ScrollView>
       ) : (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
           

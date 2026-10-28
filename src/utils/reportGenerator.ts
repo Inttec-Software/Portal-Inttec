@@ -7,7 +7,7 @@ import { Platform, Alert } from 'react-native';
 import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
 import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
-import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay } from './asistenciaUtils';
+import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay, isAutoCerradoAsistencia } from './asistenciaUtils';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
 // Esto evita ~959 KB en el bundle principal de la app
@@ -955,11 +955,12 @@ export const ReportGenerator = {
         a.empleado_nombre ||
         a.usuario_nombre ||
         'Desconocido';
+      const isAuto = isAutoCerradoAsistencia(a);
       const fecha = a.fecha || '';
-      const horaEntrada = a.hora_entrada || '--:--';
+      const horaEntrada = a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : '--:--';
       const dirEntrada = a.direccion_entrada || 'N/A';
-      const horaSalida = a.hora_salida || '--:--';
-      const dirSalida = a.direccion_salida || 'N/A';
+      const horaSalida = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : '--:--');
+      const dirSalida = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || 'N/A');
 
       tableRows += `
         <tr>
@@ -1354,7 +1355,7 @@ export const ReportGenerator = {
             <div style="display: flex; gap: 8px; align-items: center;">
               <span style="font-size: 10px; color: #64748b;">Días: <b>${semanaData.diasLaborados}/7</b></span>
               <span style="background-color: #dcfce7; color: #15803d; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
-                Regulares: ${semanaData.totalHorasRegularesStr}
+                Regulares (48h): ${semanaData.totalHorasRegularesStr}
               </span>
               ${semanaData.totalMinutosExtra > 0 ? `
                 <span style="background-color: #ffedd5; color: #c2410c; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
@@ -1478,7 +1479,7 @@ export const ReportGenerator = {
             <div class="value" style="color: #0f172a;">${formatMinutesToHours(totalMinutosEmpresa)}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Horas Regulares (8-6)</div>
+            <div class="label">Horas Regulares (48h)</div>
             <div class="value" style="color: #16a34a;">${formatMinutesToHours(totalMinutosRegularesEmpresa)}</div>
           </div>
           <div class="summary-card">
@@ -1649,7 +1650,7 @@ export const ReportGenerator = {
               <h1 class="title">Reporte Individual de Asistencia</h1>
               <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">👤 ${empleado.nombre}</p>
               <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
-              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Horario: 08:00 - 18:00</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Jornada: 48 hrs</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
@@ -1663,7 +1664,7 @@ export const ReportGenerator = {
             <div class="value" style="color: #0f172a; font-size: 17px;">${semanaData.totalHorasSemanaStr}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Horas Regulares (8-6)</div>
+            <div class="label">Horas Regulares (48h)</div>
             <div class="value" style="color: #16a34a; font-size: 17px;">${semanaData.totalHorasRegularesStr}</div>
           </div>
           <div class="summary-card">
@@ -3611,7 +3612,10 @@ export const ReportGenerator = {
                 a.empleado_nombre ||
                 a.usuario_nombre ||
                 'Desconocido';
-              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada || 'Sin registro', a.direccion_entrada || '', a.hora_salida || 'Sin registro', a.direccion_salida || '' ];
+              const isAuto = isAutoCerradoAsistencia(a);
+              const horaSalidaVal = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : 'Sin registro');
+              const dirSalidaVal = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || '');
+              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : 'Sin registro', a.direccion_entrada || '', horaSalidaVal, dirSalidaVal ];
             });
             await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
     },
@@ -3945,6 +3949,44 @@ export const ReportGenerator = {
             });
             await ReportGenerator._exportArrayToXLSX('Inventario', headers, rows, fileName);
     },
+    async exportInventarioEmpleadosToXLSX(items: any[], fileName: string = 'reporte_material_en_empleados.xlsx'): Promise<void> {
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error('No hay materiales en inventarios de empleados para exportar.');
+      }
+      const headers = [
+        'Empleado / Custodio',
+        'Rol',
+        'Email',
+        'Producto',
+        'SKU',
+        'Categoría',
+        'Cantidad Total',
+        'Nuevas',
+        'Usadas',
+        'Por Revisar / Dañado',
+        'Unidad',
+        'Precio Unitario (MXN)',
+        'Valor Estimado (MXN)',
+        'Última Actualización'
+      ];
+      const rows = items.map((it: any) => [
+        it.empleado_nombre || 'Empleado',
+        it.empleado_rol || 'EMPLEADO',
+        it.empleado_email || '-',
+        it.producto_nombre || 'Producto',
+        it.producto_sku || '-',
+        it.categoria_nombre || 'Sin Categoría',
+        Number(it.cantidad_disponible || 0),
+        Number(it.cantidad_nuevo || 0),
+        Number(it.cantidad_usado || 0),
+        Number(it.cantidad_por_revisar || 0),
+        it.producto_unidad || 'pza',
+        Number(it.producto_precio || 0),
+        Number(it.valor_estimado || 0),
+        it.updated_at ? new Date(it.updated_at).toLocaleDateString('es-MX') : '-'
+      ]);
+      await ReportGenerator._exportArrayToXLSX('Material en Empleados', headers, rows, fileName);
+    },
     async exportConsumosToXLSX(consumos: any[], fileName: string = 'reporte_consumos.xlsx'): Promise<void> {
 
             if (consumos.length === 0) {
@@ -4115,31 +4157,91 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     });
   };
   
+  const escapeHtml = (text: string) => {
+    return (text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  const formatInlineText = (text: any) => {
+    let escaped = escapeHtml(text);
+    // Convert **bold** o *bold* a <strong> negro puro
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\*([^*\n]+?)\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\b_([^_]+?)_\b/g, '<em style="color: #333;">$1</em>');
+    return escaped;
+  };
+
   const renderDescription = (name: string, description: string) => {
-    const fullText = (name || '') + (description ? '\n' + description : '');
-    const parts = fullText.split('\n');
-    return parts.map((part, part_index) => {
-      const clean_part = part.trim();
-      if (clean_part === '') return '<br/>';
-      
-      if (part_index === 0) {
-        const innerHtml = `<span style="font-size: 10.5px; color: #555;">${clean_part.replace(/\*/g, '')}</span>`;
-        return `<div style="display: block; margin-bottom: 4px;">${innerHtml}</div>`;
-      } else {
-        const chunks = clean_part.split('*');
-        const innerHtml = chunks.map((chunk, chunk_index) => {
-          if (chunk_index % 2 === 0) {
-            return `<span style="font-size: 10.5px; color: #555;">${chunk}</span>`;
-          } else {
-            return `<strong style="color: #333; font-size: 10.5px;">${chunk}</strong>`;
-          }
-        }).join('');
-        return `<div style="display: block; margin-bottom: 2px; padding-left: 10px; text-indent: -10px;">
-                  <span style="font-size: 12px; color: #555; margin-right: 3px;">&bull;</span>${innerHtml}
+    let html = '';
+
+    // 1. Título / Nombre del producto en negrita negra
+    if (name && name.trim()) {
+      html += `<div style="font-weight: 700; font-size: 11px; color: #111; line-height: 1.35; margin-bottom: 4px;">${escapeHtml(name.trim())}</div>`;
+    }
+
+    if (!description || !description.trim()) {
+      return html || '<span style="color: #999; font-style: italic;">Sin descripción</span>';
+    }
+
+    const trimmedDesc = description.trim();
+
+    // 2. Si la descripción ya es HTML (generada por el editor WYSIWYG con <ul>, <li>, <b>, etc.)
+    const isHtml = /<[a-z][\s\S]*>/i.test(trimmedDesc);
+    if (isHtml) {
+      // Limpiar y asegurar que las negritas y listas sean negras
+      const styledHtml = trimmedDesc
+        .replace(/<b\b/gi, '<b style="color: #111; font-weight: bold;"')
+        .replace(/<strong\b/gi, '<strong style="color: #111; font-weight: bold;"')
+        .replace(/<ul\b/gi, '<ul style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<ol\b/gi, '<ol style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<li\b/gi, '<li style="margin-bottom: 2px; font-size: 10px; color: #333; line-height: 1.35;"');
+
+      return html + `<div style="font-size: 10px; color: #333; line-height: 1.35;">${styledHtml}</div>`;
+    }
+
+    // 3. Si la descripción es texto plano o Markdown
+    const lines = trimmedDesc.split('\n');
+    const parsedLines = lines.map((rawLine) => {
+      const line = rawLine.trim();
+      if (!line) {
+        return '<div style="height: 4px;"></div>';
+      }
+
+      // Viñetas: •, -, *, +
+      const bulletMatch = line.match(/^([•\-\*\+])\s+(.*)$/);
+      if (bulletMatch) {
+        const itemContent = formatInlineText(bulletMatch[2]);
+        return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 10px; color: #333; line-height: 1.35;">
+                  <span style="display: inline-block; width: 12px; min-width: 12px; color: #333; font-weight: bold; font-size: 11px; line-height: 1.2;">&bull;</span>
+                  <div style="flex: 1;">${itemContent}</div>
                 </div>`;
       }
+
+      // Lista numerada: 1., 2), etc.
+      const numberMatch = line.match(/^(\d+[\.\-\)])\s+(.*)$/);
+      if (numberMatch) {
+        const numPrefix = escapeHtml(numberMatch[1]);
+        const itemContent = formatInlineText(numberMatch[2]);
+        return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 10px; color: #333; line-height: 1.35;">
+                  <span style="display: inline-block; width: 16px; min-width: 16px; color: #333; font-weight: 700; font-size: 9.5px; line-height: 1.3;">${numPrefix}</span>
+                  <div style="flex: 1;">${itemContent}</div>
+                </div>`;
+      }
+
+      // Párrafo normal (incluyendo negritas negras)
+      return `<div style="margin-bottom: 2px; font-size: 10px; color: #333; line-height: 1.35;">${formatInlineText(line)}</div>`;
     }).join('');
+
+    return html + parsedLines;
   };
+
+  const hasIva = (Number(cotizacion.iva || 0) > 0) || (cotizacion.lineas || []).some(l => Number(l.impuestoPorcentaje || 0) > 0);
+  const uniqueTaxes = Array.from(new Set((cotizacion.lineas || []).map(l => Number(l.impuestoPorcentaje || 0)).filter(p => p > 0)));
+  const ivaLabel = uniqueTaxes.length === 1 ? `IVA ${uniqueTaxes[0]}%` : 'IVA';
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -4310,31 +4412,31 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
           <table class="table table-red mt-4">
               <thead>
                   <tr>
-                      <th width="40%" style="text-align: left;">DESCRIPCIÓN</th>
-                      <th width="15%" class="text-center">ENTREGA</th>
-                      <th class="text-center">CANT</th>
-                      <th class="text-end">PRECIO UNIT</th>
-                      <th class="text-center">IVA</th>
-                      <th class="text-end">IMPORTE</th>
+                      <th width="${hasIva ? '60%' : '67%'}" style="text-align: left; padding-left: 10px;">DESCRIPCIÓN</th>
+                      <th width="${hasIva ? '8%' : '9%'}" class="text-center" style="white-space: nowrap;">ENTREGA</th>
+                      <th width="${hasIva ? '6%' : '6%'}" class="text-center" style="white-space: nowrap;">CANT</th>
+                      <th width="${hasIva ? '11%' : '9%'}" class="text-center" style="white-space: nowrap;">PRECIO UNIT</th>
+                      ${hasIva ? '<th width="5%" class="text-center" style="white-space: nowrap;">IVA</th>' : ''}
+                      <th width="${hasIva ? '10%' : '9%'}" class="text-center" style="white-space: nowrap;">IMPORTE</th>
                   </tr>
               </thead>
               <tbody>
                   ${cotizacion.lineas.map(linea => `
                       <tr>
-                          <td>
+                          <td style="padding: 6px 10px;">
                               ${renderDescription(linea.productoNombre, linea.productoDescripcion)}
                           </td>
-                          <td class="text-center">
+                          <td class="text-center" style="white-space: nowrap;">
                               ${linea.tiempoEntrega || ''}
                           </td>
-                          <td class="text-center">${Number(linea.cantidad || 0).toFixed(1)}</td>
-                          <td class="text-end">$ ${formatMoney(linea.precioUnitario)}</td>
-                          
-                          <td class="text-center">
-                              ${linea.impuestoPorcentaje}%
-                          </td>
+                          <td class="text-center" style="white-space: nowrap;">${Number(linea.cantidad || 0).toFixed(1)}</td>
+                          <td class="text-center" style="white-space: nowrap;">$ ${formatMoney(linea.precioUnitario)}</td>
+                          ${hasIva ? `
+                          <td class="text-center" style="white-space: nowrap;">
+                              ${linea.impuestoPorcentaje || 0}%
+                          </td>` : ''}
 
-                          <td class="text-end">$ ${formatMoney(linea.importe)}</td>
+                          <td class="text-center" style="white-space: nowrap;">$ ${formatMoney(linea.importe)}</td>
                       </tr>
                   `).join('')}
               </tbody>
@@ -4359,7 +4461,7 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
               <div class="col-5">
                   <table class="table-totals">
                       <tr><td>Subtotal</td><td class="text-end">$ ${formatMoney(cotizacion.subtotal)}</td></tr>
-                      <tr><td>IVA 16%</td><td class="text-end">$ ${formatMoney(cotizacion.iva)}</td></tr>
+                      ${hasIva ? `<tr><td>${ivaLabel}</td><td class="text-end">$ ${formatMoney(cotizacion.iva)}</td></tr>` : ''}
                       <tr>
                           <td>TOTAL</td>
                           <td class="text-end">$ ${formatMoney(cotizacion.total)}</td>
@@ -4595,8 +4697,95 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   const fullFileName = `${clienteSanitized}_${displayFolio}`;
   const title = effectiveDraft ? `[PREFACTURA] ${fullFileName}` : fullFileName;
   
-  // Formatters de Dinero y Fecha
-  const formatMoney = (val: any) => `$ ${Number(val || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Formatters de Dinero y Texto Odoo
+  const formatMoney = (val: any) => {
+    const num = typeof val === 'number' ? val : parseFloat(val);
+    return (isNaN(num) ? 0 : num).toLocaleString('es-MX', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
+
+  const escapeHtml = (text: any) => {
+    if (text === null || text === undefined) return '';
+    if (typeof text !== 'string') {
+      if (typeof text === 'object') return '';
+      text = String(text);
+    }
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  const formatInlineText = (text: string) => {
+    let escaped = escapeHtml(text);
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\*([^*\n]+?)\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\b_([^_]+?)\b/g, '<em style="color: #333;">$1</em>');
+    return escaped;
+  };
+
+  const renderDescription = (name: any, description: any) => {
+    let html = '';
+    const safeName = (name === null || name === undefined || typeof name === 'object') ? '' : String(name).trim();
+    const safeDesc = (description === null || description === undefined || typeof description === 'object') ? '' : String(description).trim();
+
+    if (safeName) {
+      html += `<div style="font-weight: 700; font-size: 11px; color: #111; line-height: 1.35; margin-bottom: 4px;">${escapeHtml(safeName)}</div>`;
+    }
+
+    if (!safeDesc) {
+      return html || '<span style="color: #999; font-style: italic;">Sin descripción</span>';
+    }
+
+    const trimmedDesc = safeDesc;
+
+    const isHtml = /<[a-z][\s\S]*>/i.test(trimmedDesc);
+    if (isHtml) {
+      const styledHtml = trimmedDesc
+        .replace(/<b\b/gi, '<b style="color: #111; font-weight: bold;"')
+        .replace(/<strong\b/gi, '<strong style="color: #111; font-weight: bold;"')
+        .replace(/<ul\b/gi, '<ul style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<ol\b/gi, '<ol style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<li\b/gi, '<li style="margin-bottom: 2px; font-size: 10px; color: #333; line-height: 1.35;"');
+
+      return html + `<div style="font-size: 10px; color: #333; line-height: 1.35;">${styledHtml}</div>`;
+    }
+
+    const lines = trimmedDesc.split('\n');
+    const parsedLines = lines.map((rawLine) => {
+      const line = rawLine.trim();
+      if (!line) {
+        return '<div style="height: 4px;"></div>';
+      }
+
+      const bulletMatch = line.match(/^([•\-\+\*])\s+(.*)$/);
+      if (bulletMatch) {
+        const itemContent = formatInlineText(bulletMatch[2]);
+        return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 10px; color: #333; line-height: 1.35;">
+                  <span style="display: inline-block; width: 12px; min-width: 12px; color: #333; font-weight: bold; font-size: 11px; line-height: 1.2;">&bull;</span>
+                  <div style="flex: 1;">${itemContent}</div>
+                </div>`;
+      }
+
+      const numberMatch = line.match(/^(\d+[\.\-\)])\s+(.*)$/);
+      if (numberMatch) {
+        const numPrefix = escapeHtml(numberMatch[1]);
+        const itemContent = formatInlineText(numberMatch[2]);
+        return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 10px; color: #333; line-height: 1.35;">
+                  <span style="display: inline-block; width: 16px; min-width: 16px; color: #333; font-weight: 700; font-size: 9.5px; line-height: 1.3;">${numPrefix}</span>
+                  <div style="flex: 1;">${itemContent}</div>
+                </div>`;
+      }
+
+      return `<div style="margin-bottom: 2px; font-size: 10px; color: #333; line-height: 1.35;">${formatInlineText(line)}</div>`;
+    }).join('');
+
+    return html + parsedLines;
+  };
 
   const resolveDateStr = () => {
     return (
@@ -4711,17 +4900,15 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   );
 
   // Cliente
-  const clientName = (
-    facturaData?.customer?.legal_name || 
-    venta?.cliente || 
-    'PÚBLICO EN GENERAL'
-  ).toUpperCase();
+  const safeStr = (v: any, fallback = '') => {
+    if (v === null || v === undefined) return fallback;
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object') return fallback;
+    return String(v);
+  };
 
-  const clientRfc = (
-    facturaData?.customer?.tax_id || 
-    venta?.cliente_rfc || 
-    'XAXX010101000'
-  ).toUpperCase();
+  const clientName = safeStr(facturaData?.customer?.legal_name || venta?.cliente, 'PÚBLICO EN GENERAL').toUpperCase();
+  const clientRfc = safeStr(facturaData?.customer?.tax_id || venta?.cliente_rfc, 'XAXX010101000').toUpperCase();
 
   const clientRegimenCode = (
     facturaData?.customer?.tax_system || 
@@ -4731,15 +4918,25 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
   );
   const clientRegimen = formatRegimenFiscal(clientRegimenCode);
 
-  const clientCp = (
+  const clientCp = safeStr(
     facturaData?.customer?.address?.zip || 
     facturaData?.customer?.tax_zip_code || 
     facturaData?.customer?.zip || 
-    venta?.cliente_cp || 
+    venta?.cliente_cp,
     '32690'
   );
 
-  const clientAddressStreet = (
+  const resolveAddrPart = (val: any) => {
+    if (!val) return '';
+    if (typeof val === 'string') return val.trim();
+    if (typeof val === 'object') {
+      const sub = val.street || val.calle || val.direccion;
+      return typeof sub === 'string' ? sub.trim() : '';
+    }
+    return String(val).trim();
+  };
+
+  const clientAddressStreet = resolveAddrPart(
     (typeof facturaData?.customer?.address === 'string' ? facturaData.customer.address : '') ||
     facturaData?.customer?.address?.street || 
     facturaData?.customer?.address?.calle || 
@@ -4756,9 +4953,9 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
     venta?.notas?.receptor?.direccion ||
     venta?.notas?.cliente_direccion ||
     ''
-  ).trim();
-  const clientAddressExterior = (facturaData?.customer?.address?.exterior || '').trim();
-  const clientAddressCity = (facturaData?.customer?.address?.city || '').trim();
+  );
+  const clientAddressExterior = resolveAddrPart(facturaData?.customer?.address?.exterior);
+  const clientAddressCity = resolveAddrPart(facturaData?.customer?.address?.city);
   const clientAddressStr = [clientAddressStreet, clientAddressExterior, clientAddressCity].filter(Boolean).join(', ');
 
   // Detalles comerciales
@@ -4779,7 +4976,10 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
         : [];
 
   const items = rawItems.map((it: any) => {
-    const description = it.product?.description || it.descripcion || it.nombre_producto || it.producto_nombre || it.concepto || it.nombre || 'Producto / Servicio';
+    const rawName = (it.product?.name || it.nombre_producto || it.producto_nombre || '').trim();
+    const rawDesc = (it.product?.description || it.descripcion || it.concepto || it.nombre || '').trim();
+    const name = (rawName && rawDesc && rawName.toLowerCase() === rawDesc.toLowerCase()) ? '' : rawName;
+    const description = rawDesc || rawName || 'Producto / Servicio';
     const satCode = it.product?.product_key || it.sat_clave_prod || it.clave_sat || it.sku || it.sku_interno || '46171610';
     const quantity = Number(it.quantity || it.cantidad || 1);
     const price = Number(it.product?.price || it.precio_unitario || it.precio || 0);
@@ -4788,6 +4988,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
       : (it.tasa_iva !== undefined ? `${Math.round(it.tasa_iva * 100)}%` : '16%');
     const amount = Number(it.total || (quantity * price));
     return {
+      name,
       description,
       satCode,
       quantity,
@@ -4799,6 +5000,7 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
 
   if (items.length === 0 && (total > 0 || subtotal > 0)) {
     items.push({
+      name: '',
       description: venta?.concepto || facturaData?.concept || 'Venta de equipos y servicios de tecnología',
       satCode: '46171610',
       quantity: 1,
@@ -4807,6 +5009,29 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
       amount: subtotal > 0 ? subtotal : total / 1.16
     });
   }
+
+  // Lógica dinámica de IVA idéntica a Cotizaciones
+  const hasIva = (Number(iva || 0) > 0) || items.some((it: any) => {
+    const parsedRate = parseFloat(String(it.taxRate || '').replace('%', ''));
+    return !isNaN(parsedRate) && parsedRate > 0;
+  });
+
+  const uniqueTaxes = Array.from(new Set(
+    items
+      .map((it: any) => parseFloat(String(it.taxRate || '').replace('%', '')))
+      .filter((p: number) => !isNaN(p) && p > 0)
+  ));
+  const ivaLabel = uniqueTaxes.length === 1 ? `IVA ${uniqueTaxes[0]}%` : (iva > 0 ? 'IVA 16%' : 'IVA');
+
+  const notasAdicionales = (typeof venta?.notas === 'string' && venta.notas.trim())
+    ? venta.notas.trim()
+    : (typeof venta?.observaciones === 'string' && venta.observaciones.trim())
+      ? venta.observaciones.trim()
+      : (typeof facturaData?.notes === 'string' && facturaData.notes.trim())
+        ? facturaData.notes.trim()
+        : (typeof facturaData?.observaciones === 'string' && facturaData.observaciones.trim())
+          ? facturaData.observaciones.trim()
+          : '';
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -4819,11 +5044,16 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
       <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&family=Roboto+Mono:wght@400;500;600;700&display=swap');
-        @page { size: letter; margin: 0; }
-        * { box-sizing: border-box; }
+        @page {
+          size: letter;
+          margin: 0;
+        }
+        * {
+          box-sizing: border-box;
+        }
         body {
           font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
-          color: #1e293b;
+          color: #333;
           margin: 0;
           padding: 0;
           background-color: #ffffff;
@@ -4833,324 +5063,82 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
         .page-container {
           width: 100%;
           min-height: 100vh;
+          box-sizing: border-box;
           position: relative;
-          background: #ffffff;
         }
-
-        /* Top background wave/banner */
-        .top-banner {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 160px;
-          z-index: 1;
-          pointer-events: none;
-          overflow: hidden;
-        }
-
+        /* Header and Layout */
         .header-content {
-          position: relative;
-          z-index: 2;
+          padding: 15px 40px 0 40px;
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          padding: 15px 45px 0 45px;
-        }
-        .company-logo {
-          max-height: 150px;
-          height: 170px;
-          width: 450px;
-          margin-top: -10px;
+          height: 174px;
           position: relative;
           z-index: 10;
         }
-        .company-header-info {
-          text-align: right;
-          font-size: 11px;
-          line-height: 1.35;
-          color: #1e293b;
-        }
-        .company-header-info .brand-title {
-          font-weight: 800;
-          font-size: 11.5px;
-          color: #0f172a;
-          margin-bottom: 2px;
-        }
-
-        /* Invoice Body */
-        .invoice-body {
+        .company-details { text-align: right; font-size: 11px; line-height: 1.4; color: #333; margin-top: 5px; }
+        
+        .page-body {
+          padding: 0px 40px 40px 40px;
           position: relative;
-          z-index: 2;
-          padding: 10px 45px 40px 45px;
+          z-index: 10;
+          margin-top: -50px;
         }
 
-        /* Title block right */
-        .title-block {
-          display: flex;
-          justify-content: flex-end;
-          margin-top: 15px;
-          margin-bottom: 24px;
-        }
-        .title-block-inner {
-          text-align: right;
-        }
-        .factura-title {
-          color: #801c1d;
-          font-size: 26px;
-          font-weight: 800;
-          letter-spacing: 0.5px;
-          line-height: 1;
-          margin: 0;
-        }
-        .factura-folio {
-          font-size: 19px;
-          color: #475569;
-          font-weight: 500;
-          margin-top: 4px;
-          letter-spacing: 0.5px;
-        }
-        .uuid-label {
-          font-size: 8px;
-          font-weight: 800;
-          color: #1e293b;
-          letter-spacing: 0.5px;
-          text-transform: uppercase;
-          margin-top: 8px;
-        }
-        .uuid-value {
-          font-family: 'Roboto Mono', 'Courier New', Courier, monospace;
-          font-size: 8.5px;
-          color: #1e293b;
-          font-weight: 600;
-          margin-top: 1px;
-        }
-
-        /* 2-Columns Info Section */
-        .info-grid {
-          display: flex;
-          gap: 28px;
-          margin-bottom: 22px;
-        }
-        .info-col-client {
-          flex: 1.1;
-        }
-        .info-col-details {
-          flex: 0.9;
-        }
-        .section-heading {
-          color: #801c1d;
-          font-size: 9.5px;
-          font-weight: 800;
-          text-transform: uppercase;
-          border-bottom: 1.5px solid #801c1d;
-          padding-bottom: 2px;
-          margin-bottom: 7px;
-          letter-spacing: 0.2px;
-        }
-        .client-box {
-          font-size: 9.5px;
-          line-height: 1.45;
-          color: #1e293b;
-        }
-        .client-name {
-          font-weight: 800;
-          font-size: 10px;
-          color: #0f172a;
-          margin-bottom: 2px;
-        }
-
-        /* Details Table */
-        .details-table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-        .details-table tr.alt-row {
-          background-color: #f8fafc;
-        }
-        .details-table td {
-          padding: 2.5px 6px;
+        /* Odoo specific classes */
+        .row { display: flex; flex-wrap: wrap; margin-bottom: 20px; }
+        .col-6 { width: 50%; box-sizing: border-box; }
+        .col-7 { width: 58.333333%; box-sizing: border-box; padding-right: 20px; }
+        .col-5 { width: 41.666667%; box-sizing: border-box; }
+        
+        .text-end { text-align: right; }
+        .text-center { text-align: center; }
+        .fw-bold { font-weight: bold; }
+        .mb-0 { margin-bottom: 0; }
+        .mb-2 { margin-bottom: 8px; }
+        .mb-4 { margin-bottom: 24px; }
+        .mt-4 { margin-top: 24px; }
+        .mt-2 { margin-top: 8px; }
+        .ps-1 { padding-left: 2px; }
+        .py-3 { padding-top: 8px; padding-bottom: 8px; }
+        .px-2 { padding-left: 8px; padding-right: 8px; }
+        .text-muted { color: #6c757d; }
+        
+        .inttec-red { color: #8B1D22; }
+        .section-header { border-bottom: 2px solid #8B1D22; font-weight: bold; margin-bottom: 8px; color: #8B1D22; text-transform: uppercase; padding-bottom: 3px; font-size: 10px; }
+        
+        .table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+        
+        .table-red { border: 1px solid #dee2e6; border-top: none; }
+        .table-red thead th { background-color: #8B1D22; color: #FFFFFF !important; padding: 8px 8px; font-size: 10px; border-right: 1px solid #fff; }
+        .table-red thead th:last-child { border-right: none; }
+        .table-red tbody td { border: 1px solid #dee2e6; padding: 8px; font-size: 10px; }
+        
+        .info-text { font-size: 10.5px; line-height: 1.4; color: #333; }
+        
+        .table-details { width: 100%; border-collapse: collapse; border: 1px solid #dee2e6; }
+        .table-details td { padding: 4px 8px; border: 1px solid #dee2e6; font-size: 10px; }
+        .label-col { width: 35%; background-color: #f4f5f6; font-weight: normal; color: #111; }
+        .value-col { width: 65%; text-align: right; }
+        
+        .table-totals { width: 100%; border-collapse: collapse; }
+        .table-totals td { padding: 6px 0; border-bottom: 1px solid #dee2e6; font-size: 11px; }
+        .table-totals tr:last-child td { border-bottom: none; border-top: 2px solid #333; font-size: 16px; font-weight: bold; padding-top: 10px; color: #111;}
+        
+        /* FOOTER */
+        .footer-bank {
+          margin-top: 30px;
+          border-top: 1px solid #111;
+          padding-top: 10px;
           font-size: 9px;
-          line-height: 1.35;
-        }
-        .details-lbl {
-          color: #334155;
-          font-weight: 500;
-          width: 38%;
-        }
-        .details-val {
-          color: #0f172a;
-          text-align: right;
-          font-weight: 500;
-          width: 62%;
-        }
-
-        /* Items Table */
-        .items-table {
-          width: 100%;
-          border-collapse: collapse;
-          margin-top: 6px;
-          margin-bottom: 8px;
-        }
-        .items-table thead th {
-          background-color: #801c1d;
-          color: #ffffff;
-          font-size: 9px;
-          font-weight: 800;
-          padding: 6px 8px;
-          text-transform: uppercase;
-          letter-spacing: 0.3px;
-        }
-        .items-table tbody td {
-          padding: 8px 8px;
-          font-size: 9px;
-          border-bottom: 1px solid #e2e8f0;
-          vertical-align: middle;
-        }
-        .col-desc {
-          color: #0f172a;
-          font-weight: 700;
-          line-height: 1.35;
-        }
-        .col-center {
-          text-align: center;
-          color: #334155;
-        }
-        .col-right {
-          text-align: right;
-          color: #334155;
-        }
-
-        /* Totals Block */
-        .totals-container {
-          display: flex;
-          justify-content: flex-end;
-          margin-top: 14px;
-        }
-        .totals-table {
-          width: 275px;
-          border-collapse: collapse;
-        }
-        .totals-table td {
-          padding: 4px 10px;
-          font-size: 9.5px;
-        }
-        .tot-lbl {
-          background-color: #f8fafc;
-          color: #334155;
-          width: 50%;
-          border-bottom: 1px solid #e2e8f0;
-          border-right: 1px solid #e2e8f0;
-          font-weight: 500;
-        }
-        .tot-val {
-          text-align: right;
-          color: #0f172a;
-          width: 50%;
-          border-bottom: 1px solid #e2e8f0;
-          font-weight: 500;
-        }
-        .tot-iva-row .tot-lbl,
-        .tot-iva-row .tot-val {
-          border-bottom: 2px solid #0f172a;
-        }
-        .tot-total-row td {
-          padding-top: 8px;
-          padding-bottom: 8px;
-          border-bottom: none;
-        }
-        .tot-grand-lbl {
-          font-size: 14px !important;
-          font-weight: 800;
-          color: #0f172a;
-          letter-spacing: 0.5px;
-        }
-        .tot-grand-val {
-          font-size: 15px !important;
-          font-weight: 800;
-          text-align: right;
-          color: #0f172a;
-        }
-
-        /* Divider */
-        .full-divider {
-          border-top: 1px solid #cbd5e1;
-          margin: 32px 0 20px 0;
-        }
-
-        /* SAT Stamps Block */
-        .sat-block {
-          display: flex;
-          align-items: flex-start;
-          gap: 16px;
-          page-break-inside: avoid;
-          break-inside: avoid;
-        }
-        .sat-qr-col {
-          width: 95px;
-          flex-shrink: 0;
-        }
-        .sat-qr-img {
-          width: 95px;
-          height: 95px;
-          display: block;
-        }
-        .sat-box-col {
-          flex: 1;
-          border: 1px solid #cbd5e1;
-          border-radius: 4px;
-          padding: 7px 10px;
-        }
-        .sat-group {
-          margin-bottom: 5px;
-        }
-        .sat-group:last-child {
-          margin-bottom: 0;
-        }
-        .sat-tag {
-          color: #801c1d;
-          font-weight: 800;
-          font-size: 7.5px;
-          display: block;
-          margin-bottom: 1px;
-        }
-        .sat-stamp {
-          font-family: 'Roboto Mono', 'Courier New', Courier, monospace;
-          font-size: 6px;
-          line-height: 1.25;
-          color: #334155;
-          word-break: break-all;
-        }
-
-        /* Bottom Footer */
-        .invoice-footer {
-          border-top: 1.5px solid #801c1d;
-          margin-top: 32px;
-          padding-top: 8px;
+          color: #333;
+          line-height: 1.4;
           display: flex;
           justify-content: space-between;
-          align-items: flex-end;
           page-break-inside: avoid;
           break-inside: avoid;
         }
-        .issuer-name {
-          color: #801c1d;
-          font-weight: 800;
-          font-size: 9.5px;
-          margin-bottom: 3px;
-          letter-spacing: 0.2px;
-          text-transform: uppercase;
-        }
-        .issuer-details {
-          font-size: 8px;
-          color: #334155;
-          line-height: 1.4;
-        }
-        .footer-page {
-          font-size: 8px;
-          color: #64748b;
-          font-weight: normal;
-        }
+        .footer-bank strong { color: #111; font-weight: bold; }
 
         .prefactura-watermark {
           position: fixed !important;
@@ -5159,11 +5147,11 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           transform: translate(-50%, -50%) rotate(-35deg) !important;
           width: 100% !important;
           text-align: center !important;
-          font-size: 92px !important;
+          font-size: 88px !important;
           font-weight: 900 !important;
-          color: rgba(220, 38, 38, 0.22) !important;
+          color: rgba(139, 29, 34, 0.16) !important;
           letter-spacing: 16px !important;
-          font-family: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+          font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif !important;
           text-transform: uppercase !important;
           pointer-events: none !important;
           z-index: 999999 !important;
@@ -5176,16 +5164,16 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           @page { size: letter; margin: 0; }
           body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: #fff !important; }
           .page-container { width: 100% !important; min-height: auto !important; }
-          .invoice-body { padding: 10px 45px 30px 45px !important; }
+          .page-body { padding: 0px 40px 40px 40px !important; margin-top: -50px !important; }
+          .footer-bank { page-break-inside: avoid !important; break-inside: avoid !important; }
           .sat-block { page-break-inside: avoid !important; break-inside: avoid !important; }
-          .invoice-footer { page-break-inside: avoid !important; break-inside: avoid !important; }
           .prefactura-watermark {
             display: block !important;
             position: fixed !important;
             top: 50% !important;
             left: 50% !important;
             transform: translate(-50%, -50%) rotate(-35deg) !important;
-            color: rgba(220, 38, 38, 0.25) !important;
+            color: rgba(139, 29, 34, 0.16) !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
             z-index: 999999 !important;
@@ -5207,162 +5195,191 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           </div>
         ` : ''}
 
-        <!-- Top wave banner -->
-        <div class="top-banner">
-          <svg viewBox="0 0 1000 160" preserveAspectRatio="none" style="width: 100%; height: 160px; display: block;">
-            <path d="M 0,0 L 1000,0 L 1000,135 C 800,165, 480,170, 0,150 Z" fill="#F0EFEA" />
-          </svg>
+        <!-- HEADER BG ODOO Exact Shape (Pure HTML/CSS BORDERS ONLY - FAILPROOF) -->
+        <div style="position: absolute; top: -90px; left: 0; width: 100%; height: 174px; z-index: 1;">
+            <!-- Top Rectangle -->
+            <div style="position: absolute; top: 87px; left: 0; 
+            width: 100%; height: 0; border-top: 87px solid #EAE6E2;"></div>
+            <!-- Left Rectangle -->
+            <div style="position: absolute; top: 174px; left: 0;
+             width: 60%; height: 0; border-top: 87px solid #EAE6E2;"></div>
+            <!-- Triangle -->
+            <div style="position: absolute; top: 174px; left: 60%; 
+            width: 0; height: 0; border-top: 87px solid #EAE6E2; 
+            border-right: 80px solid transparent;"></div>
         </div>
 
-        <!-- Header Content -->
         <div class="header-content">
           <div style="width: 50%;">
-            <img src="${branding.logo}" alt="Logo" class="company-logo" style="max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;" />
+            <img src="${branding.logo}" alt="Logo" style="max-height: 150px; 
+            height: 170px; width: 450px; margin-top: 
+            -10px; z-index: 10; position: relative;">
           </div>
-          <div class="company-header-info" style="width: 50%;">
-            <div class="brand-title">${branding.name}</div>
+          <div class="company-details" style="width: 50%;">
+            <div>${branding.name}</div>
             <div>Ozorno 811</div>
             <div>31107 Chihuahua, CHH</div>
             <div>México</div>
           </div>
         </div>
 
-        <div class="invoice-body">
-          <!-- Title & Folio -->
-          <div class="title-block">
-            <div class="title-block-inner">
-              <h1 class="factura-title">${effectiveDraft ? 'PREFACTURA' : 'FACTURA'}</h1>
-              <div class="factura-folio">${displayFolio}</div>
-              <div class="uuid-label">FOLIO FISCAL (UUID):</div>
-              <div class="uuid-value">${effectiveUuid || (effectiveDraft ? 'PENDIENTE DE ASIGNACIÓN (PREFACTURA)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
-            </div>
-          </div>
-
-          <!-- 2 Columns Info Section -->
-          <div class="info-grid">
-            <div class="info-col-client">
-              <div class="section-heading">DATOS DEL CLIENTE</div>
-              <div class="client-box">
-                <div class="client-name">${clientName}</div>
-                <div><strong>RFC:</strong> ${clientRfc}</div>
-                <div><strong>Regimen Fiscal:</strong> ${clientRegimen}</div>
-                <div>${clientAddressStr ? `${clientAddressStr}, ` : ''}CP: ${clientCp}</div>
+        <div class="page-body">
+          <div class="row mb-4" style="margin-top: -15px;">
+              <div class="col-6">
               </div>
-            </div>
-
-            <div class="info-col-details">
-              <div class="section-heading">DETALLES DE FACTURACIÓN</div>
-              <table class="details-table">
-                <tr class="alt-row">
-                  <td class="details-lbl">Orden Compra:</td>
-                  <td class="details-val">${ordenCompra}</td>
-                </tr>
-                <tr>
-                  <td class="details-lbl">Fecha Emisión:</td>
-                  <td class="details-val">${fechaEmision}</td>
-                </tr>
-                <tr class="alt-row">
-                  <td class="details-lbl">Uso CFDI:</td>
-                  <td class="details-val">${usoCfdi}</td>
-                </tr>
-                <tr>
-                  <td class="details-lbl">Método Pago:</td>
-                  <td class="details-val">${metodoPago}</td>
-                </tr>
-                <tr class="alt-row">
-                  <td class="details-lbl">Forma Pago:</td>
-                  <td class="details-val">${formaPago}</td>
-                </tr>
-              </table>
-            </div>
+              <div class="col-6 text-end">
+                  <h1 class="inttec-red fw-bold" style="font-size: 26px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">${effectiveDraft ? 'PREFACTURA' : 'FACTURA'}</h1>
+                  <h2 class="text-muted" style="font-size: 20px; font-weight: normal; margin-top: 0; margin-bottom: 4px;">${displayFolio}</h2>
+                  <div style="font-size: 8.5px; font-weight: bold; color: #333; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px;">FOLIO FISCAL (UUID):</div>
+                  <div style="font-family: 'Roboto Mono', monospace; font-size: 9px; color: #111; font-weight: 600; word-break: break-all;">${effectiveUuid || (effectiveDraft ? 'PENDIENTE DE ASIGNACIÓN (PREFACTURA)' : '4A7607DD-925A-5EF5-A434-4EBFEA819D98')}</div>
+              </div>
           </div>
 
-          <!-- Products Table -->
-          <table class="items-table">
-            <thead>
-              <tr>
-                <th style="width: 44%; text-align: left;">DESCRIPCIÓN</th>
-                <th style="width: 18%; text-align: center;">CÓDIGO PRODUCTO</th>
-                <th style="width: 8%; text-align: center;">CANT</th>
-                <th style="width: 12%; text-align: right;">PRECIO</th>
-                <th style="width: 6%; text-align: center;">IVA</th>
-                <th style="width: 12%; text-align: right;">IMPORTE</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${items.map((it: any) => `
-                <tr>
-                  <td class="col-desc">${it.description}</td>
-                  <td class="col-center">${it.satCode}</td>
-                  <td class="col-center">${Number(it.quantity).toFixed(1)}</td>
-                  <td class="col-right">${formatMoney(it.price)}</td>
-                  <td class="col-center">${it.taxRate}</td>
-                  <td class="col-right">${formatMoney(it.amount)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
+          <div class="row mb-4">
+              <div class="col-7">
+                  <div class="section-header">Datos del Cliente</div>
+                  <div class="info-text ps-1">
+                      <strong style="font-size: 11px;">${escapeHtml(clientName)}</strong><br/>
+                      <strong>RFC:</strong> ${escapeHtml(clientRfc)}<br/>
+                      <strong>Régimen Fiscal:</strong> ${escapeHtml(clientRegimen)}<br/>
+                      <strong>CP:</strong> ${escapeHtml(clientCp)}<br/>
+                      ${clientAddressStr ? `${escapeHtml(clientAddressStr)}<br/>` : ''}
+                  </div>
+              </div>
+              <div class="col-5">
+                  <div class="section-header">Detalles de Facturación</div>
+                  <table class="table-details">
+                      <tr>
+                          <td class="label-col">Orden de compra:</td>
+                          <td class="value-col">${escapeHtml(ordenCompra)}</td>
+                      </tr>
+                      <tr>
+                          <td class="label-col">Fecha Emisión:</td>
+                          <td class="value-col">${fechaEmision}</td>
+                      </tr>
+                      <tr>
+                          <td class="label-col">Uso CFDI:</td>
+                          <td class="value-col">${escapeHtml(usoCfdi)}</td>
+                      </tr>
+                      <tr>
+                          <td class="label-col">Método Pago:</td>
+                          <td class="value-col">${escapeHtml(metodoPago)}</td>
+                      </tr>
+                      <tr>
+                          <td class="label-col">Forma Pago:</td>
+                          <td class="value-col">${escapeHtml(formaPago)}</td>
+                      </tr>
+                  </table>
+              </div>
+          </div>
+
+          <table class="table table-red mt-4">
+              <thead>
+                  <tr>
+                      <th width="${hasIva ? '50%' : '56%'}" style="text-align: left; padding-left: 10px;">DESCRIPCIÓN</th>
+                      <th width="${hasIva ? '15%' : '17%'}" class="text-center" style="white-space: nowrap;">CLAVE SAT</th>
+                      <th width="6%" class="text-center" style="white-space: nowrap;">CANT</th>
+                      <th width="${hasIva ? '11%' : '10%'}" class="text-end" style="white-space: nowrap; padding-right: 8px;">PRECIO UNIT</th>
+                      ${hasIva ? '<th width="6%" class="text-center" style="white-space: nowrap;">IVA</th>' : ''}
+                      <th width="${hasIva ? '12%' : '11%'}" class="text-end" style="white-space: nowrap; padding-right: 8px;">IMPORTE</th>
+                  </tr>
+              </thead>
+              <tbody>
+                  ${items.map((it: any) => `
+                      <tr>
+                          <td style="padding: 6px 10px;">
+                              ${renderDescription(it.name, it.description)}
+                          </td>
+                          <td class="text-center" style="white-space: nowrap; font-family: 'Roboto Mono', monospace; font-size: 9px; color: #444;">
+                              ${escapeHtml(it.satCode)}
+                          </td>
+                          <td class="text-center" style="white-space: nowrap;">${Number(it.quantity || 0).toFixed(1)}</td>
+                          <td class="text-end" style="white-space: nowrap; padding-right: 8px;">$ ${formatMoney(it.price)}</td>
+                          ${hasIva ? `
+                          <td class="text-center" style="white-space: nowrap;">
+                              ${it.taxRate || '16%'}
+                          </td>` : ''}
+
+                          <td class="text-end" style="white-space: nowrap; padding-right: 8px;">$ ${formatMoney(it.amount)}</td>
+                      </tr>
+                  `).join('')}
+              </tbody>
           </table>
 
-          <!-- Totals -->
-          <div class="totals-container">
-            <table class="totals-table">
-              <tr>
-                <td class="tot-lbl">Subtotal</td>
-                <td class="tot-val">${formatMoney(subtotal)}</td>
-              </tr>
-              <tr class="tot-iva-row">
-                <td class="tot-lbl">IVA 16%</td>
-                <td class="tot-val">${formatMoney(iva)}</td>
-              </tr>
-              <tr class="tot-total-row">
-                <td class="tot-grand-lbl">TOTAL</td>
-                <td class="tot-grand-val">${formatMoney(total)}</td>
-              </tr>
-            </table>
+          <div class="row mt-4">
+              <div class="col-7">
+                  ${notasAdicionales ? `
+                    <div class="info-text mt-2">
+                        <div class="section-header">Información Adicional</div>
+                        <div style="padding-top: 4px; white-space: pre-line; font-size: 10px; color: #333;">
+                          ${escapeHtml(notasAdicionales)}
+                        </div>
+                    </div>
+                  ` : ''}
+              </div>
+              <div class="col-5">
+                  <table class="table-totals">
+                      <tr><td>Subtotal</td><td class="text-end">$ ${formatMoney(subtotal)}</td></tr>
+                      ${hasIva ? `<tr><td>${ivaLabel}</td><td class="text-end">$ ${formatMoney(iva)}</td></tr>` : ''}
+                      <tr>
+                          <td>TOTAL</td>
+                          <td class="text-end">$ ${formatMoney(total)}</td>
+                      </tr>
+                  </table>
+              </div>
           </div>
-
-          <!-- Full Width Divider -->
-          <div class="full-divider"></div>
 
           <!-- SAT Fiscal Section -->
-          <div class="sat-block">
-            <div class="sat-qr-col">
-              ${effectiveUuid ? `
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(satVerificationUrl || effectiveUuid)}" class="sat-qr-img" alt="QR SAT" />
-              ` : `
-                <div style="width: 95px; height: 95px; border: 1px dashed #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #94a3b8; font-weight: bold; padding: 4px;">
-                  QR SAT<br>(${effectiveDraft ? 'Prefactura' : 'Borrador'})
+          <div class="sat-block" style="margin-top: 24px; border-top: 1px solid #dee2e6; padding-top: 16px; page-break-inside: avoid; break-inside: avoid;">
+            <div style="display: flex; align-items: flex-start; gap: 16px;">
+              <div style="width: 95px; flex-shrink: 0; text-align: center;">
+                ${effectiveUuid ? `
+                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(satVerificationUrl || effectiveUuid)}" style="width: 95px; height: 95px; display: block;" alt="QR SAT" />
+                ` : `
+                  <div style="width: 95px; height: 95px; border: 1px dashed #dee2e6; border-radius: 4px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 8px; color: #999; font-weight: bold; padding: 4px; box-sizing: border-box;">
+                    QR SAT<br>(${effectiveDraft ? 'Prefactura' : 'Borrador'})
+                  </div>
+                `}
+                <div style="font-size: 7.5px; color: #6c757d; margin-top: 4px; font-weight: 500;">CFDI Versión 4.0</div>
+              </div>
+              <div style="flex: 1; border: 1px solid #dee2e6; border-radius: 4px; padding: 6px 10px; background-color: #fbfbfb;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 7.5px; color: #6c757d; border-bottom: 1px solid #f0f0f0; padding-bottom: 3px;">
+                  <span><strong>No. Certificado SAT:</strong> ${satCertNumber}</span>
+                  <span><strong>RFC PAC:</strong> ${pacRfc}</span>
+                  <span><strong>Fecha Certificación:</strong> ${fechaTimbradoStr}</span>
                 </div>
-              `}
-            </div>
-            <div class="sat-box-col">
-              <div class="sat-group">
-                <span class="sat-tag">Sello Digital Emisor:</span>
-                <div class="sat-stamp">${selloEmisor || 'N/A'}</div>
-              </div>
-              <div class="sat-group">
-                <span class="sat-tag">Sello Digital SAT:</span>
-                <div class="sat-stamp">${selloSat || 'N/A'}</div>
-              </div>
-              <div class="sat-group">
-                <span class="sat-tag">Cadena Original SAT:</span>
-                <div class="sat-stamp">${cadenaOriginal || 'N/A'}</div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #8B1D22; font-weight: bold; font-size: 7.5px; display: block; text-transform: uppercase;">Sello Digital Emisor:</span>
+                  <div style="font-family: 'Roboto Mono', 'Courier New', Courier, monospace; font-size: 5.8px; line-height: 1.2; color: #333; word-break: break-all;">${selloEmisor || 'N/A'}</div>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #8B1D22; font-weight: bold; font-size: 7.5px; display: block; text-transform: uppercase;">Sello Digital SAT:</span>
+                  <div style="font-family: 'Roboto Mono', 'Courier New', Courier, monospace; font-size: 5.8px; line-height: 1.2; color: #333; word-break: break-all;">${selloSat || 'N/A'}</div>
+                </div>
+                <div>
+                  <span style="color: #8B1D22; font-weight: bold; font-size: 7.5px; display: block; text-transform: uppercase;">Cadena Original del complemento de certificación digital del SAT:</span>
+                  <div style="font-family: 'Roboto Mono', 'Courier New', Courier, monospace; font-size: 5.8px; line-height: 1.2; color: #333; word-break: break-all;">${cadenaOriginal || 'N/A'}</div>
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Footer -->
-          <div class="invoice-footer">
-            <div>
-              <div class="issuer-name">RAFAEL ALONSO FERNANDEZ TINAJERO</div>
-              <div class="issuer-details">
-                RFC: FETR83041461A | Régimen Fiscal: 601<br/>
-                Dirección: Ozorno 811, Chihuahua, Chihuahua, CP: 31107<br/>
-                Banco: | Cuenta: 012150001930925930
-              </div>
+          <!-- FOOTER -->
+          <div class="footer-bank">
+            <div style="width: 45%;">
+              <strong>RAFAEL ALONSO FERNANDEZ TINAJERO</strong><br>
+              RFC: FETR83041461A | Régimen: 601<br>
+              Ozorno 811, Chihuahua, Chih., CP: 31107 | TEL: 6142477119<br>
+              MAIL: rfernandez@inttec.net
             </div>
-            <div class="footer-page">
-              Página 1 de 1
+            <div style="width: 25%; text-align: center;">
+              <strong>DATOS BANCARIOS</strong><br>
+              BBVA: 012150001930925930<br>
+              Banorte: 1222453474
+            </div>
+            <div style="width: 30%; text-align: right;">
+              Este documento es una representación impresa de un CFDI (Versión 4.0)<br>
+              <strong>Página 1 de 1</strong>
             </div>
           </div>
         </div>

@@ -1,9 +1,13 @@
 import { Router } from 'express';
 import { SatController } from './satController';
-
 import facturacionRoutes from './facturacion.routes';
+import { processSatSync } from './satSyncWorker';
+import { verifyToken } from '../../middlewares/auth.middleware';
 
 const router = Router();
+
+// Proteger todas las rutas de facturación y SAT con JWT
+router.use(verifyToken);
 
 // Rutas de facturación y timbrado CFDI 4.0 con Finkok
 router.use('/', facturacionRoutes);
@@ -12,8 +16,6 @@ router.use('/', facturacionRoutes);
 router.get('/productos-servicios', SatController.searchProductosServicios);
 router.get('/unidades', SatController.searchUnidades);
 router.get('/clave/:clave', SatController.getClaveInfo);
-
-import { processSatSync } from './satSyncWorker';
 
 router.post('/sync-facturas-recibidas', async (req, res) => {
   try {

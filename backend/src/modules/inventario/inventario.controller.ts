@@ -847,9 +847,13 @@ export const eliminarMovimiento = async (req: Request, res: Response) => {
     }
 
     if (source_table === 'retiros_material') {
+      const { rows: rRows } = await pool.query(`SELECT motivo, empleado_nombre FROM retiros_material WHERE id = $1`, [id]);
       await pool.query(`DELETE FROM retiros_material WHERE id = $1`, [id]);
       if (folio_factura) {
         await pool.query(`DELETE FROM movimientos_inventario WHERE folio_factura = $1`, [folio_factura]);
+      }
+      if (rRows[0]?.motivo && String(rRows[0].motivo).trim().length > 3) {
+        await pool.query(`DELETE FROM movimientos_inventario WHERE folio_factura ILIKE $1`, [`%${String(rRows[0].motivo).trim()}%`]);
       }
     } else if (source_table === 'devoluciones_empleado') {
       await pool.query(`DELETE FROM devoluciones_empleado WHERE id = $1`, [id]);
@@ -1008,6 +1012,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
 
     const otherMovs: any[] = [];
     const legacyRetirosMap = new Map<string, any>();
+    const legacyAsignacionesMap = new Map<string, any>();
     const legacyDevsMap = new Map<string, any>();
     const legacyConsumosMap = new Map<string, any>();
 
@@ -1022,13 +1027,89 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
       const mTime = new Date(m.fecha).getTime();
 
       const isRetiro = /^RETIRO:/i.test(folio);
+      const isAsignacion = /^ASIGNACI[OÓ]N/i.test(folio);
       const isDevolucion = /devoluci[oó]n/i.test(folio);
       const isGasto = /^(GASTO MATERIAL:|CONSUMO:|GASTO:)/i.test(folio);
 
-      if (isRetiro) {
+      if (isAsignacion) {
+        // Verificar si ya está incluido en un retiro estructurado (retiros_material)
         const alreadyInStructured = structuredRetiros.some((st: any) => {
           const stTime = new Date(st.fecha).getTime();
-          return (st.usuario_id === m.creado_por || st.usuario_nombre === userMap.get(m.creado_por)) && Math.abs(stTime - mTime) < 180000;
+          if (Math.abs(stTime - mTime) > 600000) return false;
+
+          const isAsig = st.tipo_gasto === 'Asignación de Material' ||
+                         /asignaci[oó]n/i.test(st.tipo_gasto || '') ||
+                         /asignaci[oó]n/i.test(st.folio_factura || '') ||
+                         /asignaci[oó]n/i.test(st.motivo || '');
+          if (!isAsig) return false;
+
+          const empMatch = Boolean(st.usuario_nombre && folio.toLowerCase().includes(st.usuario_nombre.toLowerCase())) ||
+                           st.usuario_id === m.creado_por ||
+                           st.usuario_nombre === userMap.get(m.creado_por);
+          const prodMatch = Array.isArray(st.materiales) && st.materiales.some((mat: any) => String(mat.producto_id) === String(m.producto_id));
+          const motivoMatch = Boolean(st.motivo && folio.toLowerCase().includes(st.motivo.toLowerCase().trim()));
+
+          return empMatch || prodMatch || motivoMatch;
+        });
+
+        // Si ya está en structuredRetiros, se omite para evitar duplicados individuales.
+        // Si no está (registros legados o huérfanos), agruparlos juntos:
+        if (!alreadyInStructured) {
+          const cleanKey = folio.replace(/[^a-zA-Z0-9]/g, '').substring(0, 25);
+          const groupKey = `${m.creado_por}_${cleanKey}_${Math.floor(mTime / 180000)}`;
+
+          if (!legacyAsignacionesMap.has(groupKey)) {
+            const empMatch = folio.match(/\[(.*?)\]$/);
+            const empleadoNombre = empMatch ? empMatch[1].trim() : (userMap.get(m.creado_por) || 'Empleado');
+            const detalle = folio.replace(/^ASIGNACI[OÓ]N:\s*/i, '').replace(/\[.*?\]$/g, '').trim();
+
+            legacyAsignacionesMap.set(groupKey, {
+              id: m.id,
+              source_table: 'movimientos_inventario',
+              tipo: 'SALIDA',
+              subtipo: 'SALIDA',
+              cantidad: 0,
+              fecha: m.fecha,
+              folio_factura: folio,
+              detalle_motivo: detalle || folio,
+              motivo: detalle || 'Asignación de material',
+              cliente_nombre: '',
+              sucursal_nombre: '',
+              tipo_gasto: 'Asignación de Material',
+              proveedor_id: m.proveedor_id,
+              proveedor_nombre: provMap.get(m.proveedor_id) || '',
+              usuario_id: m.creado_por,
+              usuario_nombre: empleadoNombre,
+              producto_id: m.producto_id,
+              producto_nombre: prod.nombre_oficial || 'Producto',
+              producto_sku: prod.sku_interno || '-',
+              producto_unidad: prod.unidad || 'pza',
+              precio_unitario: prod.precio_unitario || 0,
+              materiales: []
+            });
+          }
+
+          const leg = legacyAsignacionesMap.get(groupKey);
+          leg.cantidad = Math.round((leg.cantidad + (Number(m.cantidad) || 0)) * 100) / 100;
+          leg.materiales.push({
+            producto_id: m.producto_id,
+            sku: prod.sku_interno || '-',
+            nombre: prod.nombre_oficial || 'Producto',
+            cantidad: Number(m.cantidad) || 0,
+            unidad: prod.unidad || 'pza'
+          });
+          if (leg.materiales.length > 1) {
+            leg.producto_nombre = `${leg.materiales.length} materiales: ${leg.materiales.map((x: any) => x.nombre).join(', ')}`;
+            leg.producto_sku = `${leg.materiales.length} partidas`;
+          }
+        }
+      } else if (isRetiro) {
+        const alreadyInStructured = structuredRetiros.some((st: any) => {
+          const stTime = new Date(st.fecha).getTime();
+          if (Math.abs(stTime - mTime) >= 300000) return false;
+          const userMatch = st.usuario_id === m.creado_por || st.usuario_nombre === userMap.get(m.creado_por);
+          const prodMatch = Array.isArray(st.materiales) && st.materiales.some((mat: any) => String(mat.producto_id) === String(m.producto_id));
+          return userMatch || prodMatch;
         });
 
         if (!alreadyInStructured) {
@@ -1248,6 +1329,7 @@ export const getMovimientosInventario = async (req: Request, res: Response) => {
     const allMovs = [
       ...structuredRetiros, 
       ...Array.from(legacyRetirosMap.values()), 
+      ...Array.from(legacyAsignacionesMap.values()),
       ...structuredDevs, 
       ...Array.from(legacyDevsMap.values()), 
       ...Array.from(legacyConsumosMap.values()),
@@ -1293,3 +1375,306 @@ export const getFirmaMovimiento = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+export const getInventarioTodosEmpleados = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const pool = getDbPool(company, env);
+
+    const { empleadoId, search } = req.query;
+
+    let query = `
+      SELECT 
+        ie.id,
+        ie.empleado_id,
+        ie.producto_id,
+        ie.cantidad_disponible,
+        ie.cantidad_nuevo,
+        ie.cantidad_usado,
+        ie.cantidad_por_revisar,
+        ie.updated_at,
+        ie.created_at,
+        u.nombre as empleado_nombre,
+        u.email as empleado_email,
+        u.rol as empleado_rol,
+        p.nombre_oficial as producto_nombre,
+        p.sku_interno as producto_sku,
+        p.unidad as producto_unidad,
+        p.precio_unitario as producto_precio,
+        p.stock_actual as producto_stock_general,
+        c.nombre as categoria_nombre
+      FROM inventario_empleados ie
+      JOIN usuarios u ON ie.empleado_id = u.id
+      JOIN productos p ON ie.producto_id = p.id
+      LEFT JOIN categorias_productos c ON p.categoria_id = c.id
+      WHERE ie.cantidad_disponible > 0
+    `;
+    const params: any[] = [];
+
+    if (empleadoId) {
+      params.push(empleadoId);
+      query += ` AND ie.empleado_id = $${params.length}`;
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      params.push(`%${search.trim().toLowerCase()}%`);
+      query += ` AND (
+        LOWER(u.nombre) LIKE $${params.length} OR 
+        LOWER(p.nombre_oficial) LIKE $${params.length} OR 
+        LOWER(p.sku_interno) LIKE $${params.length} OR
+        LOWER(COALESCE(c.nombre, '')) LIKE $${params.length}
+      )`;
+    }
+
+    query += ` ORDER BY u.nombre ASC, p.nombre_oficial ASC`;
+
+    const { rows } = await pool.query(query, params);
+
+    const inventario = (rows || []).map((r: any) => {
+      const cTotal = Number(r.cantidad_disponible) || 0;
+      let cNuevo = Number(r.cantidad_nuevo) || 0;
+      let cUsado = Number(r.cantidad_usado) || 0;
+      let cPorRev = Number(r.cantidad_por_revisar) || 0;
+      if (cNuevo === 0 && cUsado === 0 && cPorRev === 0 && cTotal > 0) {
+        cNuevo = cTotal;
+      }
+      return {
+        id: r.id,
+        empleado_id: r.empleado_id,
+        empleado_nombre: r.empleado_nombre || r.empleado_email || 'Empleado',
+        empleado_email: r.empleado_email,
+        empleado_rol: r.empleado_rol,
+        producto_id: r.producto_id,
+        producto_nombre: r.producto_nombre,
+        producto_sku: r.producto_sku || '-',
+        producto_unidad: r.producto_unidad || 'pza',
+        producto_precio: Number(r.producto_precio) || 0,
+        producto_stock_general: Number(r.producto_stock_general) || 0,
+        categoria_nombre: r.categoria_nombre || 'Sin Categoría',
+        cantidad_disponible: cTotal,
+        cantidad_nuevo: cNuevo,
+        cantidad_usado: cUsado,
+        cantidad_por_revisar: cPorRev,
+        valor_estimado: Math.round(cTotal * (Number(r.producto_precio) || 0) * 100) / 100,
+        updated_at: r.updated_at || r.created_at
+      };
+    });
+
+    // Agrupado por empleado
+    const porEmpleadoMap = new Map<string, any>();
+    inventario.forEach((item: any) => {
+      if (!porEmpleadoMap.has(item.empleado_id)) {
+        porEmpleadoMap.set(item.empleado_id, {
+          empleado_id: item.empleado_id,
+          empleado_nombre: item.empleado_nombre,
+          empleado_email: item.empleado_email,
+          empleado_rol: item.empleado_rol,
+          total_articulos: 0,
+          total_partidas: 0,
+          valor_total: 0,
+          materiales: []
+        });
+      }
+      const emp = porEmpleadoMap.get(item.empleado_id);
+      emp.total_articulos = Math.round((emp.total_articulos + item.cantidad_disponible) * 100) / 100;
+      emp.total_partidas += 1;
+      emp.valor_total = Math.round((emp.valor_total + item.valor_estimado) * 100) / 100;
+      emp.materiales.push(item);
+    });
+
+    // Agrupado por producto
+    const porProductoMap = new Map<string, any>();
+    inventario.forEach((item: any) => {
+      if (!porProductoMap.has(item.producto_id)) {
+        porProductoMap.set(item.producto_id, {
+          producto_id: item.producto_id,
+          producto_nombre: item.producto_nombre,
+          producto_sku: item.producto_sku,
+          producto_unidad: item.producto_unidad,
+          producto_precio: item.producto_precio,
+          categoria_nombre: item.categoria_nombre,
+          total_custodia: 0,
+          total_nuevo: 0,
+          total_usado: 0,
+          total_por_revisar: 0,
+          valor_total: 0,
+          empleados: []
+        });
+      }
+      const prod = porProductoMap.get(item.producto_id);
+      prod.total_custodia = Math.round((prod.total_custodia + item.cantidad_disponible) * 100) / 100;
+      prod.total_nuevo = Math.round((prod.total_nuevo + item.cantidad_nuevo) * 100) / 100;
+      prod.total_usado = Math.round((prod.total_usado + item.cantidad_usado) * 100) / 100;
+      prod.total_por_revisar = Math.round((prod.total_por_revisar + item.cantidad_por_revisar) * 100) / 100;
+      prod.valor_total = Math.round((prod.valor_total + item.valor_estimado) * 100) / 100;
+      prod.empleados.push({
+        empleado_id: item.empleado_id,
+        empleado_nombre: item.empleado_nombre,
+        cantidad_disponible: item.cantidad_disponible,
+        cantidad_nuevo: item.cantidad_nuevo,
+        cantidad_usado: item.cantidad_usado,
+        cantidad_por_revisar: item.cantidad_por_revisar,
+        updated_at: item.updated_at
+      });
+    });
+
+    const totalArticulosGeneral = inventario.reduce((s: number, it: any) => s + it.cantidad_disponible, 0);
+    const totalValorGeneral = inventario.reduce((s: number, it: any) => s + it.valor_estimado, 0);
+
+    return res.json({
+      resumen: {
+        total_empleados: porEmpleadoMap.size,
+        total_productos_distintos: porProductoMap.size,
+        total_articulos: Math.round(totalArticulosGeneral * 100) / 100,
+        total_valor_estimado: Math.round(totalValorGeneral * 100) / 100
+      },
+      inventario,
+      por_empleado: Array.from(porEmpleadoMap.values()),
+      por_producto: Array.from(porProductoMap.values())
+    });
+  } catch (error: any) {
+    console.error('Error en getInventarioTodosEmpleados:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const devolverMaterialAdmin = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env, user } = tenant;
+    const pool = getDbPool(company, env);
+
+    const { empleadoId, materiales, motivo } = req.body;
+    const targetUserId = empleadoId || user?.id;
+
+    if (!targetUserId || !Array.isArray(materiales) || materiales.length === 0) {
+      return res.status(400).json({ error: 'Datos incompletos para procesar la devolución' });
+    }
+
+    const { rows: uRows } = await pool.query('SELECT nombre FROM usuarios WHERE id = $1', [targetUserId]);
+    const userName = uRows[0]?.nombre || 'Administrador';
+
+    const itemsDevueltos: any[] = [];
+
+    for (const m of materiales) {
+      const productoId = m.productoId || m.producto_id;
+      const totalDevolver = Number(m.cantidad) || Number(m.devolver) || 0;
+      if (totalDevolver <= 0 || !productoId) continue;
+
+      const qNuevo = Number(m.cantidad_nuevo) || Number(m.devolver_nuevo) || 0;
+      const qUsado = Number(m.cantidad_usado) || Number(m.devolver_usado) || 0;
+      const qPorRev = Number(m.cantidad_por_revisar) || Number(m.devolver_por_revisar) || 0;
+
+      // 1. Descontar de inventario_empleados
+      const { rows: invRows } = await pool.query(
+        'SELECT * FROM inventario_empleados WHERE empleado_id = $1 AND producto_id = $2',
+        [targetUserId, productoId]
+      );
+      const invRow = invRows[0];
+      if (invRow) {
+        const curDisp = Number(invRow.cantidad_disponible) || 0;
+        const curNuevo = Number(invRow.cantidad_nuevo) || 0;
+        const curUsado = Number(invRow.cantidad_usado) || 0;
+        const curPorRev = Number(invRow.cantidad_por_revisar) || 0;
+
+        let discNuevo = 0, discUsado = 0, discPorRev = 0;
+        if (qNuevo > 0 || qUsado > 0 || qPorRev > 0) {
+          discNuevo = Math.min(curNuevo, qNuevo);
+          discUsado = Math.min(curUsado, qUsado);
+          discPorRev = Math.min(curPorRev, qPorRev);
+        } else {
+          let rem = totalDevolver;
+          const baseNuevo = (curNuevo === 0 && curUsado === 0 && curPorRev === 0 && curDisp > 0) ? curDisp : curNuevo;
+          discNuevo = Math.min(baseNuevo, rem); rem -= discNuevo;
+          discUsado = Math.min(curUsado, rem); rem -= discUsado;
+          discPorRev = Math.min(curPorRev, rem);
+        }
+
+        const nextNuevo = Math.max(0, curNuevo - discNuevo);
+        const nextUsado = Math.max(0, curUsado - discUsado);
+        const nextPorRev = Math.max(0, curPorRev - discPorRev);
+        const nextTotal = Math.max(0, Math.round((curDisp - totalDevolver) * 100) / 100);
+
+        await pool.query(
+          `UPDATE inventario_empleados 
+           SET cantidad_disponible = $1, cantidad_nuevo = $2, cantidad_usado = $3, cantidad_por_revisar = $4, updated_at = $5 
+           WHERE id = $6`,
+          [nextTotal, nextNuevo, nextUsado, nextPorRev, new Date().toISOString(), invRow.id]
+        );
+      }
+
+      // 2. Incrementar stock en productos
+      const { rows: pRows } = await pool.query(
+        'SELECT id, nombre_oficial, sku_interno, stock_actual, stock_nuevo, stock_usado, stock_por_revisar FROM productos WHERE id = $1',
+        [productoId]
+      );
+      const prod = pRows[0];
+      if (prod) {
+        let pNuevo = Number(prod.stock_nuevo) || 0;
+        let pUsado = Number(prod.stock_usado) || 0;
+        let pPorRev = Number(prod.stock_por_revisar) || 0;
+
+        let addNuevo = qNuevo;
+        let addUsado = qUsado;
+        let addPorRev = qPorRev;
+
+        if (addNuevo === 0 && addUsado === 0 && addPorRev === 0) {
+          addNuevo = totalDevolver;
+        }
+
+        const nextPNuevo = pNuevo + addNuevo;
+        const nextPUsado = pUsado + addUsado;
+        const nextPPorRev = pPorRev + addPorRev;
+        const nextPTotal = Math.round((nextPNuevo + nextPUsado + nextPPorRev) * 100) / 100;
+
+        await pool.query(
+          `UPDATE productos 
+           SET stock_actual = $1, stock_nuevo = $2, stock_usado = $3, stock_por_revisar = $4 
+           WHERE id = $5`,
+          [nextPTotal, nextPNuevo, nextPUsado, nextPPorRev, productoId]
+        );
+
+        // 3. Registrar movimiento de inventario (ENTRADA)
+        const breakdownParts: string[] = [];
+        if (addNuevo > 0) breakdownParts.push(`Nuevas: ${addNuevo}`);
+        if (addUsado > 0) breakdownParts.push(`Usadas: ${addUsado}`);
+        if (addPorRev > 0) breakdownParts.push(`Dañadas: ${addPorRev}`);
+        const breakdownStr = breakdownParts.length > 0 ? ` (${breakdownParts.join(', ')})` : '';
+
+        const motivoStr = motivo ? ` - Motivo: ${motivo}` : '';
+        const folio = `DEVOLUCIÓN A ALMACÉN [${userName}]${motivoStr}${breakdownStr}`;
+
+        try {
+          await pool.query(
+            `INSERT INTO movimientos_inventario (producto_id, tipo, cantidad, folio_factura, creado_por, fecha)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [productoId, 'ENTRADA', totalDevolver, folio, user?.id || targetUserId, new Date().toISOString()]
+          );
+        } catch (movErr: any) {
+          console.warn('Aviso insertando movimiento de inventario en devolución admin:', movErr.message);
+        }
+
+        itemsDevueltos.push({
+          productoId,
+          nombre: prod.nombre_oficial,
+          sku: prod.sku_interno,
+          cantidad: totalDevolver
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      mensaje: `Se reintegraron ${itemsDevueltos.length} material(es) al almacén central exitosamente.`,
+      items: itemsDevueltos
+    });
+  } catch (error: any) {
+    console.error('Error en devolverMaterialAdmin:', error);
+    return res.status(500).json({ error: error.message || 'Error al devolver material' });
+  }
+};
+
+
