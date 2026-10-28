@@ -31,6 +31,7 @@ import { GeminiService } from '@/services/gemini';
 import { normalizeText } from '@/utils/helpers';
 import { ModuleCache } from '@/services/moduleCache';
 import { ReportGenerator } from '@/utils/reportGenerator';
+import PaginationControls from '@/components/PaginationControls';
 
 // Interfaces locales para concordar con la base de datos
 interface Categoria {
@@ -320,7 +321,7 @@ export default function InventarioDashboard() {
     }
   };
 
-  const { user: authUser } = useAuth();
+const { user: authUser } = useAuth();
   const [currentUser, setCurrentUser] = useState<any>(authUser);
 
   // Tab activa: 'importacion' | 'categorias' | 'retribuciones' | 'movimientos' | 'empleados_stock' | 'inventario_personal'
@@ -374,6 +375,10 @@ export default function InventarioDashboard() {
   const [selectedEmpleadoStockFilter, setSelectedEmpleadoStockFilter] = useState('');
   const [expandedEmpleadoIds, setExpandedEmpleadoIds] = useState<string[]>([]);
   const [isExportingEmpleadosStockExcel, setIsExportingEmpleadosStockExcel] = useState(false);
+  const [currentPageProd, setCurrentPageProd] = useState(1);
+  const [pageSizeProd, setPageSizeProd] = useState(25);
+  const [currentPageMov, setCurrentPageMov] = useState(1);
+  const [pageSizeMov, setPageSizeMov] = useState(25);
 
   // Estado del Módulo Movimientos de Inventario
   const [movimientos, setMovimientos] = useState<any[]>([]);
@@ -2203,6 +2208,16 @@ export default function InventarioDashboard() {
     });
   }, [productos, showInactive, showOutOfStock, searchTerm, selectedCategoryFilter]);
 
+  useEffect(() => {
+    setCurrentPageProd(1);
+  }, [searchTerm, selectedCategoryFilter, showInactive, showOutOfStock]);
+
+  const totalPagesProd = Math.ceil(filteredProducts.length / pageSizeProd) || 1;
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPageProd - 1) * pageSizeProd;
+    return filteredProducts.slice(start, start + pageSizeProd);
+  }, [filteredProducts, currentPageProd, pageSizeProd]);
+
   // Filtrado y estadísticas de Movimientos memoizados (0ms en re-renders)
   const { filteredMovimientos, totalMovimientosCount, totalEntradasCount, totalSalidasCount, totalGastosCount } = useMemo(() => {
     const normSearch = normalizeText(movimientosSearch);
@@ -2306,7 +2321,7 @@ export default function InventarioDashboard() {
     };
   }, [movimientos, selectedUsuarioMovimiento, selectedTipoMovimiento, selectedDateFilterMov, movimientosSearch]);
 
-  // Filtrado y agrupaciones de Material en Empleados memoizados
+// Filtrado y agrupaciones de Material en Empleados memoizados
   const { filteredEmpleadosStock, filteredPorEmpleado, filteredPorProducto } = useMemo(() => {
     const norm = normalizeText(empleadosStockSearch);
     
@@ -2393,6 +2408,16 @@ export default function InventarioDashboard() {
       );
     });
   }, [miInventario, miInventarioSearch]);
+
+useEffect(() => {
+    setCurrentPageMov(1);
+  }, [movimientosSearch, selectedTipoMovimiento, selectedUsuarioMovimiento, selectedDateFilterMov]);
+
+  const totalPagesMov = Math.ceil(filteredMovimientos.length / pageSizeMov) || 1;
+  const paginatedMovimientos = useMemo(() => {
+    const start = (currentPageMov - 1) * pageSizeMov;
+    return filteredMovimientos.slice(start, start + pageSizeMov);
+  }, [filteredMovimientos, currentPageMov, pageSizeMov]);
 
   const activeCategoryName = categorias.find(c => c.id === selectedCategoryFilter)?.nombre;
   const activeFormCategoryName = categorias.find(c => c.id === formCategoriaId)?.nombre;
@@ -2898,7 +2923,25 @@ export default function InventarioDashboard() {
           </View>
                 </>
               }
-              scrollEnabled={true} style={{ flex: 1 }} data={filteredProducts}
+              scrollEnabled={true} style={{ flex: 1 }} data={paginatedProducts}
+              ListFooterComponent={
+                filteredProducts.length > 0 ? (
+                  <PaginationControls
+                    currentPage={currentPageProd}
+                    totalPages={totalPagesProd}
+                    totalItems={filteredProducts.length}
+                    itemsPerPage={pageSizeProd}
+                    onPageChange={setCurrentPageProd}
+                    onItemsPerPageChange={(newSize: number) => {
+                      setPageSizeProd(newSize);
+                      setCurrentPageProd(1);
+                    }}
+                    itemsPerPageOptions={[20, 25, 50, 100]}
+                    isLoading={isLoading}
+                    style={{ marginTop: 12, marginBottom: 24 }}
+                  />
+                ) : null
+              }
               initialNumToRender={10}
               maxToRenderPerBatch={10}
               windowSize={5}
@@ -3718,7 +3761,7 @@ export default function InventarioDashboard() {
         <FlatList
           style={{ flex: 1 }}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
-          data={filteredMovimientos}
+          data={paginatedMovimientos}
           keyExtractor={(item) => String(item.id)}
           initialNumToRender={15}
           maxToRenderPerBatch={15}
@@ -3944,6 +3987,24 @@ export default function InventarioDashboard() {
                 </Text>
               </View>
             )
+          }
+          ListFooterComponent={
+            filteredMovimientos.length > 0 ? (
+              <PaginationControls
+                currentPage={currentPageMov}
+                totalPages={totalPagesMov}
+                totalItems={filteredMovimientos.length}
+                itemsPerPage={pageSizeMov}
+                onPageChange={setCurrentPageMov}
+                onItemsPerPageChange={(newSize: number) => {
+                  setPageSizeMov(newSize);
+                  setCurrentPageMov(1);
+                }}
+                itemsPerPageOptions={[20, 25, 50, 100]}
+                isLoading={isLoadingMovimientos}
+                style={{ marginTop: 14, marginBottom: 20 }}
+              />
+            ) : null
           }
           renderItem={({ item }) => (
             <MovimientoCardItem

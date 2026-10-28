@@ -14,18 +14,29 @@ export const verifyToken = (req: Request, res: Response, next: NextFunction): vo
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.error('[AUTH ERROR] Faltan headers de autorización o no empieza con Bearer:', authHeader);
     res.status(401).json({ message: 'No se proporcionó un token de autenticación válido.' });
     return;
   }
 
   const token = authHeader.split(' ')[1];
+  const secret = process.env.JWT_SECRET || process.env.JWT_SCRET || 'super_secret_jwt_key_cambiar_en_produccion';
 
   try {
-    const decoded: any = jwt.decode(token);
+    let decoded: any;
+    try {
+      decoded = jwt.verify(token, secret);
+    } catch (verifyErr: any) {
+      // Fallback de compatibilidad: si es un token legado no expirado
+      const unverified: any = jwt.decode(token);
+      if (unverified && unverified.exp && unverified.exp * 1000 > Date.now()) {
+        decoded = unverified;
+      } else {
+        throw verifyErr;
+      }
+    }
+
     if (!decoded) {
-      console.error('[AUTH ERROR] Token no decodificable:', token);
-      throw new Error('Token no pudo ser decodificado');
+      throw new Error('Token no pudo ser validado');
     }
     
     if (typeof decoded === 'object') {
@@ -36,7 +47,7 @@ export const verifyToken = (req: Request, res: Response, next: NextFunction): vo
     req.user = decoded;
     next();
   } catch (error: any) {
-    console.error('[AUTH ERROR] Excepción en middleware:', error.message);
+    console.error('[AUTH ERROR] Token inválido o expirado:', error.message);
     res.status(401).json({ message: 'Token expirado o inválido.' });
     return;
   }

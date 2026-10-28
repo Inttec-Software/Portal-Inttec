@@ -42,28 +42,77 @@ export const getVentasHistorial = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    const ventasRes = await pool.query(`
-      SELECT v.*,
-             (SELECT row_to_json(c_obj) FROM (SELECT folio FROM cotizaciones c WHERE c.id = v.cotizacion_id) c_obj) as cotizaciones,
-             (SELECT row_to_json(u_obj) FROM (SELECT nombre FROM usuarios u WHERE u.id = v.registrado_por) u_obj) as usuarios,
-             (SELECT json_agg(row_to_json(vp_obj)) FROM (SELECT descripcion, unidad FROM ventas_partidas vp WHERE vp.venta_id = v.id) vp_obj) as ventas_partidas
-      FROM ventas v
-      ORDER BY v.created_at DESC
-      LIMIT 300
-    `);
+    const isPaginated = req.query.page !== undefined || (req.query.limit !== undefined && req.query.limit !== 'all');
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.max(1, Math.min(200, parseInt(req.query.limit as string, 10) || 25));
+    const offset = (page - 1) * limit;
 
-    const ventasData = ventasRes.rows;
+    const search = (req.query.search as string || '').trim();
+    const fecha = (req.query.fecha as string || '').trim();
 
-    // Excluir registros generados como Factura Directa que no corresponden a ventas operativas
-    const rawVentas = (ventasData || []).filter((v: any) => {
-      if (v.tipo_proyecto === 'Factura Directa') {
-        const ref = (v.factura_referencia || '').trim();
-        const fol = (v.folio || '').trim();
-        if (!ref || ref === fol) return false;
-      }
-      return true;
-    });
-    const ventaIds = rawVentas.map((v: any) => v.id);
+    // Filtro base: Excluir registros generados como Factura Directa que no corresponden a ventas operativas
+    const conditions: string[] = [
+      `NOT (v.tipo_proyecto = 'Factura Directa' AND (TRIM(COALESCE(v.factura_referencia, '')) = '' OR TRIM(COALESCE(v.factura_referencia, '')) = TRIM(COALESCE(v.folio, ''))))`
+    ];
+    const params: any[] = [];
+
+    if (fecha) {
+      params.push(`${fecha}%`);
+      conditions.push(`(v.fecha LIKE $${params.length} OR substring(v.created_at::text, 1, 10) LIKE $${params.length})`);
+    }
+
+    if (search) {
+      params.push(`%${search}%`);
+      const sIdx = params.length;
+      conditions.push(`(
+        v.cliente ILIKE $${sIdx} OR
+        v.folio ILIKE $${sIdx} OR
+        v.factura_referencia ILIKE $${sIdx} OR
+        v.sucursal ILIKE $${sIdx} OR
+        v.tipo_proyecto ILIKE $${sIdx} OR
+        EXISTS (SELECT 1 FROM usuarios u WHERE u.id = v.registrado_por AND u.nombre ILIKE $${sIdx}) OR
+        EXISTS (SELECT 1 FROM ventas_partidas vp WHERE vp.venta_id = v.id AND vp.descripcion ILIKE $${sIdx})
+      )`);
+    }
+
+    const whereSql = `WHERE ${conditions.join(' AND ')}`;
+
+    let totalCount = 0;
+    let ventasData: any[] = [];
+
+    if (isPaginated) {
+      const countRes = await pool.query(`SELECT COUNT(*) AS total_count FROM ventas v ${whereSql}`, params);
+      totalCount = parseInt(countRes.rows[0]?.total_count || '0', 10);
+
+      const ventasRes = await pool.query(`
+        SELECT v.*,
+               (SELECT row_to_json(c_obj) FROM (SELECT folio FROM cotizaciones c WHERE c.id = v.cotizacion_id) c_obj) as cotizaciones,
+               (SELECT row_to_json(u_obj) FROM (SELECT nombre FROM usuarios u WHERE u.id = v.registrado_por) u_obj) as usuarios,
+               (SELECT json_agg(row_to_json(vp_obj)) FROM (SELECT descripcion, unidad FROM ventas_partidas vp WHERE vp.venta_id = v.id) vp_obj) as ventas_partidas
+        FROM ventas v
+        ${whereSql}
+        ORDER BY v.created_at DESC
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+      `, [...params, limit, offset]);
+
+      ventasData = ventasRes.rows || [];
+    } else {
+      const ventasRes = await pool.query(`
+        SELECT v.*,
+               (SELECT row_to_json(c_obj) FROM (SELECT folio FROM cotizaciones c WHERE c.id = v.cotizacion_id) c_obj) as cotizaciones,
+               (SELECT row_to_json(u_obj) FROM (SELECT nombre FROM usuarios u WHERE u.id = v.registrado_por) u_obj) as usuarios,
+               (SELECT json_agg(row_to_json(vp_obj)) FROM (SELECT descripcion, unidad FROM ventas_partidas vp WHERE vp.venta_id = v.id) vp_obj) as ventas_partidas
+        FROM ventas v
+        ${whereSql}
+        ORDER BY v.created_at DESC
+        LIMIT 300
+      `, params);
+
+      ventasData = ventasRes.rows || [];
+      totalCount = ventasData.length;
+    }
+
+    const ventaIds = ventasData.map((v: any) => v.id);
 
     let pagosMap: Record<string, any[]> = {};
     if (ventaIds.length > 0) {
@@ -72,8 +121,8 @@ export const getVentasHistorial = async (req: Request, res: Response) => {
           SELECT * FROM ventas_pagos WHERE venta_id = ANY($1) ORDER BY fecha_pago DESC
         `, [ventaIds]);
         
-        const pagosData = pagosRes.rows;
-        pagosData.forEach((p: any) => {
+        const pagosRows = pagosRes.rows || [];
+        pagosRows.forEach((p: any) => {
           if (!pagosMap[p.venta_id]) pagosMap[p.venta_id] = [];
           pagosMap[p.venta_id].push(p);
         });
@@ -82,7 +131,7 @@ export const getVentasHistorial = async (req: Request, res: Response) => {
       }
     }
 
-    const ventasConPagos = rawVentas.map((v: any) => {
+    const ventasConPagos = ventasData.map((v: any) => {
       const pagos = pagosMap[v.id] || [];
       const totalPagado = pagos.length > 0
         ? pagos.reduce((sum: number, p: any) => sum + (Number(p.monto) || 0), 0)
@@ -106,7 +155,15 @@ export const getVentasHistorial = async (req: Request, res: Response) => {
       };
     });
 
-    return res.json({ ventas: ventasConPagos });
+    return res.json({
+      ventas: ventasConPagos,
+      pagination: isPaginated ? {
+        page,
+        limit,
+        total: totalCount,
+        totalPages: Math.ceil(totalCount / limit) || 1,
+      } : undefined
+    });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

@@ -1,9 +1,0 @@
-[build]
-  command = "npx expo export --platform web"
-  publish = "dist"
-
-# Redirección SPA para que Expo Router maneje las rutas del lado del cliente
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200

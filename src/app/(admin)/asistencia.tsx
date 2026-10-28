@@ -1455,7 +1455,7 @@ export default function AdminAsistencia() {
 
                   {/* Resumen de Horas (Jornada y Horas Extra) */}
                   <View style={[styles.cardHoursGrid, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
-                    {/* Campo Izquierdo: Total Horas (0/48 hrs) */}
+                    {/* Campo Izquierdo: Total Horas (sumatoria) */}
                     <View style={styles.cardHoursCol}>
                       <Text style={[styles.cardHoursLabel, { color: themeColors.textSecondary }]}>
                         TOTAL HORAS
@@ -1463,9 +1463,30 @@ export default function AdminAsistencia() {
                       <View style={styles.cardHoursValueRow}>
                         <Ionicons
                           name="time"
-                          size={16}
+                          size={15}
                           color={isJornadaCompleta ? '#16a34a' : themeColors.text}
-                          style={{ marginRight: 5 }}
+                          style={{ marginRight: 4 }}
+                        />
+                        <Text style={[styles.cardHoursMainText, { color: isJornadaCompleta ? '#16a34a' : themeColors.text }]}>
+                          {emp.totalHorasFormateadas || '0h 0m'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Divisor vertical */}
+                    <View style={[styles.cardHoursDivider, { backgroundColor: themeColors.border }]} />
+
+                    {/* Campo Medio: Jornada (48 hrs) */}
+                    <View style={styles.cardHoursCol}>
+                      <Text style={[styles.cardHoursLabel, { color: themeColors.textSecondary }]}>
+                        JORNADA
+                      </Text>
+                      <View style={styles.cardHoursValueRow}>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={14}
+                          color={isJornadaCompleta ? '#16a34a' : themeColors.text}
+                          style={{ marginRight: 4 }}
                         />
                         <Text style={[styles.cardHoursMainText, { color: isJornadaCompleta ? '#16a34a' : themeColors.text }]}>
                           {formatContadorJornada48(minsReg)}
