@@ -429,6 +429,7 @@ export default function ReportesScreen() {
       return;
     }
 
+    const targetGastoId = selectedGasto.id;
     setIsProcessingAction(true);
     try {
       const oldVentaId = selectedGasto.venta_id;
@@ -482,6 +483,20 @@ export default function ReportesScreen() {
       setSelectedGasto(null);
       setRejectionFeedback('');
       setShowFeedbackInput(false);
+
+      if (activeTab === 'pendientes' && status !== 'PENDING') {
+        setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+      } else if (activeTab === 'historial' && status === 'PENDING') {
+        setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+      } else {
+        setGastos(prev => prev.map(g => g.id === targetGastoId ? {
+          ...g,
+          status,
+          approved_at: updatePayload.approved_at !== undefined ? updatePayload.approved_at : g.approved_at,
+          rejection_feedback: updatePayload.rejection_feedback !== undefined ? updatePayload.rejection_feedback : g.rejection_feedback,
+          venta_id: updatePayload.venta_id !== undefined ? updatePayload.venta_id : g.venta_id,
+        } : g));
+      }
       await refreshData();
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo procesar la acción de revisión.');
@@ -536,6 +551,7 @@ export default function ReportesScreen() {
       return;
     }
 
+    const targetGastoId = selectedGasto.id;
     setIsProcessingAction(true);
     try {
       const updatePayload: Partial<Gasto> = {
@@ -575,6 +591,17 @@ export default function ReportesScreen() {
       setSelectedGasto(null);
       setRejectionFeedback('');
       setShowFeedbackInput(false);
+
+      if (activeTab === 'pendientes') {
+        setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+      } else {
+        setGastos(prev => prev.map(g => g.id === targetGastoId ? {
+          ...g,
+          status: 'APPROVED',
+          approved_at: updatePayload.approved_at || new Date().toISOString(),
+          venta_id: ventaId,
+        } : g));
+      }
       await refreshData();
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo aprobar el gasto.');
@@ -5324,6 +5351,7 @@ export default function ReportesScreen() {
                 <AsistenciaSemanalCard
                   asistencias={asistencias}
                   empleadoNombre={asistenciaEmpleado?.nombre || 'Empleado'}
+                  empleadoRol={asistenciaEmpleado?.rol}
                   isLoading={isLoadingAsistencias}
                   onRefresh={() => {
                     if (asistenciaEmpleado) {

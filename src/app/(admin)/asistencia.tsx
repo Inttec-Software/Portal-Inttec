@@ -334,7 +334,7 @@ export default function AdminAsistencia() {
 
     return personal.map((emp) => {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-      const periodoProcesado = processAsistenciasSemana(asistenciasEmp, selectedMonday);
+      const periodoProcesado = processAsistenciasSemana(asistenciasEmp, selectedMonday, emp.rol);
 
       // Buscar asistencias del día objetivo (hoy o el seleccionado)
       const asistenciasTargetDia = asistenciasEmp.filter((a) => cleanFecha(a.fecha) === targetFecha);
@@ -868,6 +868,7 @@ export default function AdminAsistencia() {
           <AsistenciaSemanalCard
             asistencias={asistenciasEmpleado}
             empleadoNombre={selectedEmpleado.nombre || 'Empleado'}
+            empleadoRol={selectedEmpleado.rol}
             isLoading={isLoadingEmpleadoDetalle}
             onRefresh={() => cargarAsistenciasEmpleado(selectedEmpleado.id, selectedMonday)}
             selectedMonday={selectedMonday}

@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName, supabase, inttecClient, daravisaClient } from '@/services/supabase';
@@ -452,6 +452,14 @@ export default function AdminGastosScreen() {
     }
   }, [adminUser, refreshData]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (adminUser) {
+        refreshData(true);
+      }
+    }, [adminUser, refreshData])
+  );
+
   useEffect(() => {
     const checkAdmin = async () => {
       const user = await AuthService.getCurrentUser();
@@ -546,6 +554,7 @@ export default function AdminGastosScreen() {
       return;
     }
 
+    const targetGastoId = selectedGasto.id;
     setIsProcessingAction(true);
     try {
       const oldVentaId = selectedGasto.venta_id;
@@ -603,6 +612,21 @@ export default function AdminGastosScreen() {
       setSelectedGasto(null);
       setRejectionFeedback('');
       setShowFeedbackInput(false);
+
+      if (activeTab === 'pendientes' && status !== 'PENDING') {
+        setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+      } else if (activeTab === 'historial' && status === 'PENDING') {
+        setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+      } else {
+        setGastos(prev => prev.map(g => g.id === targetGastoId ? {
+          ...g,
+          status,
+          approved_at: updatePayload.approved_at !== undefined ? updatePayload.approved_at : g.approved_at,
+          rejection_feedback: updatePayload.rejection_feedback !== undefined ? updatePayload.rejection_feedback : g.rejection_feedback,
+          venta_id: updatePayload.venta_id !== undefined ? updatePayload.venta_id : g.venta_id,
+        } : g));
+      }
+      await refreshData(true);
 
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo procesar la acción de revisión.');
@@ -722,6 +746,7 @@ export default function AdminGastosScreen() {
       );
       setIsLinkSaleModalVisible(false);
       setIsRelinkingSaleMode(false);
+      await refreshData(true);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo vincular/desvincular el gasto.');
     } finally {
@@ -764,6 +789,7 @@ export default function AdminGastosScreen() {
       return;
     }
 
+    const targetGastoId = selectedGasto.id;
     setIsProcessingAction(true);
     try {
       const updatePayload: Partial<Gasto> = {
@@ -803,6 +829,18 @@ export default function AdminGastosScreen() {
       setSelectedGasto(null);
       setRejectionFeedback('');
       setShowFeedbackInput(false);
+
+      if (activeTab === 'pendientes') {
+        setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+      } else {
+        setGastos(prev => prev.map(g => g.id === targetGastoId ? {
+          ...g,
+          status: 'APPROVED',
+          approved_at: updatePayload.approved_at || new Date().toISOString(),
+          venta_id: ventaId,
+        } : g));
+      }
+      await refreshData(true);
 
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo aprobar el gasto.');
@@ -1828,6 +1866,7 @@ export default function AdminGastosScreen() {
         setReviewModalVisible(false);
         setSelectedGasto(null);
         showAlert('Éxito', 'Gasto eliminado correctamente de la base de datos.');
+        await refreshData(true);
       } catch (err: any) {
         showAlert('Error al eliminar', err.message || 'No se pudo eliminar el gasto.');
       } finally {
@@ -6299,6 +6338,7 @@ export default function AdminGastosScreen() {
                 <AsistenciaSemanalCard
                   asistencias={asistencias}
                   empleadoNombre={asistenciaEmpleado?.nombre || 'Empleado'}
+                  empleadoRol={asistenciaEmpleado?.rol}
                   isLoading={isLoadingAsistencias}
                   onRefresh={() => {
                     if (asistenciaEmpleado) {

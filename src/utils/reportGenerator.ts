@@ -1290,7 +1290,7 @@ export const ReportGenerator = {
 
     for (const emp of personalTarget) {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate);
+      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol);
 
       if (semanaData.turnosTotales > 0) {
         empleadosConRegistro++;
@@ -1514,7 +1514,7 @@ export const ReportGenerator = {
   ): Promise<void> {
     const range = getWeekRange(weekMondayInput);
     const branding = await getCompanyBranding();
-    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate);
+    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol);
 
     let diasHtml = '';
     for (const dia of semanaData.dias) {
@@ -1741,7 +1741,7 @@ export const ReportGenerator = {
 
     for (const emp of personalTarget) {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-      const mesData = processAsistenciasMes(asistenciasEmp, range.startDate);
+      const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol);
 
       if (mesData.turnosTotales > 0) {
         empleadosConRegistro++;
@@ -1951,7 +1951,7 @@ export const ReportGenerator = {
   ): Promise<void> {
     const range = getMonthRange(monthDateInput);
     const branding = await getCompanyBranding();
-    const mesData = processAsistenciasMes(asistencias, range.startDate);
+    const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol);
 
     let diasHtml = '';
     for (const dia of mesData.dias) {
@@ -3666,7 +3666,7 @@ export const ReportGenerator = {
 
       for (const emp of personalTarget) {
         const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate);
+        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol);
 
         let tieneRegistros = false;
         for (const dia of semanaData.dias) {
@@ -3721,7 +3721,7 @@ export const ReportGenerator = {
       fileName?: string
     ): Promise<void> {
       const range = getWeekRange(weekMondayInput);
-      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate);
+      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol);
 
       const headers = [
         'Período',
@@ -3819,7 +3819,7 @@ export const ReportGenerator = {
 
       for (const emp of personalTarget) {
         const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-        const mesData = processAsistenciasMes(asistenciasEmp, range.startDate);
+        const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol);
 
         let tieneRegistros = false;
         for (const dia of mesData.dias) {
@@ -3874,7 +3874,7 @@ export const ReportGenerator = {
       fileName?: string
     ): Promise<void> {
       const range = getMonthRange(monthDateInput);
-      const mesData = processAsistenciasMes(asistencias, range.startDate);
+      const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol);
 
       const headers = [
         'Período',

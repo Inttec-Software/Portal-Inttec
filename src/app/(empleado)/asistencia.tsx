@@ -470,6 +470,7 @@ export default function EmpleadoAsistencia() {
           <AsistenciaSemanalCard
             asistencias={historialAsistencias}
             empleadoNombre={user?.nombre || 'Empleado'}
+            empleadoRol={user?.rol}
             isLoading={isLoadingHistorial}
             isEmployeeView={true}
             onRefresh={() => {
