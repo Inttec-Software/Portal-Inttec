@@ -35,6 +35,7 @@ import {
 interface AsistenciaSemanalCardProps {
   asistencias: Asistencia[];
   empleadoNombre?: string;
+  empleadoRol?: string;
   isLoading?: boolean;
   onRefresh?: () => void;
   selectedMonday: Date;
@@ -59,6 +60,7 @@ interface AsistenciaSemanalCardProps {
 export default function AsistenciaSemanalCard({
   asistencias,
   empleadoNombre = 'Empleado',
+  empleadoRol,
   isLoading = false,
   onRefresh,
   selectedMonday,
@@ -73,6 +75,7 @@ export default function AsistenciaSemanalCard({
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { user } = useAuth();
+  const effectiveRole = empleadoRol || user?.rol;
   const canViewOvertime = !isEmployeeView && (user?.rol === 'ADMIN' || user?.rol === 'DEV');
   const isDev = !isEmployeeView && (user?.rol === 'DEV');
 
@@ -91,13 +94,13 @@ export default function AsistenciaSemanalCard({
 
   // Procesar asistencias para la semana seleccionada
   const semanaData: SemanaAsistencia = useMemo(() => {
-    return processAsistenciasSemana(asistencias, selectedMonday);
-  }, [asistencias, selectedMonday]);
+    return processAsistenciasSemana(asistencias, selectedMonday, effectiveRole);
+  }, [asistencias, selectedMonday, effectiveRole]);
 
   // Procesar asistencias para el mes seleccionado
   const mesData: PeriodoAsistencia = useMemo(() => {
-    return processAsistenciasMes(asistencias, selectedMonth);
-  }, [asistencias, selectedMonth]);
+    return processAsistenciasMes(asistencias, selectedMonth, effectiveRole);
+  }, [asistencias, selectedMonth, effectiveRole]);
 
   const currentWeekMonday = useMemo(() => {
     return getWeekRange().mondayDate;
@@ -440,6 +443,23 @@ export default function AsistenciaSemanalCard({
                 </View>
 
                 <View style={styles.dayInfoRight}>
+                  {dia.comidaDescontada && (
+                    <View
+                      style={[
+                        styles.comidaBadge,
+                        {
+                          backgroundColor: themeColors.accent + '15',
+                          borderColor: themeColors.accent + '35',
+                        },
+                      ]}
+                    >
+                      <Ionicons name="restaurant-outline" size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
+                      <Text style={[styles.comidaBadgeText, { color: themeColors.accent }]}>
+                        -1h comida
+                      </Text>
+                    </View>
+                  )}
+
                   {canViewOvertime && dia.minutosExtra > 0 && (
                     <View style={[styles.extraHoursBadge, { backgroundColor: '#ea580c18', borderColor: '#ea580c50' }]}>
                       <Ionicons name="flame" size={11} color="#ea580c" style={{ marginRight: 2 }} />
@@ -1118,6 +1138,19 @@ const styles = StyleSheet.create({
   extraHoursText: {
     fontSize: 10,
     fontWeight: '800',
+  },
+  comidaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    marginRight: 6,
+  },
+  comidaBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   turnoExtraBadge: {
     marginTop: 6,

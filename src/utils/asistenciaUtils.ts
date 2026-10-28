@@ -47,6 +47,8 @@ export interface TurnoAsistencia {
   autoCerrado?: boolean;
   timezone?: string | null;
   timezoneBadge?: TimezoneBadgeInfo | null;
+  minutosBrutos?: number;
+  comidaDescontada?: boolean;
 }
 
 export interface DiaAsistencia {
@@ -62,6 +64,9 @@ export interface DiaAsistencia {
   horasExtraStr: string;
   turnos: TurnoAsistencia[];
   tieneTurnoEnCurso: boolean;
+  comidaDescontada?: boolean;
+  minutosComidaDescontados?: number;
+  minutosBrutos?: number;
 }
 
 export interface SemanaAsistencia {
@@ -87,6 +92,20 @@ export interface SemanaAsistencia {
  */
 export const JORNADA_SEMANAL_HORAS = 48;
 export const JORNADA_SEMANAL_MINUTOS = 48 * 60; // 2880 minutos
+
+/**
+ * Deducción de comida diaria: 1 hora (60 minutos) por jornada laborada.
+ * Aplica exclusivamente a los roles ADMIN y EMPLEADO.
+ * Los usuarios con rol DEV conservan sus horas íntegras registradas tal cual.
+ */
+export const MINUTOS_COMIDA_DIARIA = 60;
+
+export function shouldDeductLunchHour(role?: string | null): boolean {
+  if (!role) return true; // Por defecto aplica a personal general (ADMIN / EMPLEADO)
+  const r = role.toUpperCase().trim();
+  if (r === 'DEV') return false;
+  return r === 'ADMIN' || r === 'EMPLEADO' || r === 'USER';
+}
 
 export const HORARIO_LABORAL_REGULAR = {
   horaInicio: '08:00',
@@ -442,11 +461,18 @@ export function getNextMonthDate(currentDate: Date): Date {
  */
 export function processAsistenciasSemana(
   asistencias: Asistencia[],
-  weekDateInput?: Date | string
+  weekDateInput?: Date | string,
+  userRole?: string | null
 ): SemanaAsistencia {
   const range = getWeekRange(weekDateInput);
 
   const cleanFecha = (f?: string | null) => (f ? String(f).split('T')[0] : '');
+
+  // Determinar rol efectivo para aplicar o no la deducción de 1 hora de comida diaria
+  const effectiveRole = userRole || (asistencias && asistencias.length > 0
+    ? ((asistencias[0] as any).empleado?.rol || (asistencias[0] as any).usuario?.rol || (asistencias[0] as any).rol)
+    : null);
+  const aplicaDescuentoComida = shouldDeductLunchHour(effectiveRole);
 
   // Filtrar registros que caigan dentro del rango de lunes a domingo
   const asistenciasSemana = (asistencias || []).filter((a) => {
@@ -479,12 +505,11 @@ export function processAsistenciasSemana(
       return hA.localeCompare(hB);
     });
 
-    let minutosDia = 0;
+    let minutosDiaBruto = 0;
     let tieneTurnoEnCurso = false;
 
-    const turnos: TurnoAsistencia[] = items.map((item, idx) => {
-      // REGLA: Si el empleado olvidó checar salida y es de un día pasado,
-      // automáticamente la salida se marca a las 6:00 PM (18:00:00) para no generar horas extra indebidas.
+    // 1. Calcular duración bruta de cada turno
+    const turnosData = items.map((item, idx) => {
       const esDiaPasado = dayInfo.dateStr < hoyStr;
       const sinSalida = !item.hora_salida;
       const autoCerrado = isAutoCerradoAsistencia({
@@ -499,71 +524,105 @@ export function processAsistenciasSemana(
 
       const horaSalidaEfectiva = autoCerrado ? '18:00:00' : (item.hora_salida || null);
 
-      // Desglose de horas del turno: cuenta el tiempo completo desde que checan entrada hasta salida
-      let mins = 0;
+      let minsBrutos = 0;
       if (horaSalidaEfectiva) {
-        mins = calculateDurationMinutes(item.hora_entrada, horaSalidaEfectiva);
+        minsBrutos = calculateDurationMinutes(item.hora_entrada, horaSalidaEfectiva);
       }
 
-      minutosDia += mins;
+      minutosDiaBruto += minsBrutos;
       turnosTotales++;
 
       const tz = extractTimezoneFromRecord(item);
       const badge = getTimezoneBadgeInfo(tz);
 
       return {
-        id: item.id,
-        index: idx + 1,
-        hora_entrada: formatHoraDisplay(item.hora_entrada),
-        hora_salida: autoCerrado
-          ? '18:00 (Auto)'
-          : item.hora_salida
-          ? formatHoraDisplay(item.hora_salida)
-          : null,
-        foto_entrada_url: item.foto_entrada_url,
-        foto_salida_url: (enCurso || autoCerrado) ? null : item.foto_salida_url,
-        direccion_entrada: cleanAddressForDisplay(item.direccion_entrada),
-        direccion_salida: autoCerrado
-          ? 'Cierre automático 6:00 PM (olvido de checada)'
-          : enCurso
-          ? null
-          : cleanAddressForDisplay(item.direccion_salida),
-        latitud_entrada: item.latitud_entrada,
-        longitud_entrada: item.longitud_entrada,
-        latitud_salida: (enCurso || autoCerrado) ? null : item.latitud_salida,
-        longitud_salida: (enCurso || autoCerrado) ? null : item.longitud_salida,
-        minutos: mins,
-        duracionStr: enCurso ? 'En curso' : formatMinutesToHours(mins),
-        minutosRegulares: mins,
-        horasRegularesStr: formatMinutesToHours(mins),
-        minutosExtra: 0,
-        horasExtraStr: '0h 0m',
-        enCurso,
+        item,
+        idx,
         autoCerrado,
-        timezone: tz,
-        timezoneBadge: badge,
+        enCurso,
+        minsBrutos,
+        horaSalidaEfectiva,
+        tz,
+        badge,
       };
     });
 
-    if (minutosDia > 0 || turnos.length > 0) {
+    // REGLA: A roles ADMIN y EMPLEADO se les resta 1 hora (60 min) de comida por jornada
+    // A rol DEV se les deja con las horas que registren tal cual
+    const minutosADescontar = (aplicaDescuentoComida && minutosDiaBruto > 0)
+      ? Math.min(MINUTOS_COMIDA_DIARIA, minutosDiaBruto)
+      : 0;
+
+    const minutosDiaNetos = Math.max(0, minutosDiaBruto - minutosADescontar);
+
+    // Distribuir el descuento entre los turnos del día para mantener sincronía matemática exacta
+    let remDescuento = minutosADescontar;
+    const turnos: TurnoAsistencia[] = turnosData.map((t) => {
+      let descuentoEsteTurno = 0;
+      if (remDescuento > 0 && t.minsBrutos > 0) {
+        descuentoEsteTurno = Math.min(remDescuento, t.minsBrutos);
+        remDescuento -= descuentoEsteTurno;
+      }
+      const minsNetos = Math.max(0, t.minsBrutos - descuentoEsteTurno);
+
+      return {
+        id: t.item.id,
+        index: t.idx + 1,
+        hora_entrada: formatHoraDisplay(t.item.hora_entrada),
+        hora_salida: t.autoCerrado
+          ? '18:00 (Auto)'
+          : t.item.hora_salida
+          ? formatHoraDisplay(t.item.hora_salida)
+          : null,
+        foto_entrada_url: t.item.foto_entrada_url,
+        foto_salida_url: (t.enCurso || t.autoCerrado) ? null : t.item.foto_salida_url,
+        direccion_entrada: cleanAddressForDisplay(t.item.direccion_entrada),
+        direccion_salida: t.autoCerrado
+          ? 'Cierre automático 6:00 PM (olvido de checada)'
+          : t.enCurso
+          ? null
+          : cleanAddressForDisplay(t.item.direccion_salida),
+        latitud_entrada: t.item.latitud_entrada,
+        longitud_entrada: t.item.longitud_entrada,
+        latitud_salida: (t.enCurso || t.autoCerrado) ? null : t.item.latitud_salida,
+        longitud_salida: (t.enCurso || t.autoCerrado) ? null : t.item.longitud_salida,
+        minutos: minsNetos,
+        minutosBrutos: t.minsBrutos,
+        duracionStr: t.enCurso ? 'En curso' : formatMinutesToHours(minsNetos),
+        minutosRegulares: minsNetos,
+        horasRegularesStr: formatMinutesToHours(minsNetos),
+        minutosExtra: 0,
+        horasExtraStr: '0h 0m',
+        enCurso: t.enCurso,
+        autoCerrado: t.autoCerrado,
+        timezone: t.tz,
+        timezoneBadge: t.badge,
+        comidaDescontada: descuentoEsteTurno > 0,
+      };
+    });
+
+    if (minutosDiaBruto > 0 || turnos.length > 0) {
       diasLaborados++;
     }
 
-    totalMinutosSemana += minutosDia;
+    totalMinutosSemana += minutosDiaNetos;
 
     return {
       dateStr: dayInfo.dateStr,
       dayName: dayInfo.dayName,
       shortDate: dayInfo.shortDate,
       isToday: dayInfo.isToday,
-      totalMinutos: minutosDia,
-      totalHorasStr: formatMinutesToHours(minutosDia),
-      minutosRegulares: minutosDia,
-      horasRegularesStr: formatMinutesToHours(minutosDia),
+      totalMinutos: minutosDiaNetos,
+      totalHorasStr: formatMinutesToHours(minutosDiaNetos),
+      minutosRegulares: minutosDiaNetos,
+      horasRegularesStr: formatMinutesToHours(minutosDiaNetos),
       minutosExtra: 0,
       horasExtraStr: '0h 0m',
       turnos,
       tieneTurnoEnCurso,
+      comidaDescontada: minutosADescontar > 0,
+      minutosComidaDescontados: minutosADescontar,
+      minutosBrutos: minutosDiaBruto,
     };
   });
 
@@ -610,8 +669,16 @@ export interface PeriodoAsistencia {
  */
 export function processAsistenciasPeriodo(
   asistencias: Asistencia[],
-  range: { startStr: string; endStr: string; days: WeekDayInfo[]; label: string }
+  range: { startStr: string; endStr: string; days: WeekDayInfo[]; label: string },
+  userRole?: string | null
 ): PeriodoAsistencia {
+  const cleanFecha = (f?: string | null) => (f ? String(f).split('T')[0] : '');
+
+  const effectiveRole = userRole || (asistencias && asistencias.length > 0
+    ? ((asistencias[0] as any).empleado?.rol || (asistencias[0] as any).usuario?.rol || (asistencias[0] as any).rol)
+    : null);
+  const aplicaDescuentoComida = shouldDeductLunchHour(effectiveRole);
+
   // Filtrar registros que caigan dentro del rango
   const asistenciasPeriodo = (asistencias || []).filter((a) => {
     return a.fecha >= range.startStr && a.fecha <= range.endStr;
@@ -639,10 +706,10 @@ export function processAsistenciasPeriodo(
       return hA.localeCompare(hB);
     });
 
-    let minutosDia = 0;
+    let minutosDiaBruto = 0;
     let tieneTurnoEnCurso = false;
 
-    const turnos: TurnoAsistencia[] = items.map((item, idx) => {
+    const turnosData = items.map((item, idx) => {
       const esDiaPasado = dayInfo.dateStr < hoyStr;
       const sinSalida = !item.hora_salida;
       const autoCerrado = isAutoCerradoAsistencia({
@@ -657,76 +724,103 @@ export function processAsistenciasPeriodo(
 
       const horaSalidaEfectiva = autoCerrado ? '18:00:00' : (item.hora_salida || null);
 
-      let mins = 0;
-      let regMins = 0;
-      let extMins = 0;
-
+      let minsBrutos = 0;
       if (horaSalidaEfectiva) {
-        const desglose = calculateTurnoHorasDesglose(item.hora_entrada, horaSalidaEfectiva);
-        mins = desglose.totalMins;
-        regMins = desglose.regularesMins;
-        extMins = desglose.extrasMins;
+        minsBrutos = calculateDurationMinutes(item.hora_entrada, horaSalidaEfectiva);
       }
 
-      minutosDia += mins;
+      minutosDiaBruto += minsBrutos;
       turnosTotales++;
 
       const tz = extractTimezoneFromRecord(item);
       const badge = getTimezoneBadgeInfo(tz);
 
       return {
-        id: item.id,
-        index: idx + 1,
-        hora_entrada: formatHoraDisplay(item.hora_entrada),
-        hora_salida: autoCerrado
-          ? '18:00 (Auto)'
-          : item.hora_salida
-          ? formatHoraDisplay(item.hora_salida)
-          : null,
-        foto_entrada_url: item.foto_entrada_url,
-        foto_salida_url: (enCurso || autoCerrado) ? null : item.foto_salida_url,
-        direccion_entrada: cleanAddressForDisplay(item.direccion_entrada),
-        direccion_salida: autoCerrado
-          ? 'Cierre automático 6:00 PM (olvido de checada)'
-          : enCurso
-          ? null
-          : cleanAddressForDisplay(item.direccion_salida),
-        latitud_entrada: item.latitud_entrada,
-        longitud_entrada: item.longitud_entrada,
-        latitud_salida: (enCurso || autoCerrado) ? null : item.latitud_salida,
-        longitud_salida: (enCurso || autoCerrado) ? null : item.longitud_salida,
-        minutos: mins,
-        duracionStr: enCurso ? 'En curso' : formatMinutesToHours(mins),
-        minutosRegulares: regMins,
-        horasRegularesStr: formatMinutesToHours(regMins),
-        minutosExtra: extMins,
-        horasExtraStr: formatMinutesToHours(extMins),
-        enCurso,
+        item,
+        idx,
         autoCerrado,
-        timezone: tz,
-        timezoneBadge: badge,
+        enCurso,
+        horaSalidaEfectiva,
+        minsBrutos,
+        tz,
+        badge,
       };
     });
 
-    if (minutosDia > 0 || turnos.length > 0) {
+    // Deducción de comida de 1 hora por jornada para ADMIN y EMPLEADO
+    const minutosADescontar = (aplicaDescuentoComida && minutosDiaBruto > 0)
+      ? Math.min(MINUTOS_COMIDA_DIARIA, minutosDiaBruto)
+      : 0;
+
+    const minutosDiaNetos = Math.max(0, minutosDiaBruto - minutosADescontar);
+
+    let remDescuento = minutosADescontar;
+    const turnos: TurnoAsistencia[] = turnosData.map((t) => {
+      let descuentoEsteTurno = 0;
+      if (remDescuento > 0 && t.minsBrutos > 0) {
+        descuentoEsteTurno = Math.min(remDescuento, t.minsBrutos);
+        remDescuento -= descuentoEsteTurno;
+      }
+      const minsNetos = Math.max(0, t.minsBrutos - descuentoEsteTurno);
+
+      return {
+        id: t.item.id,
+        index: t.idx + 1,
+        hora_entrada: formatHoraDisplay(t.item.hora_entrada),
+        hora_salida: t.autoCerrado
+          ? '18:00 (Auto)'
+          : t.item.hora_salida
+          ? formatHoraDisplay(t.item.hora_salida)
+          : null,
+        foto_entrada_url: t.item.foto_entrada_url,
+        foto_salida_url: (t.enCurso || t.autoCerrado) ? null : t.item.foto_salida_url,
+        direccion_entrada: cleanAddressForDisplay(t.item.direccion_entrada),
+        direccion_salida: t.autoCerrado
+          ? 'Cierre automático 6:00 PM (olvido de checada)'
+          : t.enCurso
+          ? null
+          : cleanAddressForDisplay(t.item.direccion_salida),
+        latitud_entrada: t.item.latitud_entrada,
+        longitud_entrada: t.item.longitud_entrada,
+        latitud_salida: (t.enCurso || t.autoCerrado) ? null : t.item.latitud_salida,
+        longitud_salida: (t.enCurso || t.autoCerrado) ? null : t.item.longitud_salida,
+        minutos: minsNetos,
+        minutosBrutos: t.minsBrutos,
+        duracionStr: t.enCurso ? 'En curso' : formatMinutesToHours(minsNetos),
+        minutosRegulares: minsNetos,
+        horasRegularesStr: formatMinutesToHours(minsNetos),
+        minutosExtra: 0,
+        horasExtraStr: '0h 0m',
+        enCurso: t.enCurso,
+        autoCerrado: t.autoCerrado,
+        timezone: t.tz,
+        timezoneBadge: t.badge,
+        comidaDescontada: descuentoEsteTurno > 0,
+      };
+    });
+
+    if (minutosDiaBruto > 0 || turnos.length > 0) {
       diasLaborados++;
     }
 
-    totalMinutosPeriodo += minutosDia;
+    totalMinutosPeriodo += minutosDiaNetos;
 
     return {
       dateStr: dayInfo.dateStr,
       dayName: dayInfo.dayName,
       shortDate: dayInfo.shortDate,
       isToday: dayInfo.isToday,
-      totalMinutos: minutosDia,
-      totalHorasStr: formatMinutesToHours(minutosDia),
-      minutosRegulares: minutosDia,
-      horasRegularesStr: formatMinutesToHours(minutosDia),
+      totalMinutos: minutosDiaNetos,
+      totalHorasStr: formatMinutesToHours(minutosDiaNetos),
+      minutosRegulares: minutosDiaNetos,
+      horasRegularesStr: formatMinutesToHours(minutosDiaNetos),
       minutosExtra: 0,
       horasExtraStr: '0h 0m',
       turnos,
       tieneTurnoEnCurso,
+      comidaDescontada: minutosADescontar > 0,
+      minutosComidaDescontados: minutosADescontar,
+      minutosBrutos: minutosDiaBruto,
     };
   });
 
@@ -753,7 +847,8 @@ export function processAsistenciasPeriodo(
  */
 export function processAsistenciasMes(
   asistencias: Asistencia[],
-  monthDateInput?: Date | string | { year: number; month: number }
+  monthDateInput?: Date | string | { year: number; month: number },
+  userRole?: string | null
 ): PeriodoAsistencia {
   const range = getMonthRange(monthDateInput);
   return processAsistenciasPeriodo(asistencias, {
@@ -761,5 +856,5 @@ export function processAsistenciasMes(
     endStr: range.endStr,
     days: range.days,
     label: range.label,
-  });
+  }, userRole);
 }
