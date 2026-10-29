@@ -15,6 +15,7 @@ import { Asistencia } from '@/services/supabase';
 import { useAuth } from '@/context/AuthContext';
 import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import EditarTurnoModal from '@/components/EditarTurnoModal';
+import RegistrarTurnoModal from '@/components/RegistrarTurnoModal';
 import {
   WeekRange,
   TurnoAsistencia,
@@ -34,6 +35,7 @@ import {
 
 interface AsistenciaSemanalCardProps {
   asistencias: Asistencia[];
+  empleadoId?: string;
   empleadoNombre?: string;
   empleadoRol?: string;
   isLoading?: boolean;
@@ -61,6 +63,7 @@ export default function AsistenciaSemanalCard({
   asistencias,
   empleadoNombre = 'Empleado',
   empleadoRol,
+  empleadoId,
   isLoading = false,
   onRefresh,
   selectedMonday,
@@ -77,17 +80,22 @@ export default function AsistenciaSemanalCard({
   const { user } = useAuth();
   const effectiveRole = empleadoRol || user?.rol;
   const canViewOvertime = !isEmployeeView && (user?.rol === 'ADMIN' || user?.rol === 'DEV');
-  const isDev = !isEmployeeView && (user?.rol === 'DEV');
+  const canEditTurnos = !isEmployeeView && (user?.rol === 'ADMIN' || user?.rol === 'DEV');
+  const effectiveEmpleadoId = empleadoId || (asistencias && asistencias.length > 0 ? asistencias[0].empleado_id : undefined);
 
   const isMes = modo === 'mes';
 
   // Estado del modal de selección de período manual
   const [periodoModalVisible, setPeriodoModalVisible] = useState(false);
 
-  // Estado del modal de edición de horas de turno (DEV ONLY)
+  // Estado del modal de edición de horas de turno (ADMIN / DEV)
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [turnoToEdit, setTurnoToEdit] = useState<TurnoAsistencia | null>(null);
   const [fechaToEdit, setFechaToEdit] = useState<string>('');
+
+  // Estado del modal de registro de nuevo turno (ADMIN / DEV)
+  const [registrarModalVisible, setRegistrarModalVisible] = useState(false);
+  const [fechaParaNuevoTurno, setFechaParaNuevoTurno] = useState<string>('');
 
   // Estados de días expandidos (por defecto expandir días que tengan turnos)
   const [expandedDays, setExpandedDays] = useState<{ [dateStr: string]: boolean }>({});
@@ -499,14 +507,27 @@ export default function AsistenciaSemanalCard({
                     </Text>
                   </View>
 
-                  {hasTurnos && (
-                    <Ionicons
-                      name={expanded ? 'chevron-up' : 'chevron-down'}
-                      size={18}
-                      color={themeColors.textSecondary}
-                      style={{ marginLeft: 6 }}
-                    />
+                  {canEditTurnos && effectiveEmpleadoId && (
+                    <TouchableOpacity
+                      style={[styles.addTurnoQuickBtn, { backgroundColor: '#10b98118', borderColor: '#10b98150' }]}
+                      onPress={(e) => {
+                        (e as any)?.stopPropagation?.();
+                        setFechaParaNuevoTurno(dia.dateStr);
+                        setRegistrarModalVisible(true);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="add" size={13} color="#10b981" style={{ marginRight: 2 }} />
+                      <Text style={[styles.addTurnoQuickBtnText, { color: '#10b981' }]}>Registro de asistencia</Text>
+                    </TouchableOpacity>
                   )}
+
+                  <Ionicons
+                    name={expanded ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={themeColors.textSecondary}
+                    style={{ marginLeft: 6 }}
+                  />
                 </View>
               </TouchableOpacity>
 
@@ -537,7 +558,7 @@ export default function AsistenciaSemanalCard({
                             <Text style={styles.turnoIndexText}>Turno #{turno.index}</Text>
                           </View>
                           <View style={styles.turnoHeaderRight}>
-                            {isDev && (
+                            {canEditTurnos && (
                               <TouchableOpacity
                                 style={[styles.devEditBtn, { backgroundColor: '#6366f115', borderColor: '#6366f140' }]}
                                 onPress={() => {
@@ -548,7 +569,7 @@ export default function AsistenciaSemanalCard({
                                 activeOpacity={0.7}
                               >
                                 <Ionicons name="pencil" size={11} color="#6366f1" style={{ marginRight: 3 }} />
-                                <Text style={styles.devEditText}>Editar (DEV)</Text>
+                                <Text style={styles.devEditText}>Editar</Text>
                               </TouchableOpacity>
                             )}
 
@@ -745,7 +766,7 @@ export default function AsistenciaSemanalCard({
         })}
       </View>
 
-      {/* Modal de Edición de Turnos (Exclusivo DEV) */}
+      {/* Modal de Edición de Turnos (ADMIN / DEV) */}
       <EditarTurnoModal
         visible={editModalVisible}
         onClose={() => {
@@ -759,6 +780,23 @@ export default function AsistenciaSemanalCard({
           onRefresh?.();
         }}
       />
+
+      {/* Modal de Registro de Nuevo Turno (ADMIN / DEV) */}
+      {effectiveEmpleadoId && (
+        <RegistrarTurnoModal
+          visible={registrarModalVisible}
+          onClose={() => {
+            setRegistrarModalVisible(false);
+            setFechaParaNuevoTurno('');
+          }}
+          empleadoId={effectiveEmpleadoId}
+          empleadoNombre={empleadoNombre}
+          defaultFecha={fechaParaNuevoTurno || undefined}
+          onSaveSuccess={() => {
+            onRefresh?.();
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -1162,5 +1200,74 @@ const styles = StyleSheet.create({
   turnoExtraText: {
     fontSize: 10,
     fontWeight: '700',
+  },
+  topActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  addTurnoHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.medium,
+  },
+  addTurnoHeaderBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  noTurnosRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  addTurnoDayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+  },
+  addTurnoDayBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  addTurnoQuickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    marginLeft: 6,
+  },
+  addTurnoQuickBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  noTurnosContainer: {
+    paddingVertical: 4,
+    gap: 8,
+  },
+  addAnotherTurnoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    marginTop: 8,
+  },
+  addAnotherTurnoText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

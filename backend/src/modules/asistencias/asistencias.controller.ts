@@ -569,30 +569,31 @@ export const editarHorasAsistencia = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'ID de registro de asistencia es requerido' });
     }
 
-    // Doble verificación del rol DEV: en token y en la base de datos
+    // Doble verificación del rol ADMIN o DEV: en token y en la base de datos
     const poolInttec = getDbPool('inttec', tenant?.env || 'cloud');
     const poolDaravisa = getDbPool('daravisa', tenant?.env || 'cloud');
 
     let userRole = user.rol || user.role || user.user_metadata?.rol || user.app_metadata?.rol;
+    const isAuthorizedRole = (role?: string) => role === 'ADMIN' || role === 'DEV';
 
-    if (userRole !== 'DEV') {
+    if (!isAuthorizedRole(userRole)) {
       const dbUserRes = await poolInttec.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
       const dbUser = dbUserRes.rows[0];
 
-      if (dbUser?.rol === 'DEV') {
-        userRole = 'DEV';
+      if (isAuthorizedRole(dbUser?.rol)) {
+        userRole = dbUser.rol;
       } else {
         const dbUserDaravisaRes = await poolDaravisa.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
         const dbUserDaravisa = dbUserDaravisaRes.rows[0];
-        if (dbUserDaravisa?.rol === 'DEV') {
-          userRole = 'DEV';
+        if (isAuthorizedRole(dbUserDaravisa?.rol)) {
+          userRole = dbUserDaravisa.rol;
         }
       }
     }
 
-    if (userRole !== 'DEV') {
+    if (!isAuthorizedRole(userRole)) {
       return res.status(403).json({
-        error: 'Acceso denegado. Únicamente los usuarios con rol DEV tienen permisos para modificar horas de asistencia.'
+        error: 'Acceso denegado. Únicamente los usuarios con rol ADMIN o DEV tienen permisos para modificar horas de asistencia.'
       });
     }
 
@@ -709,30 +710,31 @@ export const eliminarAsistencia = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'ID de registro de asistencia es requerido' });
     }
 
-    // Doble verificación del rol DEV
+    // Doble verificación del rol ADMIN o DEV
     const poolInttec = getDbPool('inttec', tenant?.env || 'cloud');
     const poolDaravisa = getDbPool('daravisa', tenant?.env || 'cloud');
 
     let userRole = user.rol || user.role || user.user_metadata?.rol || user.app_metadata?.rol;
+    const isAuthorizedRole = (role?: string) => role === 'ADMIN' || role === 'DEV';
 
-    if (userRole !== 'DEV') {
+    if (!isAuthorizedRole(userRole)) {
       const dbUserRes = await poolInttec.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
       const dbUser = dbUserRes.rows[0];
 
-      if (dbUser?.rol === 'DEV') {
-        userRole = 'DEV';
+      if (isAuthorizedRole(dbUser?.rol)) {
+        userRole = dbUser.rol;
       } else {
         const dbUserDaravisaRes = await poolDaravisa.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
         const dbUserDaravisa = dbUserDaravisaRes.rows[0];
-        if (dbUserDaravisa?.rol === 'DEV') {
-          userRole = 'DEV';
+        if (isAuthorizedRole(dbUserDaravisa?.rol)) {
+          userRole = dbUserDaravisa.rol;
         }
       }
     }
 
-    if (userRole !== 'DEV') {
+    if (!isAuthorizedRole(userRole)) {
       return res.status(403).json({
-        error: 'Acceso denegado. Únicamente los usuarios con rol DEV tienen permisos para eliminar registros de asistencia.'
+        error: 'Acceso denegado. Únicamente los usuarios con rol ADMIN o DEV tienen permisos para eliminar registros de asistencia.'
       });
     }
 
@@ -793,3 +795,122 @@ export const eliminarAsistencia = async (req: Request, res: Response) => {
 };
 
 
+
+/**
+ * Registro manual de nuevo turno de asistencia para un empleado (Exclusivo para ADMIN o DEV)
+ */
+export const registrarTurnoManual = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    const user = (req as any).user;
+
+    if (!user) {
+      return res.status(401).json({ error: 'No autenticado' });
+    }
+
+    const { empleado_id, fecha, hora_entrada, hora_salida, observaciones } = req.body;
+
+    if (!empleado_id) {
+      return res.status(400).json({ error: 'ID de empleado es requerido' });
+    }
+    if (!fecha) {
+      return res.status(400).json({ error: 'La fecha es requerida (YYYY-MM-DD)' });
+    }
+    if (!hora_entrada) {
+      return res.status(400).json({ error: 'La hora de entrada es requerida' });
+    }
+
+    const poolInttec = getDbPool('inttec', tenant?.env || 'cloud');
+    const poolDaravisa = getDbPool('daravisa', tenant?.env || 'cloud');
+
+    let userRole = user.rol || user.role || user.user_metadata?.rol || user.app_metadata?.rol;
+    const isAuthorizedRole = (role?: string) => role === 'ADMIN' || role === 'DEV';
+
+    if (!isAuthorizedRole(userRole)) {
+      const dbUserRes = await poolInttec.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
+      const dbUser = dbUserRes.rows[0];
+
+      if (isAuthorizedRole(dbUser?.rol)) {
+        userRole = dbUser.rol;
+      } else {
+        const dbUserDaravisaRes = await poolDaravisa.query('SELECT rol, nombre FROM usuarios WHERE id = $1 LIMIT 1', [user.id]);
+        const dbUserDaravisa = dbUserDaravisaRes.rows[0];
+        if (isAuthorizedRole(dbUserDaravisa?.rol)) {
+          userRole = dbUserDaravisa.rol;
+        }
+      }
+    }
+
+    if (!isAuthorizedRole(userRole)) {
+      return res.status(403).json({
+        error: 'Acceso denegado. Únicamente los usuarios con rol ADMIN o DEV tienen permisos para registrar turnos de asistencia.'
+      });
+    }
+
+    const formatTime = (t: string | null | undefined) => {
+      if (!t || t.trim() === '') return null;
+      const clean = t.trim().split('+')[0];
+      if (/^\d{1,2}:\d{2}$/.test(clean)) {
+        const [h, m] = clean.split(':');
+        return `${h.padStart(2, '0')}:${m}:00`;
+      }
+      if (/^\d{1,2}:\d{2}:\d{2}$/.test(clean)) {
+        const [h, m, s] = clean.split(':');
+        return `${h.padStart(2, '0')}:${m}:${s}`;
+      }
+      return clean;
+    };
+
+    const cleanHoraEntrada = formatTime(hora_entrada);
+    const cleanHoraSalida = formatTime(hora_salida);
+
+    if (!cleanHoraEntrada) {
+      return res.status(400).json({ error: 'La hora de entrada debe tener formato HH:MM o HH:MM:SS' });
+    }
+
+    const editorNombre = user.nombre || user.email || userRole;
+    const descEntrada = observaciones ? `Registro manual (${observaciones.trim()})` : `Registro manual por ${editorNombre}`;
+    const descSalida = cleanHoraSalida ? (observaciones ? `Registro manual (${observaciones.trim()})` : `Registro manual por ${editorNombre}`) : null;
+
+    const insertQuery = `
+      INSERT INTO asistencias (
+        empleado_id, fecha, hora_entrada, hora_salida, direccion_entrada, direccion_salida
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `;
+    const params = [empleado_id, fecha, cleanHoraEntrada, cleanHoraSalida, descEntrada, descSalida];
+
+    const [inttecRes, daravisaRes] = await Promise.allSettled([
+      poolInttec.query(insertQuery, params),
+      poolDaravisa.query(insertQuery, params),
+    ]);
+
+    const createdRecord =
+      inttecRes.status === 'fulfilled' && (inttecRes.value as any)?.rows?.[0]
+        ? (inttecRes.value as any).rows[0]
+        : daravisaRes.status === 'fulfilled' && (daravisaRes.value as any)?.rows?.[0]
+          ? (daravisaRes.value as any).rows[0]
+          : null;
+
+    if (!createdRecord) {
+      const err =
+        inttecRes.status === 'rejected'
+          ? inttecRes.reason
+          : daravisaRes.status === 'rejected'
+            ? daravisaRes.reason
+            : 'Error al registrar turno';
+      throw new Error(err.message || String(err));
+    }
+
+    console.log(`📝 [REGISTRO MANUAL TURNO] Turno creado para empleado ${empleado_id} fecha ${fecha} por ${editorNombre}: ${cleanHoraEntrada} -> ${cleanHoraSalida || 'Abierto'}`);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Turno registrado correctamente',
+      data: formatAsistenciaRecord(createdRecord),
+    });
+  } catch (error: any) {
+    console.error('[REGISTRAR TURNO MANUAL ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
