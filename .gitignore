@@ -47,3 +47,6 @@ example
 *.log
 eslint*.json
 lint-results.txt
+
+# tesseract data
+*.traineddata
