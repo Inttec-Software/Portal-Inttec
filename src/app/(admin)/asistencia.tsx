@@ -867,6 +867,7 @@ export default function AdminAsistencia() {
           {/* Tarjeta con desglose semanal día a día del empleado */}
           <AsistenciaSemanalCard
             asistencias={asistenciasEmpleado}
+            empleadoId={selectedEmpleado.id}
             empleadoNombre={selectedEmpleado.nombre || 'Empleado'}
             empleadoRol={selectedEmpleado.rol}
             isLoading={isLoadingEmpleadoDetalle}

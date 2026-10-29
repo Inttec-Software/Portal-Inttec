@@ -234,7 +234,7 @@ export const crearEvidencia = async (req: Request, res: Response) => {
     for (const key of Object.keys(materialUsage)) {
       const item = materialUsage[key];
       if (item.dbId && item.currentStock !== undefined) {
-        await pool.query(
+          await pool.query(
           `UPDATE inventario_empleados SET cantidad_disponible = $1, updated_at = $2 WHERE id = $3`,
           [item.currentStock - item.usado, new Date().toISOString(), item.dbId]
         );
@@ -244,10 +244,14 @@ export const crearEvidencia = async (req: Request, res: Response) => {
           ? `Utilizado en evidencia (${cliente || 'Sin cliente'}). ${item.motivos.join(' | ')}`
           : `Utilizado como colaborador en reporte de ${user.nombre} (${cliente || 'Sin cliente'}). ${item.motivos.join(' | ')}`;
 
-        await pool.query(
-          `INSERT INTO movimientos_inventario (producto_id, empleado_id, cantidad, tipo, motivo, empresa) VALUES ($1, $2, $3, $4, $5, $6)`,
-          [item.productoId, item.empleadoId, item.usado, 'USO_EVIDENCIA', motivoDetalle, company]
-        );
+        try {
+          await pool.query(
+            `INSERT INTO movimientos_inventario (producto_id, tipo, cantidad, folio_factura, creado_por, fecha) VALUES ($1, $2, $3, $4, $5, $6)`,
+            [item.productoId, 'SALIDA', item.usado, motivoDetalle, item.empleadoId || user.id, new Date().toISOString()]
+          );
+        } catch (movErr: any) {
+          console.warn('Aviso al registrar movimiento de inventario:', movErr?.message);
+        }
       }
     }
     return res.status(201).json(evidenciaData);

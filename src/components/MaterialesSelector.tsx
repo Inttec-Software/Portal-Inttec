@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, Modal, ScrollView, TextInput, StyleSheet,
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CustomButton from './CustomButton';
 import { normalizeText } from '@/utils/helpers';
 
@@ -45,6 +46,7 @@ export default function MaterialesSelector({
 }: MaterialesSelectorProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const insets = useSafeAreaInsets();
 
   const isEnabled = typeof usaMateriales === 'boolean' 
     ? usaMateriales 
@@ -279,7 +281,13 @@ export default function MaterialesSelector({
       >
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
-          style={styles.modalOverlay}
+          style={[
+            styles.modalOverlay,
+            {
+              paddingTop: Platform.OS !== 'web' ? Math.max(insets.top + 12, 16) : 24,
+              paddingBottom: Platform.OS !== 'web' ? Math.max(insets.bottom + 12, 16) : 24,
+            },
+          ]}
         >
           <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -367,7 +375,11 @@ export default function MaterialesSelector({
                   )}
                 </View>
 
-                <ScrollView style={{ marginTop: Spacing.two }} keyboardShouldPersistTaps="handled">
+                <ScrollView 
+                  style={{ flex: 1, marginTop: Spacing.two }} 
+                  contentContainerStyle={{ paddingBottom: Spacing.four }}
+                  keyboardShouldPersistTaps="handled"
+                >
                   {filteredProductos.length === 0 ? (
                     <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginTop: 20 }}>
                       No se encontraron productos disponibles.
@@ -478,7 +490,7 @@ export default function MaterialesSelector({
                     </TouchableOpacity>
 
                     <TextInput
-                      style={[styles.stepperInput, { color: themeColors.text }]}
+                      style={[styles.stepperInput, { color: themeColors.text }, Platform.OS === 'web' && ({ minWidth: 0, outlineStyle: 'none' } as any)]}
                       keyboardType="decimal-pad"
                       value={usado}
                       onChangeText={(val) => {
@@ -650,8 +662,9 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '100%',
     maxWidth: 540,
+    height: Platform.OS === 'web' ? '82%' : '88%',
+    maxHeight: '90%',
     borderRadius: BorderRadius.large,
-    maxHeight: '82%',
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -699,18 +712,21 @@ const styles = StyleSheet.create({
     height: 54,
   },
   stepperBtn: {
-    width: 46,
+    width: 44,
     height: 44,
     borderRadius: BorderRadius.small,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   stepperInput: {
     flex: 1,
+    minWidth: 0,
     fontSize: 22,
     fontWeight: '800',
     textAlign: 'center',
     paddingVertical: 4,
+    paddingHorizontal: 8,
   },
 });
 

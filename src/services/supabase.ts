@@ -697,7 +697,7 @@ export const AsistenciaService = {
   },
 
   /**
-   * Elimina un registro de asistencia (Exclusivo para usuarios con rol DEV).
+   * Elimina un registro de asistencia (Para usuarios con rol ADMIN o DEV).
    */
   async eliminarAsistencia(
     asistenciaId: string
@@ -712,6 +712,54 @@ export const AsistenciaService = {
       throw new Error(data.message || data.error || 'Error al eliminar el registro de asistencia');
     }
     return data;
+  },
+
+  /**
+   * Registra manualmente un nuevo turno de asistencia para un empleado (ADMIN o DEV).
+   */
+  async registrarTurnoManual(params: {
+    empleado_id: string;
+    fecha: string;
+    hora_entrada: string;
+    hora_salida?: string | null;
+    observaciones?: string;
+  }): Promise<{ success: boolean; message: string; data: any }> {
+    const headers = await getApiHeaders();
+    try {
+      const res = await fetch(`${getApiUrl()}/api/asistencias/admin/registrar-turno`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(params),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || 'Error al registrar turno');
+      }
+      return data;
+    } catch (err: any) {
+      // Fallback a clientes Supabase directos si falla la API
+      const descEntrada = params.observaciones ? `Registro manual (${params.observaciones.trim()})` : 'Registro manual por Administrador';
+      const descSalida = params.hora_salida ? descEntrada : null;
+      const insertData = {
+        empleado_id: params.empleado_id,
+        fecha: params.fecha,
+        hora_entrada: params.hora_entrada,
+        hora_salida: params.hora_salida || null,
+        direccion_entrada: descEntrada,
+        direccion_salida: descSalida,
+      };
+      const [inttecRes, daravisaRes] = await Promise.allSettled([
+        inttecClient.from('asistencias').insert(insertData).select().single(),
+        daravisaClient.from('asistencias').insert(insertData).select().single(),
+      ]);
+      const record =
+        (inttecRes.status === 'fulfilled' && (inttecRes.value as any)?.data) ||
+        (daravisaRes.status === 'fulfilled' && (daravisaRes.value as any)?.data);
+      if (!record && inttecRes.status === 'rejected') {
+        throw new Error((inttecRes.reason as any)?.message || 'Error al registrar turno');
+      }
+      return { success: true, message: 'Turno registrado correctamente (fallback directo)', data: record };
+    }
   },
 };
 

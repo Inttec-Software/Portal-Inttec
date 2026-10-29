@@ -7,6 +7,7 @@ import {
   handleHikvisionWebhook,
   editarHorasAsistencia,
   eliminarAsistencia,
+  registrarTurnoManual,
 } from './asistencias.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -32,9 +33,9 @@ router.post('/entrada', registrarEntrada);
 router.put('/salida', registrarSalida);
 router.get('/historial/:empleado_id', getHistorial);
 
-// Rutas protegidas exclusivamente para usuarios con rol DEV
+// Rutas protegidas para usuarios con rol ADMIN o DEV
 router.put('/admin/editar-horas/:id', editarHorasAsistencia);
 router.delete('/admin/eliminar/:id', eliminarAsistencia);
+router.post('/admin/registrar-turno', registrarTurnoManual);
 
 export default router;
-

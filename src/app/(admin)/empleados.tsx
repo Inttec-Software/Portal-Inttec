@@ -4979,6 +4979,7 @@ export default function AdminEmpleadosScreen() {
               >
                 <AsistenciaSemanalCard
                   asistencias={asistencias}
+                  empleadoId={asistenciaEmpleado?.id}
                   empleadoNombre={asistenciaEmpleado?.nombre || 'Empleado'}
                   empleadoRol={asistenciaEmpleado?.rol}
                   isLoading={isLoadingAsistencias}
