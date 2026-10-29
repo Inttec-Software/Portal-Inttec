@@ -1,32 +1,26 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  Modal,
   ScrollView,
   Platform,
   useWindowDimensions,
   Pressable,
 } from 'react-native';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { AuthService, Usuario, Evidencia, supabase } from '@/services/supabase';
-import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import CustomInput from '@/components/CustomInput';
-import CustomButton from '@/components/CustomButton';
 import { EvidenciasTableSkeleton, EvidenciasCardsListSkeleton } from '@/components/skeleton';
 import PaginationControls from '@/components/PaginationControls';
-import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import ImageViewerModal from '@/components/ImageViewerModal';
-import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
+import { useEvidenciasList } from '@/features/evidencias/hooks/useEvidenciasList';
+import EvidenciaDetailModal from '@/features/evidencias/components/EvidenciaDetailModal';
+import { EvidenciaItem } from '@/features/evidencias/types';
 
 export default function AdminEvidenciasScreen() {
   const router = useRouter();
@@ -35,150 +29,39 @@ export default function AdminEvidenciasScreen() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [adminUser, setAdminUser] = useState<Usuario | null>(null);
-  const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
-  const [employees, setEmployees] = useState<Usuario[]>([]);
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Modal de Detalles
-  const [selectedEvidencia, setSelectedEvidencia] = useState<Evidencia | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-
-  // Modal de imagen a pantalla completa
-  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
-  const [viewerVisible, setViewerVisible] = useState(false);
-
-  const handleOpenPhoto = (uri: string | null | undefined) => {
-    if (uri) {
-      setSelectedPhoto(uri);
-      setViewerVisible(true);
-    }
-  };
-
-  async function refreshData(isRefresh = false) {
-    if (isRefresh) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
-
-    try {
-      const headers = await getApiHeaders();
-      const res = await fetch(`${getApiUrl()}/api/evidencias/admin/all`, { headers });
-      
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Error al recuperar evidencias');
-      }
-      
-      const data = await res.json();
-      setEvidencias(data.evidencias || []);
-      setEmployees(data.employees || []);
-    } catch (err: any) {
-      console.error('Error al actualizar evidencias:', err.message);
-      Alert.alert('Error', err.message || 'No se pudieron recuperar los reportes de trabajo.');
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }
-
-  useEffect(() => {
-    const init = async () => {
-      const user = await AuthService.getCurrentUser();
-      if (!user || (user.rol !== 'ADMIN' && user.rol !== 'DEV')) {
-        router.replace('/');
-        return;
-      }
-      setAdminUser(user);
-      await refreshData();
-    };
-    init();
-  }, [router]);
-
-  const filteredEvidencias = useMemo(() => {
-    let result = evidencias;
-
-    // Filtro por Empleado
-    if (selectedEmployeeId) {
-      result = result.filter((e) => e.empleado_id === selectedEmployeeId);
-    }
-
-    // Filtro por Caja de Búsqueda
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(
-        (e) =>
-          e.cliente.toLowerCase().includes(q) ||
-          e.descripcion_trabajo.toLowerCase().includes(q) ||
-          (e.empleado_nombre && e.empleado_nombre.toLowerCase().includes(q)) ||
-          (e.materiales_usados && e.materiales_usados.toLowerCase().includes(q))
-      );
-    }
-
-    return result;
-  }, [searchQuery, selectedEmployeeId, evidencias]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, selectedEmployeeId]);
-
-  const totalPages = Math.ceil(filteredEvidencias.length / pageSize) || 1;
-  const paginatedEvidencias = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredEvidencias.slice(start, start + pageSize);
-  }, [filteredEvidencias, currentPage, pageSize]);
-
-  const parseTrabajosList = (descStr: string) => {
-    if (!descStr) return [];
-    if (descStr.trim().startsWith('[')) {
-      try {
-        const parsed = JSON.parse(descStr);
-        if (Array.isArray(parsed)) return parsed;
-      } catch {
-        // ignore
-      }
-    }
-    return [{ descripcion: descStr }];
-  };
-
-  const getCleanDescription = (descStr: string) => {
-    const list = parseTrabajosList(descStr);
-    if (list.length > 1) {
-      return list.map((t: any, i: number) => `#${i + 1}: ${t.descripcion}`).join(' • ');
-    }
-    return list[0]?.descripcion || descStr;
-  };
-
-  const handleExportPDF = async (ev: Evidencia) => {
-    setIsExporting(true);
-    try {
-      await EvidenceReportGenerator.exportToPDF(
-        ev,
-        ev.empleado_nombre || 'Técnico Autorizado',
-        ev.fotos_adicionales_urls || []
-      );
-    } catch (err: any) {
-      Alert.alert('Error', err.message || 'No se pudo exportar el PDF.');
-    } finally {
-      setIsExporting(false);
-    }
-  };
+  const {
+    evidencias,
+    paginatedEvidencias,
+    employees,
+    selectedEmployeeId,
+    setSelectedEmployeeId,
+    searchQuery,
+    setSearchQuery,
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    totalCount,
+    isLoading,
+    isRefreshing,
+    handleRefresh,
+    selectedEvidencia,
+    modalVisible,
+    handleOpenDetail,
+    handleCloseDetail,
+    isExporting,
+    handleExportPDF,
+    selectedPhoto,
+    viewerVisible,
+    handleOpenPhoto,
+    handleClosePhoto,
+  } = useEvidenciasList({ isAdmin: true });
 
   const formatFriendlyDate = (dateStr?: string | null) => {
     if (!dateStr) return 'N/A';
     try {
       const date = new Date(dateStr);
-      if (isNaN(date.getTime())) {
-        return dateStr.split('T')[0];
-      }
       return date.toLocaleDateString('es-MX', {
         day: '2-digit',
         month: '2-digit',
@@ -191,578 +74,268 @@ export default function AdminEvidenciasScreen() {
     }
   };
 
+  const getCleanDescription = (desc: any) => {
+    try {
+      const list = typeof desc === 'string' ? JSON.parse(desc) : desc;
+      if (Array.isArray(list) && list.length > 0) {
+        return list.map((t: any, i: number) => `#${i + 1}: ${t.descripcion}`).join(' • ');
+      }
+    } catch {}
+    return String(desc || '');
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
-      <View style={{ flex: 1 }}>
+      {/* Header y Filtros */}
+      <View style={styles.header}>
+        <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
+      </View>
 
-      {/* Listado de Reportes */}
-      {isLoading ? (
-        <ScrollView style={{ flex: 1 }}>
-          <View style={styles.header}>
-            <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
-            <View style={{ width: 40 }} />
-          </View>
-          <View style={styles.searchContainer}>
-            <CustomInput
-              placeholder="Buscar por cliente, descripción, material o técnico..."
-              value=""
-              editable={false}
-              iconName="search-outline"
-            />
-          </View>
-          {isDesktop ? (
-            <EvidenciasTableSkeleton count={8} />
-          ) : (
-            <EvidenciasCardsListSkeleton count={6} />
-          )}
-        </ScrollView>
-      ) : isDesktop ? (
-        <ScrollView style={{ flex: 1 }}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
-            <View style={{ width: 40 }} />
-          </View>
-          <View style={styles.searchContainer}>
-            <CustomInput
-              placeholder="Buscar por cliente, descripción, material o técnico..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              iconName="search-outline"
-            />
-          </View>
-          <View style={styles.filterSection}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterScrollContent}
-            >
-              <TouchableOpacity
-                onPress={() => setSelectedEmployeeId(null)}
-                style={[
-                  styles.filterPill,
-                  {
-                    backgroundColor: selectedEmployeeId === null ? themeColors.accent : themeColors.backgroundElement,
-                    borderColor: selectedEmployeeId === null ? themeColors.accent : themeColors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.filterPillText, { color: selectedEmployeeId === null ? '#ffffff' : themeColors.textSecondary }]}>
-                  Todos
-                </Text>
-              </TouchableOpacity>
-              {employees.map((emp) => (
-                <TouchableOpacity
-                  key={emp.id}
-                  onPress={() => setSelectedEmployeeId(emp.id)}
-                  style={[
-                    styles.filterPill,
-                    {
-                      backgroundColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.backgroundElement,
-                      borderColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterPillText, { color: selectedEmployeeId === emp.id ? '#ffffff' : themeColors.textSecondary }]}>
-                    {emp.nombre.split(' ')[0]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-          <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
-            <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Fecha de Reg.</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '20%', fontWeight: 'bold' }]}>Empleado</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '25%', fontWeight: 'bold' }]}>Cliente</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Fotos</Text>
-              <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%', fontWeight: 'bold' }]}>Material</Text>
-              <View style={{ width: '10%', alignItems: 'center' }}>
-                <Ionicons name="settings-outline" size={14} color={themeColors.text} />
-              </View>
-            </View>
-            <View style={{ backgroundColor: themeColors.backgroundElement, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderTopWidth: 0 }}>
-            {filteredEvidencias.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Ionicons name="document-text-outline" size={48} color={themeColors.textSecondary} />
-                <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>No hay evidencias registradas.</Text>
-              </View>
-            ) : (
-              paginatedEvidencias.map((item) => (
-                <Pressable
-                  key={item.id}
-                  onPress={() => {
-                    setSelectedEvidencia(item);
-                    setModalVisible(true);
-                  }}
-                  style={({ hovered }: any) => [
-                    styles.tableRow,
-                    { borderBottomColor: themeColors.border },
-                    hovered && { backgroundColor: themeColors.backgroundSelected }
-                  ] as any}
-                >
-                  <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]}>{formatFriendlyDate(item.created_at)}</Text>
-                  <Text style={[styles.tableCell, { color: themeColors.text, width: '20%', fontWeight: '600' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
-                  <Text style={[styles.tableCell, { color: themeColors.text, width: '25%' }]} numberOfLines={1}>{item.cliente || 'Sin cliente'}</Text>
-                  <Text style={[styles.tableCell, { width: '15%', color: themeColors.textSecondary }]}>
-                    {(item.fotos_adicionales_urls?.length || 0) + (item.foto_antes_url ? 1 : 0) + (item.foto_despues_url ? 1 : 0)} fotos
-                  </Text>
-                  <Text style={[styles.tableCell, { width: '15%', color: themeColors.textSecondary }]} numberOfLines={1}>
-                    {item.materiales_usados ? 'Sí' : 'No'}
-                  </Text>
-                  <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', gap: 12 }}>
-                    <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
-                  </View>
-                </Pressable>
-              ))
-            )}
-            </View>
+      <View style={styles.searchContainer}>
+        <CustomInput
+          placeholder="Buscar por cliente, descripción o técnico..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          iconName="search-outline"
+        />
+      </View>
 
-            {filteredEvidencias.length > 0 && (
-              <PaginationControls
-                currentPage={currentPage}
-                totalPages={totalPages}
-                totalItems={filteredEvidencias.length}
-                itemsPerPage={pageSize}
-                onPageChange={setCurrentPage}
-                onItemsPerPageChange={(newSize: number) => {
-                  setPageSize(newSize);
-                  setCurrentPage(1);
-                }}
-                itemsPerPageOptions={[20, 25, 50, 100]}
-                isLoading={isLoading}
-                style={{ marginTop: 14, marginBottom: 24 }}
-              />
-            )}
-          </View>
-        </ScrollView>
-      ) : (
-        <FlatList scrollEnabled={true} style={{ flex: 1 }}
-          ListHeaderComponent={
-            <View>
-              <View style={styles.header}>
-                <Text style={[styles.headerTitle, { color: themeColors.text }]}>Evidencias de Trabajo</Text>
-                <View style={{ width: 40 }} />
-              </View>
-              <View style={styles.searchContainer}>
-                <CustomInput
-                  placeholder="Buscar por cliente, descripción, material o técnico..."
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  iconName="search-outline"
-                />
-              </View>
-              <View style={styles.filterSection}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.filterScrollContent}
-                >
-                  <TouchableOpacity
-                    onPress={() => setSelectedEmployeeId(null)}
-                    style={[
-                      styles.filterPill,
-                      {
-                        backgroundColor: selectedEmployeeId === null ? themeColors.accent : themeColors.backgroundElement,
-                        borderColor: selectedEmployeeId === null ? themeColors.accent : themeColors.border,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.filterPillText, { color: selectedEmployeeId === null ? '#ffffff' : themeColors.textSecondary }]}>
-                      Todos
-                    </Text>
-                  </TouchableOpacity>
-                  {employees.map((emp) => (
-                    <TouchableOpacity
-                      key={emp.id}
-                      onPress={() => setSelectedEmployeeId(emp.id)}
-                      style={[
-                        styles.filterPill,
-                        {
-                          backgroundColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.backgroundElement,
-                          borderColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.border,
-                        },
-                      ]}
-                    >
-                      <Text style={[styles.filterPillText, { color: selectedEmployeeId === emp.id ? '#ffffff' : themeColors.textSecondary }]}>
-                        {emp.nombre.split(' ')[0]}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            </View>
-          }
-          initialNumToRender={8}
-          maxToRenderPerBatch={8}
-          windowSize={5}
-          removeClippedSubviews={true}
-          data={paginatedEvidencias}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          ListFooterComponent={
-            filteredEvidencias.length > 0 ? (
-              <PaginationControls
-                currentPage={currentPage}
-                totalPages={totalPages}
-                totalItems={filteredEvidencias.length}
-                itemsPerPage={pageSize}
-                onPageChange={setCurrentPage}
-                onItemsPerPageChange={(newSize: number) => {
-                  setPageSize(newSize);
-                  setCurrentPage(1);
-                }}
-                itemsPerPageOptions={[20, 25, 50, 100]}
-                isLoading={isLoading}
-                style={{ marginTop: 14, marginBottom: 24 }}
-              />
-            ) : null
-          }
-          refreshing={isRefreshing}
-          onRefresh={() => refreshData(true)}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              activeOpacity={0.7}
+      {/* Filtro por empleado */}
+      <View style={styles.filterSection}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScrollContent}>
+          <TouchableOpacity
+            onPress={() => setSelectedEmployeeId(null)}
+            style={[
+              styles.filterPill,
+              {
+                backgroundColor: selectedEmployeeId === null ? themeColors.accent : themeColors.backgroundElement,
+                borderColor: selectedEmployeeId === null ? themeColors.accent : themeColors.border,
+              },
+            ]}
+          >
+            <Text
               style={[
-                styles.card,
+                styles.filterPillText,
+                { color: selectedEmployeeId === null ? '#ffffff' : themeColors.textSecondary },
+              ]}
+            >
+              Todos ({evidencias.length})
+            </Text>
+          </TouchableOpacity>
+
+          {employees.map((emp) => (
+            <TouchableOpacity
+              key={emp.id}
+              onPress={() => setSelectedEmployeeId(selectedEmployeeId === emp.id ? null : emp.id)}
+              style={[
+                styles.filterPill,
                 {
-                  backgroundColor: themeColors.backgroundElement,
-                  borderColor: themeColors.border,
+                  backgroundColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.backgroundElement,
+                  borderColor: selectedEmployeeId === emp.id ? themeColors.accent : themeColors.border,
                 },
               ]}
-              onPress={() => {
-                setSelectedEvidencia(item);
-                setModalVisible(true);
-              }}
             >
-              <View style={styles.cardHeader}>
-                <Text style={[styles.cardClient, { color: themeColors.text }]} numberOfLines={1}>
-                  {item.cliente}
-                </Text>
-                <Text style={[styles.cardDate, { color: themeColors.textSecondary }]}>
-                  {formatFriendlyDate(item.created_at).split(',')[0]}
-                </Text>
-              </View>
-
-              <Text style={[styles.cardTechName, { color: themeColors.accent, fontWeight: '700' }]}>
-                Técnico: {item.empleado_nombre || 'Desconocido'}
+              <Text
+                style={[
+                  styles.filterPillText,
+                  { color: selectedEmployeeId === emp.id ? '#ffffff' : themeColors.textSecondary },
+                ]}
+              >
+                {emp.nombre.split(' ')[0]}
               </Text>
-
-              <Text style={[styles.cardDesc, { color: themeColors.textSecondary, marginTop: 4 }]} numberOfLines={2}>
-                {getCleanDescription(item.descripcion_trabajo)}
-              </Text>
-
-              <View style={styles.cardFooter}>
-                <View style={styles.indicatorGroup}>
-                  {item.foto_antes_url && (
-                    <View style={[styles.indicator, { backgroundColor: themeColors.danger + '20' }]}>
-                      <Text style={[styles.indicatorText, { color: themeColors.danger }]}>Antes</Text>
-                    </View>
-                  )}
-                  {item.foto_despues_url && (
-                    <View style={[styles.indicator, { backgroundColor: themeColors.success + '20' }]}>
-                      <Text style={[styles.indicatorText, { color: themeColors.success }]}>Después</Text>
-                    </View>
-                  )}
-                  {item.resumen_ia && (
-                    <View style={[styles.indicator, { backgroundColor: themeColors.accent + '20' }]}>
-                      <Ionicons name="sparkles" size={10} color={themeColors.accent} />
-                      <Text style={[styles.indicatorText, { color: themeColors.accent, marginLeft: 2 }]}>IA</Text>
-                    </View>
-                  )}
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
-              </View>
             </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
+      {/* Contenido: Desktop Table o Mobile Cards */}
+      {isLoading ? (
+        <ScrollView style={{ flex: 1 }}>
+          {isDesktop ? <EvidenciasTableSkeleton count={8} /> : <EvidenciasCardsListSkeleton count={6} />}
+        </ScrollView>
+      ) : isDesktop ? (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: Spacing.three, paddingBottom: 30 }}>
+          <View
+            style={[
+              styles.tableHeaderRow,
+              { backgroundColor: themeColors.backgroundElement, borderBottomColor: themeColors.border },
+            ]}
+          >
+            <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%' }]}>Fecha</Text>
+            <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '20%' }]}>Empleado</Text>
+            <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '25%' }]}>Cliente</Text>
+            <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%' }]}>Fotos</Text>
+            <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '15%' }]}>Material</Text>
+            <View style={{ width: '10%', alignItems: 'center' }}>
+              <Ionicons name="settings-outline" size={14} color={themeColors.text} />
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.tableBody,
+              { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+            ]}
+          >
+            {totalCount === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="document-text-outline" size={48} color={themeColors.textSecondary} />
+                <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
+                  No se encontraron evidencias.
+                </Text>
+              </View>
+            ) : (
+              paginatedEvidencias.map((item) => {
+                const totalFotos =
+                  (item.foto_antes_url ? 1 : 0) +
+                  (item.foto_despues_url ? 1 : 0) +
+                  (item.fotos_adicionales_urls?.length || 0);
+
+                const techName = item.creado_por_nombre || item.usuario?.nombre || 'Técnico';
+
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => handleOpenDetail(item)}
+                    style={({ hovered }: any) => [
+                      styles.tableRow,
+                      { borderBottomColor: themeColors.border },
+                      hovered && { backgroundColor: themeColors.backgroundSelected },
+                    ]}
+                  >
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '15%' }]}>
+                      {formatFriendlyDate(item.created_at || item.fecha)}
+                    </Text>
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '20%', fontWeight: '600' }]} numberOfLines={1}>
+                      {techName}
+                    </Text>
+                    <Text style={[styles.tableCell, { color: themeColors.text, width: '25%' }]} numberOfLines={1}>
+                      {item.cliente || 'Sin cliente'}
+                    </Text>
+                    <Text style={[styles.tableCell, { width: '15%', color: themeColors.textSecondary }]}>
+                      {totalFotos} fotos
+                    </Text>
+                    <Text style={[styles.tableCell, { width: '15%', color: themeColors.textSecondary }]}>
+                      {item.materiales_usados ? 'Sí' : 'No'}
+                    </Text>
+                    <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+                      <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                    </View>
+                  </Pressable>
+                );
+              })
+            )}
+          </View>
+
+          {totalCount > 0 && (
+            <PaginationControls
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={totalCount}
+              itemsPerPage={pageSize}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={(newSize: number) => {
+                setPageSize(newSize);
+                setCurrentPage(1);
+              }}
+              itemsPerPageOptions={[20, 25, 50, 100]}
+              isLoading={isLoading}
+              style={{ marginTop: 14 }}
+            />
           )}
+        </ScrollView>
+      ) : (
+        <FlatList
+          data={evidencias}
+          keyExtractor={(item) => item.id}
+          refreshing={isRefreshing}
+          onRefresh={handleRefresh}
+          contentContainerStyle={{ paddingHorizontal: Spacing.three, paddingBottom: 40 }}
+          renderItem={({ item }) => {
+            const totalFotos =
+              (item.foto_antes_url ? 1 : 0) +
+              (item.foto_despues_url ? 1 : 0) +
+              (item.fotos_adicionales_urls?.length || 0);
+            const techName = item.creado_por_nombre || item.usuario?.nombre || 'Técnico';
+
+            return (
+              <TouchableOpacity
+                onPress={() => handleOpenDetail(item)}
+                activeOpacity={0.7}
+                style={[
+                  styles.mobileCard,
+                  { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+                ]}
+              >
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={[styles.mobileCardTitle, { color: themeColors.text }]} numberOfLines={1}>
+                    {item.cliente || 'Sin cliente'}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                    {formatFriendlyDate(item.created_at || item.fecha)}
+                  </Text>
+                </View>
+
+                <Text style={{ fontSize: 12, color: themeColors.primary, fontWeight: '600', marginTop: 2 }}>
+                  👤 {techName}
+                </Text>
+
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }} numberOfLines={2}>
+                  {getCleanDescription(item.descripcion_trabajo)}
+                </Text>
+
+                <View style={styles.mobileCardFooter}>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <View style={[styles.tag, { backgroundColor: themeColors.primary + '15' }]}>
+                      <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>
+                        📷 {totalFotos} fotos
+                      </Text>
+                    </View>
+                    {item.materiales_usados ? (
+                      <View style={[styles.tag, { backgroundColor: themeColors.success + '15' }]}>
+                        <Text style={{ fontSize: 11, color: themeColors.success, fontWeight: '700' }}>
+                          📦 Material
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
+                </View>
+              </TouchableOpacity>
+            );
+          }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="briefcase-outline" size={64} color={themeColors.textSecondary} />
+              <Ionicons name="document-text-outline" size={48} color={themeColors.textSecondary} />
               <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-                No se encontraron reportes técnicos de trabajo.
+                No se encontraron evidencias.
               </Text>
             </View>
           }
         />
       )}
 
-      {/* Modal de Detalle */}
-      <Modal statusBarTranslucent={true}
-        animationType="slide"
-        transparent={true}
+      {/* Modal de Detalle Compartido */}
+      <EvidenciaDetailModal
         visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: themeColors.background }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: themeColors.text }]}>Detalle de Evidencia</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setModalVisible(false);
-                  setSelectedEvidencia(null);
-                }}
-              >
-                <Ionicons name="close" size={24} color={themeColors.text} />
-              </TouchableOpacity>
-            </View>
+        evidencia={selectedEvidencia}
+        isAdmin={true}
+        isExporting={isExporting}
+        onClose={handleCloseDetail}
+        onExportPDF={handleExportPDF}
+        onEdit={(ev) => {
+          handleCloseDetail();
+          router.push(`/(admin)/editar-evidencia?id=${ev.id}`);
+        }}
+        onOpenPhoto={handleOpenPhoto}
+      />
 
-            {selectedEvidencia && (
-              <ScrollView contentContainerStyle={styles.modalScroll}>
-                {/* Fotos de Evidencia */}
-                <View style={styles.evidencePhotosContainer}>
-                  {selectedEvidencia.foto_antes_url ? (
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      onPress={() => handleOpenPhoto(selectedEvidencia.foto_antes_url)}
-                      style={styles.photoWrapper}
-                    >
-                      <Text style={[styles.photoTypeLabel, { color: themeColors.danger }]}>Antes</Text>
-                      <Image
-                        source={{ uri: selectedEvidencia.foto_antes_url }}
-                        style={styles.modalImage}
-                        resizeMode="cover"
-                      />
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={[styles.modalNoImage, { backgroundColor: themeColors.backgroundElement }]}>
-                      <Ionicons name="camera-outline" size={32} color={themeColors.textSecondary} />
-                      <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>Sin foto del Antes</Text>
-                    </View>
-                  )}
-
-                  {selectedEvidencia.foto_despues_url ? (
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      onPress={() => handleOpenPhoto(selectedEvidencia.foto_despues_url)}
-                      style={styles.photoWrapper}
-                    >
-                      <Text style={[styles.photoTypeLabel, { color: themeColors.success }]}>Después</Text>
-                      <Image
-                        source={{ uri: selectedEvidencia.foto_despues_url }}
-                        style={styles.modalImage}
-                        resizeMode="cover"
-                      />
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={[styles.modalNoImage, { backgroundColor: themeColors.backgroundElement }]}>
-                      <Ionicons name="camera-outline" size={32} color={themeColors.textSecondary} />
-                      <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>Sin foto del Después</Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Campos de Información */}
-                <View style={styles.modalDetails}>
-                  <View style={styles.detailItem}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Técnico Responsable</Text>
-                    <Text style={[styles.detailValue, { color: themeColors.text, fontWeight: '700' }]}>
-                      {selectedEvidencia.empleado_nombre || 'N/D'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.detailItem}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Cliente / Ubicación</Text>
-                    <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedEvidencia.cliente}
-                    </Text>
-                  </View>
-
-                  <View style={styles.detailItem}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Fecha de Registro</Text>
-                    <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {formatFriendlyDate(selectedEvidencia.created_at)}
-                    </Text>
-                  </View>
-
-                  {(() => {
-                    let colabs = (selectedEvidencia as any).colaboradores;
-                    if (typeof colabs === 'string') {
-                      try { colabs = JSON.parse(colabs); } catch {}
-                    }
-                    if (Array.isArray(colabs) && colabs.length > 0) {
-                      const colabNames = colabs.map((c: any) => typeof c === 'string' ? c : c?.nombre).filter(Boolean).join(', ');
-                      return (
-                        <View style={styles.detailItem}>
-                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Colaboradores / Cuadrilla</Text>
-                          <Text style={[styles.detailValue, { color: themeColors.text }]}>👥 {colabNames}</Text>
-                        </View>
-                      );
-                    }
-                    return null;
-                  })()}
-
-                  {(() => {
-                    let listTrabajos = [];
-                    let isJson = false;
-                    try {
-                      if (selectedEvidencia.descripcion_trabajo && selectedEvidencia.descripcion_trabajo.trim().startsWith('[')) {
-                        listTrabajos = JSON.parse(selectedEvidencia.descripcion_trabajo);
-                        isJson = true;
-                      }
-                    } catch {}
-
-                    if (isJson && listTrabajos.length > 0) {
-                      return (
-                        <View style={{ marginTop: Spacing.two, marginBottom: Spacing.two }}>
-                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: Spacing.one }]}>
-                            Trabajos Realizados
-                          </Text>
-                          {listTrabajos.map((t: any, index: number) => (
-                            <View key={index} style={{
-                              marginBottom: Spacing.two,
-                              padding: Spacing.two,
-                              borderWidth: 1,
-                              borderColor: themeColors.border,
-                              borderRadius: BorderRadius.medium,
-                              backgroundColor: themeColors.backgroundElement
-                            }}>
-                              <Text style={{ fontWeight: '700', fontSize: 13, color: themeColors.accent, marginBottom: 4 }}>
-                                Trabajo #{index + 1}
-                              </Text>
-                              <Text style={{ fontSize: 13, color: themeColors.text, marginBottom: 2 }}>
-                                <Text style={{ fontWeight: '600' }}>Situación encontrada: </Text>{t.descripcion}
-                              </Text>
-                              {t.materiales && (
-                                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginBottom: 2 }}>
-                                  <Text style={{ fontWeight: '600' }}>Materiales: </Text>{t.materiales}
-                                </Text>
-                              )}
-                              {(t.solucion || t.observaciones) && (
-                                <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
-                                  <Text style={{ fontWeight: '600' }}>Solución: </Text>{t.solucion || t.observaciones}
-                                </Text>
-                              )}
-                            </View>
-                          ))}
-                        </View>
-                      );
-                    }
-
-                    return (
-                      <>
-                        <View style={styles.detailItem}>
-                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Situación encontrada</Text>
-                          <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                            {selectedEvidencia.descripcion_trabajo}
-                          </Text>
-                        </View>
-
-                        {selectedEvidencia.materiales_usados && (
-                          <View style={styles.detailItem}>
-                            <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Materiales Utilizados</Text>
-                            <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                              {selectedEvidencia.materiales_usados}
-                            </Text>
-                          </View>
-                        )}
-
-                        {selectedEvidencia.observaciones && (
-                          <View style={styles.detailItem}>
-                            <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Solución</Text>
-                            <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                              {selectedEvidencia.observaciones}
-                            </Text>
-                          </View>
-                        )}
-                      </>
-                    );
-                  })()}
-
-                  {selectedEvidencia.fotos_adicionales_urls && selectedEvidencia.fotos_adicionales_urls.length > 0 && (
-                    <View style={styles.detailItem}>
-                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: Spacing.two }]}>
-                        Fotos Adicionales
-                      </Text>
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={true}
-                        style={[
-                          styles.adicionalPhotosScroll,
-                          Platform.OS === 'web' && ({
-                            overflowX: 'auto',
-                            scrollbarWidth: 'thin',
-                          } as any)
-                        ]}
-                        // @ts-ignore
-                        onWheel={Platform.OS === 'web' ? (e: any) => {
-                          if (e.deltaY) {
-                            e.currentTarget.scrollLeft += e.deltaY;
-                          }
-                        } : undefined}
-                      >
-                        {selectedEvidencia.fotos_adicionales_urls.map((url, index) => (
-                          <TouchableOpacity
-                            key={index}
-                            activeOpacity={0.9}
-                            onPress={() => handleOpenPhoto(url)}
-                            style={styles.adicionalPhotoCard}
-                          >
-                            <Image source={{ uri: url }} style={styles.adicionalModalImage} resizeMode="cover" />
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )}
-
-                  {/* Resumen IA */}
-                  {selectedEvidencia.resumen_ia && (
-                    <View style={styles.aiReportSection}>
-                      <View style={styles.aiHeader}>
-                        <Ionicons name="sparkles" size={18} color={themeColors.accent} />
-                        <Text style={[styles.aiTitle, { color: themeColors.accent }]}>
-                          Análisis Técnico IA (Gemini)
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.aiReportBox,
-                          {
-                            backgroundColor: themeColors.backgroundElement,
-                            borderColor: themeColors.border,
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.aiText, { color: themeColors.text }]}>
-                          {selectedEvidencia.resumen_ia}
-                        </Text>
-                      </View>
-                    </View>
-                  )}
-                </View>
-
-                {/* Acciones */}
-                <View style={styles.modalActionContainer}>
-                  <CustomButton
-                    title="EDITAR REPORTE"
-                    onPress={() => {
-                      setModalVisible(false);
-                      router.push(`/(admin)/editar-evidencia?id=${selectedEvidencia.id}`);
-                    }}
-                    variant="secondary"
-                    icon={<Ionicons name="create-outline" size={20} color={themeColors.text} style={{ marginRight: 8 }} />}
-                    style={{ marginBottom: Spacing.two }}
-                  />
-                  <CustomButton
-                    title="EXPORTAR REPORTE (PDF)"
-                    onPress={() => handleExportPDF(selectedEvidencia)}
-                    loading={isExporting}
-                    variant="primary"
-                    icon={<Ionicons name="document-text-outline" size={20} color="#ffffff" style={{ marginRight: 8 }} />}
-                  />
-                </View>
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
-
+      {/* Modal Visor de Fotos */}
       <ImageViewerModal
         visible={viewerVisible}
         imageUrl={selectedPhoto}
-        onClose={() => setViewerVisible(false)}
+        onClose={handleClosePhoto}
       />
-    </View>
     </View>
   );
 }
@@ -772,266 +345,96 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.two,
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '800',
-  },
-  backBtn: {
-    padding: Spacing.one,
+    fontWeight: 'bold',
   },
   searchContainer: {
-    paddingHorizontal: Spacing.four,
+    paddingHorizontal: Spacing.three,
     marginBottom: Spacing.two,
   },
   filterSection: {
+    paddingHorizontal: Spacing.three,
     marginBottom: Spacing.two,
   },
   filterScrollContent: {
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.two,
+    gap: 6,
   },
   filterPill: {
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.one,
-    borderRadius: BorderRadius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   filterPillText: {
     fontSize: 12,
-    fontWeight: '700',
-  },
-  loaderContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  listContent: {
-    paddingHorizontal: Spacing.four,
-    paddingBottom: Spacing.five,
-  },
-  card: {
-    borderRadius: BorderRadius.large,
-    borderWidth: 1,
-    padding: Spacing.two,
-    marginBottom: Spacing.one,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  cardClient: {
-    fontSize: 16,
-    fontWeight: '700',
-    flex: 1,
-    marginRight: Spacing.two,
-  },
-  cardDate: {
-    fontSize: 11,
     fontWeight: '600',
   },
-  cardTechName: {
-    fontSize: 12,
-    marginTop: 4,
-  },
-  cardDesc: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: Spacing.two,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  indicatorGroup: {
-    flexDirection: 'row',
-    gap: Spacing.one,
-  },
-  indicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.pill,
-  },
-  indicatorText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.seven,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.three,
-  },
-  emptyText: {
-    fontSize: 14,
-    marginTop: Spacing.two,
-    fontWeight: '500',
-  },
-  // Table Styles (Desktop)
   tableHeaderRow: {
     flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-    borderBottomWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderTopLeftRadius: BorderRadius.medium,
+    borderTopRightRadius: BorderRadius.medium,
+    borderWidth: 1,
+    alignItems: 'center',
   },
   tableHeaderCell: {
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  tableBody: {
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: BorderRadius.medium,
+    borderBottomRightRadius: BorderRadius.medium,
+    overflow: 'hidden',
   },
   tableRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
+    alignItems: 'center',
   },
   tableCell: {
     fontSize: 13,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    borderTopLeftRadius: BorderRadius.large,
-    borderTopRightRadius: BorderRadius.large,
-    height: '90%',
+  emptyContainer: {
     padding: Spacing.four,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modalHeader: {
+  emptyText: {
+    fontSize: 14,
+    marginTop: 8,
+  },
+  mobileCard: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.medium,
+    padding: Spacing.two,
+    marginBottom: 8,
+  },
+  mobileCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
+    marginRight: 8,
+  },
+  mobileCardFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: Spacing.three,
+    marginTop: 8,
+    paddingTop: 6,
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  modalScroll: {
-    paddingBottom: Spacing.six,
-  },
-  evidencePhotosContainer: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    marginBottom: Spacing.three,
-  },
-  photoWrapper: {
-    flex: 1,
-    position: 'relative',
-    height: 140,
-    borderRadius: BorderRadius.medium,
-    overflow: 'hidden',
-    backgroundColor: '#000',
-  },
-  photoTypeLabel: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    zIndex: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    fontSize: 9,
-    fontWeight: '800',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+  tag: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: BorderRadius.small,
-    textTransform: 'uppercase',
-  },
-  modalImage: {
-    width: '100%',
-    height: '100%',
-  },
-  modalNoImage: {
-    flex: 1,
-    height: 140,
-    borderRadius: BorderRadius.medium,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: Spacing.one,
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderStyle: 'dashed',
-  },
-  modalDetails: {
-    gap: Spacing.three,
-  },
-  detailItem: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    paddingBottom: Spacing.one,
-  },
-  detailLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginTop: 2,
-    lineHeight: 18,
-  },
-  aiReportSection: {
-    marginTop: Spacing.one,
-    gap: Spacing.two,
-  },
-  aiHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-  },
-  aiTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  aiReportBox: {
-    borderWidth: 1,
-    borderRadius: BorderRadius.medium,
-    padding: Spacing.three,
-  },
-  aiText: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  modalActionContainer: {
-    marginTop: Spacing.four,
-  },
-  adicionalPhotosScroll: {
-    flexDirection: 'row',
-    marginBottom: Spacing.two,
-  },
-  adicionalPhotoCard: {
-    width: 120,
-    height: 120,
-    borderRadius: BorderRadius.medium,
-    borderWidth: 1,
-    borderColor: '#eee',
-    overflow: 'hidden',
-    marginRight: Spacing.two,
-    backgroundColor: '#000',
-  },
-  adicionalModalImage: {
-    width: '100%',
-    height: '100%',
   },
 });
-

@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, Modal, ScrollView, TextInput, StyleSheet,
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CustomButton from './CustomButton';
 import { normalizeText } from '@/utils/helpers';
 
@@ -45,6 +46,7 @@ export default function MaterialesSelector({
 }: MaterialesSelectorProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const insets = useSafeAreaInsets();
 
   const isEnabled = typeof usaMateriales === 'boolean' 
     ? usaMateriales 
@@ -279,7 +281,13 @@ export default function MaterialesSelector({
       >
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
-          style={styles.modalOverlay}
+          style={[
+            styles.modalOverlay,
+            {
+              paddingTop: Platform.OS !== 'web' ? Math.max(insets.top + 12, 16) : 24,
+              paddingBottom: Platform.OS !== 'web' ? Math.max(insets.bottom + 12, 16) : 24,
+            },
+          ]}
         >
           <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -654,7 +662,7 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '100%',
     maxWidth: 540,
-    height: '82%',
+    height: Platform.OS === 'web' ? '82%' : '88%',
     maxHeight: '90%',
     borderRadius: BorderRadius.large,
     overflow: 'hidden',
