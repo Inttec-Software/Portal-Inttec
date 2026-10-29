@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, ScrollView, Alert, Platform } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -401,7 +401,23 @@ export default function MisEvidenciasHistorial() {
                       <Text style={[styles.detailLabel, { color: themeColors.textSecondary, marginBottom: Spacing.two }]}>
                         Fotos Adicionales
                       </Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.adicionalPhotosScroll}>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={true}
+                        style={[
+                          styles.adicionalPhotosScroll,
+                          Platform.OS === 'web' && ({
+                            overflowX: 'auto',
+                            scrollbarWidth: 'thin',
+                          } as any)
+                        ]}
+                        // @ts-ignore
+                        onWheel={Platform.OS === 'web' ? (e: any) => {
+                          if (e.deltaY) {
+                            e.currentTarget.scrollLeft += e.deltaY;
+                          }
+                        } : undefined}
+                      >
                         {selectedEvidencia.fotos_adicionales_urls.map((url: string, index: number) => (
                           <TouchableOpacity
                             key={index}

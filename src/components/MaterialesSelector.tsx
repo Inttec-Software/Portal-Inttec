@@ -367,7 +367,11 @@ export default function MaterialesSelector({
                   )}
                 </View>
 
-                <ScrollView style={{ marginTop: Spacing.two }} keyboardShouldPersistTaps="handled">
+                <ScrollView 
+                  style={{ flex: 1, marginTop: Spacing.two }} 
+                  contentContainerStyle={{ paddingBottom: Spacing.four }}
+                  keyboardShouldPersistTaps="handled"
+                >
                   {filteredProductos.length === 0 ? (
                     <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginTop: 20 }}>
                       No se encontraron productos disponibles.
@@ -478,7 +482,7 @@ export default function MaterialesSelector({
                     </TouchableOpacity>
 
                     <TextInput
-                      style={[styles.stepperInput, { color: themeColors.text }]}
+                      style={[styles.stepperInput, { color: themeColors.text }, Platform.OS === 'web' && ({ minWidth: 0, outlineStyle: 'none' } as any)]}
                       keyboardType="decimal-pad"
                       value={usado}
                       onChangeText={(val) => {
@@ -650,8 +654,9 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '100%',
     maxWidth: 540,
+    height: '82%',
+    maxHeight: '90%',
     borderRadius: BorderRadius.large,
-    maxHeight: '82%',
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -699,18 +704,21 @@ const styles = StyleSheet.create({
     height: 54,
   },
   stepperBtn: {
-    width: 46,
+    width: 44,
     height: 44,
     borderRadius: BorderRadius.small,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   stepperInput: {
     flex: 1,
+    minWidth: 0,
     fontSize: 22,
     fontWeight: '800',
     textAlign: 'center',
     paddingVertical: 4,
+    paddingHorizontal: 8,
   },
 });
 
