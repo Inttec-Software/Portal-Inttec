@@ -24,7 +24,7 @@ La aplicación interactúa principalmente con las siguientes tablas:
 - **`usuarios`**: Almacena las credenciales de ingreso y el rol de acceso.
   - Campos: `id` (uuid, PK), `nombre`, `email`, `password`, `rol` (`'ADMIN'`, `'EMPLEADO'`), `telefono`, `expo_push_token` (Para recibir notificaciones nativas), `created_at`.
 - **`gastos`**: Registro de reembolsos y compras.
-  - Campos: `id` (uuid, PK), `empleado_id` (FK a usuarios), `empleado_nombre`, `monto` (numeric), `categoria`, `subcategoria`, `cliente`, `proveedor`, `sucursal`, `metodo_pago` (Restricción CHECK: `efectivo`, `tarjeta`, `tarjeta_credito`, `tarjeta_debito`), `tipo_tarjeta`, `justificacion` (incluye logs de alertas IA), `foto_url`, `status` (`PENDING`, `APPROVED`, `REJECTED`, `ACTION_REQUIRED`), `rejection_feedback`, `created_at`, `approved_at`, `fecha_comprobante`, `proveedor`, `cliente`, `sucursal`, `tipo_tarjeta`, `ubicacion_registro`, `estado`.
+  - Campos: `id` (uuid, PK), `empleado_id` (FK a usuarios), `empleado_nombre`, `monto` (numeric), `categoria`, `subcategoria`, `cliente`, `proveedor`, `sucursal`, `metodo_pago` (Restricción CHECK: `efectivo`, `tarjeta`, `tarjeta_credito`, `tarjeta_debito`, `transferencia`, `monedero_electronico`), `tipo_tarjeta`, `justificacion` (incluye logs de alertas IA), `foto_url`, `status` (`PENDING`, `APPROVED`, `REJECTED`, `ACTION_REQUIRED`), `rejection_feedback`, `created_at`, `approved_at`, `fecha_comprobante`, `proveedor`, `cliente`, `sucursal`, `tipo_tarjeta`, `ubicacion_registro`, `estado`.
 - **`ventas`**: Registro y seguimiento de utilidades de proyectos y ventas.
   - Campos relevantes: `cotizacion_id` (FK), `precio_total_facturado`, `costo_total`, `utilidad_bruta`, datos CFDI (`cfdi_uuid`, `cfdi_estado`, `cfdi_xml_url`, `cfdi_pdf_url`, `cfdi_facturapi_id`).
 - **`evidencias`**: Registro histórico de actividades y reportes técnicos de trabajo.
@@ -127,7 +127,7 @@ sequenceDiagram
 ---
 
 ## 5. Directrices de Desarrollo y Mantenimiento
-1. **Diferencia de Modelos en Gastos**: La restricción CHECK en Supabase obliga a enviar los métodos de pago en minúsculas (`efectivo`, `tarjeta`, `tarjeta_credito`, `tarjeta_debito`). No alterar estas conversiones en los formularios.
+1. **Diferencia de Modelos en Gastos**: La restricción CHECK en Supabase obliga a enviar los métodos de pago en minúsculas (`efectivo`, `tarjeta`, `tarjeta_credito`, `tarjeta_debito`, `transferencia`, `monedero_electronico`). No alterar estas conversiones en los formularios.
 2. **Generación de Reportes PDF**: La renderización de logotipos e imágenes en `expo-print` debe realizarse preferentemente mediante Base64 o URLs remotas públicas directas. No intentar referenciar recursos de la carpeta local de assets (`../../assets/...`) usando URIs relativas en las plantillas HTML, ya que fallará al compilarse en los emuladores o dispositivos físicos por seguridad de la WebView.
 3. **Unicidad de Iconos y Componentes**: El diseño utiliza el tema visual global y los iconos nativos de `Ionicons` de Expo Router. Mantener siempre la coherencia del esquema de colores (Modo Oscuro/Claro).
 

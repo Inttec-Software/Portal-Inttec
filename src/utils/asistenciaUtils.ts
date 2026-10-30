@@ -82,6 +82,8 @@ export interface SemanaAsistencia {
   totalHorasExtraStr: string;
   diasLaborados: number;
   turnosTotales: number;
+  jornadaHoras?: number;
+  jornadaMinutos?: number;
 }
 
 /**
@@ -265,20 +267,23 @@ export function isAutoCerradoAsistencia(
 }
 
 /**
- * Formatea el contador de jornada laboral semanal sobre la base de 48 horas.
- * Ejemplo: "0/48 hrs", "8/48 hrs", "24h 30m / 48 hrs", "48/48 hrs".
+ * Formatea el contador de jornada laboral semanal sobre la base de horas configuradas (por defecto 48 horas).
+ * Ejemplo: "0/48 hrs", "8/48 hrs", "24h 30m / 40 hrs", "40/40 hrs".
  */
-export function formatContadorJornada48(minutosRegulares: number = 0): string {
+export function formatContadorJornada48(minutosRegulares: number = 0, jornadaHoras: number = 48): string {
+  const meta = (jornadaHoras && Number(jornadaHoras) > 0) ? Number(jornadaHoras) : 48;
   if (!minutosRegulares || minutosRegulares <= 0) {
-    return '0/48 hrs';
+    return `0/${meta} hrs`;
   }
   const h = Math.floor(minutosRegulares / 60);
   const m = Math.round(minutosRegulares % 60);
   if (m === 0) {
-    return `${h}/48 hrs`;
+    return `${h}/${meta} hrs`;
   }
-  return `${h}h ${m}m / 48 hrs`;
+  return `${h}h ${m}m / ${meta} hrs`;
 }
+
+export const formatContadorJornada = formatContadorJornada48;
 
 const NOMBRES_DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 
@@ -462,7 +467,8 @@ export function getNextMonthDate(currentDate: Date): Date {
 export function processAsistenciasSemana(
   asistencias: Asistencia[],
   weekDateInput?: Date | string,
-  userRole?: string | null
+  userRole?: string | null,
+  jornadaHoras: number = JORNADA_SEMANAL_HORAS
 ): SemanaAsistencia {
   const range = getWeekRange(weekDateInput);
 
@@ -626,10 +632,13 @@ export function processAsistenciasSemana(
     };
   });
 
-  // Jornada laboral estándar: 48 horas semanales (2880 minutos).
-  // Si en la semana sumó 60 hrs trabajadas: 48 son regulares y 12 son extras.
-  const totalMinutosRegulares = Math.min(totalMinutosSemana, JORNADA_SEMANAL_MINUTOS);
-  const totalMinutosExtra = Math.max(0, totalMinutosSemana - JORNADA_SEMANAL_MINUTOS);
+  // Jornada laboral semanal configurada para el empleado (por defecto 48 horas / 2880 minutos).
+  // Si en la semana sumó 60 hrs trabajadas y su jornada es de 40h: 40 son regulares y 20 son extras.
+  const metaHoras = (jornadaHoras && Number(jornadaHoras) > 0) ? Number(jornadaHoras) : JORNADA_SEMANAL_HORAS;
+  const metaMinutos = Math.round(metaHoras * 60);
+
+  const totalMinutosRegulares = Math.min(totalMinutosSemana, metaMinutos);
+  const totalMinutosExtra = Math.max(0, totalMinutosSemana - metaMinutos);
 
   return {
     range,
@@ -644,6 +653,8 @@ export function processAsistenciasSemana(
     totalHorasExtraStr: formatMinutesToHours(totalMinutosExtra),
     diasLaborados,
     turnosTotales,
+    jornadaHoras: metaHoras,
+    jornadaMinutos: metaMinutos,
   };
 }
 
@@ -662,6 +673,8 @@ export interface PeriodoAsistencia {
   totalHorasExtraStr: string;
   diasLaborados: number;
   turnosTotales: number;
+  jornadaHoras?: number;
+  jornadaMinutos?: number;
 }
 
 /**

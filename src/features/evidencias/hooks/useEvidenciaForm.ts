@@ -36,6 +36,7 @@ export function useEvidenciaForm({
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const originalEvidenceUsageRef = useRef<Record<string, number>>({});
 
   // Validación y scroll a error
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -148,19 +149,31 @@ export function useEvidenciaForm({
     setSelectedPhoto(null);
   };
 
-  // Sincronizar y combinar inventario
+  // Sincronizar y combinar inventario (con restitución de stock si se está editando esta evidencia)
   const syncCombinedProductos = useCallback(
-    async (miInv: any[], colabs: ColaboradorItem[], userObj: Usuario | null) => {
-      const miProductos: ProductoInventario[] = (miInv || []).map((item: any) => ({
-        id: item.producto_id,
-        sku_interno: item.productos?.sku_interno || '',
-        nombre_oficial: item.productos?.nombre_oficial || '',
-        stock_actual: Number(item.cantidad_disponible) || 0,
-        unidad: item.productos?.unidad || 'pza',
-        empleadoId: userObj?.id,
-        empleadoNombre: 'Mi Inventario',
-        esMio: true,
-      }));
+    async (
+      miInv: any[],
+      colabs: ColaboradorItem[],
+      userObj: Usuario | null,
+      initialUsage: Record<string, number> = originalEvidenceUsageRef.current
+    ) => {
+      const miProductos: ProductoInventario[] = (miInv || []).map((item: any) => {
+        const empKey = userObj?.id || 'propio';
+        const key = `${empKey}___${item.producto_id}`;
+        const restoredQty = isEditing ? (initialUsage[key] || 0) : 0;
+        const totalStock = Math.max(0, Math.round(((Number(item.cantidad_disponible) || 0) + restoredQty) * 100) / 100);
+
+        return {
+          id: item.producto_id,
+          sku_interno: item.productos?.sku_interno || '',
+          nombre_oficial: item.productos?.nombre_oficial || '',
+          stock_actual: totalStock,
+          unidad: item.productos?.unidad || 'pza',
+          empleadoId: userObj?.id,
+          empleadoNombre: 'Mi Inventario',
+          esMio: true,
+        };
+      });
 
       if (!colabs || colabs.length === 0) {
         setProductos(miProductos);
@@ -174,12 +187,16 @@ export function useEvidenciaForm({
         const colabProductos: ProductoInventario[] = colabInventarioData.map((item: any) => {
           const empName = colabs.find((c) => c.id === item.empleado_id)?.nombre || 'Colaborador';
           const prodObj = item.productos || miProductos.find((p) => p.id === item.producto_id);
+          const empKey = item.empleado_id;
+          const key = `${empKey}___${item.producto_id}`;
+          const restoredQty = isEditing ? (initialUsage[key] || 0) : 0;
+          const totalStock = Math.max(0, Math.round(((Number(item.cantidad_disponible) || 0) + restoredQty) * 100) / 100);
 
           return {
             id: item.producto_id || prodObj?.id || item.id,
             sku_interno: prodObj?.sku_interno || item.sku_interno || 'N/A',
             nombre_oficial: prodObj?.nombre_oficial || item.nombre_oficial || 'Material de Cuadrilla',
-            stock_actual: Number(item.cantidad_disponible) || 0,
+            stock_actual: totalStock,
             unidad: prodObj?.unidad || item.unidad || 'pza',
             empleadoId: item.empleado_id,
             empleadoNombre: empName,
@@ -193,7 +210,7 @@ export function useEvidenciaForm({
         setProductos(miProductos);
       }
     },
-    []
+    [isEditing]
   );
 
   useEffect(() => {
@@ -300,6 +317,7 @@ export function useEvidenciaForm({
               }
             }
 
+            let loadedTrabajos: TrabajoRealizado[] = [];
             if (ev.descripcion_trabajo) {
               try {
                 const parsedTrabajos = Array.isArray(ev.descripcion_trabajo)
@@ -309,7 +327,7 @@ export function useEvidenciaForm({
                   : [ev.descripcion_trabajo];
 
                 if (Array.isArray(parsedTrabajos) && parsedTrabajos.length > 0) {
-                  const loadedTrabajos: TrabajoRealizado[] = parsedTrabajos.map((t: any, idx: number) => ({
+                  loadedTrabajos = parsedTrabajos.map((t: any, idx: number) => ({
                     id: t.id || `job_edit_${idx}`,
                     descripcion: t.descripcion || '',
                     materiales: t.materiales || '',
@@ -376,10 +394,45 @@ export function useEvidenciaForm({
               } catch {}
             }
 
+            // Calcular el stock original usado en este reporte para sumarlo temporalmente al disponible
+            const initialUsage: Record<string, number> = {};
+            if (Array.isArray(loadedTrabajos)) {
+              loadedTrabajos.forEach((t) => {
+                (t.materiales_usados || []).forEach((m) => {
+                  if (Number(m.usado) > 0) {
+                    const empKey = m.empleadoId || user.id;
+                    const key = `${empKey}___${m.productoId}`;
+                    initialUsage[key] = (initialUsage[key] || 0) + (Number(m.usado) || 0);
+                  }
+                });
+              });
+            }
+            originalEvidenceUsageRef.current = initialUsage;
+
+            // Recalcular stock de referencia y sobrante en cada material cargado
+            if (Array.isArray(loadedTrabajos)) {
+              loadedTrabajos.forEach((t) => {
+                if (Array.isArray(t.materiales_usados)) {
+                  t.materiales_usados.forEach((m) => {
+                    const empKey = m.empleadoId || user.id;
+                    const key = `${empKey}___${m.productoId}`;
+                    const matchingMi = cats?.inventario?.find(
+                      (i: any) => i.producto_id === m.productoId && (!m.empleadoId || m.empleadoId === user.id)
+                    );
+                    const currentDbStock = Number(matchingMi?.cantidad_disponible) || 0;
+                    const totalAvailable = currentDbStock + (initialUsage[key] || Number(m.usado) || 0);
+                    m.retirado = Math.max(Number(m.retirado) || 0, totalAvailable);
+                    m.sobrante = Math.max(0, Math.round((m.retirado - Number(m.usado)) * 100) / 100);
+                  });
+                }
+              });
+              setTrabajos([...loadedTrabajos]);
+            }
+
             if (restoredColabs.length > 0) {
               setSelectedColaboradores(restoredColabs);
-              syncCombinedProductos(cats?.inventario || miInventarioRaw, restoredColabs, user);
             }
+            syncCombinedProductos(cats?.inventario || miInventarioRaw, restoredColabs, user, initialUsage);
           }
         } catch (evErr: any) {
           Alert.alert('Error', evErr.message || 'No se pudo cargar la evidencia.');

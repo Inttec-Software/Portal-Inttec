@@ -33,6 +33,7 @@ import ExpenseCard from '@/components/ExpenseCard';
 import { EmpleadosTableSkeleton, EmpleadosCardsListSkeleton } from '@/components/skeleton';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
+import EditarHorarioModal from '@/components/EditarHorarioModal';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
@@ -168,6 +169,9 @@ export default function AdminEmpleadosScreen() {
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
   const [newUserRole, setNewUserRole] = useState<'EMPLEADO' | 'ADMIN' | 'DEV'>('EMPLEADO');
+  const [newUserHoras, setNewUserHoras] = useState('48');
+  const [newUserEntrada, setNewUserEntrada] = useState('08:00');
+  const [newUserSalida, setNewUserSalida] = useState('18:00');
   const [isAddingUser, setIsAddingUser] = useState(false);
 
   const [editingUser, setEditingUser] = useState<Usuario | null>(null);
@@ -177,7 +181,14 @@ export default function AdminEmpleadosScreen() {
   const [editUserPassword, setEditUserPassword] = useState('');
   const [editUserPhone, setEditUserPhone] = useState('');
   const [editUserRole, setEditUserRole] = useState<'EMPLEADO' | 'ADMIN' | 'DEV'>('EMPLEADO');
+  const [editUserHoras, setEditUserHoras] = useState('48');
+  const [editUserEntrada, setEditUserEntrada] = useState('08:00');
+  const [editUserSalida, setEditUserSalida] = useState('18:00');
   const [isUpdatingUser, setIsUpdatingUser] = useState(false);
+
+  // Modal para configurar horarios y jornada directamente (ADMIN y DEV)
+  const [horarioModalVisible, setHorarioModalVisible] = useState(false);
+  const [empleadoToEditHorario, setEmpleadoToEditHorario] = useState<Usuario | null>(null);
 
   // Modal de Perfil (Admin)
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -1144,12 +1155,15 @@ export default function AdminEmpleadosScreen() {
 
     setIsAddingUser(true);
     try {
-      const newUserObj = {
+      const newUserObj: any = {
         nombre: newUserName.trim(),
         email: newUserEmail.trim().toLowerCase(),
         password: newUserPassword,
         rol: newUserRole as 'ADMIN' | 'EMPLEADO' | 'DEV',
         telefono: newUserPhone.trim() || null,
+        horas_semanales: parseFloat(newUserHoras) || 48,
+        hora_entrada_estandar: newUserEntrada.trim() || '08:00',
+        hora_salida_estandar: newUserSalida.trim() || '18:00',
       };
 
       await CatalogService.crearUsuario(newUserObj);
@@ -1162,6 +1176,9 @@ export default function AdminEmpleadosScreen() {
       setNewUserPassword('');
       setNewUserPhone('');
       setNewUserRole('EMPLEADO');
+      setNewUserHoras('48');
+      setNewUserEntrada('08:00');
+      setNewUserSalida('18:00');
       await refreshData();
     } catch (err: any) {
       showAlert('Error al registrar', err.message || 'No se pudo registrar el nuevo usuario.');
@@ -1177,6 +1194,13 @@ export default function AdminEmpleadosScreen() {
     setEditUserEmail(user.email);
     setEditUserPhone(user.telefono || '');
     setEditUserRole(user.rol);
+    setEditUserHoras(
+      user.horas_semanales !== undefined && user.horas_semanales !== null
+        ? String(user.horas_semanales)
+        : '48'
+    );
+    setEditUserEntrada(user.hora_entrada_estandar || '08:00');
+    setEditUserSalida(user.hora_salida_estandar || '18:00');
     setEditUserPassword(''); // Mantener contraseña vacía a menos que se quiera cambiar
     setEditUserModalVisible(true);
   };
@@ -1195,6 +1219,9 @@ export default function AdminEmpleadosScreen() {
         email: editUserEmail.trim().toLowerCase(),
         rol: editUserRole,
         telefono: editUserPhone.trim() || null,
+        horas_semanales: parseFloat(editUserHoras) || 48,
+        hora_entrada_estandar: editUserEntrada.trim() || '08:00',
+        hora_salida_estandar: editUserSalida.trim() || '18:00',
       };
 
       // Si se ingresó una nueva contraseña, la actualizamos
@@ -2771,6 +2798,37 @@ export default function AdminEmpleadosScreen() {
                     <Text style={[styles.userName, { color: themeColors.text }]}>{item.nombre}</Text>
                     <Text style={[styles.userEmail, { color: themeColors.textSecondary }]}>{item.email}</Text>
                     {!!item.telefono && <Text style={[styles.userEmail, { color: themeColors.textSecondary }]}>{item.telefono}</Text>}
+                    
+                    {/* Badge de Horario y Jornada Semanal */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setEmpleadoToEditHorario(item);
+                          setHorarioModalVisible(true);
+                        }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 6,
+                          backgroundColor: '#0284c718',
+                          borderWidth: 1,
+                          borderColor: '#0284c750',
+                        }}
+                        {...(Platform.OS === 'web' ? { title: "Toca para cambiar la jornada o el horario" } as any : {})}
+                      >
+                        <Ionicons name="time" size={12} color="#0284c7" />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#0284c7' }}>
+                          Jornada: {item.horas_semanales !== undefined && item.horas_semanales !== null ? item.horas_semanales : 48} hrs/sem
+                        </Text>
+                        <Ionicons name="pencil" size={10} color="#0284c7" />
+                      </TouchableOpacity>
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                        • {item.hora_entrada_estandar || '08:00'} a {item.hora_salida_estandar || '18:00'}
+                      </Text>
+                    </View>
                   </View>
                   <View style={styles.userMetaActions}>
                     <View style={[
@@ -2804,10 +2862,20 @@ export default function AdminEmpleadosScreen() {
                       >
                         <Ionicons name="cube-outline" size={18} color="#3B82F6" />
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleOpenAsistencia(item)} style={styles.userRowBtn}>
+                      <TouchableOpacity onPress={() => handleOpenAsistencia(item)} style={styles.userRowBtn} {...(Platform.OS === 'web' ? { title: "Ver asistencia" } as any : {})}>
                         <Ionicons name="time-outline" size={18} color={themeColors.success} />
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleOpenEditUser(item)} style={styles.userRowBtn}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setEmpleadoToEditHorario(item);
+                          setHorarioModalVisible(true);
+                        }}
+                        style={[styles.userRowBtn, { backgroundColor: '#0284c718', borderWidth: 1, borderColor: '#0284c750' }]}
+                        {...(Platform.OS === 'web' ? { title: `Editar jornada y horario (${item.horas_semanales || 48}h)` } as any : {})}
+                      >
+                        <Ionicons name="time" size={18} color="#0284c7" />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleOpenEditUser(item)} style={styles.userRowBtn} {...(Platform.OS === 'web' ? { title: "Editar datos de usuario" } as any : {})}>
                         <Ionicons name="create-outline" size={18} color={themeColors.accent} />
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => handleDeleteUser(item.id, item.nombre)} style={styles.userRowBtn}>
@@ -3250,7 +3318,7 @@ export default function AdminEmpleadosScreen() {
                         <View style={styles.detailItem}>
                           <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Pago / Comentarios</Text>
                           <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                            Método: {selectedGasto.metodo_pago} {selectedGasto.tipo_tarjeta ? `(${selectedGasto.tipo_tarjeta})` : ''}
+                            Método: {selectedGasto.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : selectedGasto.metodo_pago === 'transferencia' ? 'Transferencia' : selectedGasto.metodo_pago === 'efectivo' ? 'Efectivo' : selectedGasto.metodo_pago === 'tarjeta_debito' ? 'Tarjeta Débito' : selectedGasto.metodo_pago === 'tarjeta_credito' ? 'Tarjeta Crédito' : (selectedGasto.metodo_pago || 'No especificado')} {selectedGasto.tipo_tarjeta ? `(${selectedGasto.tipo_tarjeta})` : ''}
                             {'\n'}Comentarios: {parsed.justificacion || 'No especificados'}
                           </Text>
                         </View>
@@ -4666,6 +4734,66 @@ export default function AdminEmpleadosScreen() {
                 </View>
               </View>
 
+              <CustomInput
+                label="Jornada Semanal (Horas)"
+                placeholder="48 (horas regulares por semana)"
+                keyboardType="numeric"
+                value={newUserHoras}
+                onChangeText={setNewUserHoras}
+                iconName="calendar-outline"
+              />
+
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: -8, marginBottom: 14 }}>
+                {[
+                  { horas: '48', label: '48h (LFT)' },
+                  { horas: '40', label: '40h' },
+                  { horas: '30', label: '30h (Contabilidad)' },
+                  { horas: '25', label: '25h (Devs)' },
+                  { horas: '20', label: '20h' },
+                ].map((p) => {
+                  const isSel = newUserHoras === p.horas;
+                  return (
+                    <TouchableOpacity
+                      key={p.horas}
+                      onPress={() => setNewUserHoras(p.horas)}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        borderWidth: 1,
+                        backgroundColor: isSel ? '#0284c7' : themeColors.backgroundElement,
+                        borderColor: isSel ? '#0284c7' : themeColors.border,
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: isSel ? '#fff' : themeColors.text }}>
+                        {p.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Entrada Estándar"
+                    placeholder="08:00"
+                    value={newUserEntrada}
+                    onChangeText={setNewUserEntrada}
+                    iconName="log-in-outline"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Salida Estándar"
+                    placeholder="18:00"
+                    value={newUserSalida}
+                    onChangeText={setNewUserSalida}
+                    iconName="log-out-outline"
+                  />
+                </View>
+              </View>
+
               <CustomButton
                 title="Registrar"
                 onPress={handleAddUser}
@@ -4764,6 +4892,66 @@ export default function AdminEmpleadosScreen() {
                       </TouchableOpacity>
                     );
                   })}
+                </View>
+              </View>
+
+              <CustomInput
+                label="Jornada Semanal (Horas)"
+                placeholder="48 (horas regulares por semana)"
+                keyboardType="numeric"
+                value={editUserHoras}
+                onChangeText={setEditUserHoras}
+                iconName="calendar-outline"
+              />
+
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: -8, marginBottom: 14 }}>
+                {[
+                  { horas: '48', label: '48h (LFT)' },
+                  { horas: '40', label: '40h' },
+                  { horas: '30', label: '30h (Contabilidad)' },
+                  { horas: '25', label: '25h (Devs)' },
+                  { horas: '20', label: '20h' },
+                ].map((p) => {
+                  const isSel = editUserHoras === p.horas;
+                  return (
+                    <TouchableOpacity
+                      key={p.horas}
+                      onPress={() => setEditUserHoras(p.horas)}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        borderWidth: 1,
+                        backgroundColor: isSel ? '#0284c7' : themeColors.backgroundElement,
+                        borderColor: isSel ? '#0284c7' : themeColors.border,
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: isSel ? '#fff' : themeColors.text }}>
+                        {p.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Entrada Estándar"
+                    placeholder="08:00"
+                    value={editUserEntrada}
+                    onChangeText={setEditUserEntrada}
+                    iconName="log-in-outline"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <CustomInput
+                    label="Salida Estándar"
+                    placeholder="18:00"
+                    value={editUserSalida}
+                    onChangeText={setEditUserSalida}
+                    iconName="log-out-outline"
+                  />
                 </View>
               </View>
 
@@ -4982,6 +5170,15 @@ export default function AdminEmpleadosScreen() {
                   empleadoId={asistenciaEmpleado?.id}
                   empleadoNombre={asistenciaEmpleado?.nombre || 'Empleado'}
                   empleadoRol={asistenciaEmpleado?.rol}
+                  empleadoHorasSemanales={asistenciaEmpleado?.horas_semanales ? Number(asistenciaEmpleado.horas_semanales) : 48}
+                  empleadoHoraEntrada={asistenciaEmpleado?.hora_entrada_estandar}
+                  empleadoHoraSalida={asistenciaEmpleado?.hora_salida_estandar}
+                  onEditHorario={() => {
+                    if (asistenciaEmpleado) {
+                      setEmpleadoToEditHorario(asistenciaEmpleado);
+                      setHorarioModalVisible(true);
+                    }
+                  }}
                   isLoading={isLoadingAsistencias}
                   onRefresh={() => {
                     if (asistenciaEmpleado) {
@@ -5024,6 +5221,24 @@ export default function AdminEmpleadosScreen() {
           setAsistenciaViewerVisible(false);
           setAsistenciaPreviewUrl(null);
           setSelectedAsistenciaInfo(null);
+        }}
+      />
+
+      {/* Modal para configurar horarios y jornada laboral */}
+      <EditarHorarioModal
+        visible={horarioModalVisible}
+        onClose={() => {
+          setHorarioModalVisible(false);
+          setEmpleadoToEditHorario(null);
+        }}
+        empleado={empleadoToEditHorario}
+        onSaveSuccess={(updatedEmp) => {
+          setPersonal((prev) =>
+            prev.map((p) => (p.id === updatedEmp.id ? { ...p, ...updatedEmp } : p))
+          );
+          if (asistenciaEmpleado && asistenciaEmpleado.id === updatedEmp.id) {
+            setAsistenciaEmpleado((prev) => (prev ? { ...prev, ...updatedEmp } : updatedEmp));
+          }
         }}
       />
       

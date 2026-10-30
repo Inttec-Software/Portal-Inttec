@@ -21,7 +21,7 @@ export const getCatalogos = async (req: Request, res: Response) => {
         SELECT ie.id, ie.cantidad_disponible, ie.producto_id, ie.empleado_id, 
                (SELECT row_to_json(p_obj) FROM (SELECT id, sku_interno, nombre_oficial, unidad FROM productos WHERE id = ie.producto_id) p_obj) as productos
         FROM inventario_empleados ie
-        WHERE ie.empleado_id = $1 AND ie.cantidad_disponible > 0
+        WHERE ie.empleado_id = $1 AND ie.cantidad_disponible >= 0
       `, [user.id]);
     }
 
@@ -64,7 +64,7 @@ export const getInventarioColaboradores = async (req: Request, res: Response) =>
       SELECT ie.id, ie.cantidad_disponible, ie.producto_id, ie.empleado_id, 
              (SELECT row_to_json(p_obj) FROM (SELECT id, sku_interno, nombre_oficial, unidad FROM productos WHERE id = ie.producto_id) p_obj) as productos
       FROM inventario_empleados ie
-      WHERE ie.empleado_id IN (${placeholders}) AND ie.cantidad_disponible > 0
+      WHERE ie.empleado_id IN (${placeholders}) AND ie.cantidad_disponible >= 0
     `, idList);
 
     return res.json({ inventario: data || [] });

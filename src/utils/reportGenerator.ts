@@ -488,7 +488,7 @@ export const ReportGenerator = {
             ${catName}${subName ? ` - ${subName}` : ''}
           </td>
           <td style="font-size: 9px; max-width: 120px; overflow: hidden; text-overflow: ellipsis;" title="${commentText}">${commentText || 'N/A'}</td>
-          <td>${g.metodo_pago}${g.tipo_tarjeta ? ` (${g.tipo_tarjeta})` : ''}</td>
+          <td>${g.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : g.metodo_pago}${g.tipo_tarjeta ? ` (${g.tipo_tarjeta})` : ''}</td>
           <td><span class="status-badge" style="background-color: ${badgeColor};">${g.status}</span></td>
           <td style="text-align: right; font-weight: bold;">${montoFormatted}</td>
         </tr>
@@ -1290,7 +1290,8 @@ export const ReportGenerator = {
 
     for (const emp of personalTarget) {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol);
+      const empHoras = emp.horas_semanales ? Number(emp.horas_semanales) : 48;
+      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras);
 
       if (semanaData.turnosTotales > 0) {
         empleadosConRegistro++;
@@ -1355,7 +1356,7 @@ export const ReportGenerator = {
             <div style="display: flex; gap: 8px; align-items: center;">
               <span style="font-size: 10px; color: #64748b;">Días: <b>${semanaData.diasLaborados}/7</b></span>
               <span style="background-color: #dcfce7; color: #15803d; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
-                Regulares (48h): ${semanaData.totalHorasRegularesStr}
+                Regulares (${emp.horas_semanales || 48}h): ${semanaData.totalHorasRegularesStr}
               </span>
               ${semanaData.totalMinutosExtra > 0 ? `
                 <span style="background-color: #ffedd5; color: #c2410c; padding: 3px 7px; border-radius: 6px; font-weight: bold; font-size: 11px;">
@@ -1514,7 +1515,8 @@ export const ReportGenerator = {
   ): Promise<void> {
     const range = getWeekRange(weekMondayInput);
     const branding = await getCompanyBranding();
-    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol);
+    const targetHoras = empleado.horas_semanales ? Number(empleado.horas_semanales) : 48;
+    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras);
 
     let diasHtml = '';
     for (const dia of semanaData.dias) {
@@ -1650,7 +1652,7 @@ export const ReportGenerator = {
               <h1 class="title">Reporte Individual de Asistencia</h1>
               <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: bold; color: #0f172a;">👤 ${empleado.nombre}</p>
               <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: bold; color: #0284c7;">📅 ${range.label}</p>
-              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Jornada: 48 hrs</p>
+              <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Rol: ${empleado.rol || 'EMPLEADO'} | Sucursal: ${empleado.sucursal || 'N/A'} | Jornada: ${targetHoras} hrs</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               ${branding.logo ? `<img src="${branding.logo}" class="logo-img" alt="${branding.name}" />` : `<span style="font-size: 20px; font-weight: 900; color: #0d1b2a;">${branding.name}</span>`}
@@ -1664,7 +1666,7 @@ export const ReportGenerator = {
             <div class="value" style="color: #0f172a; font-size: 17px;">${semanaData.totalHorasSemanaStr}</div>
           </div>
           <div class="summary-card">
-            <div class="label">Horas Regulares (48h)</div>
+            <div class="label">Horas Regulares (${targetHoras}h)</div>
             <div class="value" style="color: #16a34a; font-size: 17px;">${semanaData.totalHorasRegularesStr}</div>
           </div>
           <div class="summary-card">
@@ -3577,7 +3579,7 @@ export const ReportGenerator = {
               const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
               const estadoReembolso = g.estado_reembolso === 'REEMBOLSADO' ? 'Reembolsado' : 'No';
               const ventaVinc = g.venta_id ? `Venta #${String(g.venta_id).slice(0, 8)}` : 'Sin Venta';
-              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), ventaVinc, g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, estadoReembolso, commentText ];
+              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), ventaVinc, g.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, estadoReembolso, commentText ];
             });
             await ReportGenerator._exportArrayToXLSX('Gastos', headers, rows, fileName);
     },
@@ -3666,7 +3668,8 @@ export const ReportGenerator = {
 
       for (const emp of personalTarget) {
         const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol);
+        const empHoras = emp.horas_semanales ? Number(emp.horas_semanales) : 48;
+        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras);
 
         let tieneRegistros = false;
         for (const dia of semanaData.dias) {
@@ -3721,7 +3724,8 @@ export const ReportGenerator = {
       fileName?: string
     ): Promise<void> {
       const range = getWeekRange(weekMondayInput);
-      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol);
+      const targetHoras = empleado.horas_semanales ? Number(empleado.horas_semanales) : 48;
+      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras);
 
       const headers = [
         'Período',

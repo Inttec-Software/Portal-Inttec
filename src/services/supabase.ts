@@ -67,6 +67,9 @@ export interface Usuario {
   telefono?: string;
   sucursal?: string;
   created_at?: string;
+  horas_semanales?: number;
+  hora_entrada_estandar?: string;
+  hora_salida_estandar?: string;
 }
 
 export type EstadoReembolsoGasto = 'NORMAL' | 'PENDIENTE_REEMBOLSO' | 'REEMBOLSADO';
@@ -80,7 +83,7 @@ export interface Gasto {
   categoria_id?: string | null; // Deprecado: la categorÃ­a se obtiene a travÃ©s de subcategoria_id
   subcategoria?: string | null;
   subcategoria_id?: string | null;
-  metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia';
+  metodo_pago: 'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia' | 'monedero_electronico';
   justificacion?: string | null;
   foto_url?: string | null;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ACTION_REQUIRED';

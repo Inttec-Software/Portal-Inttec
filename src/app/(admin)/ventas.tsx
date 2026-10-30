@@ -3345,7 +3345,7 @@ const handleRefreshHistorial = () => {
                     <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginBottom: 4 }}>Método de Pago</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
                       <View style={{ flexDirection: 'row', gap: 6 }}>
-                        {['Transferencia', 'Efectivo', 'Cheque', 'Tarjeta', 'Otro'].map(met => (
+                        {['Transferencia', 'Efectivo', 'Tarjeta', 'Monedero Electrónico', 'Cheque', 'Otro'].map(met => (
                           <TouchableOpacity
                             key={met}
                             onPress={() => setPagoMetodo(met)}
@@ -3892,7 +3892,7 @@ const handleRefreshHistorial = () => {
                   <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 6 }}>Método de Pago</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
-                      {['Transferencia', 'Efectivo', 'Cheque', 'Tarjeta', 'Otro'].map(met => (
+                      {['Transferencia', 'Efectivo', 'Tarjeta', 'Monedero Electrónico', 'Cheque', 'Otro'].map(met => (
                         <TouchableOpacity
                           key={met}
                           onPress={() => setPagoMetodo(met)}

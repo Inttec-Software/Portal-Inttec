@@ -166,7 +166,7 @@ export default function AdminGastosScreen() {
   const [quickCliSearch, setQuickCliSearch] = useState('');
   const [tempTipoProyecto, setTempTipoProyecto] = useState('');
   const [tempDetalleProyecto, setTempDetalleProyecto] = useState('');
-  const [tempMetodoPago, setTempMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia'>('efectivo');
+  const [tempMetodoPago, setTempMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia' | 'monedero_electronico'>('efectivo');
   const [tempTipoTarjeta, setTempTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | 'HILTON' | null>(null);
   const [tempComentarios, setTempComentarios] = useState('');
 
@@ -1020,7 +1020,7 @@ export default function AdminGastosScreen() {
       setTempDetalleProyecto(selectedGasto.detalle_servicio_proyecto || '');
     } else if (fieldType === 'pago') {
       const rawMetodo = selectedGasto.metodo_pago || 'efectivo';
-      const isCard = rawMetodo !== 'efectivo' && rawMetodo !== 'transferencia';
+      const isCard = rawMetodo !== 'efectivo' && rawMetodo !== 'transferencia' && rawMetodo !== 'monedero_electronico';
       setTempMetodoPago(rawMetodo === 'tarjeta' ? 'tarjeta_debito' : rawMetodo);
       setTempTipoTarjeta((selectedGasto.tipo_tarjeta as any) || (isCard ? 'BBVA' : null));
       const parsed = parseJustificacion(selectedGasto.justificacion);
@@ -1108,7 +1108,7 @@ export default function AdminGastosScreen() {
         };
         successMsg = 'Servicio / Proyecto actualizado.';
       } else if (quickEditFieldType === 'pago') {
-        const isTarjeta = tempMetodoPago !== 'efectivo' && tempMetodoPago !== 'transferencia';
+        const isTarjeta = tempMetodoPago !== 'efectivo' && tempMetodoPago !== 'transferencia' && tempMetodoPago !== 'monedero_electronico';
         if (isTarjeta && !tempTipoTarjeta) {
           showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, MERCADO PAGO, HILTON).');
           setIsSavingQuickField(false);
@@ -3624,7 +3624,7 @@ export default function AdminGastosScreen() {
                           <View style={{ flex: 1, marginRight: Spacing.two }}>
                             <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Método de Pago</Text>
                             <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                              {selectedGasto.metodo_pago === 'transferencia' ? 'Transferencia' : selectedGasto.metodo_pago === 'efectivo' ? 'Efectivo' : selectedGasto.metodo_pago === 'tarjeta_debito' ? 'Tarjeta Débito' : selectedGasto.metodo_pago === 'tarjeta_credito' ? 'Tarjeta Crédito' : (selectedGasto.metodo_pago || 'No especificado')} {selectedGasto.tipo_tarjeta ? `(${selectedGasto.tipo_tarjeta})` : ''}
+                              {selectedGasto.metodo_pago === 'transferencia' ? 'Transferencia' : selectedGasto.metodo_pago === 'efectivo' ? 'Efectivo' : selectedGasto.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : selectedGasto.metodo_pago === 'tarjeta_debito' ? 'Tarjeta Débito' : selectedGasto.metodo_pago === 'tarjeta_credito' ? 'Tarjeta Crédito' : (selectedGasto.metodo_pago || 'No especificado')} {selectedGasto.tipo_tarjeta ? `(${selectedGasto.tipo_tarjeta})` : ''}
                             </Text>
                           </View>
                           {selectedGasto.status === 'APPROVED' && (
@@ -5074,7 +5074,7 @@ export default function AdminGastosScreen() {
 
                         <TouchableOpacity
                           onPress={() => {
-                            if (tempMetodoPago === 'efectivo' || tempMetodoPago === 'transferencia') {
+                            if (tempMetodoPago === 'efectivo' || tempMetodoPago === 'transferencia' || tempMetodoPago === 'monedero_electronico') {
                               setTempMetodoPago('tarjeta_debito');
                             }
                             if (!tempTipoTarjeta) {
@@ -5123,6 +5123,32 @@ export default function AdminGastosScreen() {
                             color: tempMetodoPago === 'transferencia' ? '#ffffff' : themeColors.text
                           }}>
                             Transferencia
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => {
+                            setTempMetodoPago('monedero_electronico');
+                            setTempTipoTarjeta(null);
+                          }}
+                          style={{
+                            flex: 1,
+                            paddingVertical: 12,
+                            borderRadius: BorderRadius.medium,
+                            backgroundColor: tempMetodoPago === 'monedero_electronico' ? themeColors.accent : themeColors.backgroundElement,
+                            borderWidth: 1,
+                            borderColor: tempMetodoPago === 'monedero_electronico' ? 'transparent' : themeColors.border,
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <Text style={{
+                            fontSize: 13,
+                            fontWeight: tempMetodoPago === 'monedero_electronico' ? '800' : '600',
+                            color: tempMetodoPago === 'monedero_electronico' ? '#ffffff' : themeColors.text,
+                            textAlign: 'center'
+                          }}>
+                            Monedero
                           </Text>
                         </TouchableOpacity>
                       </View>
