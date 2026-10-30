@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   RefreshControl,
   ScrollView,
+  Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +24,8 @@ import { EvidenciaItem } from '@/features/evidencias/types';
 
 export default function MisEvidenciasScreen() {
   const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && windowWidth >= 1024;
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
@@ -44,7 +48,17 @@ export default function MisEvidenciasScreen() {
     handleClosePhoto,
   } = useEvidenciasList({ isAdmin: false });
 
-  const renderItem = ({ item }: { item: EvidenciaItem }) => {
+  const getCleanDescription = (desc: any) => {
+    try {
+      const list = typeof desc === 'string' ? JSON.parse(desc) : desc;
+      if (Array.isArray(list) && list.length > 0) {
+        return list.map((t: any, i: number) => `#${i + 1}: ${t.descripcion || t.solucion || ''}`).filter(Boolean).join(' • ');
+      }
+    } catch {}
+    return String(desc || '');
+  };
+
+  const countMateriales = (item: EvidenciaItem) => {
     let materialCount = 0;
     try {
       if (item.descripcion_trabajo) {
@@ -65,7 +79,78 @@ export default function MisEvidenciasScreen() {
         materialCount = item.materiales_usados.split(',').filter((m: string) => m.trim().length > 0).length;
       }
     } catch {}
+    return materialCount;
+  };
 
+  // Render para celulares (Expo app y web celular)
+  const renderMobileCard = ({ item }: { item: EvidenciaItem }) => {
+    const materialCount = countMateriales(item);
+    const totalFotos =
+      (item.foto_antes_url ? 1 : 0) +
+      (item.foto_despues_url ? 1 : 0) +
+      (item.fotos_adicionales_urls ? item.fotos_adicionales_urls.length : 0);
+    const dateText = item.created_at || item.fecha
+      ? dayjs(item.created_at || item.fecha).format('DD/MM/YY, hh:mm A')
+      : 'N/A';
+
+    return (
+      <TouchableOpacity
+        onPress={() => handleOpenDetail(item)}
+        activeOpacity={0.7}
+        style={[
+          styles.mobileCard,
+          { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border },
+        ]}
+      >
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={[styles.mobileCardTitle, { color: themeColors.text }]} numberOfLines={1}>
+            {item.cliente || 'Sin cliente'}
+          </Text>
+          <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+            {dateText}
+          </Text>
+        </View>
+
+        <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }} numberOfLines={2}>
+          {getCleanDescription(item.descripcion_trabajo)}
+        </Text>
+
+        <View style={styles.mobileCardFooter}>
+          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+            <View style={[styles.tag, { backgroundColor: themeColors.primary + '15' }]}>
+              <Text style={{ fontSize: 11, color: themeColors.primary, fontWeight: '700' }}>
+                📷 {totalFotos} fotos
+              </Text>
+            </View>
+            {materialCount > 0 ? (
+              <View style={[styles.tag, { backgroundColor: themeColors.success + '15' }]}>
+                <Text style={{ fontSize: 11, color: themeColors.success, fontWeight: '700' }}>
+                  📦 {materialCount} mat.
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <TouchableOpacity
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={(e) => {
+                e.stopPropagation();
+                router.push(`/(empleado)/editar-evidencia?id=${item.id}` as any);
+              }}
+            >
+              <Ionicons name="create-outline" size={18} color={themeColors.textSecondary} />
+            </TouchableOpacity>
+            <Ionicons name="chevron-forward" size={16} color={themeColors.textSecondary} />
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // Render para pantallas de escritorio amplias
+  const renderTableRow = ({ item }: { item: EvidenciaItem }) => {
+    const materialCount = countMateriales(item);
     const materialText = materialCount > 0 ? `${materialCount} mat.` : 'No';
     const fotosCount =
       (item.foto_antes_url ? 1 : 0) +
@@ -94,7 +179,13 @@ export default function MisEvidenciasScreen() {
           {materialText}
         </Text>
         <View style={styles.actionCell}>
-          <Ionicons name="eye-outline" size={20} color={themeColors.accent} />
+          <TouchableOpacity
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={() => router.push(`/(empleado)/editar-evidencia?id=${item.id}` as any)}
+          >
+            <Ionicons name="create-outline" size={18} color={themeColors.textSecondary} />
+          </TouchableOpacity>
+          <Ionicons name="eye-outline" size={18} color={themeColors.accent} />
         </View>
       </TouchableOpacity>
     );
@@ -128,8 +219,8 @@ export default function MisEvidenciasScreen() {
             Toca el botón "+" abajo para agregar tu primera evidencia.
           </Text>
         </View>
-      ) : (
-        <View style={{ flex: 1 }}>
+      ) : isDesktop ? (
+        <View style={{ flex: 1, paddingHorizontal: Spacing.three }}>
           <View
             style={[
               styles.tableHeader,
@@ -147,13 +238,23 @@ export default function MisEvidenciasScreen() {
           <FlatList
             data={evidencias}
             keyExtractor={(item) => item.id}
-            renderItem={renderItem}
+            renderItem={renderTableRow}
             contentContainerStyle={styles.listContainer}
             refreshControl={
               <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={themeColors.accent} />
             }
           />
         </View>
+      ) : (
+        <FlatList
+          data={evidencias}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMobileCard}
+          contentContainerStyle={[styles.listContainer, { paddingHorizontal: Spacing.three, paddingTop: Spacing.two }]}
+          refreshControl={
+            <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={themeColors.accent} />
+          }
+        />
       )}
 
       {/* Modal de Detalle */}
@@ -164,6 +265,10 @@ export default function MisEvidenciasScreen() {
         isExporting={isExporting}
         onClose={handleCloseDetail}
         onExportPDF={handleExportPDF}
+        onEdit={(ev) => {
+          handleCloseDetail();
+          router.push(`/(empleado)/editar-evidencia?id=${ev.id}` as any);
+        }}
         onOpenPhoto={handleOpenPhoto}
       />
 
@@ -213,6 +318,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.one,
     textAlign: 'center',
   },
+  // Vista Desktop Table
   tableHeader: {
     flexDirection: 'row',
     paddingVertical: 10,
@@ -235,15 +341,43 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   actionCellHeader: {
-    width: 32,
+    width: 56,
     alignItems: 'center',
   },
   actionCell: {
-    width: 32,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    width: 56,
     alignItems: 'center',
   },
+  // Vista Celular Mobile Cards
+  mobileCard: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.medium,
+    padding: Spacing.three,
+    marginBottom: Spacing.two,
+  },
+  mobileCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    flex: 1,
+    marginRight: 8,
+  },
+  mobileCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingTop: 6,
+  },
+  tag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.small,
+  },
   listContainer: {
-    paddingBottom: 80,
+    paddingBottom: 90,
   },
   fab: {
     position: 'absolute',

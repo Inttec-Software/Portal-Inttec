@@ -146,19 +146,21 @@ export default function MaterialesSelector({
     };
 
     // Validar si ya existe el mismo producto para el mismo propietario
-    const existe = materiales.find(
+    const existeIndex = materiales.findIndex(
       m => m.productoId === selectedProduct.id && (m.empleadoId || '') === (selectedProduct.empleadoId || '')
     );
-    if (existe) {
-      Alert.alert('Aviso', 'Este material de este inventario ya está en la lista. Si deseas modificarlo, elimínalo y vuelve a agregarlo.');
-      return;
-    }
 
     if (onToggleUsaMateriales && !isEnabled) {
       onToggleUsaMateriales(true);
     }
 
-    onChange([...materiales, nuevoMaterial]);
+    if (existeIndex !== -1) {
+      const updatedList = [...materiales];
+      updatedList[existeIndex] = nuevoMaterial;
+      onChange(updatedList);
+    } else {
+      onChange([...materiales, nuevoMaterial]);
+    }
     setSelectedProduct(null);
     setUsado('');
     setModalVisible(false);
@@ -231,7 +233,32 @@ export default function MaterialesSelector({
           ) : (
             <View style={{ marginBottom: Spacing.two }}>
               {materiales.map((m, idx) => (
-                <View key={idx} style={[styles.materialItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                <TouchableOpacity
+                  key={idx}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    const prodMatch = productos.find(
+                      p => p.id === m.productoId && (p.empleadoId || '') === (m.empleadoId || '')
+                    );
+                    if (prodMatch) {
+                      setSelectedProduct(prodMatch);
+                    } else {
+                      setSelectedProduct({
+                        id: m.productoId,
+                        sku_interno: '',
+                        nombre_oficial: m.nombre,
+                        stock_actual: m.retirado,
+                        unidad: m.unidad,
+                        empleadoId: m.empleadoId,
+                        empleadoNombre: m.empleadoNombre,
+                        esMio: !m.empleadoId,
+                      });
+                    }
+                    setUsado(m.usado.toString());
+                    setModalVisible(true);
+                  }}
+                  style={[styles.materialItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                >
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
                       <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 14, flex: 1 }}>{m.nombre}</Text>
@@ -242,16 +269,24 @@ export default function MaterialesSelector({
                         </View>
                       ) : null}
                     </View>
-                    <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4, flexWrap: 'wrap' }}>
+                    <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                       <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Stock: {m.retirado} {m.unidad || 'pza'}</Text>
                       <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Usado: {m.usado} {m.unidad || 'pza'}</Text>
                       <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.sobrante} {m.unidad || 'pza'}</Text>
+                      <Text style={{ color: themeColors.primary, fontSize: 11, fontStyle: 'italic', marginLeft: 4 }}>✏️ Editar</Text>
                     </View>
                   </View>
-                  <TouchableOpacity onPress={() => handleRemoveMaterial(idx)} style={{ padding: 4, marginLeft: 8 }}>
+                  <TouchableOpacity
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleRemoveMaterial(idx);
+                    }}
+                    style={{ padding: 4, marginLeft: 8 }}
+                  >
                     <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
                   </TouchableOpacity>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           )}
@@ -388,6 +423,9 @@ export default function MaterialesSelector({
                     filteredProductos.slice(0, 60).map((prod, pIdx) => {
                       const stockNum = Number(prod.stock_actual) || 0;
                       const isOutOfStock = stockNum <= 0;
+                      const alreadyInList = materiales.find(
+                        m => m.productoId === prod.id && (m.empleadoId || '') === (prod.empleadoId || '')
+                      );
                       return (
                         <TouchableOpacity
                           key={`${prod.id}_${prod.empleadoId || 'propio'}_${pIdx}`}
@@ -395,17 +433,22 @@ export default function MaterialesSelector({
                             styles.productItem, 
                             { 
                               borderBottomColor: themeColors.border,
-                              opacity: isOutOfStock ? 0.45 : 1,
+                              opacity: isOutOfStock && !alreadyInList ? 0.45 : 1,
+                              backgroundColor: alreadyInList ? themeColors.primary + '08' : 'transparent',
                             }
                           ]}
                           onPress={() => {
-                            if (isOutOfStock) {
+                            if (isOutOfStock && !alreadyInList) {
                               Alert.alert('Material Agotado', 'No queda stock disponible de este material en este reporte (ya fue utilizado en otros trabajos).');
                               return;
                             }
                             setSelectedProduct(prod);
-                            const initialQty = Math.min(1, Number(prod.stock_actual) || 1);
-                            setUsado(initialQty.toString());
+                            if (alreadyInList) {
+                              setUsado(alreadyInList.usado.toString());
+                            } else {
+                              const initialQty = Math.min(1, Number(prod.stock_actual) || 1);
+                              setUsado(initialQty.toString());
+                            }
                           }}
                         >
                           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -421,7 +464,10 @@ export default function MaterialesSelector({
                             )}
                           </View>
                           <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
-                            SKU: {prod.sku_interno} | Stock Disponible: <Text style={{ fontWeight: '700', color: isOutOfStock ? '#ef4444' : themeColors.primary }}>{prod.stock_actual} {prod.unidad || 'pza'} {isOutOfStock ? '(Agotado en reporte)' : ''}</Text>
+                            SKU: {prod.sku_interno} | Stock Disponible: <Text style={{ fontWeight: '700', color: isOutOfStock && !alreadyInList ? '#ef4444' : themeColors.primary }}>{prod.stock_actual} {prod.unidad || 'pza'} {isOutOfStock && !alreadyInList ? '(Agotado en reporte)' : ''}</Text>
+                            {alreadyInList && (
+                              <Text style={{ color: themeColors.success, fontWeight: '700' }}> • ✓ En este trabajo ({alreadyInList.usado} {prod.unidad || 'pza'})</Text>
+                            )}
                           </Text>
                         </TouchableOpacity>
                       );
@@ -572,7 +618,7 @@ export default function MaterialesSelector({
                     style={{ flex: 1 }}
                   />
                   <CustomButton
-                    title="Confirmar"
+                    title={materiales.some(m => m.productoId === selectedProduct.id && (m.empleadoId || '') === (selectedProduct.empleadoId || '')) ? "Actualizar Cantidad" : "Confirmar"}
                     variant="primary"
                     onPress={handleAddMaterial}
                     style={{ flex: 1 }}

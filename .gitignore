@@ -50,3 +50,6 @@ lint-results.txt
 
 # tesseract data
 *.traineddata
+
+#Graphify
+graphify-out/

@@ -216,12 +216,12 @@ export default function EvidenciaDetailModal({
 
           {/* Footer de Acciones */}
           <View style={[styles.footer, { borderTopColor: themeColors.border }]}>
-            {isAdmin && onEdit && (
+            {onEdit && (
               <CustomButton
                 title="Editar Evidencia"
                 variant="secondary"
-                onPress={() => onEdit(evidencia)}
-                style={{ flex: 1, marginRight: 8 }}
+                onPress={() => onEdit?.(evidencia)}
+                style={{ flex: 1 }}
                 icon={<Ionicons name="create-outline" size={16} color={themeColors.text} style={{ marginRight: 6 }} />}
               />
             )}
@@ -252,6 +252,7 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     maxWidth: 620,
+    height: Platform.OS === 'web' ? 'auto' : '85%',
     maxHeight: '90%',
     borderRadius: BorderRadius.large,
     borderWidth: 1,
@@ -271,12 +272,14 @@ const styles = StyleSheet.create({
   infoCard: {
     borderWidth: 1,
     borderRadius: BorderRadius.medium,
-    padding: Spacing.two,
+    padding: Spacing.three,
+    gap: 10,
   },
   jobCard: {
     borderWidth: 1,
     borderRadius: BorderRadius.medium,
-    padding: Spacing.two,
+    padding: Spacing.three,
+    gap: 10,
     marginBottom: Spacing.two,
   },
   thumbnailBox: {
@@ -305,7 +308,8 @@ const styles = StyleSheet.create({
   },
   footer: {
     flexDirection: 'row',
-    padding: Spacing.two,
+    padding: Spacing.three,
+    gap: 10,
     borderTopWidth: 1,
   },
 });
