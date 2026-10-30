@@ -38,6 +38,9 @@ interface AsistenciaSemanalCardProps {
   empleadoId?: string;
   empleadoNombre?: string;
   empleadoRol?: string;
+  empleadoHorasSemanales?: number;
+  empleadoHoraEntrada?: string;
+  empleadoHoraSalida?: string;
   isLoading?: boolean;
   onRefresh?: () => void;
   selectedMonday: Date;
@@ -47,6 +50,7 @@ interface AsistenciaSemanalCardProps {
   onChangeMonth?: (newMonth: Date) => void;
   onChangeModo?: (newModo: 'mes' | 'semana') => void;
   isEmployeeView?: boolean;
+  onEditHorario?: () => void;
   onViewFoto?: (info: {
     url: string;
     fecha: string;
@@ -64,6 +68,9 @@ export default function AsistenciaSemanalCard({
   empleadoNombre = 'Empleado',
   empleadoRol,
   empleadoId,
+  empleadoHorasSemanales,
+  empleadoHoraEntrada,
+  empleadoHoraSalida,
   isLoading = false,
   onRefresh,
   selectedMonday,
@@ -73,6 +80,7 @@ export default function AsistenciaSemanalCard({
   onChangeMonth,
   onChangeModo,
   onViewFoto,
+  onEditHorario,
   isEmployeeView = false,
 }: AsistenciaSemanalCardProps) {
   const scheme = useColorScheme();
@@ -102,8 +110,8 @@ export default function AsistenciaSemanalCard({
 
   // Procesar asistencias para la semana seleccionada
   const semanaData: SemanaAsistencia = useMemo(() => {
-    return processAsistenciasSemana(asistencias, selectedMonday, effectiveRole);
-  }, [asistencias, selectedMonday, effectiveRole]);
+    return processAsistenciasSemana(asistencias, selectedMonday, effectiveRole, empleadoHorasSemanales);
+  }, [asistencias, selectedMonday, effectiveRole, empleadoHorasSemanales]);
 
   // Procesar asistencias para el mes seleccionado
   const mesData: PeriodoAsistencia = useMemo(() => {
@@ -331,23 +339,41 @@ export default function AsistenciaSemanalCard({
           <>
             <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
             <View style={styles.summaryMetricCol}>
-              <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>JORNADA</Text>
-              <View style={styles.hoursValueRow}>
-                <Ionicons
-                  name="calendar-outline"
-                  size={14}
-                  color={semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text}
-                  style={{ marginRight: 4 }}
-                />
-                <Text
-                  style={[
-                    styles.summaryHoursText,
-                    { color: semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text },
-                  ]}
-                >
-                  {formatContadorJornada48(semanaData.totalMinutosRegulares)}
-                </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>JORNADA</Text>
+                {canEditTurnos && onEditHorario && (
+                  <TouchableOpacity
+                    onPress={onEditHorario}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={{ padding: 2, borderRadius: 4, backgroundColor: '#0284c718' }}
+                  >
+                    <Ionicons name="pencil" size={10} color="#0284c7" />
+                  </TouchableOpacity>
+                )}
               </View>
+              {(() => {
+                const targetHoras = empleadoHorasSemanales || semanaData.jornadaHoras || 48;
+                const targetMinutos = targetHoras * 60;
+                const isJornadaCompleta = semanaData.totalMinutosRegulares >= targetMinutos;
+                return (
+                  <View style={styles.hoursValueRow}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={14}
+                      color={isJornadaCompleta ? '#16a34a' : themeColors.text}
+                      style={{ marginRight: 4 }}
+                    />
+                    <Text
+                      style={[
+                        styles.summaryHoursText,
+                        { color: isJornadaCompleta ? '#16a34a' : themeColors.text },
+                      ]}
+                    >
+                      {formatContadorJornada48(semanaData.totalMinutosRegulares, targetHoras)}
+                    </Text>
+                  </View>
+                );
+              })()}
             </View>
           </>
         )}

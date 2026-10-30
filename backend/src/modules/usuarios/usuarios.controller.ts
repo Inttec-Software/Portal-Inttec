@@ -16,7 +16,7 @@ export const getUsuarios = async (req: Request, res: Response) => {
 
 export const createUsuario = async (req: Request, res: Response) => {
   try {
-    const { nombre, email, password, rol, telefono } = req.body;
+    const { nombre, email, password, rol, telefono, horas_semanales, hora_entrada_estandar, hora_salida_estandar } = req.body;
     
     // We need both pools for the active environment to sync the user across companies
     const { company: activeCompany, env } = req.tenant!;
@@ -30,7 +30,11 @@ export const createUsuario = async (req: Request, res: Response) => {
       hashedPassword = await bcrypt.hash(password, 10);
     }
 
-    const usuarioData = { nombre, email, password: hashedPassword, rol, telefono };
+    const usuarioData: any = { nombre, email, password: hashedPassword, rol, telefono };
+    if (horas_semanales !== undefined && horas_semanales !== null) usuarioData.horas_semanales = horas_semanales;
+    if (hora_entrada_estandar !== undefined && hora_entrada_estandar !== null) usuarioData.hora_entrada_estandar = hora_entrada_estandar;
+    if (hora_salida_estandar !== undefined && hora_salida_estandar !== null) usuarioData.hora_salida_estandar = hora_salida_estandar;
+
     const keys = Object.keys(usuarioData);
     const values = Object.values(usuarioData);
     const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
@@ -93,7 +97,15 @@ export const updateUsuario = async (req: Request, res: Response) => {
       }
     };
 
-    await Promise.allSettled([updateDb(poolInttec), updateDb(poolDaravisa)]);
+    const results = await Promise.allSettled([updateDb(poolInttec), updateDb(poolDaravisa)]);
+    
+    // Si ambas fallaron, reportar el error exacto
+    const allFailed = results.every((r) => r.status === 'rejected');
+    if (allFailed) {
+      const firstError = (results[0] as PromiseRejectedResult).reason;
+      console.error('[UsuariosController] Error en updateUsuario:', firstError);
+      return res.status(500).json({ error: firstError?.message || 'Error actualizando usuario en base de datos' });
+    }
 
     res.json({ success: true, message: 'Usuario actualizado correctamente' });
   } catch (error: any) {

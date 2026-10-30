@@ -34,6 +34,7 @@ import { AsistenciaGridSkeleton } from '@/components/skeleton';
 import ImageViewerModal from '@/components/ImageViewerModal';
 import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import CustomButton from '@/components/CustomButton';
+import EditarHorarioModal from '@/components/EditarHorarioModal';
 import {
   getWeekRange,
   getPreviousWeekMonday,
@@ -79,6 +80,10 @@ export default function AdminAsistencia() {
   const [selectedEmpleado, setSelectedEmpleado] = useState<Usuario | null>(null);
   const [asistenciasEmpleado, setAsistenciasEmpleado] = useState<Asistencia[]>([]);
   const [isLoadingEmpleadoDetalle, setIsLoadingEmpleadoDetalle] = useState(false);
+
+  // Modal de edición de horarios y jornada laboral (ADMIN / DEV)
+  const [horarioModalVisible, setHorarioModalVisible] = useState(false);
+  const [empleadoToEditHorario, setEmpleadoToEditHorario] = useState<Usuario | null>(null);
 
   // Filtros y búsqueda
   const [searchQuery, setSearchQuery] = useState('');
@@ -260,6 +265,30 @@ export default function AdminAsistencia() {
     setAsistenciasEmpleado([]);
   };
 
+  // Permiso para editar horarios y metas de jornada: solo ADMIN y DEV
+  const canEditHorarios = authUser?.rol === 'ADMIN' || authUser?.rol === 'DEV';
+
+  const handleOpenEditarHorario = (emp: Usuario) => {
+    if (!canEditHorarios) {
+      Alert.alert(
+        'Acceso Restringido',
+        'Solo los administradores y desarrolladores tienen permiso para editar los horarios y metas de jornada laboral.'
+      );
+      return;
+    }
+    setEmpleadoToEditHorario(emp);
+    setHorarioModalVisible(true);
+  };
+
+  const handleSaveHorarioSuccess = (updatedEmp: Usuario) => {
+    setPersonal((prev) =>
+      prev.map((p) => (p.id === updatedEmp.id ? { ...p, ...updatedEmp } : p))
+    );
+    if (selectedEmpleado && selectedEmpleado.id === updatedEmp.id) {
+      setSelectedEmpleado((prev) => (prev ? { ...prev, ...updatedEmp } : updatedEmp));
+    }
+  };
+
   // ==========================================
   // PROCESAMIENTO DE ESTADOS POR EMPLEADO Y DÍAS
   // ==========================================
@@ -334,7 +363,8 @@ export default function AdminAsistencia() {
 
     return personal.map((emp) => {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-      const periodoProcesado = processAsistenciasSemana(asistenciasEmp, selectedMonday, emp.rol);
+      const targetHoras = emp.horas_semanales ? Number(emp.horas_semanales) : 48;
+      const periodoProcesado = processAsistenciasSemana(asistenciasEmp, selectedMonday, emp.rol, targetHoras);
 
       // Buscar asistencias del día objetivo (hoy o el seleccionado)
       const asistenciasTargetDia = asistenciasEmp.filter((a) => cleanFecha(a.fecha) === targetFecha);
@@ -843,6 +873,32 @@ export default function AdminAsistencia() {
               </View>
             </View>
 
+            {/* Botón de configuración de horario y jornada para Admin / Dev */}
+            {canEditHorarios && (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                <TouchableOpacity
+                  style={[styles.editHorarioActionBtn, { backgroundColor: '#0284c715', borderColor: '#0284c750' }]}
+                  onPress={() => handleOpenEditarHorario(selectedEmpleado)}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <View style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: '#0284c7', justifyContent: 'center', alignItems: 'center' }}>
+                      <Ionicons name="time" size={20} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.editHorarioActionTitle, { color: '#0284c7' }]}>
+                        Horario y Jornada ({selectedEmpleado.horas_semanales ? `${selectedEmpleado.horas_semanales} hrs` : '48 hrs'})
+                      </Text>
+                      <Text style={[styles.editHorarioActionSubtitle, { color: themeColors.textSecondary }]} numberOfLines={1}>
+                        Estándar: {selectedEmpleado.hora_entrada_estandar || '08:00'} - {selectedEmpleado.hora_salida_estandar || '18:00'} • Toca para editar meta y horarios
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="create-outline" size={18} color="#0284c7" />
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Acciones de exportación individual */}
             <View style={[styles.exportActionsRow, { borderTopColor: themeColors.border }]}>
               <CustomButton
@@ -870,6 +926,10 @@ export default function AdminAsistencia() {
             empleadoId={selectedEmpleado.id}
             empleadoNombre={selectedEmpleado.nombre || 'Empleado'}
             empleadoRol={selectedEmpleado.rol}
+            empleadoHorasSemanales={selectedEmpleado.horas_semanales ? Number(selectedEmpleado.horas_semanales) : 48}
+            empleadoHoraEntrada={selectedEmpleado.hora_entrada_estandar}
+            empleadoHoraSalida={selectedEmpleado.hora_salida_estandar}
+            onEditHorario={() => handleOpenEditarHorario(selectedEmpleado)}
             isLoading={isLoadingEmpleadoDetalle}
             onRefresh={() => cargarAsistenciasEmpleado(selectedEmpleado.id, selectedMonday)}
             selectedMonday={selectedMonday}
@@ -914,6 +974,17 @@ export default function AdminAsistencia() {
 
         {/* Modal de Descarga de Reportes (Semanal o Mensual) */}
         {renderModalDescargarReportes()}
+
+        {/* Modal de edición de horario y jornada laboral (ADMIN / DEV) */}
+        <EditarHorarioModal
+          visible={horarioModalVisible}
+          onClose={() => {
+            setHorarioModalVisible(false);
+            setEmpleadoToEditHorario(null);
+          }}
+          empleado={empleadoToEditHorario}
+          onSaveSuccess={handleSaveHorarioSuccess}
+        />
 
         {/* Modales de checador del admin */}
         {renderModalesChecadorAdmin()}
@@ -1302,10 +1373,12 @@ export default function AdminAsistencia() {
             {filteredEmpleados.map((emp) => {
               const isEnTurno = emp.estadoHoy === 'EN_TURNO';
               const isCompletado = emp.estadoHoy === 'COMPLETADO';
+              const targetHoras = emp.horas_semanales ? Number(emp.horas_semanales) : 48;
+              const targetMins = targetHoras * 60;
               const minsReg = emp.totalMinutosRegulares || 0;
               const minsExtra = emp.totalMinutosExtra || 0;
-              const pctReg = Math.min(100, Math.max(0, (minsReg / 2880) * 100));
-              const isJornadaCompleta = minsReg >= 2880;
+              const pctReg = Math.min(100, Math.max(0, (minsReg / targetMins) * 100));
+              const isJornadaCompleta = minsReg >= targetMins;
               const hasExtraHours = minsExtra > 0;
               const pctExtra = hasExtraHours ? Math.min(100, Math.max(8, (minsExtra / (12 * 60)) * 100)) : 0;
 
@@ -1478,11 +1551,25 @@ export default function AdminAsistencia() {
                     {/* Divisor vertical */}
                     <View style={[styles.cardHoursDivider, { backgroundColor: themeColors.border }]} />
 
-                    {/* Campo Medio: Jornada (48 hrs) */}
-                    <View style={styles.cardHoursCol}>
-                      <Text style={[styles.cardHoursLabel, { color: themeColors.textSecondary }]}>
-                        JORNADA
-                      </Text>
+                    {/* Campo Medio: Jornada (48 hrs o configurada) */}
+                    <TouchableOpacity
+                      style={styles.cardHoursCol}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        if (canEditHorarios) {
+                          handleOpenEditarHorario(emp);
+                        }
+                      }}
+                      activeOpacity={canEditHorarios ? 0.7 : 1}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+                        <Text style={[styles.cardHoursLabel, { color: themeColors.textSecondary }]}>
+                          JORNADA
+                        </Text>
+                        {canEditHorarios && (
+                          <Ionicons name="pencil" size={10} color="#0284c7" />
+                        )}
+                      </View>
                       <View style={styles.cardHoursValueRow}>
                         <Ionicons
                           name="calendar-outline"
@@ -1491,10 +1578,10 @@ export default function AdminAsistencia() {
                           style={{ marginRight: 4 }}
                         />
                         <Text style={[styles.cardHoursMainText, { color: isJornadaCompleta ? '#16a34a' : themeColors.text }]}>
-                          {formatContadorJornada48(minsReg)}
+                          {formatContadorJornada48(minsReg, targetHoras)}
                         </Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
 
                     {/* Divisor vertical */}
                     <View style={[styles.cardHoursDivider, { backgroundColor: themeColors.border }]} />
@@ -1570,6 +1657,17 @@ export default function AdminAsistencia() {
 
       {/* Modal de Descarga de Reportes (Semanal o Mensual) */}
       {renderModalDescargarReportes()}
+
+      {/* Modal de edición de horario y jornada laboral (ADMIN / DEV) */}
+      <EditarHorarioModal
+        visible={horarioModalVisible}
+        onClose={() => {
+          setHorarioModalVisible(false);
+          setEmpleadoToEditHorario(null);
+        }}
+        empleado={empleadoToEditHorario}
+        onSaveSuccess={handleSaveHorarioSuccess}
+      />
 
       {/* Modales de checador del admin */}
       {renderModalesChecadorAdmin()}
@@ -2666,5 +2764,21 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '700',
+  },
+  editHorarioActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  editHorarioActionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  editHorarioActionSubtitle: {
+    fontSize: 11,
+    marginTop: 1,
   },
 });

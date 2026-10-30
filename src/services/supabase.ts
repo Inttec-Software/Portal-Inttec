@@ -67,6 +67,9 @@ export interface Usuario {
   telefono?: string;
   sucursal?: string;
   created_at?: string;
+  horas_semanales?: number;
+  hora_entrada_estandar?: string;
+  hora_salida_estandar?: string;
 }
 
 export type EstadoReembolsoGasto = 'NORMAL' | 'PENDIENTE_REEMBOLSO' | 'REEMBOLSADO';

@@ -363,6 +363,9 @@ CREATE TABLE public.usuarios (
 	rol text NOT NULL,
 	telefono text NULL,
 	created_at timestamptz DEFAULT now() NULL,
+	horas_semanales numeric DEFAULT 48 NULL,
+	hora_entrada_estandar text DEFAULT '08:00' NULL,
+	hora_salida_estandar text DEFAULT '18:00' NULL,
 	CONSTRAINT usuarios_email_key UNIQUE (email),
 	CONSTRAINT usuarios_pkey PRIMARY KEY (id),
 	CONSTRAINT usuarios_rol_check CHECK ((rol = ANY (ARRAY['ADMIN'::text, 'EMPLEADO'::text, 'DEV'::text])))
