@@ -1204,7 +1204,7 @@ CREATE TABLE public.gastos (
 	sucursal_id uuid NULL,
 	estado_reembolso text DEFAULT 'NORMAL'::text NULL,
 	CONSTRAINT gastos_estado_reembolso_check CHECK ((estado_reembolso = ANY (ARRAY['NORMAL'::text, 'PENDIENTE_REEMBOLSO'::text, 'REEMBOLSADO'::text]))),
-	CONSTRAINT gastos_metodo_pago_check CHECK ((metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text, 'transferencia'::text]))),
+	CONSTRAINT gastos_metodo_pago_check CHECK ((metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text, 'transferencia'::text, 'monedero_electronico'::text]))),
 	CONSTRAINT gastos_pkey PRIMARY KEY (id),
 	CONSTRAINT gastos_status_check CHECK ((status = ANY (ARRAY['PENDING'::text, 'APPROVED'::text, 'REJECTED'::text, 'ACTION_REQUIRED'::text]))),
 	CONSTRAINT gastos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE SET NULL,
