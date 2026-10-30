@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Alert } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { EvidenceReportGenerator } from '@/utils/evidenceReportGenerator';
 import { logger } from '@/utils/logger';
@@ -54,6 +55,12 @@ export function useEvidenciasList({ isAdmin = false }: UseEvidenciasListProps = 
   useEffect(() => {
     loadData();
   }, [loadData, company]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData(true);
+    }, [loadData])
+  );
 
   const handleRefresh = () => {
     setIsRefreshing(true);

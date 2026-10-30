@@ -23,5 +23,7 @@ router.post('/', crearEvidencia);
 router.get('/admin/all', getAdminEvidencias);
 router.get('/admin/:id', getAdminEvidenciaById);
 router.put('/admin/:id', actualizarEvidencia);
+router.get('/:id', getAdminEvidenciaById);
+router.put('/:id', actualizarEvidencia);
 
 export default router;

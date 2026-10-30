@@ -337,6 +337,49 @@ export function useEvidenciaForm({
                 console.warn('Error parsing descripcion_trabajo:', e);
               }
             }
+
+            let restoredColabs: ColaboradorItem[] = [];
+            if (ev.colaboradores) {
+              try {
+                const parsedColabs = typeof ev.colaboradores === 'string'
+                  ? JSON.parse(ev.colaboradores)
+                  : ev.colaboradores;
+                if (Array.isArray(parsedColabs)) {
+                  restoredColabs = parsedColabs;
+                }
+              } catch (e) {
+                console.warn('Error parsing colaboradores in useEvidenciaForm:', e);
+              }
+            }
+
+            // Fallback inteligente: si ev.colaboradores venía vacío,
+            // deducir la cuadrilla a partir de los materiales usados pertenecientes a otros colaboradores
+            if (restoredColabs.length === 0 && ev.descripcion_trabajo) {
+              try {
+                const parsedTrab = Array.isArray(ev.descripcion_trabajo)
+                  ? ev.descripcion_trabajo
+                  : typeof ev.descripcion_trabajo === 'string'
+                  ? JSON.parse(ev.descripcion_trabajo)
+                  : [];
+                const seenEmpIds = new Set<string>();
+                parsedTrab.forEach((t: any) => {
+                  (t.materiales_usados || []).forEach((m: any) => {
+                    if (m.empleadoId && m.empleadoId !== user.id && !seenEmpIds.has(m.empleadoId)) {
+                      seenEmpIds.add(m.empleadoId);
+                      restoredColabs.push({
+                        id: m.empleadoId,
+                        nombre: m.empleadoNombre || 'Colaborador',
+                      });
+                    }
+                  });
+                });
+              } catch {}
+            }
+
+            if (restoredColabs.length > 0) {
+              setSelectedColaboradores(restoredColabs);
+              syncCombinedProductos(cats?.inventario || miInventarioRaw, restoredColabs, user);
+            }
           }
         } catch (evErr: any) {
           Alert.alert('Error', evErr.message || 'No se pudo cargar la evidencia.');
