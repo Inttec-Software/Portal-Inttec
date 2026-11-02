@@ -7,6 +7,7 @@ export interface MaterialUsadoItem {
   unidad?: string;
   empleadoId?: string;
   empleadoNombre?: string;
+  esLibre?: boolean;
 }
 
 export interface PhotoAsset {

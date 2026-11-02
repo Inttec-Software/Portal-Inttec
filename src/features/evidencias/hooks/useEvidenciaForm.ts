@@ -226,6 +226,7 @@ export function useEvidenciaForm({
     trabajos.forEach((t, tIdx) => {
       if (tIdx !== trabajoIndex && t.usa_materiales && Array.isArray(t.materiales_usados)) {
         t.materiales_usados.forEach((m) => {
+          if (m.esLibre) return;
           const empKey = m.empleadoId || currentUser?.id || 'propio';
           const key = `${empKey}___${m.productoId}`;
           usedByOtherTrabajos.set(key, (usedByOtherTrabajos.get(key) || 0) + (Number(m.usado) || 0));
@@ -414,6 +415,7 @@ export function useEvidenciaForm({
               loadedTrabajos.forEach((t) => {
                 if (Array.isArray(t.materiales_usados)) {
                   t.materiales_usados.forEach((m) => {
+          if (m.esLibre) return;
                     const empKey = m.empleadoId || user.id;
                     const key = `${empKey}___${m.productoId}`;
                     const matchingMi = cats?.inventario?.find(
@@ -672,7 +674,7 @@ export function useEvidenciaForm({
 
       setTrabajos((prev) =>
         prev.map((t) => {
-          const filteredMat = (t.materiales_usados || []).filter((m) => m.empleadoId !== empId);
+          const filteredMat = (t.materiales_usados || []).filter((m) => m.esLibre || m.empleadoId !== empId);
           const textoMateriales = filteredMat.map((m) => `৹ ${m.usado}x ${m.nombre} (${m.unidad || 'pza'})`).join('\n');
           return {
             ...t,
@@ -686,7 +688,7 @@ export function useEvidenciaForm({
       await syncCombinedProductos(miInventarioRaw, newColabs, currentUser);
     };
 
-    const hasUsedMat = trabajos.some((t) => (t.materiales_usados || []).some((m) => m.empleadoId === empId));
+    const hasUsedMat = trabajos.some((t) => (t.materiales_usados || []).some((m) => !m.esLibre && m.empleadoId === empId));
     if (hasUsedMat) {
       if (Platform.OS === 'web') {
         if (window.confirm(`Al remover a ${empNombre}, se quitarán de la lista los materiales asignados a su inventario. ¿Continuar?`)) {
