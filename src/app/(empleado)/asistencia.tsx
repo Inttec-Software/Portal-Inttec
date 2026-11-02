@@ -470,6 +470,10 @@ export default function EmpleadoAsistencia() {
           <AsistenciaSemanalCard
             asistencias={historialAsistencias}
             empleadoNombre={user?.nombre || 'Empleado'}
+            empleadoRol={user?.rol}
+            empleadoHorasSemanales={user?.horas_semanales ? Number(user.horas_semanales) : 48}
+            empleadoHoraEntrada={user?.hora_entrada_estandar}
+            empleadoHoraSalida={user?.hora_salida_estandar}
             isLoading={isLoadingHistorial}
             isEmployeeView={true}
             onRefresh={() => {

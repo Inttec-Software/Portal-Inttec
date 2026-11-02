@@ -30,6 +30,7 @@
     "node-cron": "^4.6.0",
     "node-forge": "^1.4.0",
     "pg": "^8.23.1",
+    "tesseract.js": "^7.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -52,4 +53,3 @@
     "typescript": "^7.0.2"
   }
 }
-

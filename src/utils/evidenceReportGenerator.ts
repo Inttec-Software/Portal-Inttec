@@ -71,6 +71,11 @@ const preparePdfImage = async (uriOrBase64: string): Promise<string> => {
   }
 
   try {
+    // En Web, los navegadores renderizan URLs remotas de forma nativa e instantánea en el iframe de impresión
+    if (Platform.OS === 'web' && (clean.startsWith('http://') || clean.startsWith('https://'))) {
+      return clean;
+    }
+
     let inputUri = clean;
     
     // Si ya es un data URI base64
@@ -156,13 +161,30 @@ export const EvidenceReportGenerator = {
     }[] = [];
     let isMultiple = false;
 
-    try {
-      if (evidencia.descripcion_trabajo && evidencia.descripcion_trabajo.trim().startsWith('[')) {
-        listTrabajos = JSON.parse(evidencia.descripcion_trabajo);
-        isMultiple = true;
+    const getImgUri = (img: any): string => {
+      if (!img) return '';
+      if (typeof img === 'string') return img;
+      if (typeof img === 'object' && img.uri) return img.uri;
+      return '';
+    };
+
+    if (Array.isArray(evidencia.descripcion_trabajo)) {
+      listTrabajos = evidencia.descripcion_trabajo;
+      isMultiple = true;
+    } else if (typeof evidencia.descripcion_trabajo === 'string') {
+      try {
+        const trimmed = evidencia.descripcion_trabajo.trim();
+        if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+          const parsed = JSON.parse(trimmed);
+          listTrabajos = Array.isArray(parsed) ? parsed : [parsed];
+          isMultiple = true;
+        }
+      } catch (e) {
+        console.warn('Error parsing trabajos JSON:', e);
       }
-    } catch (e) {
-      console.warn('Error parsing trabajos JSON:', e);
+    } else if (evidencia.descripcion_trabajo && typeof evidencia.descripcion_trabajo === 'object') {
+      listTrabajos = [evidencia.descripcion_trabajo as any];
+      isMultiple = true;
     }
 
     if (!isMultiple) {
@@ -180,9 +202,11 @@ export const EvidenceReportGenerator = {
     // Downscale y conversión a base64 seguro en lotes de 4
     const optimizedTrabajos = await Promise.all(
       listTrabajos.map(async (t) => {
-        const antesOpt = t.antesImg ? await preparePdfImage(t.antesImg) : null;
-        const despuesOpt = t.despuesImg ? await preparePdfImage(t.despuesImg) : null;
-        const validExtras = (t.fotosAdicionales || []).filter(Boolean);
+        const antesUri = getImgUri(t.antesImg);
+        const despuesUri = getImgUri(t.despuesImg);
+        const antesOpt = antesUri ? await preparePdfImage(antesUri) : null;
+        const despuesOpt = despuesUri ? await preparePdfImage(despuesUri) : null;
+        const validExtras = (t.fotosAdicionales || []).map(getImgUri).filter(Boolean);
         const optExtras: string[] = [];
         const BATCH_SIZE = 4;
         for (let i = 0; i < validExtras.length; i += BATCH_SIZE) {

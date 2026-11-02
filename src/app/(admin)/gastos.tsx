@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName, supabase, inttecClient, daravisaClient } from '@/services/supabase';
@@ -166,7 +166,7 @@ export default function AdminGastosScreen() {
   const [quickCliSearch, setQuickCliSearch] = useState('');
   const [tempTipoProyecto, setTempTipoProyecto] = useState('');
   const [tempDetalleProyecto, setTempDetalleProyecto] = useState('');
-  const [tempMetodoPago, setTempMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia'>('efectivo');
+  const [tempMetodoPago, setTempMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia' | 'monedero_electronico'>('efectivo');
   const [tempTipoTarjeta, setTempTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | 'HILTON' | null>(null);
   const [tempComentarios, setTempComentarios] = useState('');
 
@@ -452,6 +452,14 @@ export default function AdminGastosScreen() {
     }
   }, [adminUser, refreshData]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (adminUser) {
+        refreshData(true);
+      }
+    }, [adminUser, refreshData])
+  );
+
   useEffect(() => {
     const checkAdmin = async () => {
       const user = await AuthService.getCurrentUser();
@@ -546,6 +554,7 @@ export default function AdminGastosScreen() {
       return;
     }
 
+    const targetGastoId = selectedGasto.id;
     setIsProcessingAction(true);
     try {
       const oldVentaId = selectedGasto.venta_id;
@@ -603,6 +612,21 @@ export default function AdminGastosScreen() {
       setSelectedGasto(null);
       setRejectionFeedback('');
       setShowFeedbackInput(false);
+
+      if (activeTab === 'pendientes' && status !== 'PENDING') {
+        setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+      } else if (activeTab === 'historial' && status === 'PENDING') {
+        setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+      } else {
+        setGastos(prev => prev.map(g => g.id === targetGastoId ? {
+          ...g,
+          status,
+          approved_at: updatePayload.approved_at !== undefined ? updatePayload.approved_at : g.approved_at,
+          rejection_feedback: updatePayload.rejection_feedback !== undefined ? updatePayload.rejection_feedback : g.rejection_feedback,
+          venta_id: updatePayload.venta_id !== undefined ? updatePayload.venta_id : g.venta_id,
+        } : g));
+      }
+      await refreshData(true);
 
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo procesar la acción de revisión.');
@@ -722,6 +746,7 @@ export default function AdminGastosScreen() {
       );
       setIsLinkSaleModalVisible(false);
       setIsRelinkingSaleMode(false);
+      await refreshData(true);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo vincular/desvincular el gasto.');
     } finally {
@@ -764,6 +789,7 @@ export default function AdminGastosScreen() {
       return;
     }
 
+    const targetGastoId = selectedGasto.id;
     setIsProcessingAction(true);
     try {
       const updatePayload: Partial<Gasto> = {
@@ -803,6 +829,18 @@ export default function AdminGastosScreen() {
       setSelectedGasto(null);
       setRejectionFeedback('');
       setShowFeedbackInput(false);
+
+      if (activeTab === 'pendientes') {
+        setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+      } else {
+        setGastos(prev => prev.map(g => g.id === targetGastoId ? {
+          ...g,
+          status: 'APPROVED',
+          approved_at: updatePayload.approved_at || new Date().toISOString(),
+          venta_id: ventaId,
+        } : g));
+      }
+      await refreshData(true);
 
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo aprobar el gasto.');
@@ -982,7 +1020,7 @@ export default function AdminGastosScreen() {
       setTempDetalleProyecto(selectedGasto.detalle_servicio_proyecto || '');
     } else if (fieldType === 'pago') {
       const rawMetodo = selectedGasto.metodo_pago || 'efectivo';
-      const isCard = rawMetodo !== 'efectivo' && rawMetodo !== 'transferencia';
+      const isCard = rawMetodo !== 'efectivo' && rawMetodo !== 'transferencia' && rawMetodo !== 'monedero_electronico';
       setTempMetodoPago(rawMetodo === 'tarjeta' ? 'tarjeta_debito' : rawMetodo);
       setTempTipoTarjeta((selectedGasto.tipo_tarjeta as any) || (isCard ? 'BBVA' : null));
       const parsed = parseJustificacion(selectedGasto.justificacion);
@@ -1070,7 +1108,7 @@ export default function AdminGastosScreen() {
         };
         successMsg = 'Servicio / Proyecto actualizado.';
       } else if (quickEditFieldType === 'pago') {
-        const isTarjeta = tempMetodoPago !== 'efectivo' && tempMetodoPago !== 'transferencia';
+        const isTarjeta = tempMetodoPago !== 'efectivo' && tempMetodoPago !== 'transferencia' && tempMetodoPago !== 'monedero_electronico';
         if (isTarjeta && !tempTipoTarjeta) {
           showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, MERCADO PAGO, HILTON).');
           setIsSavingQuickField(false);
@@ -1828,6 +1866,7 @@ export default function AdminGastosScreen() {
         setReviewModalVisible(false);
         setSelectedGasto(null);
         showAlert('Éxito', 'Gasto eliminado correctamente de la base de datos.');
+        await refreshData(true);
       } catch (err: any) {
         showAlert('Error al eliminar', err.message || 'No se pudo eliminar el gasto.');
       } finally {
@@ -3585,7 +3624,7 @@ export default function AdminGastosScreen() {
                           <View style={{ flex: 1, marginRight: Spacing.two }}>
                             <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Método de Pago</Text>
                             <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                              {selectedGasto.metodo_pago === 'transferencia' ? 'Transferencia' : selectedGasto.metodo_pago === 'efectivo' ? 'Efectivo' : selectedGasto.metodo_pago === 'tarjeta_debito' ? 'Tarjeta Débito' : selectedGasto.metodo_pago === 'tarjeta_credito' ? 'Tarjeta Crédito' : (selectedGasto.metodo_pago || 'No especificado')} {selectedGasto.tipo_tarjeta ? `(${selectedGasto.tipo_tarjeta})` : ''}
+                              {selectedGasto.metodo_pago === 'transferencia' ? 'Transferencia' : selectedGasto.metodo_pago === 'efectivo' ? 'Efectivo' : selectedGasto.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : selectedGasto.metodo_pago === 'tarjeta_debito' ? 'Tarjeta Débito' : selectedGasto.metodo_pago === 'tarjeta_credito' ? 'Tarjeta Crédito' : (selectedGasto.metodo_pago || 'No especificado')} {selectedGasto.tipo_tarjeta ? `(${selectedGasto.tipo_tarjeta})` : ''}
                             </Text>
                           </View>
                           {selectedGasto.status === 'APPROVED' && (
@@ -5035,7 +5074,7 @@ export default function AdminGastosScreen() {
 
                         <TouchableOpacity
                           onPress={() => {
-                            if (tempMetodoPago === 'efectivo' || tempMetodoPago === 'transferencia') {
+                            if (tempMetodoPago === 'efectivo' || tempMetodoPago === 'transferencia' || tempMetodoPago === 'monedero_electronico') {
                               setTempMetodoPago('tarjeta_debito');
                             }
                             if (!tempTipoTarjeta) {
@@ -5084,6 +5123,32 @@ export default function AdminGastosScreen() {
                             color: tempMetodoPago === 'transferencia' ? '#ffffff' : themeColors.text
                           }}>
                             Transferencia
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => {
+                            setTempMetodoPago('monedero_electronico');
+                            setTempTipoTarjeta(null);
+                          }}
+                          style={{
+                            flex: 1,
+                            paddingVertical: 12,
+                            borderRadius: BorderRadius.medium,
+                            backgroundColor: tempMetodoPago === 'monedero_electronico' ? themeColors.accent : themeColors.backgroundElement,
+                            borderWidth: 1,
+                            borderColor: tempMetodoPago === 'monedero_electronico' ? 'transparent' : themeColors.border,
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <Text style={{
+                            fontSize: 13,
+                            fontWeight: tempMetodoPago === 'monedero_electronico' ? '800' : '600',
+                            color: tempMetodoPago === 'monedero_electronico' ? '#ffffff' : themeColors.text,
+                            textAlign: 'center'
+                          }}>
+                            Monedero
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -6298,7 +6363,9 @@ export default function AdminGastosScreen() {
               >
                 <AsistenciaSemanalCard
                   asistencias={asistencias}
+                  empleadoId={asistenciaEmpleado?.id}
                   empleadoNombre={asistenciaEmpleado?.nombre || 'Empleado'}
+                  empleadoRol={asistenciaEmpleado?.rol}
                   isLoading={isLoadingAsistencias}
                   onRefresh={() => {
                     if (asistenciaEmpleado) {

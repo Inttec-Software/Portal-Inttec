@@ -190,7 +190,7 @@ export default function EditarTurnoModal({
                     Editar Horas
                   </Text>
                   <View style={styles.devBadge}>
-                    <Text style={styles.devBadgeText}>DEV ONLY</Text>
+                    <Text style={styles.devBadgeText}>ADMIN / DEV</Text>
                   </View>
                 </View>
                 <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>

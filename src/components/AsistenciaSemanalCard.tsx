@@ -15,6 +15,7 @@ import { Asistencia } from '@/services/supabase';
 import { useAuth } from '@/context/AuthContext';
 import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import EditarTurnoModal from '@/components/EditarTurnoModal';
+import RegistrarTurnoModal from '@/components/RegistrarTurnoModal';
 import {
   WeekRange,
   TurnoAsistencia,
@@ -34,7 +35,12 @@ import {
 
 interface AsistenciaSemanalCardProps {
   asistencias: Asistencia[];
+  empleadoId?: string;
   empleadoNombre?: string;
+  empleadoRol?: string;
+  empleadoHorasSemanales?: number;
+  empleadoHoraEntrada?: string;
+  empleadoHoraSalida?: string;
   isLoading?: boolean;
   onRefresh?: () => void;
   selectedMonday: Date;
@@ -44,6 +50,7 @@ interface AsistenciaSemanalCardProps {
   onChangeMonth?: (newMonth: Date) => void;
   onChangeModo?: (newModo: 'mes' | 'semana') => void;
   isEmployeeView?: boolean;
+  onEditHorario?: () => void;
   onViewFoto?: (info: {
     url: string;
     fecha: string;
@@ -59,6 +66,11 @@ interface AsistenciaSemanalCardProps {
 export default function AsistenciaSemanalCard({
   asistencias,
   empleadoNombre = 'Empleado',
+  empleadoRol,
+  empleadoId,
+  empleadoHorasSemanales,
+  empleadoHoraEntrada,
+  empleadoHoraSalida,
   isLoading = false,
   onRefresh,
   selectedMonday,
@@ -68,36 +80,43 @@ export default function AsistenciaSemanalCard({
   onChangeMonth,
   onChangeModo,
   onViewFoto,
+  onEditHorario,
   isEmployeeView = false,
 }: AsistenciaSemanalCardProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { user } = useAuth();
+  const effectiveRole = empleadoRol || user?.rol;
   const canViewOvertime = !isEmployeeView && (user?.rol === 'ADMIN' || user?.rol === 'DEV');
-  const isDev = !isEmployeeView && (user?.rol === 'DEV');
+  const canEditTurnos = !isEmployeeView && (user?.rol === 'ADMIN' || user?.rol === 'DEV');
+  const effectiveEmpleadoId = empleadoId || (asistencias && asistencias.length > 0 ? asistencias[0].empleado_id : undefined);
 
   const isMes = modo === 'mes';
 
   // Estado del modal de selección de período manual
   const [periodoModalVisible, setPeriodoModalVisible] = useState(false);
 
-  // Estado del modal de edición de horas de turno (DEV ONLY)
+  // Estado del modal de edición de horas de turno (ADMIN / DEV)
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [turnoToEdit, setTurnoToEdit] = useState<TurnoAsistencia | null>(null);
   const [fechaToEdit, setFechaToEdit] = useState<string>('');
+
+  // Estado del modal de registro de nuevo turno (ADMIN / DEV)
+  const [registrarModalVisible, setRegistrarModalVisible] = useState(false);
+  const [fechaParaNuevoTurno, setFechaParaNuevoTurno] = useState<string>('');
 
   // Estados de días expandidos (por defecto expandir días que tengan turnos)
   const [expandedDays, setExpandedDays] = useState<{ [dateStr: string]: boolean }>({});
 
   // Procesar asistencias para la semana seleccionada
   const semanaData: SemanaAsistencia = useMemo(() => {
-    return processAsistenciasSemana(asistencias, selectedMonday);
-  }, [asistencias, selectedMonday]);
+    return processAsistenciasSemana(asistencias, selectedMonday, effectiveRole, empleadoHorasSemanales);
+  }, [asistencias, selectedMonday, effectiveRole, empleadoHorasSemanales]);
 
   // Procesar asistencias para el mes seleccionado
   const mesData: PeriodoAsistencia = useMemo(() => {
-    return processAsistenciasMes(asistencias, selectedMonth);
-  }, [asistencias, selectedMonth]);
+    return processAsistenciasMes(asistencias, selectedMonth, effectiveRole);
+  }, [asistencias, selectedMonth, effectiveRole]);
 
   const currentWeekMonday = useMemo(() => {
     return getWeekRange().mondayDate;
@@ -320,23 +339,41 @@ export default function AsistenciaSemanalCard({
           <>
             <View style={[styles.summaryDivider, { backgroundColor: themeColors.border }]} />
             <View style={styles.summaryMetricCol}>
-              <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>JORNADA</Text>
-              <View style={styles.hoursValueRow}>
-                <Ionicons
-                  name="calendar-outline"
-                  size={14}
-                  color={semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text}
-                  style={{ marginRight: 4 }}
-                />
-                <Text
-                  style={[
-                    styles.summaryHoursText,
-                    { color: semanaData.totalMinutosRegulares >= 2880 ? '#16a34a' : themeColors.text },
-                  ]}
-                >
-                  {formatContadorJornada48(semanaData.totalMinutosRegulares)}
-                </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                <Text style={[styles.summaryMetricLabel, { color: themeColors.textSecondary }]}>JORNADA</Text>
+                {canEditTurnos && onEditHorario && (
+                  <TouchableOpacity
+                    onPress={onEditHorario}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={{ padding: 2, borderRadius: 4, backgroundColor: '#0284c718' }}
+                  >
+                    <Ionicons name="pencil" size={10} color="#0284c7" />
+                  </TouchableOpacity>
+                )}
               </View>
+              {(() => {
+                const targetHoras = empleadoHorasSemanales || semanaData.jornadaHoras || 48;
+                const targetMinutos = targetHoras * 60;
+                const isJornadaCompleta = semanaData.totalMinutosRegulares >= targetMinutos;
+                return (
+                  <View style={styles.hoursValueRow}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={14}
+                      color={isJornadaCompleta ? '#16a34a' : themeColors.text}
+                      style={{ marginRight: 4 }}
+                    />
+                    <Text
+                      style={[
+                        styles.summaryHoursText,
+                        { color: isJornadaCompleta ? '#16a34a' : themeColors.text },
+                      ]}
+                    >
+                      {formatContadorJornada48(semanaData.totalMinutosRegulares, targetHoras)}
+                    </Text>
+                  </View>
+                );
+              })()}
             </View>
           </>
         )}
@@ -440,6 +477,23 @@ export default function AsistenciaSemanalCard({
                 </View>
 
                 <View style={styles.dayInfoRight}>
+                  {dia.comidaDescontada && (
+                    <View
+                      style={[
+                        styles.comidaBadge,
+                        {
+                          backgroundColor: themeColors.accent + '15',
+                          borderColor: themeColors.accent + '35',
+                        },
+                      ]}
+                    >
+                      <Ionicons name="restaurant-outline" size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
+                      <Text style={[styles.comidaBadgeText, { color: themeColors.accent }]}>
+                        -1h comida
+                      </Text>
+                    </View>
+                  )}
+
                   {canViewOvertime && dia.minutosExtra > 0 && (
                     <View style={[styles.extraHoursBadge, { backgroundColor: '#ea580c18', borderColor: '#ea580c50' }]}>
                       <Ionicons name="flame" size={11} color="#ea580c" style={{ marginRight: 2 }} />
@@ -479,14 +533,27 @@ export default function AsistenciaSemanalCard({
                     </Text>
                   </View>
 
-                  {hasTurnos && (
-                    <Ionicons
-                      name={expanded ? 'chevron-up' : 'chevron-down'}
-                      size={18}
-                      color={themeColors.textSecondary}
-                      style={{ marginLeft: 6 }}
-                    />
+                  {canEditTurnos && effectiveEmpleadoId && (
+                    <TouchableOpacity
+                      style={[styles.addTurnoQuickBtn, { backgroundColor: '#10b98118', borderColor: '#10b98150' }]}
+                      onPress={(e) => {
+                        (e as any)?.stopPropagation?.();
+                        setFechaParaNuevoTurno(dia.dateStr);
+                        setRegistrarModalVisible(true);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="add" size={13} color="#10b981" style={{ marginRight: 2 }} />
+                      <Text style={[styles.addTurnoQuickBtnText, { color: '#10b981' }]}>Registro de asistencia</Text>
+                    </TouchableOpacity>
                   )}
+
+                  <Ionicons
+                    name={expanded ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={themeColors.textSecondary}
+                    style={{ marginLeft: 6 }}
+                  />
                 </View>
               </TouchableOpacity>
 
@@ -517,7 +584,7 @@ export default function AsistenciaSemanalCard({
                             <Text style={styles.turnoIndexText}>Turno #{turno.index}</Text>
                           </View>
                           <View style={styles.turnoHeaderRight}>
-                            {isDev && (
+                            {canEditTurnos && (
                               <TouchableOpacity
                                 style={[styles.devEditBtn, { backgroundColor: '#6366f115', borderColor: '#6366f140' }]}
                                 onPress={() => {
@@ -528,7 +595,7 @@ export default function AsistenciaSemanalCard({
                                 activeOpacity={0.7}
                               >
                                 <Ionicons name="pencil" size={11} color="#6366f1" style={{ marginRight: 3 }} />
-                                <Text style={styles.devEditText}>Editar (DEV)</Text>
+                                <Text style={styles.devEditText}>Editar</Text>
                               </TouchableOpacity>
                             )}
 
@@ -725,7 +792,7 @@ export default function AsistenciaSemanalCard({
         })}
       </View>
 
-      {/* Modal de Edición de Turnos (Exclusivo DEV) */}
+      {/* Modal de Edición de Turnos (ADMIN / DEV) */}
       <EditarTurnoModal
         visible={editModalVisible}
         onClose={() => {
@@ -739,6 +806,23 @@ export default function AsistenciaSemanalCard({
           onRefresh?.();
         }}
       />
+
+      {/* Modal de Registro de Nuevo Turno (ADMIN / DEV) */}
+      {effectiveEmpleadoId && (
+        <RegistrarTurnoModal
+          visible={registrarModalVisible}
+          onClose={() => {
+            setRegistrarModalVisible(false);
+            setFechaParaNuevoTurno('');
+          }}
+          empleadoId={effectiveEmpleadoId}
+          empleadoNombre={empleadoNombre}
+          defaultFecha={fechaParaNuevoTurno || undefined}
+          onSaveSuccess={() => {
+            onRefresh?.();
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -1119,6 +1203,19 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
   },
+  comidaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    marginRight: 6,
+  },
+  comidaBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
   turnoExtraBadge: {
     marginTop: 6,
     paddingHorizontal: 6,
@@ -1129,5 +1226,74 @@ const styles = StyleSheet.create({
   turnoExtraText: {
     fontSize: 10,
     fontWeight: '700',
+  },
+  topActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  addTurnoHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.medium,
+  },
+  addTurnoHeaderBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  noTurnosRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  addTurnoDayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+  },
+  addTurnoDayBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  addTurnoQuickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    marginLeft: 6,
+  },
+  addTurnoQuickBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  noTurnosContainer: {
+    paddingVertical: 4,
+    gap: 8,
+  },
+  addAnotherTurnoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    marginTop: 8,
+  },
+  addAnotherTurnoText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

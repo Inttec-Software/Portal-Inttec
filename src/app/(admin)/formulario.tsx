@@ -97,7 +97,7 @@ export default function GastoForm() {
   const [tipoServicioProyecto, setTipoServicioProyecto] = useState<'Servicio' | 'Proyecto' | 'Venta' | 'Operativo' | null>(null);
   const [detalleServicioProyecto, setDetalleServicioProyecto] = useState('');
   const [sucursal, setSucursal] = useState('');
-  const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia'>('efectivo');
+  const [metodoPago, setMetodoPago] = useState<'efectivo' | 'tarjeta' | 'tarjeta_credito' | 'tarjeta_debito' | 'transferencia' | 'monedero_electronico'>('efectivo');
   const [tipoTarjeta, setTipoTarjeta] = useState<'BBVA' | 'AMEX' | 'MARRIOT' | 'BANORTE' | 'INVEX' | 'MERCADO PAGO' | 'HILTON' | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateValue, setDateValue] = useState(new Date());
@@ -670,7 +670,7 @@ export default function GastoForm() {
       return;
     }
 
-    if (metodoPago !== 'efectivo' && metodoPago !== 'transferencia' && (!tipoTarjeta || !tipoTarjeta.trim())) {
+    if (metodoPago !== 'efectivo' && metodoPago !== 'transferencia' && metodoPago !== 'monedero_electronico' && (!tipoTarjeta || !tipoTarjeta.trim())) {
       showAlert('Validación', 'Por favor especifica la tarjeta o tipo de pago.');
       setCurrentStep(2);
       return;
@@ -849,7 +849,7 @@ export default function GastoForm() {
       proveedor_id: activeProvObj?.id || null,
       cliente_id: activeCliObj?.id || null,
       sucursal_id: activeSucObj?.id || null,
-      tipo_tarjeta: tipoTarjeta,
+      tipo_tarjeta: (metodoPago === 'efectivo' || metodoPago === 'transferencia' || metodoPago === 'monedero_electronico') ? null : tipoTarjeta,
       ubicacion_registro: 'Móvil',
       facturado: facturado,
       motivo_sin_factura: facturado === true 
@@ -1088,7 +1088,7 @@ export default function GastoForm() {
         return;
       }
 
-      if (metodoPago !== 'efectivo' && metodoPago !== 'transferencia' && !tipoTarjeta) {
+      if (metodoPago !== 'efectivo' && metodoPago !== 'transferencia' && metodoPago !== 'monedero_electronico' && !tipoTarjeta) {
         showAlert('Validación', 'Por favor selecciona la tarjeta utilizada (BBVA, AMEX, MARRIOT, BANORTE, INVEX, Mercado Pago, Hilton).');
         return;
       }
@@ -2317,6 +2317,26 @@ export default function GastoForm() {
                   >
                     <Text style={[styles.paymentOptionText, { color: (metodoPago === 'tarjeta_debito' || metodoPago === 'tarjeta_credito' || metodoPago === 'tarjeta') ? '#ffffff' : themeColors.text }]}>
                       Tarjeta
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      setMetodoPago('monedero_electronico');
+                      setTipoTarjeta(null);
+                    }}
+                    style={[
+                      styles.paymentOption,
+                      {
+                        backgroundColor: metodoPago === 'monedero_electronico' ? themeColors.accent : themeColors.backgroundElement,
+                        borderColor: metodoPago === 'monedero_electronico' ? 'transparent' : themeColors.border,
+                        flex: 1,
+                        alignItems: 'center',
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.paymentOptionText, { color: metodoPago === 'monedero_electronico' ? '#ffffff' : themeColors.text, textAlign: 'center' }]}>
+                      Monedero Electrónico
                     </Text>
                   </TouchableOpacity>
                 </View>

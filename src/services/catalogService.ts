@@ -160,6 +160,9 @@ export const CatalogService = {
     password: string;
     rol: 'ADMIN' | 'EMPLEADO' | 'DEV';
     telefono?: string | null;
+    horas_semanales?: number | null;
+    hora_entrada_estandar?: string | null;
+    hora_salida_estandar?: string | null;
   }): Promise<Usuario> {
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/usuarios`, {
@@ -178,6 +181,9 @@ export const CatalogService = {
     password?: string;
     rol?: 'ADMIN' | 'EMPLEADO' | 'DEV';
     telefono?: string | null;
+    horas_semanales?: number | null;
+    hora_entrada_estandar?: string | null;
+    hora_salida_estandar?: string | null;
   }): Promise<void> {
     const headers = await getApiHeaders();
     const res = await fetch(`${getApiUrl()}/api/usuarios/${id}`, {

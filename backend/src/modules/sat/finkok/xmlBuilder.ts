@@ -40,6 +40,7 @@ function mapFormaPagoSAT(forma?: string): string {
   if (!forma) return '01'; // Default Efectivo
   const f = forma.toLowerCase().trim();
   if (f.includes('transferencia') || f === '03') return '03';
+  if (f.includes('monedero') || f === '05') return '05';
   if (f.includes('credito') || f === '04') return '04';
   if (f.includes('debito') || f === '28') return '28';
   if (f.includes('cheque') || f === '02') return '02';

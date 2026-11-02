@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, Modal, ScrollView, TextInput, StyleSheet,
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CustomButton from './CustomButton';
 import { normalizeText } from '@/utils/helpers';
 
@@ -26,6 +27,7 @@ export interface MaterialUsado {
   unidad?: string;
   empleadoId?: string;
   empleadoNombre?: string;
+  esLibre?: boolean;
 }
 
 interface MaterialesSelectorProps {
@@ -45,6 +47,7 @@ export default function MaterialesSelector({
 }: MaterialesSelectorProps) {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const insets = useSafeAreaInsets();
 
   const isEnabled = typeof usaMateriales === 'boolean' 
     ? usaMateriales 
@@ -57,6 +60,13 @@ export default function MaterialesSelector({
   // Variables locales para cuando seleccionan un producto
   const [selectedProduct, setSelectedProduct] = useState<ProductoInventario | null>(null);
   const [usado, setUsado] = useState('');
+
+  // Estados para Material Libre / Manual
+  const [manualModalVisible, setManualModalVisible] = useState(false);
+  const [manualEditingIndex, setManualEditingIndex] = useState<number | null>(null);
+  const [manualNombre, setManualNombre] = useState('');
+  const [manualCantidad, setManualCantidad] = useState('');
+  const [manualUnidad, setManualUnidad] = useState('m');
 
   const handleToggle = (val: boolean) => {
     if (onToggleUsaMateriales) {
@@ -144,11 +154,52 @@ export default function MaterialesSelector({
     };
 
     // Validar si ya existe el mismo producto para el mismo propietario
-    const existe = materiales.find(
+    const existeIndex = materiales.findIndex(
       m => m.productoId === selectedProduct.id && (m.empleadoId || '') === (selectedProduct.empleadoId || '')
     );
-    if (existe) {
-      Alert.alert('Aviso', 'Este material de este inventario ya está en la lista. Si deseas modificarlo, elimínalo y vuelve a agregarlo.');
+
+    if (onToggleUsaMateriales && !isEnabled) {
+      onToggleUsaMateriales(true);
+    }
+
+    if (existeIndex !== -1) {
+      const updatedList = [...materiales];
+      updatedList[existeIndex] = nuevoMaterial;
+      onChange(updatedList);
+    } else {
+      onChange([...materiales, nuevoMaterial]);
+    }
+    setSelectedProduct(null);
+    setUsado('');
+    setModalVisible(false);
+  };
+
+  const handleOpenAddManual = () => {
+    setManualEditingIndex(null);
+    setManualNombre('');
+    setManualCantidad('1');
+    setManualUnidad('m');
+    setManualModalVisible(true);
+  };
+
+  const handleOpenEditManual = (idx: number, m: MaterialUsado) => {
+    setManualEditingIndex(idx);
+    setManualNombre(m.nombre);
+    setManualCantidad(m.usado.toString());
+    setManualUnidad(m.unidad || 'pza');
+    setManualModalVisible(true);
+  };
+
+  const handleSaveManualMaterial = () => {
+    const nombreTrim = manualNombre.trim();
+    const cantNum = parseFloat(manualCantidad);
+
+    if (!nombreTrim) {
+      Alert.alert('Validación', 'Ingresa una descripción o nombre para el material.');
+      return;
+    }
+    if (isNaN(cantNum) || cantNum <= 0) {
+      Alert.alert('Validación', 'Ingresa una cantidad válida mayor a 0.');
       return;
     }
 
@@ -156,10 +207,30 @@ export default function MaterialesSelector({
       onToggleUsaMateriales(true);
     }
 
-    onChange([...materiales, nuevoMaterial]);
-    setSelectedProduct(null);
-    setUsado('');
-    setModalVisible(false);
+    const item: MaterialUsado = {
+      productoId: manualEditingIndex !== null && materiales[manualEditingIndex]?.productoId
+        ? materiales[manualEditingIndex].productoId
+        : `manual_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      nombre: nombreTrim,
+      retirado: cantNum,
+      usado: cantNum,
+      sobrante: 0,
+      unidad: manualUnidad.trim() || 'pza',
+      esLibre: true,
+    };
+
+    if (manualEditingIndex !== null) {
+      const next = [...materiales];
+      next[manualEditingIndex] = item;
+      onChange(next);
+    } else {
+      onChange([...materiales, item]);
+    }
+
+    setManualModalVisible(false);
+    setManualEditingIndex(null);
+    setManualNombre('');
+    setManualCantidad('');
   };
 
   const handleRemoveMaterial = (index: number) => {
@@ -229,44 +300,90 @@ export default function MaterialesSelector({
           ) : (
             <View style={{ marginBottom: Spacing.two }}>
               {materiales.map((m, idx) => (
-                <View key={idx} style={[styles.materialItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                <TouchableOpacity
+                  key={idx}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    if (m.esLibre) {
+                      handleOpenEditManual(idx, m);
+                      return;
+                    }
+                    const prodMatch = productos.find(
+                      p => p.id === m.productoId && (p.empleadoId || '') === (m.empleadoId || '')
+                    );
+                    if (prodMatch) {
+                      setSelectedProduct(prodMatch);
+                    } else {
+                      setSelectedProduct({
+                        id: m.productoId,
+                        sku_interno: '',
+                        nombre_oficial: m.nombre,
+                        stock_actual: m.retirado,
+                        unidad: m.unidad,
+                        empleadoId: m.empleadoId,
+                        empleadoNombre: m.empleadoNombre,
+                        esMio: !m.empleadoId,
+                      });
+                    }
+                    setUsado(m.usado.toString());
+                    setModalVisible(true);
+                  }}
+                  style={[styles.materialItem, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                >
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
                       <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 14, flex: 1 }}>{m.nombre}</Text>
-                      {m.empleadoNombre ? (
+                      {m.esLibre ? null : m.empleadoNombre ? (
                         <View style={[styles.ownerTag, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary + '30' }]}>
                           <Ionicons name="person-outline" size={11} color={themeColors.primary} />
                           <Text style={{ fontSize: 11, fontWeight: '600', color: themeColors.primary }}>{m.empleadoNombre}</Text>
                         </View>
                       ) : null}
                     </View>
-                    <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4, flexWrap: 'wrap' }}>
-                      <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Stock: {m.retirado} {m.unidad || 'pza'}</Text>
+                    <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Stock: {m.esLibre ? '-' : `${m.retirado} ${m.unidad || 'pza'}`}</Text>
                       <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Usado: {m.usado} {m.unidad || 'pza'}</Text>
-                      <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.sobrante} {m.unidad || 'pza'}</Text>
+                      <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.esLibre ? '-' : `${m.sobrante} ${m.unidad || 'pza'}`}</Text>
+                      <Text style={{ color: themeColors.primary, fontSize: 11, fontStyle: 'italic', marginLeft: 4 }}>✏️ Editar</Text>
                     </View>
                   </View>
-                  <TouchableOpacity onPress={() => handleRemoveMaterial(idx)} style={{ padding: 4, marginLeft: 8 }}>
+                  <TouchableOpacity
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleRemoveMaterial(idx);
+                    }}
+                    style={{ padding: 4, marginLeft: 8 }}
+                  >
                     <Ionicons name="trash-outline" size={20} color={themeColors.danger} />
                   </TouchableOpacity>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           )}
 
-          <CustomButton
-            title="Agregar Material del Inventario"
-            variant="secondary"
-            onPress={() => {
-              setSelectedOwnerFilter('TODOS');
-              setSearchQuery('');
-              setModalVisible(true);
-            }}
-            icon={<Ionicons name="add" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
-          />
+          <View style={{ flexDirection: 'column', gap: Spacing.one }}>
+            <CustomButton
+              title="Agregar Material del Inventario"
+              variant="secondary"
+              onPress={() => {
+                setSelectedOwnerFilter('TODOS');
+                setSearchQuery('');
+                setModalVisible(true);
+              }}
+              icon={<Ionicons name="cube-outline" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
+            />
+            <CustomButton
+              title="Agregar Material Libre / Manual"
+              variant="secondary"
+              onPress={handleOpenAddManual}
+              icon={<Ionicons name="create-outline" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
+            />
+          </View>
         </View>
       )}
 
+      {/* Modal para Material de Inventario */}
       <Modal 
         statusBarTranslucent={true} 
         visible={modalVisible} 
@@ -279,7 +396,13 @@ export default function MaterialesSelector({
       >
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
-          style={styles.modalOverlay}
+          style={[
+            styles.modalOverlay,
+            {
+              paddingTop: Platform.OS !== 'web' ? Math.max(insets.top + 12, 16) : 24,
+              paddingBottom: Platform.OS !== 'web' ? Math.max(insets.bottom + 12, 16) : 24,
+            },
+          ]}
         >
           <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -367,7 +490,11 @@ export default function MaterialesSelector({
                   )}
                 </View>
 
-                <ScrollView style={{ marginTop: Spacing.two }} keyboardShouldPersistTaps="handled">
+                <ScrollView 
+                  style={{ flex: 1, marginTop: Spacing.two }} 
+                  contentContainerStyle={{ paddingBottom: Spacing.four }}
+                  keyboardShouldPersistTaps="handled"
+                >
                   {filteredProductos.length === 0 ? (
                     <Text style={{ color: themeColors.textSecondary, textAlign: 'center', marginTop: 20 }}>
                       No se encontraron productos disponibles.
@@ -376,6 +503,9 @@ export default function MaterialesSelector({
                     filteredProductos.slice(0, 60).map((prod, pIdx) => {
                       const stockNum = Number(prod.stock_actual) || 0;
                       const isOutOfStock = stockNum <= 0;
+                      const alreadyInList = materiales.find(
+                        m => m.productoId === prod.id && (m.empleadoId || '') === (prod.empleadoId || '')
+                      );
                       return (
                         <TouchableOpacity
                           key={`${prod.id}_${prod.empleadoId || 'propio'}_${pIdx}`}
@@ -383,17 +513,22 @@ export default function MaterialesSelector({
                             styles.productItem, 
                             { 
                               borderBottomColor: themeColors.border,
-                              opacity: isOutOfStock ? 0.45 : 1,
+                              opacity: isOutOfStock && !alreadyInList ? 0.45 : 1,
+                              backgroundColor: alreadyInList ? themeColors.primary + '08' : 'transparent',
                             }
                           ]}
                           onPress={() => {
-                            if (isOutOfStock) {
+                            if (isOutOfStock && !alreadyInList) {
                               Alert.alert('Material Agotado', 'No queda stock disponible de este material en este reporte (ya fue utilizado en otros trabajos).');
                               return;
                             }
                             setSelectedProduct(prod);
-                            const initialQty = Math.min(1, Number(prod.stock_actual) || 1);
-                            setUsado(initialQty.toString());
+                            if (alreadyInList) {
+                              setUsado(alreadyInList.usado.toString());
+                            } else {
+                              const initialQty = Math.min(1, Number(prod.stock_actual) || 1);
+                              setUsado(initialQty.toString());
+                            }
                           }}
                         >
                           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -409,7 +544,10 @@ export default function MaterialesSelector({
                             )}
                           </View>
                           <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
-                            SKU: {prod.sku_interno} | Stock Disponible: <Text style={{ fontWeight: '700', color: isOutOfStock ? '#ef4444' : themeColors.primary }}>{prod.stock_actual} {prod.unidad || 'pza'} {isOutOfStock ? '(Agotado en reporte)' : ''}</Text>
+                            SKU: {prod.sku_interno} | Stock Disponible: <Text style={{ fontWeight: '700', color: isOutOfStock && !alreadyInList ? '#ef4444' : themeColors.primary }}>{prod.stock_actual} {prod.unidad || 'pza'} {isOutOfStock && !alreadyInList ? '(Agotado en reporte)' : ''}</Text>
+                            {alreadyInList && (
+                              <Text style={{ color: themeColors.success, fontWeight: '700' }}> • ✓ En este trabajo ({alreadyInList.usado} {prod.unidad || 'pza'})</Text>
+                            )}
                           </Text>
                         </TouchableOpacity>
                       );
@@ -478,7 +616,7 @@ export default function MaterialesSelector({
                     </TouchableOpacity>
 
                     <TextInput
-                      style={[styles.stepperInput, { color: themeColors.text }]}
+                      style={[styles.stepperInput, { color: themeColors.text }, Platform.OS === 'web' && ({ minWidth: 0, outlineStyle: 'none' } as any)]}
                       keyboardType="decimal-pad"
                       value={usado}
                       onChangeText={(val) => {
@@ -560,7 +698,7 @@ export default function MaterialesSelector({
                     style={{ flex: 1 }}
                   />
                   <CustomButton
-                    title="Confirmar"
+                    title={materiales.some(m => m.productoId === selectedProduct.id && (m.empleadoId || '') === (selectedProduct.empleadoId || '')) ? "Actualizar Cantidad" : "Confirmar"}
                     variant="primary"
                     onPress={handleAddMaterial}
                     style={{ flex: 1 }}
@@ -568,6 +706,187 @@ export default function MaterialesSelector({
                 </View>
               </ScrollView>
             )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Modal para Material Libre / Manual */}
+      <Modal
+        statusBarTranslucent={true}
+        visible={manualModalVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => {
+          setManualModalVisible(false);
+          setManualEditingIndex(null);
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[
+            styles.modalOverlay,
+            {
+              paddingTop: Platform.OS !== 'web' ? Math.max(insets.top + 12, 16) : 24,
+              paddingBottom: Platform.OS !== 'web' ? Math.max(insets.bottom + 12, 16) : 24,
+            },
+          ]}
+        >
+          <View style={[styles.manualModalContent, { backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="create-outline" size={20} color={themeColors.primary} />
+                <Text style={{ fontSize: 17, fontWeight: 'bold', color: themeColors.text }}>
+                  {manualEditingIndex !== null ? 'Editar Material Libre' : 'Agregar Material Libre'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setManualModalVisible(false);
+                  setManualEditingIndex(null);
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ padding: Spacing.three }} keyboardShouldPersistTaps="handled">
+              {/* Nombre / Descripción */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <Text style={[styles.label, { color: themeColors.text }]}>Descripción del Material *</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: themeColors.background,
+                      borderColor: themeColors.border,
+                      color: themeColors.text,
+                    },
+                    Platform.OS === 'web' && ({ outlineStyle: 'none' } as any),
+                  ]}
+                  value={manualNombre}
+                  onChangeText={setManualNombre}
+                  placeholder="Ej. Cable UTP Cat 6, Cable cal. 12, Cinta..."
+                  placeholderTextColor={themeColors.textSecondary}
+                  autoFocus={true}
+                />
+              </View>
+
+              {/* Cantidad Usada */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <Text style={[styles.label, { color: themeColors.text }]}>Cantidad Usada *</Text>
+                <View style={[styles.stepperContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      const cur = parseFloat(manualCantidad) || 0;
+                      const next = Math.max(0.5, Math.round((cur - 1) * 100) / 100);
+                      setManualCantidad(next.toString());
+                    }}
+                    style={[styles.stepperBtn, { backgroundColor: '#ef444415' }]}
+                  >
+                    <Ionicons name="remove" size={24} color="#ef4444" />
+                  </TouchableOpacity>
+
+                  <TextInput
+                    style={[
+                      styles.stepperInput,
+                      { color: themeColors.text },
+                      Platform.OS === 'web' && ({ minWidth: 0, outlineStyle: 'none' } as any),
+                    ]}
+                    keyboardType="decimal-pad"
+                    value={manualCantidad}
+                    onChangeText={(val) => setManualCantidad(val.replace(/[^0-9.]/g, ''))}
+                    placeholder="1"
+                    placeholderTextColor={themeColors.textSecondary}
+                    textAlign="center"
+                  />
+
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      const cur = parseFloat(manualCantidad) || 0;
+                      const next = Math.round((cur + 1) * 100) / 100;
+                      setManualCantidad(next.toString());
+                    }}
+                    style={[styles.stepperBtn, { backgroundColor: themeColors.primary + '15' }]}
+                  >
+                    <Ionicons name="add" size={24} color={themeColors.primary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Unidad de Medida */}
+              <View style={{ marginBottom: Spacing.three }}>
+                <Text style={[styles.label, { color: themeColors.text }]}>Unidad de Medida</Text>
+                {/* Chips de acceso rápido */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                  {['m', 'pza', 'tramo', 'kg', 'rollo', 'caja', 'jgo'].map((u) => {
+                    const isSel = manualUnidad.toLowerCase() === u.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={u}
+                        onPress={() => setManualUnidad(u)}
+                        style={[
+                          styles.unitChip,
+                          {
+                            backgroundColor: isSel ? themeColors.primary : themeColors.background,
+                            borderColor: isSel ? themeColors.primary : themeColors.border,
+                          },
+                        ]}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: isSel ? '#ffffff' : themeColors.text }}>
+                          {u}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: themeColors.background,
+                      borderColor: themeColors.border,
+                      color: themeColors.text,
+                      height: 40,
+                      paddingVertical: 8,
+                    },
+                    Platform.OS === 'web' && ({ outlineStyle: 'none' } as any),
+                  ]}
+                  value={manualUnidad}
+                  onChangeText={setManualUnidad}
+                  placeholder="Otra unidad (ej. m, rollos, litros...)"
+                  placeholderTextColor={themeColors.textSecondary}
+                />
+              </View>
+
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: 10,
+                  borderRadius: BorderRadius.medium,
+                  backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  marginBottom: Spacing.three,
+                }}
+              >
+                <Ionicons name="information-circle-outline" size={18} color={themeColors.textSecondary} />
+                <Text style={{ flex: 1, fontSize: 12, color: themeColors.textSecondary }}>
+                  Este material no se descuenta del inventario ni requiere existencias previas.
+                </Text>
+              </View>
+
+              <CustomButton
+                title={manualEditingIndex !== null ? 'Guardar Cambios' : 'Agregar Material'}
+                variant="primary"
+                onPress={handleSaveManualMaterial}
+                icon={<Ionicons name="checkmark" size={18} color="#ffffff" style={{ marginRight: 8 }} />}
+              />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -650,14 +969,33 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '100%',
     maxWidth: 540,
+    height: Platform.OS === 'web' ? '82%' : '88%',
+    maxHeight: '90%',
     borderRadius: BorderRadius.large,
-    maxHeight: '82%',
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 8,
+  },
+  manualModalContent: {
+    width: '100%',
+    maxWidth: 500,
+    maxHeight: '85%',
+    borderRadius: BorderRadius.large,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  unitChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -699,18 +1037,20 @@ const styles = StyleSheet.create({
     height: 54,
   },
   stepperBtn: {
-    width: 46,
+    width: 44,
     height: 44,
     borderRadius: BorderRadius.small,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   stepperInput: {
     flex: 1,
+    minWidth: 0,
     fontSize: 22,
     fontWeight: '800',
     textAlign: 'center',
     paddingVertical: 4,
+    paddingHorizontal: 8,
   },
 });
-

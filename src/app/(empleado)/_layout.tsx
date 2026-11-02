@@ -52,6 +52,7 @@ function EmpleadoLayoutContent() {
     if (lastPart === 'formulario') return 'Registrar Gasto';
     if (lastPart === 'editar-gasto') return 'Editar Gasto';
     if (lastPart === 'agregar-evidencia') return 'Nueva Evidencia';
+    if (lastPart === 'editar-evidencia') return 'Editar Evidencia';
     if (lastPart === 'evidencia') return 'Evidencias';
     if (lastPart === 'retiro-material') return 'Retiro de Material';
     if (lastPart === 'devoluciones') return 'Devoluciones';
@@ -116,7 +117,7 @@ function EmpleadoLayoutContent() {
             style={styles.headerTitleContainer}
             onPress={() => {
               setIsMenuOpen(false);
-              if (pathname.includes('agregar-evidencia')) {
+              if (pathname.includes('agregar-evidencia') || pathname.includes('editar-evidencia')) {
                 if (router.canGoBack()) router.back();
                 else router.replace('/(empleado)/evidencia');
               } else if (pathname.includes('formulario') || pathname.includes('editar-gasto')) {
