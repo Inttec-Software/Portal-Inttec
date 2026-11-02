@@ -143,6 +143,9 @@ export const crearEvidencia = async (req: Request, res: Response) => {
     }> = {};
     for (const t of trabajosPayload) {
       for (const m of (t.materiales_usados || [])) {
+        if (m.esLibre || !m.productoId || String(m.productoId).startsWith('manual_') || String(m.productoId).startsWith('custom_')) {
+          continue;
+        }
         if (m.usado > 0) {
           const targetEmpleadoId = m.empleadoId || user.id;
           const targetEmpleadoNombre = m.empleadoNombre || (targetEmpleadoId === user.id ? user.nombre : 'Colaborador');
@@ -386,6 +389,9 @@ export const actualizarEvidencia = async (req: Request, res: Response) => {
     if (Array.isArray(prevTrabajosPayload)) {
       for (const t of prevTrabajosPayload) {
         for (const m of (t.materiales_usados || [])) {
+        if (m.esLibre || !m.productoId || String(m.productoId).startsWith('manual_') || String(m.productoId).startsWith('custom_')) {
+          continue;
+        }
           if (Number(m.usado) > 0) {
             const targetEmpId = m.empleadoId || existingEvidencia.empleado_id;
             const targetEmpName = m.empleadoNombre || 'Empleado';
@@ -418,6 +424,9 @@ export const actualizarEvidencia = async (req: Request, res: Response) => {
     if (Array.isArray(trabajosPayload)) {
       for (const t of trabajosPayload) {
         for (const m of (t.materiales_usados || [])) {
+        if (m.esLibre || !m.productoId || String(m.productoId).startsWith('manual_') || String(m.productoId).startsWith('custom_')) {
+          continue;
+        }
           if (Number(m.usado) > 0) {
             const targetEmpId = m.empleadoId || user.id;
             const targetEmpName = m.empleadoNombre || (targetEmpId === user.id ? user.nombre : 'Colaborador');

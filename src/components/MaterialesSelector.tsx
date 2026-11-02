@@ -27,6 +27,7 @@ export interface MaterialUsado {
   unidad?: string;
   empleadoId?: string;
   empleadoNombre?: string;
+  esLibre?: boolean;
 }
 
 interface MaterialesSelectorProps {
@@ -59,6 +60,13 @@ export default function MaterialesSelector({
   // Variables locales para cuando seleccionan un producto
   const [selectedProduct, setSelectedProduct] = useState<ProductoInventario | null>(null);
   const [usado, setUsado] = useState('');
+
+  // Estados para Material Libre / Manual
+  const [manualModalVisible, setManualModalVisible] = useState(false);
+  const [manualEditingIndex, setManualEditingIndex] = useState<number | null>(null);
+  const [manualNombre, setManualNombre] = useState('');
+  const [manualCantidad, setManualCantidad] = useState('');
+  const [manualUnidad, setManualUnidad] = useState('m');
 
   const handleToggle = (val: boolean) => {
     if (onToggleUsaMateriales) {
@@ -166,6 +174,65 @@ export default function MaterialesSelector({
     setModalVisible(false);
   };
 
+  const handleOpenAddManual = () => {
+    setManualEditingIndex(null);
+    setManualNombre('');
+    setManualCantidad('1');
+    setManualUnidad('m');
+    setManualModalVisible(true);
+  };
+
+  const handleOpenEditManual = (idx: number, m: MaterialUsado) => {
+    setManualEditingIndex(idx);
+    setManualNombre(m.nombre);
+    setManualCantidad(m.usado.toString());
+    setManualUnidad(m.unidad || 'pza');
+    setManualModalVisible(true);
+  };
+
+  const handleSaveManualMaterial = () => {
+    const nombreTrim = manualNombre.trim();
+    const cantNum = parseFloat(manualCantidad);
+
+    if (!nombreTrim) {
+      Alert.alert('Validación', 'Ingresa una descripción o nombre para el material.');
+      return;
+    }
+    if (isNaN(cantNum) || cantNum <= 0) {
+      Alert.alert('Validación', 'Ingresa una cantidad válida mayor a 0.');
+      return;
+    }
+
+    if (onToggleUsaMateriales && !isEnabled) {
+      onToggleUsaMateriales(true);
+    }
+
+    const item: MaterialUsado = {
+      productoId: manualEditingIndex !== null && materiales[manualEditingIndex]?.productoId
+        ? materiales[manualEditingIndex].productoId
+        : `manual_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      nombre: nombreTrim,
+      retirado: cantNum,
+      usado: cantNum,
+      sobrante: 0,
+      unidad: manualUnidad.trim() || 'pza',
+      esLibre: true,
+    };
+
+    if (manualEditingIndex !== null) {
+      const next = [...materiales];
+      next[manualEditingIndex] = item;
+      onChange(next);
+    } else {
+      onChange([...materiales, item]);
+    }
+
+    setManualModalVisible(false);
+    setManualEditingIndex(null);
+    setManualNombre('');
+    setManualCantidad('');
+  };
+
   const handleRemoveMaterial = (index: number) => {
     const updated = materiales.filter((_, i) => i !== index);
     onChange(updated);
@@ -237,6 +304,10 @@ export default function MaterialesSelector({
                   key={idx}
                   activeOpacity={0.7}
                   onPress={() => {
+                    if (m.esLibre) {
+                      handleOpenEditManual(idx, m);
+                      return;
+                    }
                     const prodMatch = productos.find(
                       p => p.id === m.productoId && (p.empleadoId || '') === (m.empleadoId || '')
                     );
@@ -262,7 +333,7 @@ export default function MaterialesSelector({
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
                       <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 14, flex: 1 }}>{m.nombre}</Text>
-                      {m.empleadoNombre ? (
+                      {m.esLibre ? null : m.empleadoNombre ? (
                         <View style={[styles.ownerTag, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary + '30' }]}>
                           <Ionicons name="person-outline" size={11} color={themeColors.primary} />
                           <Text style={{ fontSize: 11, fontWeight: '600', color: themeColors.primary }}>{m.empleadoNombre}</Text>
@@ -270,9 +341,9 @@ export default function MaterialesSelector({
                       ) : null}
                     </View>
                     <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Stock: {m.retirado} {m.unidad || 'pza'}</Text>
+                      <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Stock: {m.esLibre ? '-' : `${m.retirado} ${m.unidad || 'pza'}`}</Text>
                       <Text style={{ color: themeColors.textSecondary, fontSize: 12 }}>Usado: {m.usado} {m.unidad || 'pza'}</Text>
-                      <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.sobrante} {m.unidad || 'pza'}</Text>
+                      <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: '700' }}>Sobrante: {m.esLibre ? '-' : `${m.sobrante} ${m.unidad || 'pza'}`}</Text>
                       <Text style={{ color: themeColors.primary, fontSize: 11, fontStyle: 'italic', marginLeft: 4 }}>✏️ Editar</Text>
                     </View>
                   </View>
@@ -291,19 +362,28 @@ export default function MaterialesSelector({
             </View>
           )}
 
-          <CustomButton
-            title="Agregar Material del Inventario"
-            variant="secondary"
-            onPress={() => {
-              setSelectedOwnerFilter('TODOS');
-              setSearchQuery('');
-              setModalVisible(true);
-            }}
-            icon={<Ionicons name="add" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
-          />
+          <View style={{ flexDirection: 'column', gap: Spacing.one }}>
+            <CustomButton
+              title="Agregar Material del Inventario"
+              variant="secondary"
+              onPress={() => {
+                setSelectedOwnerFilter('TODOS');
+                setSearchQuery('');
+                setModalVisible(true);
+              }}
+              icon={<Ionicons name="cube-outline" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
+            />
+            <CustomButton
+              title="Agregar Material Libre / Manual"
+              variant="secondary"
+              onPress={handleOpenAddManual}
+              icon={<Ionicons name="create-outline" size={18} color={themeColors.primary} style={{ marginRight: 8 }} />}
+            />
+          </View>
         </View>
       )}
 
+      {/* Modal para Material de Inventario */}
       <Modal 
         statusBarTranslucent={true} 
         visible={modalVisible} 
@@ -629,6 +709,187 @@ export default function MaterialesSelector({
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Modal para Material Libre / Manual */}
+      <Modal
+        statusBarTranslucent={true}
+        visible={manualModalVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => {
+          setManualModalVisible(false);
+          setManualEditingIndex(null);
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[
+            styles.modalOverlay,
+            {
+              paddingTop: Platform.OS !== 'web' ? Math.max(insets.top + 12, 16) : 24,
+              paddingBottom: Platform.OS !== 'web' ? Math.max(insets.bottom + 12, 16) : 24,
+            },
+          ]}
+        >
+          <View style={[styles.manualModalContent, { backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="create-outline" size={20} color={themeColors.primary} />
+                <Text style={{ fontSize: 17, fontWeight: 'bold', color: themeColors.text }}>
+                  {manualEditingIndex !== null ? 'Editar Material Libre' : 'Agregar Material Libre'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setManualModalVisible(false);
+                  setManualEditingIndex(null);
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ padding: Spacing.three }} keyboardShouldPersistTaps="handled">
+              {/* Nombre / Descripción */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <Text style={[styles.label, { color: themeColors.text }]}>Descripción del Material *</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: themeColors.background,
+                      borderColor: themeColors.border,
+                      color: themeColors.text,
+                    },
+                    Platform.OS === 'web' && ({ outlineStyle: 'none' } as any),
+                  ]}
+                  value={manualNombre}
+                  onChangeText={setManualNombre}
+                  placeholder="Ej. Cable UTP Cat 6, Cable cal. 12, Cinta..."
+                  placeholderTextColor={themeColors.textSecondary}
+                  autoFocus={true}
+                />
+              </View>
+
+              {/* Cantidad Usada */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <Text style={[styles.label, { color: themeColors.text }]}>Cantidad Usada *</Text>
+                <View style={[styles.stepperContainer, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      const cur = parseFloat(manualCantidad) || 0;
+                      const next = Math.max(0.5, Math.round((cur - 1) * 100) / 100);
+                      setManualCantidad(next.toString());
+                    }}
+                    style={[styles.stepperBtn, { backgroundColor: '#ef444415' }]}
+                  >
+                    <Ionicons name="remove" size={24} color="#ef4444" />
+                  </TouchableOpacity>
+
+                  <TextInput
+                    style={[
+                      styles.stepperInput,
+                      { color: themeColors.text },
+                      Platform.OS === 'web' && ({ minWidth: 0, outlineStyle: 'none' } as any),
+                    ]}
+                    keyboardType="decimal-pad"
+                    value={manualCantidad}
+                    onChangeText={(val) => setManualCantidad(val.replace(/[^0-9.]/g, ''))}
+                    placeholder="1"
+                    placeholderTextColor={themeColors.textSecondary}
+                    textAlign="center"
+                  />
+
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      const cur = parseFloat(manualCantidad) || 0;
+                      const next = Math.round((cur + 1) * 100) / 100;
+                      setManualCantidad(next.toString());
+                    }}
+                    style={[styles.stepperBtn, { backgroundColor: themeColors.primary + '15' }]}
+                  >
+                    <Ionicons name="add" size={24} color={themeColors.primary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Unidad de Medida */}
+              <View style={{ marginBottom: Spacing.three }}>
+                <Text style={[styles.label, { color: themeColors.text }]}>Unidad de Medida</Text>
+                {/* Chips de acceso rápido */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                  {['m', 'pza', 'tramo', 'kg', 'rollo', 'caja', 'jgo'].map((u) => {
+                    const isSel = manualUnidad.toLowerCase() === u.toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={u}
+                        onPress={() => setManualUnidad(u)}
+                        style={[
+                          styles.unitChip,
+                          {
+                            backgroundColor: isSel ? themeColors.primary : themeColors.background,
+                            borderColor: isSel ? themeColors.primary : themeColors.border,
+                          },
+                        ]}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: isSel ? '#ffffff' : themeColors.text }}>
+                          {u}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: themeColors.background,
+                      borderColor: themeColors.border,
+                      color: themeColors.text,
+                      height: 40,
+                      paddingVertical: 8,
+                    },
+                    Platform.OS === 'web' && ({ outlineStyle: 'none' } as any),
+                  ]}
+                  value={manualUnidad}
+                  onChangeText={setManualUnidad}
+                  placeholder="Otra unidad (ej. m, rollos, litros...)"
+                  placeholderTextColor={themeColors.textSecondary}
+                />
+              </View>
+
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: 10,
+                  borderRadius: BorderRadius.medium,
+                  backgroundColor: scheme === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  marginBottom: Spacing.three,
+                }}
+              >
+                <Ionicons name="information-circle-outline" size={18} color={themeColors.textSecondary} />
+                <Text style={{ flex: 1, fontSize: 12, color: themeColors.textSecondary }}>
+                  Este material no se descuenta del inventario ni requiere existencias previas.
+                </Text>
+              </View>
+
+              <CustomButton
+                title={manualEditingIndex !== null ? 'Guardar Cambios' : 'Agregar Material'}
+                variant="primary"
+                onPress={handleSaveManualMaterial}
+                icon={<Ionicons name="checkmark" size={18} color="#ffffff" style={{ marginRight: 8 }} />}
+              />
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -718,6 +979,24 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
   },
+  manualModalContent: {
+    width: '100%',
+    maxWidth: 500,
+    maxHeight: '85%',
+    borderRadius: BorderRadius.large,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  unitChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -775,4 +1054,3 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
 });
-
