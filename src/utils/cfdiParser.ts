@@ -69,21 +69,78 @@ export interface ParsedCFDI {
 }
 
 /**
+ * Repara comillas dobles (") o ampersands (&) sin escapar dentro de valores de atributos XML
+ * (por ejemplo, Descripcion="Llave de 6", 8", 12"" -> Descripcion="Llave de 6&quot;, 8&quot;, 12&quot;").
+ */
+export function sanitizeCfdiXmlAttributes(xml: string): string {
+  if (!xml || typeof xml !== 'string') return xml;
+  return xml.replace(/<([a-zA-Z0-9_:-]+)(\s[^>]*?)(\/?>)/g, (_fullMatch, tagName, attrsPart, closeBracket) => {
+    let out = '';
+    let i = 0;
+    const len = attrsPart.length;
+    let inAttrValue = false;
+
+    while (i < len) {
+      const ch = attrsPart[i];
+      if (!inAttrValue) {
+        out += ch;
+        if (ch === '"') {
+          inAttrValue = true;
+        }
+        i++;
+      } else {
+        if (ch === '"') {
+          const rest = attrsPart.slice(i + 1);
+          if (/^\s*$/.test(rest) || /^\s+[a-zA-Z_][a-zA-Z0-9_.:-]*\s*=\s*"/.test(rest)) {
+            out += '"';
+            inAttrValue = false;
+          } else {
+            out += '&quot;';
+          }
+          i++;
+        } else if (ch === '&') {
+          const rest = attrsPart.slice(i);
+          if (/^&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);/i.test(rest)) {
+            out += '&';
+          } else {
+            out += '&amp;';
+          }
+          i++;
+        } else {
+          out += ch;
+          i++;
+        }
+      }
+    }
+
+    return `<${tagName}${out}${closeBracket}`;
+  });
+}
+
+/**
  * Extrae el valor de un atributo en un fragmento XML
  */
 function getAttribute(xmlSnippet: string, attrName: string): string {
   const regex = new RegExp(`\\b${attrName}="([^"]*)"`, 'i');
   const match = xmlSnippet.match(regex);
-  return match ? match[1] : '';
+  if (!match) return '';
+  return match[1]
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 }
 
 /**
  * Convierte un XML timbrado CFDI 4.0 al formato estructurado para PDF y vistas
  */
-export function parseCFDIXML(xmlText: string, status: 'valid' | 'canceled' = 'valid'): ParsedCFDI {
-  if (!xmlText || typeof xmlText !== 'string') {
+export function parseCFDIXML(rawXmlText: string, status: 'valid' | 'canceled' = 'valid'): ParsedCFDI {
+  if (!rawXmlText || typeof rawXmlText !== 'string') {
     throw new Error('El contenido del XML es inválido o está vacío');
   }
+
+  const xmlText = sanitizeCfdiXmlAttributes(rawXmlText);
 
   // 1. Datos del Comprobante
   const comprobanteMatch = xmlText.match(/<cfdi:Comprobante\b([^>]*)>/i) || xmlText.match(/<Comprobante\b([^>]*)>/i);

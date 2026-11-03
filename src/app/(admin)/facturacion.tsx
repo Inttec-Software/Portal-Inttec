@@ -23,7 +23,7 @@ import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
-import { parseCFDIXML } from '@/utils/cfdiParser';
+import { parseCFDIXML, sanitizeCfdiXmlAttributes } from '@/utils/cfdiParser';
 import { exportarFacturaOdooPDF, exportarReciboPagoPDF, generarReciboPagoHTML, cleanFolio } from '@/utils/reportGenerator';
 import FacturaPreviewModal from '@/components/FacturaPreviewModal';
 import { FacturacionTableSkeleton, FacturacionCardsListSkeleton } from '@/components/skeleton';
@@ -1732,7 +1732,7 @@ export default function FacturacionScreen() {
         if (j.notas && !(factura as any).notas) {
           (factura as any).notas = j.notas;
         }
-        if (j.xml && j.xml.includes('<')) return j.xml;
+        if (j.xml && j.xml.includes('<')) return sanitizeCfdiXmlAttributes(j.xml);
       }
     } catch (_) {}
 
@@ -1740,7 +1740,7 @@ export default function FacturacionScreen() {
     if (factura.cfdi_xml_url && factura.cfdi_xml_url.startsWith('data:application/xml;base64,')) {
       try {
         const b64 = factura.cfdi_xml_url.replace('data:application/xml;base64,', '');
-        return decodeURIComponent(escape(atob(b64)));
+        return sanitizeCfdiXmlAttributes(decodeURIComponent(escape(atob(b64))));
       } catch (_) {}
     }
 
@@ -1750,7 +1750,7 @@ export default function FacturacionScreen() {
         const resp = await fetch(factura.cfdi_xml_url);
         if (resp.ok) {
           const text = await resp.text();
-          if (text && text.includes('<')) return text;
+          if (text && text.includes('<')) return sanitizeCfdiXmlAttributes(text);
         }
       } catch (_) {}
     }
@@ -1759,12 +1759,12 @@ export default function FacturacionScreen() {
     if (factura.cfdi_uuid) {
       try {
         const { data: dUpper } = await supabase.storage.from('facturas').download(`${factura.cfdi_uuid.toUpperCase()}.xml`);
-        if (dUpper) return await dUpper.text();
+        if (dUpper) return sanitizeCfdiXmlAttributes(await dUpper.text());
       } catch (_) {}
 
       try {
         const { data: dLower } = await supabase.storage.from('facturas').download(`${factura.cfdi_uuid.toLowerCase()}.xml`);
-        if (dLower) return await dLower.text();
+        if (dLower) return sanitizeCfdiXmlAttributes(await dLower.text());
       } catch (_) {}
     }
 
@@ -2496,7 +2496,8 @@ export default function FacturacionScreen() {
         const cl = normalizeText(f.cliente || '');
         const fo = normalizeText(f.folio || '');
         const uu = normalizeText(f.cfdi_uuid || '');
-        return cl.includes(q) || fo.includes(q) || uu.includes(q);
+        const oc = normalizeText(f.orden_compra || '');
+        return cl.includes(q) || fo.includes(q) || uu.includes(q) || oc.includes(q);
       }
       return true;
     });
@@ -2849,6 +2850,7 @@ export default function FacturacionScreen() {
           </TouchableOpacity>
           <Text style={[styles.facturasTableHeaderCell, { width: 110, color: themeColors.text }]}>Número</Text>
           <Text style={[styles.facturasTableHeaderCell, { flex: 1, minWidth: 200, color: themeColors.text }]}>Cliente</Text>
+          <Text style={[styles.facturasTableHeaderCell, { width: 140, color: themeColors.text }]}>Orden de compra</Text>
           <Text style={[styles.facturasTableHeaderCell, { width: 130, color: themeColors.text }]}>Etiqueta</Text>
           <Text style={[styles.facturasTableHeaderCell, { width: 125, color: themeColors.text }]}>Fecha de factura</Text>
           <Text style={[styles.facturasTableHeaderCell, { width: 135, textAlign: 'right', paddingRight: 10, color: themeColors.text }]}>Total</Text>
@@ -2921,6 +2923,24 @@ export default function FacturacionScreen() {
                     {factura.cfdi_uuid}
                   </Text>
                 ) : null}
+              </View>
+
+              {/* Orden de compra */}
+              <View style={{ width: 140, justifyContent: 'center', paddingRight: 8 }}>
+                {(factura.orden_compra || factura.notas?.config?.orden_compra) ? (
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontSize: 12,
+                      fontWeight: '600',
+                      color: themeColors.text,
+                    }}
+                  >
+                    {factura.orden_compra || factura.notas?.config?.orden_compra}
+                  </Text>
+                ) : (
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary + '70' }}>--</Text>
+                )}
               </View>
 
               {/* Etiqueta */}
@@ -4520,6 +4540,7 @@ export default function FacturacionScreen() {
                       </TouchableOpacity>
                       <Text style={[styles.facturasTableHeaderCell, { width: 110, color: themeColors.text }]}>Número</Text>
                       <Text style={[styles.facturasTableHeaderCell, { flex: 1, minWidth: 200, color: themeColors.text }]}>Cliente</Text>
+                      <Text style={[styles.facturasTableHeaderCell, { width: 140, color: themeColors.text }]}>Orden de compra</Text>
                       <Text style={[styles.facturasTableHeaderCell, { width: 130, color: themeColors.text }]}>Etiqueta</Text>
                       <Text style={[styles.facturasTableHeaderCell, { width: 125, color: themeColors.text }]}>Fecha de factura</Text>
                       <Text style={[styles.facturasTableHeaderCell, { width: 135, textAlign: 'right', paddingRight: 10, color: themeColors.text }]}>Total</Text>
@@ -4592,6 +4613,24 @@ export default function FacturacionScreen() {
                                   {factura.cfdi_uuid}
                                 </Text>
                               ) : null}
+                            </View>
+
+                            {/* Orden de compra */}
+                            <View style={{ width: 140, justifyContent: 'center', paddingRight: 8 }}>
+                              {(factura.orden_compra || factura.notas?.config?.orden_compra) ? (
+                                <Text
+                                  numberOfLines={1}
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: '600',
+                                    color: themeColors.text,
+                                  }}
+                                >
+                                  {factura.orden_compra || factura.notas?.config?.orden_compra}
+                                </Text>
+                              ) : (
+                                <Text style={{ fontSize: 11, color: themeColors.textSecondary + '70' }}>--</Text>
+                              )}
                             </View>
 
                             {/* Etiqueta */}
@@ -4904,6 +4943,20 @@ export default function FacturacionScreen() {
                             <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
                               📅 {formatFechaFactura(factura.fecha || factura.created_at)}
                             </Text>
+                            {factura.orden_compra ? (
+                              <View
+                                style={{
+                                  backgroundColor: '#0284c715',
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '600', color: '#0284c7' }}>
+                                  OC: {factura.orden_compra}
+                                </Text>
+                              </View>
+                            ) : null}
                             {factura.etiqueta ? (
                               <View
                                 style={{

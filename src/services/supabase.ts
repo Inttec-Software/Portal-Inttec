@@ -127,6 +127,52 @@ export interface Gasto {
   proveedor_rel?: { id: string; nombre: string } | null;
   cliente_rel?: { id: string; nombre: string } | null;
   sucursal_rel?: { id: string; nombre: string } | null;
+  // Conciliación automática con Facturas Recibidas (SAT)
+  conciliacion_activa?: boolean | null;
+  factura_recibida_id?: string | null;
+  factura_sugerida_id?: string | null;
+  devuelto_por_factura?: boolean | null;
+  facturas_descartadas_ids?: string[] | null;
+  factura_sugerida_rel?: {
+    id: string;
+    uuid: string;
+    rfc_emisor?: string;
+    nombre_emisor?: string;
+    rfc_receptor?: string;
+    fecha_emision?: string;
+    subtotal?: number;
+    descuento?: number;
+    iva?: number;
+    retencion_isr?: number;
+    retencion_iva?: number;
+    total?: number;
+    moneda?: string;
+    tipo_comprobante?: string;
+    estado_sat?: string;
+    xml_url?: string | null;
+    pdf_url?: string | null;
+    conceptos_json?: any;
+  } | null;
+  factura_recibida_rel?: {
+    id: string;
+    uuid: string;
+    rfc_emisor?: string;
+    nombre_emisor?: string;
+    rfc_receptor?: string;
+    fecha_emision?: string;
+    subtotal?: number;
+    descuento?: number;
+    iva?: number;
+    retencion_isr?: number;
+    retencion_iva?: number;
+    total?: number;
+    moneda?: string;
+    tipo_comprobante?: string;
+    estado_sat?: string;
+    xml_url?: string | null;
+    pdf_url?: string | null;
+    conceptos_json?: any;
+  } | null;
 }
 
 export const GastoHelper = {

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
+import { ensureGastosConciliacionSchema } from '../reportes/reportes.controller';
 
 // Helper: calcular estado de pago
 function calcularEstadoPago(precioTotal: number, totalPagado: number): string {
@@ -179,6 +180,8 @@ export const getVentaDetalle = async (req: Request, res: Response) => {
 
     const { id } = req.params;
 
+    await ensureGastosConciliacionSchema(pool);
+
     const [partidasRes, gastosRes, pagosRes] = await Promise.all([
       pool.query('SELECT * FROM ventas_partidas WHERE venta_id = $1', [id]),
       pool.query(`
@@ -192,7 +195,7 @@ export const getVentaDetalle = async (req: Request, res: Response) => {
           (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
           (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
         FROM gastos g
-        WHERE g.venta_id = $1 AND g.status = 'APPROVED'
+        WHERE g.venta_id = $1 AND (g.status = 'APPROVED' OR (g.status = 'PENDING' AND COALESCE(g.devuelto_por_factura, FALSE) = TRUE))
       `, [id]),
       pool.query('SELECT * FROM ventas_pagos WHERE venta_id = $1 ORDER BY fecha_pago DESC', [id]),
     ]);

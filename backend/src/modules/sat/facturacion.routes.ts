@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseClient } from '../../config/supabase';
 import { buildUnsignedCFDI } from './finkok/xmlBuilder';
 import { buildUnsignedCFDIPagos, CFDIPagoParams, DoctoRelacionadoParam } from './finkok/xmlBuilderPagos';
-import { signStampFinkok, signCancelFinkok } from './finkok/soapClient';
+import { signStampFinkok, signCancelFinkok, sanitizeCfdiXmlAttributes } from './finkok/soapClient';
 import { invalidateCache } from '../../middlewares/cache.middleware';
 import { folioMutex } from '../../utils/mutex';
 
@@ -1562,6 +1562,26 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
       .order('created_at', { ascending: false });
 
     if (!factsErr && factsData && factsData.length > 0) {
+      const ventaIds = Array.from(
+        new Set(
+          factsData
+            .filter((f: any) => !f.orden_compra && f.venta_id)
+            .map((f: any) => f.venta_id)
+        )
+      );
+      const ventaOcMap: Record<string, string> = {};
+      if (ventaIds.length > 0) {
+        try {
+          const { data: vData } = await supabaseClient
+            .from('ventas')
+            .select('id, orden_compra')
+            .in('id', ventaIds);
+          (vData || []).forEach((v: any) => {
+            if (v.id && v.orden_compra) ventaOcMap[String(v.id)] = v.orden_compra;
+          });
+        } catch (_) {}
+      }
+
       const facturas = factsData.map((f: any) => {
         const isBorrador = f.cfdi_estado === 'BORRADOR';
         const cleanFolioVal = cleanFolio(f.folio);
@@ -1595,7 +1615,7 @@ router.get('/facturas-emitidas', async (req: Request, res: Response) => {
           total_pagado: Number(f.total_pagado || 0),
           saldo_pendiente: Number(f.saldo_pendiente || 0),
           estado_pago: f.estado_pago,
-          orden_compra: f.orden_compra,
+          orden_compra: f.orden_compra || f.notas?.config?.orden_compra || (f.venta_id ? ventaOcMap[String(f.venta_id)] : null) || null,
           etiqueta: f.etiqueta || f.notas?.config?.etiqueta || null,
           venta_id: f.venta_id,
           created_at: f.created_at,
@@ -1744,8 +1764,9 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
       try {
         const fetchResp = await fetch(xmlUrl);
         if (fetchResp.ok) {
-          const text = await fetchResp.text();
-          if (text && text.includes('<')) {
+          const rawText = await fetchResp.text();
+          if (rawText && rawText.includes('<')) {
+            const text = sanitizeCfdiXmlAttributes(rawText);
             return res.json({ success: true, xml: text, cliente_direccion: resolvedDireccion, notas: factura?.notas || null });
           }
         }
@@ -1767,8 +1788,9 @@ router.get('/factura-xml/:identificador', async (req: Request, res: Response) =>
           .download(fName);
 
         if (!downErr && fileBlob) {
-          const text = await fileBlob.text();
-          if (text && text.includes('<')) {
+          const rawText = await fileBlob.text();
+          if (rawText && rawText.includes('<')) {
+            const text = sanitizeCfdiXmlAttributes(rawText);
             return res.json({ success: true, xml: text, cliente_direccion: resolvedDireccion, notas: factura?.notas || null });
           }
         }

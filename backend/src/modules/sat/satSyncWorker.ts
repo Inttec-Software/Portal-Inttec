@@ -2,6 +2,8 @@ import { getDbPool } from '../../config/database';
 import { uploadFileToStorage } from '../../config/storage';
 import { SatSoapClient } from './satSoapClient';
 import { parseCfdiXml } from './xmlParser';
+import { reconcilePendingInvoicesForPool } from '../reportes/reportes.controller';
+import { invalidateCache } from '../../middlewares/cache.middleware';
 import JSZip from 'jszip';
 
 export async function processSatSync(company: string, env: string, options: any = {}) {
@@ -135,6 +137,15 @@ export async function processSatSync(company: string, env: string, options: any 
         resumen.nuevaSolicitudCreada = true;
         resumen.idNuevaSolicitud = solResult.idSolicitud;
       }
+    }
+  }
+
+  if (resumen.facturasProcesadas > 0) {
+    try {
+      await reconcilePendingInvoicesForPool(pool);
+      invalidateCache('reportes');
+    } catch (recErr) {
+      console.warn('[SAT Worker] Error ejecutando conciliación de gastos con facturas pendientes:', recErr);
     }
   }
 
