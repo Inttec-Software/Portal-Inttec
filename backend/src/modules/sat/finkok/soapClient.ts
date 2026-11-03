@@ -1,5 +1,54 @@
 // @ts-nocheck
 
+/**
+ * Repara comillas dobles (") o ampersands (&) sin escapar dentro de valores de atributos XML
+ * (por ejemplo, Descripcion="Llave de 6", 8", 12"" -> Descripcion="Llave de 6&quot;, 8&quot;, 12&quot;").
+ */
+export function sanitizeCfdiXmlAttributes(xml: string): string {
+  if (!xml || typeof xml !== 'string') return xml;
+  return xml.replace(/<([a-zA-Z0-9_:-]+)(\s[^>]*?)(\/?>)/g, (_fullMatch, tagName, attrsPart, closeBracket) => {
+    let out = '';
+    let i = 0;
+    const len = attrsPart.length;
+    let inAttrValue = false;
+
+    while (i < len) {
+      const ch = attrsPart[i];
+      if (!inAttrValue) {
+        out += ch;
+        if (ch === '"') {
+          inAttrValue = true;
+        }
+        i++;
+      } else {
+        if (ch === '"') {
+          const rest = attrsPart.slice(i + 1);
+          if (/^\s*$/.test(rest) || /^\s+[a-zA-Z_][a-zA-Z0-9_.:-]*\s*=\s*"/.test(rest)) {
+            out += '"';
+            inAttrValue = false;
+          } else {
+            out += '&quot;';
+          }
+          i++;
+        } else if (ch === '&') {
+          const rest = attrsPart.slice(i);
+          if (/^&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);/i.test(rest)) {
+            out += '&';
+          } else {
+            out += '&amp;';
+          }
+          i++;
+        } else {
+          out += ch;
+          i++;
+        }
+      }
+    }
+
+    return `<${tagName}${out}${closeBracket}`;
+  });
+}
+
 function extractTag(xml: string, tag: string): string | null {
   const regex = new RegExp(`<(?:[a-zA-Z0-9_-]+:)?${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:[a-zA-Z0-9_-]+:)?${tag}>`, 'i');
   const match = xml.match(regex);
@@ -75,14 +124,17 @@ export async function signStampFinkok(
 
   xmlTimbrado = xmlTimbrado.trim();
   // Si viene con entidades escapadas como &lt;cfdi:Comprobante... des-escapar
-  if (xmlTimbrado.startsWith('&lt;')) {
+  // IMPORTANTE: &amp; SIEMPRE debe des-escaparse al final para no convertir &amp;quot; en " cruda dentro de atributos
+  if (xmlTimbrado.startsWith('&lt;') || xmlTimbrado.includes('&lt;cfdi:')) {
     xmlTimbrado = xmlTimbrado
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&')
       .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'");
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&');
   }
+
+  xmlTimbrado = sanitizeCfdiXmlAttributes(xmlTimbrado);
 
   // Extraer UUID
   let uuid = extractTag(responseText, 'UUID');

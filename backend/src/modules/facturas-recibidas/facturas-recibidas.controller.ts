@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
 import { SatSyncService } from '../../services/satSyncService';
+import { reconcilePendingInvoicesForPool } from '../reportes/reportes.controller';
+import { invalidateCache } from '../../middlewares/cache.middleware';
 
 // === GET /api/facturas-recibidas ===
 export const getFacturasRecibidas = async (req: Request, res: Response) => {
@@ -105,6 +107,13 @@ export const importFactura = async (req: Request, res: Response) => {
       `INSERT INTO facturas_recibidas (${keys.join(', ')}) VALUES (${placeholders}) ON CONFLICT (uuid) DO UPDATE SET ${updateEx} RETURNING *`,
       values
     );
+
+    try {
+      await reconcilePendingInvoicesForPool(pool);
+      invalidateCache('reportes');
+    } catch (recErr) {
+      console.warn('[importFactura] Error ejecutando conciliación de gastos:', recErr);
+    }
 
     return res.json({ success: true, factura: rows[0] });
   } catch (error: any) {

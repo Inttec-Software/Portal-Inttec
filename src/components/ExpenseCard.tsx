@@ -36,6 +36,9 @@ function ExpenseCard({
   const clienteNombre = GastoHelper.getCliente(gasto);
   const sucursalNombre = GastoHelper.getSucursal(gasto);
 
+  const isDevueltoFactura = gasto.status === 'PENDING' && Boolean(gasto.devuelto_por_factura);
+  const isNuevoConFacturaDetectada = gasto.status === 'PENDING' && !gasto.devuelto_por_factura && Boolean(gasto.factura_sugerida_rel || gasto.factura_sugerida_id);
+
   // Configuración de estados
   let statusText = 'PENDIENTE';
   let statusColor: string = themeColors.warning;
@@ -45,6 +48,14 @@ function ExpenseCard({
     statusText = 'OFFLINE';
     statusColor = themeColors.textSecondary;
     statusIcon = 'cloud-offline-outline';
+  } else if (isDevueltoFactura) {
+    statusText = 'FACTURA DETECTADA (DEVUELTO)';
+    statusColor = '#0284C7';
+    statusIcon = 'document-attach-outline';
+  } else if (isNuevoConFacturaDetectada) {
+    statusText = 'COMPROBAR FACTURA';
+    statusColor = '#D97706';
+    statusIcon = 'search-outline';
   } else if (gasto.status === 'APPROVED') {
     statusText = 'APROBADO';
     statusColor = themeColors.success;
@@ -75,8 +86,14 @@ function ExpenseCard({
         styles.card,
         {
           backgroundColor: themeColors.backgroundElement,
-          borderColor: gasto.status === 'ACTION_REQUIRED' ? themeColors.actionRequired : themeColors.border,
-          borderWidth: gasto.status === 'ACTION_REQUIRED' ? 1.5 : 1,
+          borderColor: isDevueltoFactura
+            ? '#0284C7'
+            : isNuevoConFacturaDetectada
+            ? '#F59E0B'
+            : gasto.status === 'ACTION_REQUIRED'
+            ? themeColors.actionRequired
+            : themeColors.border,
+          borderWidth: (isDevueltoFactura || isNuevoConFacturaDetectada || gasto.status === 'ACTION_REQUIRED') ? 1.5 : 1,
         },
       ]}
     >
@@ -194,7 +211,28 @@ function ExpenseCard({
         <Text style={[styles.monto, { color: themeColors.text }]}>{montoFormatted}</Text>
       </View>
 
-      {/* 5. Feedback Box */}
+      {/* 5. Banner de Factura Recibida Detectada (Devuelto de Historial vs Gasto Nuevo) */}
+      {isDevueltoFactura && gasto.factura_sugerida_rel ? (
+        <View style={[styles.feedbackContainer, { backgroundColor: '#0284C715', borderLeftColor: '#0284C7' }]}>
+          <Text style={[styles.feedbackTitle, { color: '#0284C7' }]}>
+            📄 Factura Recibida Detectada (Devuelto de Historial)
+          </Text>
+          <Text style={{ fontSize: 12, color: themeColors.text, fontWeight: '600' }} numberOfLines={2}>
+            Coincide con CFDI de {gasto.factura_sugerida_rel.nombre_emisor || gasto.factura_sugerida_rel.rfc_emisor || 'Proveedor'} por {montoFormatted}. Toca para ver PDF y volver a enviar.
+          </Text>
+        </View>
+      ) : isNuevoConFacturaDetectada && gasto.factura_sugerida_rel ? (
+        <View style={[styles.feedbackContainer, { backgroundColor: '#F59E0B18', borderLeftColor: '#D97706' }]}>
+          <Text style={[styles.feedbackTitle, { color: '#D97706' }]}>
+            ⚠️ Favor de comprobar que la factura recibida coincide con el gasto
+          </Text>
+          <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={2}>
+            Se detectó una factura recibida por {montoFormatted} ({gasto.factura_sugerida_rel.nombre_emisor || gasto.factura_sugerida_rel.rfc_emisor || 'SAT'}).
+          </Text>
+        </View>
+      ) : null}
+
+      {/* 6. Feedback Box */}
       {gasto.rejection_feedback ? (
         <View style={[styles.feedbackContainer, { backgroundColor: statusColor + '10', borderLeftColor: statusColor }]}>
           <Text style={[styles.feedbackTitle, { color: statusColor }]}>
@@ -216,6 +254,8 @@ const ExpenseCardMemo = React.memo(ExpenseCard, (prevProps, nextProps) => {
     prevProps.gasto.facturado === nextProps.gasto.facturado &&
     prevProps.gasto.motivo_sin_factura === nextProps.gasto.motivo_sin_factura &&
     prevProps.gasto.proveedor_id === nextProps.gasto.proveedor_id &&
+    prevProps.gasto.devuelto_por_factura === nextProps.gasto.devuelto_por_factura &&
+    prevProps.gasto.factura_sugerida_id === nextProps.gasto.factura_sugerida_id &&
     prevProps.showEmployeeName === nextProps.showEmployeeName
   );
 });

@@ -43,6 +43,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { base64ToArrayBuffer } from '@/services/sync';
 import { PushNotificationService } from '@/services/pushNotifications';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
+import { exportFacturaCfdiToPdf } from '@/utils/cfdiPdfGenerator';
 
 interface PartidaEditable {
   id: string;
@@ -79,6 +80,7 @@ export default function AdminGastosScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
   const [facturaFilter, setFacturaFilter] = useState<'TODOS' | 'FACTURADOS' | 'PENDIENTE_ENTREGA' | 'NO_FACTURADOS'>('TODOS');
+  const [pendingFilter, setPendingFilter] = useState<'TODOS' | 'NUEVOS' | 'FACTURA_DETECTADA'>('TODOS');
 
   // Paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -90,6 +92,8 @@ export default function AdminGastosScreen() {
     totalAprobados: number;
     countPendientes: number;
     countAprobados: number;
+    countDevueltosFactura?: number;
+    countConFacturaDetectada?: number;
   } | null>(null);
   const catalogsLoadedRef = React.useRef(false);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
@@ -134,6 +138,11 @@ export default function AdminGastosScreen() {
   const [prevSelectedGastoId, setPrevSelectedGastoId] = useState<string | undefined>(undefined);
   const [localMotivo, setLocalMotivo] = useState('');
   const [isUpdatingEstadoReembolso, setIsUpdatingEstadoReembolso] = useState(false);
+  const [isExportingSatPdf, setIsExportingSatPdf] = useState(false);
+  const [isAttachingSatFactura, setIsAttachingSatFactura] = useState(false);
+  const [isDismissingSatFactura, setIsDismissingSatFactura] = useState(false);
+  const [satFacturaPreviewModalVisible, setSatFacturaPreviewModalVisible] = useState(false);
+  const [satFacturaToPreview, setSatFacturaToPreview] = useState<any | null>(null);
 
   if (selectedGasto?.id !== prevSelectedGastoId) {
     setPrevSelectedGastoId(selectedGasto?.id);
@@ -367,6 +376,7 @@ export default function AdminGastosScreen() {
         limit: String(pageSize),
         tab: activeTab,
         facturaFilter,
+        pendingFilter,
         search: debouncedSearchQuery,
         startDate: startDateFilter || '',
         endDate: endDateFilter || '',
@@ -434,7 +444,7 @@ export default function AdminGastosScreen() {
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }, [currentPage, pageSize, activeTab, facturaFilter, debouncedSearchQuery, startDateFilter, endDateFilter]);
+  }, [currentPage, pageSize, activeTab, facturaFilter, pendingFilter, debouncedSearchQuery, startDateFilter, endDateFilter]);
 
   // Debounce de búsqueda para consulta al servidor
   useEffect(() => {
@@ -563,15 +573,19 @@ export default function AdminGastosScreen() {
       if (status === 'APPROVED') {
         updatePayload.approved_at = new Date().toISOString();
         updatePayload.rejection_feedback = `[Aprobado por ${adminUser.nombre}]`;
+        updatePayload.devuelto_por_factura = false;
+        updatePayload.factura_sugerida_id = null;
       } else {
-        updatePayload.venta_id = null;
-        if (status === 'ACTION_REQUIRED') {
-          updatePayload.rejection_feedback = `[Devuelto por ${adminUser.nombre}] ${rejectionFeedback.trim()}`;
-        } else if (status === 'REJECTED') {
+        // Regla de negocio: NUNCA desvincular venta_id al devolver a PENDING o ACTION_REQUIRED; solo si es REJECTED
+        if (status === 'REJECTED') {
+          updatePayload.venta_id = null;
           updatePayload.rejection_feedback = `[Rechazado por ${adminUser.nombre}] ${rejectionFeedback.trim()}`;
+        } else if (status === 'ACTION_REQUIRED') {
+          updatePayload.rejection_feedback = `[Devuelto por ${adminUser.nombre}] ${rejectionFeedback.trim()}`;
         } else if (status === 'PENDING') {
           updatePayload.approved_at = null;
           updatePayload.rejection_feedback = null;
+          updatePayload.devuelto_por_factura = false;
         }
       }
 
@@ -681,11 +695,167 @@ export default function AdminGastosScreen() {
       );
       return;
     }
+    // Si el gasto fue devuelto de Historial por detección de factura recibida, enviarlo aprobado directamente conservando su venta_id
+    if (selectedGasto.devuelto_por_factura) {
+      executeApproveGasto(selectedGasto.venta_id || null);
+      return;
+    }
     setIsRelinkingSaleMode(false);
     setLinkSaleSearch('');
     setIsQuickSaleFormVisible(false);
     setIsLinkSaleModalVisible(true);
     loadSalesForLinking();
+  };
+
+  const handlePreviewSatFactura = (factura: any) => {
+    if (!factura) return;
+    setSatFacturaToPreview(factura);
+    setSatFacturaPreviewModalVisible(true);
+  };
+
+  const handleDownloadSatFacturaPdf = async (factura: any) => {
+    if (!factura) return;
+    setIsExportingSatPdf(true);
+    try {
+      await exportFacturaCfdiToPdf({ factura });
+    } catch (err: any) {
+      showAlert('Error PDF', err.message || 'No se pudo generar el PDF de la factura recibida.');
+    } finally {
+      setIsExportingSatPdf(false);
+    }
+  };
+
+  const handleAttachSatFacturaAndSend = async (factura: any, approveDirectly: boolean) => {
+    if (!selectedGasto || !adminUser || !factura) return;
+
+    if (approveDirectly) {
+      const provName = GastoHelper.getProveedor(selectedGasto);
+      if (!provName || !provName.trim()) {
+        showAlert(
+          'Indicar Proveedor',
+          'Antes de aprobar directamente, por favor asigna el proveedor de este gasto con el botón de arriba.'
+        );
+        return;
+      }
+    }
+
+    const targetGastoId = selectedGasto.id;
+    setIsAttachingSatFactura(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}/attach-sat-factura`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          factura_id: factura.id,
+          approve_directly: approveDirectly,
+          actor_id: adminUser.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al vincular la factura recibida al gasto');
+      }
+
+      const data = await res.json();
+      const updatedGasto: Gasto = data.gasto || {
+        ...selectedGasto,
+        facturado: true,
+        motivo_sin_factura: null,
+        factura_recibida_id: factura.id,
+        factura_sugerida_id: null,
+        factura_recibida_rel: factura,
+        factura_sugerida_rel: null,
+        devuelto_por_factura: approveDirectly ? false : selectedGasto.devuelto_por_factura,
+        status: approveDirectly ? 'APPROVED' : selectedGasto.status,
+      };
+
+      if (approveDirectly) {
+        showAlert(
+          'Éxito',
+          'La factura recibida se ha agregado al gasto y se ha enviado directamente a Historial (Aprobado).'
+        );
+        setReviewModalVisible(false);
+        setSelectedGasto(null);
+        setRejectionFeedback('');
+        setShowFeedbackInput(false);
+        if (activeTab === 'pendientes') {
+          setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+        } else {
+          setGastos(prev => prev.map(g => g.id === targetGastoId ? updatedGasto : g));
+        }
+      } else {
+        setSelectedGasto(updatedGasto);
+        setGastos(prev => prev.map(g => g.id === targetGastoId ? updatedGasto : g));
+        showAlert('Factura Agregada', 'La factura recibida ha quedado vinculada a este gasto como Facturado.');
+      }
+
+      await refreshData(true);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo vincular la factura recibida.');
+    } finally {
+      setIsAttachingSatFactura(false);
+    }
+  };
+
+  const handleDismissSatFactura = async (factura: any) => {
+    if (!selectedGasto || !adminUser || !factura) return;
+
+    const confirmMsg = selectedGasto.devuelto_por_factura
+      ? '¿Confirmas que esta factura recibida NO corresponde a este gasto? La sugerencia se descartará y el gasto regresará a Historial con factura pendiente.'
+      : '¿Confirmas que esta factura recibida NO coincide con este gasto? El aviso de coincidencia se ocultará para esta factura.';
+
+    const doDismiss = async () => {
+      const targetGastoId = selectedGasto.id;
+      setIsDismissingSatFactura(true);
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}/dismiss-sat-factura`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            factura_id: factura.id,
+            actor_id: adminUser.id,
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Error al descartar la factura sugerida');
+        }
+
+        const data = await res.json();
+        if (data.returnedToHistory) {
+          showAlert('Factura Descartada', 'El gasto ha sido devuelto a Historial manteniendo su estado de factura pendiente.');
+          setReviewModalVisible(false);
+          setSelectedGasto(null);
+          if (activeTab === 'pendientes') {
+            setGastos(prev => prev.filter(g => g.id !== targetGastoId));
+          }
+        } else if (data.gasto) {
+          setSelectedGasto(data.gasto);
+          setGastos(prev => prev.map(g => g.id === targetGastoId ? data.gasto : g));
+          showAlert('Aviso Descartado', 'Se ha descartado la coincidencia con esa factura.');
+        }
+        await refreshData(true);
+      } catch (err: any) {
+        showAlert('Error', err.message || 'No se pudo descartar la factura.');
+      } finally {
+        setIsDismissingSatFactura(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(confirmMsg)) {
+        await doDismiss();
+      }
+    } else {
+      Alert.alert('Descartar Coincidencia', confirmMsg, [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'No coincide (Descartar)', style: 'destructive', onPress: doDismiss },
+      ]);
+    }
   };
 
   // Abrir modal para Vincular o Cambiar Venta de un gasto
@@ -794,9 +964,11 @@ export default function AdminGastosScreen() {
     try {
       const updatePayload: Partial<Gasto> = {
         status: 'APPROVED',
-        approved_at: new Date().toISOString(),
+        approved_at: selectedGasto.approved_at || new Date().toISOString(),
         venta_id: ventaId,
         rejection_feedback: `[Aprobado por ${adminUser.nombre}]`,
+        devuelto_por_factura: false,
+        factura_sugerida_id: null,
       };
 
       const headers = await getApiHeaders();
@@ -824,7 +996,7 @@ export default function AdminGastosScreen() {
         `Tu gasto por ${formatCurrency(selectedGasto.monto)} ha sido aprobado.`
       );
 
-      showAlert('Éxito', `El gasto ha sido marcado como Aprobado.${ventaId ? ' Vinculado a la venta seleccionada.' : ''}`);
+      showAlert('Éxito', `El gasto ha sido enviado a Historial (Aprobado).${ventaId ? ' Venta vinculada conservada.' : ''}`);
       setReviewModalVisible(false);
       setSelectedGasto(null);
       setRejectionFeedback('');
@@ -838,6 +1010,9 @@ export default function AdminGastosScreen() {
           status: 'APPROVED',
           approved_at: updatePayload.approved_at || new Date().toISOString(),
           venta_id: ventaId,
+          devuelto_por_factura: false,
+          factura_sugerida_id: null,
+          factura_sugerida_rel: null,
         } : g));
       }
       await refreshData(true);
@@ -882,17 +1057,26 @@ export default function AdminGastosScreen() {
 
       if (!dbRes.ok) throw new Error('Error actualizando gasto en la BD');
 
-      // Actualizar estado local
-      const updatedGasto = {
+      // Actualizar estado local (si tenía factura sugerida, pasarla a factura_recibida_rel)
+      const updatedGasto: Gasto = {
         ...selectedGasto,
         facturado: true,
         factura_url: combinedUrls,
-        motivo_sin_factura: null
+        motivo_sin_factura: null,
+        factura_recibida_id: selectedGasto.factura_sugerida_id || selectedGasto.factura_recibida_id,
+        factura_recibida_rel: selectedGasto.factura_sugerida_rel || selectedGasto.factura_recibida_rel,
+        factura_sugerida_id: null,
+        factura_sugerida_rel: null,
       };
       setSelectedGasto(updatedGasto);
       setGastos(prev => prev.map(g => g.id === selectedGasto.id ? updatedGasto : g));
 
-      showAlert('Éxito', 'Factura cargada y registrada correctamente.');
+      showAlert(
+        'Éxito',
+        selectedGasto.devuelto_por_factura
+          ? 'Factura cargada correctamente. Ahora puedes darle a "Volver a Enviar a Historial (Aprobar Directo)".'
+          : 'Factura cargada y registrada correctamente.'
+      );
     } catch (err: any) {
       logger.error('Error al subir factura:', err);
       showAlert('Error', err.message || 'No se pudo subir la factura.');
@@ -2149,7 +2333,15 @@ export default function AdminGastosScreen() {
   }, [gastos, searchQuery, startDateFilter, endDateFilter]);
 
   // Filtrados por Pestañas y Facturación
-  const pendingGastos = activeTab === 'pendientes' ? gastos : filteredGastos.filter((g) => g.status === 'PENDING');
+  const pendingGastos = (activeTab === 'pendientes' ? gastos : filteredGastos.filter((g) => g.status === 'PENDING')).filter((g) => {
+    if (pendingFilter === 'FACTURA_DETECTADA') {
+      return Boolean(g.devuelto_por_factura || g.factura_sugerida_id || g.factura_sugerida_rel);
+    }
+    if (pendingFilter === 'NUEVOS') {
+      return !g.devuelto_por_factura && !g.factura_sugerida_id && !g.factura_sugerida_rel;
+    }
+    return true;
+  });
   const historyGastos = activeTab === 'historial' ? gastos : filteredGastos.filter((g) => {
     const isHistoryStatus = g.status === 'APPROVED' || g.status === 'REJECTED' || g.status === 'ACTION_REQUIRED';
     if (!isHistoryStatus) return false;
@@ -2431,112 +2623,164 @@ export default function AdminGastosScreen() {
         <View style={{ flex: 1 }}>
           {/* REVISAR PENDIENTES */}
           {activeTab === 'pendientes' && (
-            isDesktop ? (
-              <ScrollView style={{ flex: 1 }}>
-                {renderScreenHeader()}
-                <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
-                  <PaginationControls
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    totalItems={totalCount}
-                    itemsPerPage={pageSize}
-                    onPageChange={(p) => setCurrentPage(p)}
-                    onItemsPerPageChange={(s) => {
-                      setPageSize(s);
-                      setCurrentPage(1);
-                    }}
-                    isLoading={isLoading}
-                    style={{ marginBottom: Spacing.two }}
-                  />
-                  <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Empleado</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '16%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '11%', fontWeight: 'bold' }]}>Sucursal</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Fecha</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Estado</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Autorizado</Text>
-                    <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
-                    <View style={{ width: '10%', alignItems: 'center' }}>
-                      <Ionicons name="settings-outline" size={14} color={themeColors.text} />
+            <>
+              <View style={{ flexDirection: 'row', marginHorizontal: Spacing.three, marginBottom: Spacing.two, marginTop: Spacing.one, backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, overflow: 'hidden', borderWidth: 1, borderColor: themeColors.border }}>
+                <TouchableOpacity
+                  onPress={() => { setPendingFilter('TODOS'); setCurrentPage(1); }}
+                  style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: pendingFilter === 'TODOS' ? themeColors.accent + '20' : 'transparent' }}
+                >
+                  <Text style={{ fontSize: 10, fontWeight: pendingFilter === 'TODOS' ? 'bold' : '600', color: pendingFilter === 'TODOS' ? themeColors.accent : themeColors.textSecondary }}>TODOS</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => { setPendingFilter('NUEVOS'); setCurrentPage(1); }}
+                  style={{ flex: 1.2, paddingVertical: 8, alignItems: 'center', backgroundColor: pendingFilter === 'NUEVOS' ? themeColors.warning + '20' : 'transparent', borderLeftWidth: 1, borderRightWidth: 1, borderColor: themeColors.border }}
+                >
+                  <Text style={{ fontSize: 10, fontWeight: pendingFilter === 'NUEVOS' ? 'bold' : '600', color: pendingFilter === 'NUEVOS' ? themeColors.warning : themeColors.textSecondary }}>NUEVOS POR REVISAR</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => { setPendingFilter('FACTURA_DETECTADA'); setCurrentPage(1); }}
+                  style={{ flex: 1.3, paddingVertical: 8, alignItems: 'center', backgroundColor: pendingFilter === 'FACTURA_DETECTADA' ? '#0284C725' : 'transparent' }}
+                >
+                  <Text style={{ fontSize: 10, fontWeight: pendingFilter === 'FACTURA_DETECTADA' ? 'bold' : '600', color: pendingFilter === 'FACTURA_DETECTADA' ? '#0284C7' : themeColors.textSecondary }}>
+                    📄 FACTURA DETECTADA {backendTotals?.countConFacturaDetectada ? `(${backendTotals.countConFacturaDetectada})` : ''}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {isDesktop ? (
+                <ScrollView style={{ flex: 1 }}>
+                  {renderScreenHeader()}
+                  <View style={{ paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}>
+                    <PaginationControls
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      totalItems={totalCount}
+                      itemsPerPage={pageSize}
+                      onPageChange={(p) => setCurrentPage(p)}
+                      onItemsPerPageChange={(s) => {
+                        setPageSize(s);
+                        setCurrentPage(1);
+                      }}
+                      isLoading={isLoading}
+                      style={{ marginBottom: Spacing.two }}
+                    />
+                    <View style={[styles.tableHeaderRow, { backgroundColor: themeColors.background, borderBottomColor: themeColors.border }]}>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Categoría</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Empleado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '16%', fontWeight: 'bold' }]}>Proveedor / Cliente</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold' }]}>Sucursal</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Fecha</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '12%', fontWeight: 'bold' }]}>Estado / Tipo</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '9%', fontWeight: 'bold' }]}>Autorizado</Text>
+                      <Text style={[styles.tableHeaderCell, { color: themeColors.text, width: '10%', fontWeight: 'bold', textAlign: 'right' }]}>Monto</Text>
+                      <View style={{ width: '10%', alignItems: 'center' }}>
+                        <Ionicons name="settings-outline" size={14} color={themeColors.text} />
+                      </View>
+                    </View>
+                    <View style={{ backgroundColor: themeColors.backgroundElement, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderTopWidth: 0 }}>
+                      {pendingGastos.length === 0 ? (
+                        <View style={styles.emptyContainer}>
+                          <Ionicons name="shield-checkmark-outline" size={48} color={themeColors.success} />
+                          <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
+                            ¡Al corriente! No hay gastos pendientes de revisión.
+                          </Text>
+                        </View>
+                      ) : (
+                        pendingGastos.map((item) => {
+                          const fecha = formatFriendlyDate(item.fecha_comprobante || item.created_at);
+                          const isDevueltoFactura = Boolean(item.devuelto_por_factura);
+                          const isNuevoConFactura = !isDevueltoFactura && Boolean(item.factura_sugerida_rel || item.factura_sugerida_id);
+
+                          let statusText = 'PENDIENTE';
+                          let statusColor: string = themeColors.warning;
+                          if (isDevueltoFactura) {
+                            statusText = '📄 FACTURA DETECTADA';
+                            statusColor = '#0284C7';
+                          } else if (isNuevoConFactura) {
+                            statusText = '🔎 COMPROBAR FACTURA';
+                            statusColor = '#D97706';
+                          } else if (item.status === 'APPROVED') {
+                            statusText = 'APROBADO';
+                            statusColor = themeColors.success;
+                          } else if (item.status === 'REJECTED') {
+                            statusText = 'RECHAZADO';
+                            statusColor = themeColors.danger;
+                          } else if (item.status === 'ACTION_REQUIRED') {
+                            statusText = 'ACCIÓN REQ.';
+                            statusColor = themeColors.actionRequired;
+                          }
+                          
+                          return (
+                            <Pressable
+                              key={item.id}
+                              onPress={() => {
+                                setSelectedGasto(item);
+                                setReviewModalVisible(true);
+                              }}
+                              style={({ hovered }: any) => [
+                                styles.tableRow,
+                                {
+                                  borderBottomColor: themeColors.border,
+                                  borderLeftWidth: isDevueltoFactura || isNuevoConFactura ? 3 : 0,
+                                  borderLeftColor: isDevueltoFactura ? '#0284C7' : isNuevoConFactura ? '#D97706' : 'transparent',
+                                  backgroundColor: isDevueltoFactura ? '#0284C708' : isNuevoConFactura ? '#F59E0B08' : 'transparent',
+                                },
+                                hovered && { backgroundColor: themeColors.backgroundSelected }
+                              ] as any}
+                            >
+                              <Text style={[styles.tableCell, { color: themeColors.text, width: '12%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
+                              <Text style={[styles.tableCell, { color: themeColors.text, width: '12%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
+                              <Text style={[styles.tableCell, { width: '16%', color: themeColors.textSecondary }]} numberOfLines={1}>
+                                {GastoHelper.getProveedor(item)} {GastoHelper.getProveedor(item) && GastoHelper.getCliente(item) ? ' | ' : ''} {GastoHelper.getCliente(item)}
+                              </Text>
+                              <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
+                              <Text style={[styles.tableCell, { color: themeColors.text, width: '9%' }]}>{fecha}</Text>
+                              <View style={{ width: '12%' }}>
+                                <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
+                                  <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColor }}>{statusText}</Text>
+                                </View>
+                                {isDevueltoFactura ? (
+                                  <Text style={{ fontSize: 9, color: '#0284C7', fontWeight: '600', marginTop: 1 }} numberOfLines={1}>
+                                    Devuelto de Historial
+                                  </Text>
+                                ) : isNuevoConFactura ? (
+                                  <Text style={{ fontSize: 9, color: '#D97706', fontWeight: '600', marginTop: 1 }} numberOfLines={1}>
+                                    ⚠️ Comprobar coincidencia
+                                  </Text>
+                                ) : null}
+                              </View>
+                              <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '9%', fontSize: 11 }]} numberOfLines={1}>
+                                {item.rejection_feedback?.match(/\[(?:Aprobado|Devuelto|Rechazado) por (.*?)\]/)?.[1] || '-'}
+                              </Text>
+                              <Text style={[styles.tableCell, { color: themeColors.text, width: '10%', fontWeight: '700', textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
+                              <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+                                <TouchableOpacity
+                                  onPress={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedGasto(item);
+                                    setReviewModalVisible(true);
+                                  }}
+                                  style={{ padding: 4 }}
+                                >
+                                  <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  onPress={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteGasto(item.id);
+                                  }}
+                                  style={{ padding: 4 }}
+                                >
+                                  <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
+                                </TouchableOpacity>
+                              </View>
+                            </Pressable>
+                          );
+                        })
+                      )}
                     </View>
                   </View>
-                  <View style={{ backgroundColor: themeColors.backgroundElement, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 1, borderColor: themeColors.border, borderTopWidth: 0 }}>
-                    {pendingGastos.length === 0 ? (
-                      <View style={styles.emptyContainer}>
-                        <Ionicons name="shield-checkmark-outline" size={48} color={themeColors.success} />
-                        <Text style={[styles.emptyText, { color: themeColors.textSecondary }]}>
-                          ¡Al corriente! No hay gastos pendientes de revisión.
-                        </Text>
-                      </View>
-                    ) : (
-                      pendingGastos.map((item) => {
-                        const fecha = formatFriendlyDate(item.fecha_comprobante || item.created_at);
-                        
-                        let statusText = 'PENDIENTE';
-                        let statusColor: string = themeColors.warning;
-                        if (item.status === 'APPROVED') { statusText = 'APROBADO'; statusColor = themeColors.success; }
-                        else if (item.status === 'REJECTED') { statusText = 'RECHAZADO'; statusColor = themeColors.danger; }
-                        else if (item.status === 'ACTION_REQUIRED') { statusText = 'ACCIÓN REQ.'; statusColor = themeColors.actionRequired; }
-                        
-                        return (
-                          <Pressable
-                            key={item.id}
-                            onPress={() => {
-                              setSelectedGasto(item);
-                              setReviewModalVisible(true);
-                            }}
-                            style={({ hovered }: any) => [
-                              styles.tableRow,
-                              { borderBottomColor: themeColors.border },
-                              hovered && { backgroundColor: themeColors.backgroundSelected }
-                            ] as any}
-                          >
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '12%', fontWeight: '600' }]} numberOfLines={1}>{GastoHelper.getCategoria(item) || 'Sin Cat.'}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '12%' }]} numberOfLines={1}>{item.empleado_nombre}</Text>
-                            <Text style={[styles.tableCell, { width: '16%', color: themeColors.textSecondary }]} numberOfLines={1}>
-                              {GastoHelper.getProveedor(item)} {GastoHelper.getProveedor(item) && GastoHelper.getCliente(item) ? ' | ' : ''} {GastoHelper.getCliente(item)}
-                            </Text>
-                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '11%' }]} numberOfLines={1}>{GastoHelper.getSucursal(item) || '-'}</Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '10%' }]}>{fecha}</Text>
-                            <View style={{ width: '9%' }}>
-                               <View style={{ backgroundColor: statusColor + '18', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 12, alignSelf: 'flex-start' }}>
-                                 <Text style={{ fontSize: 9, fontWeight: 'bold', color: statusColor }}>{statusText}</Text>
-                               </View>
-                            </View>
-                            <Text style={[styles.tableCell, { color: themeColors.textSecondary, width: '10%', fontSize: 11 }]} numberOfLines={1}>
-                              {item.rejection_feedback?.match(/\[(?:Aprobado|Devuelto|Rechazado) por (.*?)\]/)?.[1] || '-'}
-                            </Text>
-                            <Text style={[styles.tableCell, { color: themeColors.text, width: '10%', fontWeight: '700', textAlign: 'right' }]}>{formatCurrency(item.monto)}</Text>
-                            <View style={{ width: '10%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-                              <TouchableOpacity
-                                onPress={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedGasto(item);
-                                  setReviewModalVisible(true);
-                                }}
-                                style={{ padding: 4 }}
-                              >
-                                <Ionicons name="eye-outline" size={16} color={themeColors.accent} />
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                onPress={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteGasto(item.id);
-                                }}
-                                style={{ padding: 4 }}
-                              >
-                                <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
-                              </TouchableOpacity>
-                            </View>
-                          </Pressable>
-                        );
-                      })
-                    )}
-                  </View>
-                </View>
-              </ScrollView>
-            ) : (
+                </ScrollView>
+              ) : (
               <FlatList scrollEnabled={true} style={{ flex: 1 }}
                 ListHeaderComponent={renderScreenHeader()}
                 data={pendingGastos}
@@ -2584,7 +2828,8 @@ export default function AdminGastosScreen() {
                 refreshing={isLoading}
                 onRefresh={refreshData}
               />
-            )
+              )}
+            </>
           )}
 
           {/* HISTORIAL */}
@@ -3356,6 +3601,310 @@ export default function AdminGastosScreen() {
                 />
 
                 <View style={styles.modalDetails}>
+                  {/* ATAJO Y AVISO DE FACTURA RECIBIDA DETECTADA (SAT) */}
+                  {selectedGasto.devuelto_por_factura && selectedGasto.factura_sugerida_rel ? (
+                    <View style={{
+                      backgroundColor: '#0284C712',
+                      borderColor: '#0284C7',
+                      borderWidth: 1.5,
+                      borderRadius: BorderRadius.medium,
+                      padding: Spacing.two,
+                      marginBottom: Spacing.two,
+                      gap: 8,
+                    }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="document-attach" size={20} color="#0284C7" />
+                        <Text style={{ flex: 1, color: '#0284C7', fontWeight: '800', fontSize: 13 }}>
+                          📄 GASTO DEVUELTO DE HISTORIAL — FACTURA RECIBIDA DETECTADA
+                        </Text>
+                      </View>
+                      <Text style={{ color: themeColors.text, fontSize: 12, lineHeight: 17 }}>
+                        Este gasto estaba aprobado con factura pendiente y el sistema detectó en Facturas Recibidas un CFDI por el mismo monto exacto ({formatCurrency(selectedGasto.monto)}).
+                      </Text>
+
+                      {/* Tarjeta resumen de la factura recibida */}
+                      <View style={{
+                        backgroundColor: themeColors.backgroundElement,
+                        borderRadius: BorderRadius.small,
+                        padding: Spacing.two,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        gap: 3,
+                      }}>
+                        <Text style={{ color: themeColors.text, fontWeight: '800', fontSize: 13 }}>
+                          {selectedGasto.factura_sugerida_rel.nombre_emisor || 'Proveedor SAT'}
+                        </Text>
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                          RFC Emisor: <Text style={{ fontWeight: '700', color: themeColors.text }}>{selectedGasto.factura_sugerida_rel.rfc_emisor || 'N/D'}</Text> • Total: <Text style={{ fontWeight: '800', color: themeColors.success }}>{formatCurrency(Number(selectedGasto.factura_sugerida_rel.total || selectedGasto.monto))}</Text>
+                        </Text>
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                          Fecha CFDI: {formatFriendlyDate(selectedGasto.factura_sugerida_rel.fecha_emision)} • UUID: {selectedGasto.factura_sugerida_rel.uuid?.slice(0, 18)}...
+                        </Text>
+                      </View>
+
+                      {/* Botones de Atajo: Mostrar Factura, Descargar PDF, Agregar y Volver a Enviar */}
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
+                        <TouchableOpacity
+                          onPress={() => handlePreviewSatFactura(selectedGasto.factura_sugerida_rel)}
+                          style={{
+                            flex: 1,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 5,
+                            backgroundColor: themeColors.backgroundElement,
+                            borderWidth: 1,
+                            borderColor: '#0284C7',
+                            paddingVertical: 8,
+                            paddingHorizontal: 8,
+                            borderRadius: BorderRadius.small,
+                          }}
+                        >
+                          <Ionicons name="eye-outline" size={15} color="#0284C7" />
+                          <Text style={{ color: '#0284C7', fontWeight: '700', fontSize: 11 }}>Mostrar Factura</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => handleDownloadSatFacturaPdf(selectedGasto.factura_sugerida_rel)}
+                          disabled={isExportingSatPdf}
+                          style={{
+                            flex: 1,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 5,
+                            backgroundColor: '#e74c3c',
+                            paddingVertical: 8,
+                            paddingHorizontal: 8,
+                            borderRadius: BorderRadius.small,
+                          }}
+                        >
+                          {isExportingSatPdf ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <>
+                              <Ionicons name="download-outline" size={15} color="#fff" />
+                              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>Descargar PDF</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={() => handleAttachSatFacturaAndSend(selectedGasto.factura_sugerida_rel, true)}
+                        disabled={isAttachingSatFactura || isDismissingSatFactura}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          backgroundColor: themeColors.success,
+                          paddingVertical: 10,
+                          paddingHorizontal: 12,
+                          borderRadius: BorderRadius.small,
+                        }}
+                      >
+                        {isAttachingSatFactura ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name="checkmark-done-circle-outline" size={18} color="#fff" />
+                            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>
+                              ⚡ Agregar al Gasto y Volver a Enviar (Aprobar Directo)
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => handleDismissSatFactura(selectedGasto.factura_sugerida_rel)}
+                        disabled={isAttachingSatFactura || isDismissingSatFactura}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 5,
+                          paddingVertical: 6,
+                        }}
+                      >
+                        <Ionicons name="close-circle-outline" size={15} color={themeColors.textSecondary} />
+                        <Text style={{ color: themeColors.textSecondary, fontWeight: '600', fontSize: 11, textDecorationLine: 'underline' }}>
+                          No coincide con este gasto (Descartar y regresar a Historial)
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : selectedGasto.devuelto_por_factura && selectedGasto.facturado ? (
+                    <View style={{
+                      backgroundColor: themeColors.success + '15',
+                      borderColor: themeColors.success,
+                      borderWidth: 1.5,
+                      borderRadius: BorderRadius.medium,
+                      padding: Spacing.two,
+                      marginBottom: Spacing.two,
+                      gap: 8,
+                    }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="checkmark-circle" size={20} color={themeColors.success} />
+                        <Text style={{ flex: 1, color: themeColors.success, fontWeight: '800', fontSize: 13 }}>
+                          Factura Adjuntada — Listo para Volver a Enviar
+                        </Text>
+                      </View>
+                      <Text style={{ color: themeColors.text, fontSize: 12 }}>
+                        Ya adjuntaste la factura a este gasto devuelto de Historial. Presiona el botón para enviarlo aprobado directamente a Historial conservando su venta vinculada.
+                      </Text>
+                      <TouchableOpacity
+                        onPress={handleApproveClick}
+                        disabled={isProcessingAction}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          backgroundColor: themeColors.success,
+                          paddingVertical: 10,
+                          paddingHorizontal: 12,
+                          borderRadius: BorderRadius.small,
+                        }}
+                      >
+                        <Ionicons name="send-outline" size={16} color="#fff" />
+                        <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>
+                          ✅ Volver a Enviar a Historial (Aprobar Directo)
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (!selectedGasto.devuelto_por_factura && selectedGasto.factura_sugerida_rel) ? (
+                    <View style={{
+                      backgroundColor: '#F59E0B15',
+                      borderColor: '#D97706',
+                      borderWidth: 1.5,
+                      borderRadius: BorderRadius.medium,
+                      padding: Spacing.two,
+                      marginBottom: Spacing.two,
+                      gap: 8,
+                    }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="warning" size={20} color="#D97706" />
+                        <Text style={{ flex: 1, color: '#D97706', fontWeight: '800', fontSize: 13 }}>
+                          ⚠️ Favor de comprobar que la factura recibida coincide con el gasto
+                        </Text>
+                      </View>
+                      <Text style={{ color: themeColors.text, fontSize: 12, lineHeight: 17 }}>
+                        Este gasto se registró con factura pendiente y el sistema detectó una Factura Recibida en el módulo del SAT por el mismo monto exacto ({formatCurrency(selectedGasto.monto)}).
+                      </Text>
+
+                      {/* Tarjeta resumen de la factura recibida */}
+                      <View style={{
+                        backgroundColor: themeColors.backgroundElement,
+                        borderRadius: BorderRadius.small,
+                        padding: Spacing.two,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        gap: 3,
+                      }}>
+                        <Text style={{ color: themeColors.text, fontWeight: '800', fontSize: 13 }}>
+                          {selectedGasto.factura_sugerida_rel.nombre_emisor || 'Proveedor SAT'}
+                        </Text>
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                          RFC Emisor: <Text style={{ fontWeight: '700', color: themeColors.text }}>{selectedGasto.factura_sugerida_rel.rfc_emisor || 'N/D'}</Text> • Total: <Text style={{ fontWeight: '800', color: themeColors.success }}>{formatCurrency(Number(selectedGasto.factura_sugerida_rel.total || selectedGasto.monto))}</Text>
+                        </Text>
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
+                          Fecha CFDI: {formatFriendlyDate(selectedGasto.factura_sugerida_rel.fecha_emision)} • UUID: {selectedGasto.factura_sugerida_rel.uuid?.slice(0, 18)}...
+                        </Text>
+                      </View>
+
+                      {/* Botones de Atajo */}
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
+                        <TouchableOpacity
+                          onPress={() => handlePreviewSatFactura(selectedGasto.factura_sugerida_rel)}
+                          style={{
+                            flex: 1,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 5,
+                            backgroundColor: themeColors.backgroundElement,
+                            borderWidth: 1,
+                            borderColor: '#D97706',
+                            paddingVertical: 8,
+                            paddingHorizontal: 8,
+                            borderRadius: BorderRadius.small,
+                          }}
+                        >
+                          <Ionicons name="eye-outline" size={15} color="#D97706" />
+                          <Text style={{ color: '#D97706', fontWeight: '700', fontSize: 11 }}>Mostrar Factura</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          onPress={() => handleDownloadSatFacturaPdf(selectedGasto.factura_sugerida_rel)}
+                          disabled={isExportingSatPdf}
+                          style={{
+                            flex: 1,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 5,
+                            backgroundColor: '#e74c3c',
+                            paddingVertical: 8,
+                            paddingHorizontal: 8,
+                            borderRadius: BorderRadius.small,
+                          }}
+                        >
+                          {isExportingSatPdf ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <>
+                              <Ionicons name="download-outline" size={15} color="#fff" />
+                              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>Descargar PDF</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={() => handleAttachSatFacturaAndSend(selectedGasto.factura_sugerida_rel, false)}
+                        disabled={isAttachingSatFactura || isDismissingSatFactura}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          backgroundColor: themeColors.accent,
+                          paddingVertical: 9,
+                          paddingHorizontal: 12,
+                          borderRadius: BorderRadius.small,
+                        }}
+                      >
+                        {isAttachingSatFactura ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name="attach-outline" size={17} color="#fff" />
+                            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>
+                              Sí coincide: Agregar Factura al Gasto
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => handleDismissSatFactura(selectedGasto.factura_sugerida_rel)}
+                        disabled={isAttachingSatFactura || isDismissingSatFactura}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 5,
+                          paddingVertical: 6,
+                        }}
+                      >
+                        <Ionicons name="close-circle-outline" size={15} color={themeColors.textSecondary} />
+                        <Text style={{ color: themeColors.textSecondary, fontWeight: '600', fontSize: 11, textDecorationLine: 'underline' }}>
+                          No coincide con el gasto (Descartar aviso)
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+
                   {/* Monto */}
                   <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
                     <View style={{ flex: 1, marginRight: Spacing.two }}>
@@ -3762,6 +4311,64 @@ export default function AdminGastosScreen() {
                           {/* Secciones según el toggle */}
                           {selectedGasto.facturado ? (
                             <View style={{ gap: Spacing.one }}>
+                              {selectedGasto.factura_recibida_rel && (
+                                <View style={{
+                                  backgroundColor: themeColors.success + '12',
+                                  borderWidth: 1,
+                                  borderColor: themeColors.success + '50',
+                                  borderRadius: BorderRadius.small,
+                                  padding: Spacing.two,
+                                  marginBottom: 4,
+                                  gap: 6,
+                                }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Ionicons name="shield-checkmark" size={16} color={themeColors.success} />
+                                    <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.success, flex: 1 }}>
+                                      CFDI SAT Vinculado: {selectedGasto.factura_recibida_rel.nombre_emisor || selectedGasto.factura_recibida_rel.rfc_emisor}
+                                    </Text>
+                                  </View>
+                                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                                    UUID: {selectedGasto.factura_recibida_rel.uuid}
+                                  </Text>
+                                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    <TouchableOpacity
+                                      onPress={() => handlePreviewSatFactura(selectedGasto.factura_recibida_rel)}
+                                      style={{
+                                        flex: 1,
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 4,
+                                        backgroundColor: themeColors.backgroundElement,
+                                        borderWidth: 1,
+                                        borderColor: themeColors.border,
+                                        paddingVertical: 6,
+                                        borderRadius: BorderRadius.small,
+                                      }}
+                                    >
+                                      <Ionicons name="eye-outline" size={14} color={themeColors.text} />
+                                      <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>Mostrar CFDI</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                      onPress={() => handleDownloadSatFacturaPdf(selectedGasto.factura_recibida_rel)}
+                                      disabled={isExportingSatPdf}
+                                      style={{
+                                        flex: 1,
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 4,
+                                        backgroundColor: '#e74c3c',
+                                        paddingVertical: 6,
+                                        borderRadius: BorderRadius.small,
+                                      }}
+                                    >
+                                      <Ionicons name="download-outline" size={14} color="#fff" />
+                                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>Descargar PDF SAT</Text>
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+                              )}
                               <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 2 }}>
                                 Archivos de Factura Adjuntos ({GastoHelper.getFacturaUrls(selectedGasto).length}):
                               </Text>
@@ -3775,9 +4382,11 @@ export default function AdminGastosScreen() {
                                           <TouchableOpacity
                                             style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15', flex: 1, height: 40, justifyContent: 'center', borderRadius: BorderRadius.small }]}
                                             onPress={() => {
-                                              if (url.toLowerCase().includes('.pdf')) {
+                                              if ((url.startsWith('cfdi://') || url.toLowerCase().endsWith('.xml')) && selectedGasto.factura_recibida_rel) {
+                                                handleDownloadSatFacturaPdf(selectedGasto.factura_recibida_rel);
+                                              } else if (url.toLowerCase().includes('.pdf') || url.toLowerCase().endsWith('.xml')) {
                                                 Linking.openURL(url).catch(() => {
-                                                  Alert.alert('Error', 'No se pudo abrir el archivo PDF.');
+                                                  Alert.alert('Error', 'No se pudo abrir el archivo de factura.');
                                                 });
                                               } else {
                                                 setActivePreviewUrl(url);
@@ -3785,7 +4394,7 @@ export default function AdminGastosScreen() {
                                               }
                                             }}
                                           >
-                                            <Ionicons name={url.toLowerCase().includes('.pdf') ? 'document-text-outline' : 'image-outline'} size={18} color={themeColors.accent} />
+                                            <Ionicons name={(url.toLowerCase().includes('.pdf') || url.startsWith('cfdi://') || url.toLowerCase().endsWith('.xml')) ? 'document-text-outline' : 'image-outline'} size={18} color={themeColors.accent} />
                                             <Text style={[styles.invoiceLinkText, { color: themeColors.accent }]}>
                                               {urls.length > 1 ? `Ver Factura #${idx + 1}` : 'Ver Factura Adjunta'}
                                             </Text>
@@ -3948,7 +4557,7 @@ export default function AdminGastosScreen() {
                         <>
                           <View style={styles.rowActions}>
                             <CustomButton
-                              title="Aprobar"
+                              title={selectedGasto.devuelto_por_factura ? "Volver a Enviar (Aprobar Directo)" : "Aprobar"}
                               onPress={handleApproveClick}
                               variant="success"
                               style={{ flex: 1 }}
@@ -4093,6 +4702,206 @@ export default function AdminGastosScreen() {
                     </View>
                   )}
                 </View>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL DE VISTA PREVIA DE FACTURA RECIBIDA (SAT CFDI) */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        statusBarTranslucent={true}
+        visible={satFacturaPreviewModalVisible}
+        onRequestClose={() => setSatFacturaPreviewModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: themeColors.background, maxHeight: '88%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>Factura Recibida (CFDI SAT)</Text>
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                  Comprobante detectado en el módulo de Facturas Recibidas
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setSatFacturaPreviewModalVisible(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {satFacturaToPreview && (
+              <ScrollView contentContainerStyle={{ paddingBottom: Spacing.four, gap: Spacing.two }}>
+                {/* Botón principal: Descargar / Exportar PDF SAT */}
+                <TouchableOpacity
+                  onPress={() => handleDownloadSatFacturaPdf(satFacturaToPreview)}
+                  disabled={isExportingSatPdf}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    backgroundColor: '#e74c3c',
+                    paddingVertical: 12,
+                    paddingHorizontal: 14,
+                    borderRadius: BorderRadius.medium,
+                  }}
+                >
+                  {isExportingSatPdf ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="document-text-outline" size={18} color="#fff" />
+                      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>
+                        Descargar / Abrir Factura en PDF (Formato SAT)
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {/* Acción rápida para vincular desde la vista previa si aún no está vinculada */}
+                {selectedGasto && !selectedGasto.facturado && (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      setSatFacturaPreviewModalVisible(false);
+                      await handleAttachSatFacturaAndSend(
+                        satFacturaToPreview,
+                        Boolean(selectedGasto.devuelto_por_factura)
+                      );
+                    }}
+                    disabled={isAttachingSatFactura}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      backgroundColor: themeColors.success,
+                      paddingVertical: 12,
+                      paddingHorizontal: 14,
+                      borderRadius: BorderRadius.medium,
+                    }}
+                  >
+                    <Ionicons name="checkmark-done-circle-outline" size={18} color="#fff" />
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>
+                      {selectedGasto.devuelto_por_factura
+                        ? '⚡ Agregar al Gasto y Volver a Enviar (Aprobar Directo)'
+                        : '📎 Agregar esta Factura al Gasto'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Datos del Emisor y Fiscales */}
+                <View style={{
+                  backgroundColor: themeColors.backgroundElement,
+                  borderRadius: BorderRadius.medium,
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  padding: Spacing.two,
+                  gap: 6,
+                }}>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.accent }}>EMISOR / PROVEEDOR</Text>
+                  <Text style={{ fontSize: 15, fontWeight: '800', color: themeColors.text }}>
+                    {satFacturaToPreview.nombre_emisor || 'Sin razón social'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                    RFC Emisor: <Text style={{ fontWeight: '700', color: themeColors.text }}>{satFacturaToPreview.rfc_emisor || 'N/D'}</Text>
+                  </Text>
+
+                  <View style={{ height: 1, backgroundColor: themeColors.border, marginVertical: 6 }} />
+
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.accent }}>DATOS FISCALES</Text>
+                  <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                    Fecha de Emisión: <Text style={{ fontWeight: '700', color: themeColors.text }}>{formatFriendlyDate(satFacturaToPreview.fecha_emision)}</Text>
+                  </Text>
+                  <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                    Folio Fiscal (UUID): <Text style={{ fontWeight: '700', color: themeColors.text }}>{satFacturaToPreview.uuid}</Text>
+                  </Text>
+                  <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                    Estado SAT: <Text style={{ fontWeight: '700', color: themeColors.success }}>{satFacturaToPreview.estado_sat || 'VIGENTE'}</Text>
+                  </Text>
+                  {satFacturaToPreview.xml_url && (
+                    <TouchableOpacity
+                      onPress={() => Linking.openURL(satFacturaToPreview.xml_url).catch(() => {})}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}
+                    >
+                      <Ionicons name="code-download-outline" size={16} color={themeColors.accent} />
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.accent }}>
+                        Ver / Descargar XML Original
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Resumen Financiero */}
+                <View style={{
+                  backgroundColor: themeColors.backgroundElement,
+                  borderRadius: BorderRadius.medium,
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  padding: Spacing.two,
+                  gap: 6,
+                }}>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.accent }}>RESUMEN FINANCIERO</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Subtotal:</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                      {formatCurrency(Number(satFacturaToPreview.subtotal || 0))}
+                    </Text>
+                  </View>
+                  {Number(satFacturaToPreview.descuento || 0) > 0 && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>Descuento:</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.danger }}>
+                        -{formatCurrency(Number(satFacturaToPreview.descuento || 0))}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>IVA:</Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                      {formatCurrency(Number(satFacturaToPreview.iva || 0))}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: 6, marginTop: 2 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: themeColors.text }}>TOTAL:</Text>
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: themeColors.success }}>
+                      {formatCurrency(Number(satFacturaToPreview.total || 0))} {satFacturaToPreview.moneda || 'MXN'}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Partidas / Conceptos */}
+                {(() => {
+                  let conceptos: any[] = [];
+                  if (Array.isArray(satFacturaToPreview.conceptos_json)) {
+                    conceptos = satFacturaToPreview.conceptos_json;
+                  } else if (typeof satFacturaToPreview.conceptos_json === 'string') {
+                    try { conceptos = JSON.parse(satFacturaToPreview.conceptos_json); } catch {}
+                  }
+                  if (!conceptos || conceptos.length === 0) return null;
+                  return (
+                    <View style={{
+                      backgroundColor: themeColors.backgroundElement,
+                      borderRadius: BorderRadius.medium,
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                      padding: Spacing.two,
+                      gap: 8,
+                    }}>
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.accent }}>
+                        CONCEPTOS / PARTIDAS ({conceptos.length})
+                      </Text>
+                      {conceptos.map((c: any, idx: number) => (
+                        <View key={idx} style={{ borderBottomWidth: idx < conceptos.length - 1 ? 1 : 0, borderBottomColor: themeColors.border, paddingBottom: 6 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>{c.descripcion}</Text>
+                          <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                            Cant: {c.cantidad || 1} • P.U.: {formatCurrency(Number(c.valorUnitario || 0))} • Importe: {formatCurrency(Number(c.importe || 0))}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  );
+                })()}
               </ScrollView>
             )}
           </View>

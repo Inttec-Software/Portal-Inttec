@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Colors, Spacing } from '@/constants/theme';
 import { generarFacturaHTML, exportarFacturaOdooPDF, exportarReciboPagoPDF, cleanFolio } from '@/utils/reportGenerator';
+import { sanitizeCfdiXmlAttributes } from '@/utils/cfdiParser';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { cacheDirectory, writeAsStringAsync } from 'expo-file-system/legacy';
@@ -187,10 +188,11 @@ export default function FacturaPreviewModal({
     if (!xmlText) return;
     try {
       setIsActionLoading(true);
+      const safeXmlText = sanitizeCfdiXmlAttributes(xmlText);
       const fileName = getCleanFileName('xml');
 
       if (Platform.OS === 'web') {
-        const blob = new Blob([xmlText], { type: 'application/xml;charset=utf-8;' });
+        const blob = new Blob([safeXmlText], { type: 'application/xml;charset=utf-8;' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -201,7 +203,7 @@ export default function FacturaPreviewModal({
         document.body.removeChild(a);
       } else {
         const fileUri = `${cacheDirectory}${fileName}`;
-        await writeAsStringAsync(fileUri, xmlText, { encoding: 'utf8' as any });
+        await writeAsStringAsync(fileUri, safeXmlText, { encoding: 'utf8' as any });
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(fileUri, { mimeType: 'application/xml' });
         }
