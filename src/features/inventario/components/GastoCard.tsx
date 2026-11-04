@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { decodeHtmlEntities } from '@/utils/helpers';
 import { styles } from './devolucionesStyles';
 import { MaterialItem } from '../types';
 
@@ -68,7 +69,7 @@ export default function GastoCard({
       >
         <View style={{ flex: 1, paddingRight: 8 }}>
           <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 15 }}>
-            {m.nombre}
+            {decodeHtmlEntities(m.nombre)}
           </Text>
           <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 2 }}>
             SKU: {m.sku || '-'} • En posesión:{' '}
@@ -103,13 +104,15 @@ export default function GastoCard({
           alignItems: 'center',
           marginTop: 4,
           marginBottom: m.hasUsedOrDamaged ? 8 : 4,
+          flexWrap: 'wrap',
+          rowGap: 6,
         }}
       >
-        <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text }}>
+        <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text, flex: 1, marginRight: 6 }}>
           Cantidad Utilizada:
         </Text>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           {currentTotal === 0 && (
             <TouchableOpacity
               style={[
@@ -185,7 +188,7 @@ export default function GastoCard({
           onPress={onToggleExpand}
           activeOpacity={0.7}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, paddingRight: 6 }}>
             <Ionicons
               name={isExpanded ? 'layers' : 'layers-outline'}
               size={14}
@@ -196,34 +199,36 @@ export default function GastoCard({
                 fontSize: 12,
                 fontWeight: '700',
                 color: isExpanded ? '#10B981' : themeColors.text,
+                flexShrink: 1,
               }}
             >
               Desglose por condición (Nuevas, Usadas, Dañadas)
             </Text>
           </View>
 
-          {(qUsado > 0 || qPorRev > 0) && (
-            <View
-              style={{
-                backgroundColor: '#D9770620',
-                paddingHorizontal: 6,
-                paddingVertical: 2,
-                borderRadius: 6,
-                marginRight: 6,
-              }}
-            >
-              <Text style={{ fontSize: 10, fontWeight: '700', color: '#D97706' }}>
-                {qUsado > 0 ? `Usadas: ${qUsado}` : ''}{' '}
-                {qPorRev > 0 ? `Dañadas: ${qPorRev}` : ''}
-              </Text>
-            </View>
-          )}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {(qUsado > 0 || qPorRev > 0) && (
+              <View
+                style={{
+                  backgroundColor: '#D9770620',
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  borderRadius: 6,
+                }}
+              >
+                <Text style={{ fontSize: 10, fontWeight: '700', color: '#D97706' }}>
+                  {qUsado > 0 ? `Usadas: ${qUsado}` : ''}{' '}
+                  {qPorRev > 0 ? `Dañadas: ${qPorRev}` : ''}
+                </Text>
+              </View>
+            )}
 
-          <Ionicons
-            name={isExpanded ? 'chevron-up' : 'chevron-down'}
-            size={14}
-            color={isExpanded ? '#10B981' : themeColors.textSecondary}
-          />
+            <Ionicons
+              name={isExpanded ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={isExpanded ? '#10B981' : themeColors.textSecondary}
+            />
+          </View>
         </TouchableOpacity>
 
         {isExpanded && (
@@ -582,6 +587,8 @@ export default function GastoCard({
           justifyContent: 'space-between',
           alignItems: 'center',
           marginTop: 10,
+          flexWrap: 'wrap',
+          gap: 6,
         }}
       >
         <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>

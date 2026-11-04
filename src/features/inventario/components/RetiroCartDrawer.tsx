@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   View,
   Text,
@@ -25,6 +26,7 @@ import {
 } from '../utils/inventarioUtils';
 import { Producto, CartItem, TipoGastoMaterial } from '../types';
 import { CatalogoItem, SucursalCliente } from '@/services/supabase';
+import { decodeHtmlEntities } from '@/utils/helpers';
 
 interface RetiroCartDrawerProps {
   themeColors: any;
@@ -111,6 +113,7 @@ export default function RetiroCartDrawer({
   handleConfirmarRetiro,
   handleProcessSignedRetiro,
 }: RetiroCartDrawerProps) {
+  const insets = useSafeAreaInsets();
   return (
     <>
       {/* MODAL DE CARRITO Y CONFIRMACIÓN */}
@@ -123,7 +126,7 @@ export default function RetiroCartDrawer({
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
+          style={[styles.modalOverlay, { paddingTop: Math.max(insets.top, 24) }]}
         >
           <View style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement }]}>
             <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
@@ -238,7 +241,7 @@ export default function RetiroCartDrawer({
                                   color: themeColors.text,
                                 }}
                               >
-                                {item.producto.nombre_oficial}
+                                {decodeHtmlEntities(item.producto.nombre_oficial)}
                               </Text>
                               <Text
                                 style={{
@@ -282,7 +285,7 @@ export default function RetiroCartDrawer({
                                 }}
                               >
                                 <Text
-                                  style={{ fontSize: 12, fontWeight: '600', color: '#059669' }}
+                                  style={{ fontSize: 12, fontWeight: '600', color: '#059669', flex: 1, marginRight: 6 }}
                                 >
                                   🟢 Nuevas (Stock: {stockNuevo})
                                 </Text>
@@ -322,9 +325,7 @@ export default function RetiroCartDrawer({
                                       styles.stepperInput,
                                       {
                                         color: themeColors.text,
-                                        height: 26,
-                                        minWidth: 36,
-                                        fontSize: 12,
+                                        height: 32, width: 38, fontSize: 13, paddingVertical: 0, includeFontPadding: false, textAlignVertical: 'center',
                                       },
                                     ]}
                                     value={String(item.cantidad_nuevo ?? 0)}
@@ -371,7 +372,7 @@ export default function RetiroCartDrawer({
                                   }}
                                 >
                                   <Text
-                                    style={{ fontSize: 12, fontWeight: '600', color: '#D97706' }}
+                                    style={{ fontSize: 12, fontWeight: '600', color: '#D97706', flex: 1, marginRight: 6 }}
                                   >
                                     🟡 Usadas (Stock: {stockUsado})
                                   </Text>
@@ -413,9 +414,7 @@ export default function RetiroCartDrawer({
                                         styles.stepperInput,
                                         {
                                           color: themeColors.text,
-                                          height: 26,
-                                          minWidth: 36,
-                                          fontSize: 12,
+                                          height: 32, width: 38, fontSize: 13, paddingVertical: 0, includeFontPadding: false, textAlignVertical: 'center',
                                         },
                                       ]}
                                       value={String(item.cantidad_usado ?? 0)}
@@ -463,7 +462,7 @@ export default function RetiroCartDrawer({
                                   }}
                                 >
                                   <Text
-                                    style={{ fontSize: 12, fontWeight: '600', color: '#DC2626' }}
+                                    style={{ fontSize: 12, fontWeight: '600', color: '#DC2626', flex: 1, marginRight: 6 }}
                                   >
                                     🔴 Dañado/Incompleto (Stock: {stockPorRevisar})
                                   </Text>
@@ -505,9 +504,7 @@ export default function RetiroCartDrawer({
                                         styles.stepperInput,
                                         {
                                           color: themeColors.text,
-                                          height: 26,
-                                          minWidth: 36,
-                                          fontSize: 12,
+                                          height: 32, width: 38, fontSize: 13, paddingVertical: 0, includeFontPadding: false, textAlignVertical: 'center',
                                         },
                                       ]}
                                       value={String(item.cantidad_por_revisar ?? 0)}
@@ -940,7 +937,15 @@ export default function RetiroCartDrawer({
               )}
             </ScrollView>
 
-            <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
+            <View
+              style={[
+                styles.modalFooter,
+                {
+                  borderTopColor: themeColors.border,
+                  paddingBottom: Math.max(insets.bottom, Platform.OS === 'ios' ? 34 : Spacing.three),
+                },
+              ]}
+            >
               <CustomButton
                 title="Cerrar"
                 variant="secondary"
@@ -969,7 +974,7 @@ export default function RetiroCartDrawer({
         transparent={true}
         onRequestClose={() => setStateModalProduct(null)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { paddingTop: Math.max(insets.top, 24) }]}>
           <View
             style={[
               styles.modalContent,
@@ -985,7 +990,7 @@ export default function RetiroCartDrawer({
                   style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}
                   numberOfLines={1}
                 >
-                  {stateModalProduct?.nombre_oficial}
+                  {decodeHtmlEntities(stateModalProduct?.nombre_oficial)}
                 </Text>
               </View>
               <TouchableOpacity onPress={() => setStateModalProduct(null)}>
@@ -1059,7 +1064,7 @@ export default function RetiroCartDrawer({
                           borderColor: themeColors.border,
                         }}
                       >
-                        <View style={{ flex: 1 }}>
+                        <View style={{ flex: 1, paddingRight: 8, minWidth: 0 }}>
                           <Text style={{ fontSize: 13, fontWeight: '700', color: '#059669' }}>
                             🟢 Nuevas
                           </Text>
@@ -1148,7 +1153,7 @@ export default function RetiroCartDrawer({
                             borderColor: themeColors.border,
                           }}
                         >
-                          <View style={{ flex: 1 }}>
+                          <View style={{ flex: 1, paddingRight: 8, minWidth: 0 }}>
                             <Text style={{ fontSize: 13, fontWeight: '700', color: '#D97706' }}>
                               🟡 Usadas
                             </Text>
@@ -1238,7 +1243,7 @@ export default function RetiroCartDrawer({
                             borderColor: themeColors.border,
                           }}
                         >
-                          <View style={{ flex: 1 }}>
+                          <View style={{ flex: 1, paddingRight: 8, minWidth: 0 }}>
                             <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>
                               🔴 Dañado / Incompleto
                             </Text>
@@ -1347,7 +1352,15 @@ export default function RetiroCartDrawer({
                 );
               })()}
 
-            <View style={[styles.modalFooter, { borderTopColor: themeColors.border }]}>
+            <View
+              style={[
+                styles.modalFooter,
+                {
+                  borderTopColor: themeColors.border,
+                  paddingBottom: Math.max(insets.bottom, Platform.OS === 'ios' ? 34 : Spacing.three),
+                },
+              ]}
+            >
               {cart.some((c) => c.producto.id === stateModalProduct?.id) && (
                 <CustomButton
                   title="Quitar todo"

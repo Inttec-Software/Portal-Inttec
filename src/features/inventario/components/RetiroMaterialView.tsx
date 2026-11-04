@@ -19,6 +19,7 @@ import {
   getStockNuevo,
 } from '../utils/inventarioUtils';
 import RetiroCartDrawer from './RetiroCartDrawer';
+import { decodeHtmlEntities } from '@/utils/helpers';
 
 export default function RetiroMaterialView() {
   const scheme = useColorScheme();
@@ -200,9 +201,9 @@ export default function RetiroMaterialView() {
                   ]}
                 >
                   {/* Info izquierda */}
-                  <View style={{ flex: 1, paddingRight: 8 }}>
+                  <View style={{ flex: 1, paddingRight: 8, minWidth: 0 }}>
                     <Text style={{ fontSize: 15, fontWeight: '600', color: themeColors.text }}>
-                      {prod.nombre_oficial}
+                      {decodeHtmlEntities(prod.nombre_oficial)}
                     </Text>
                     <Text
                       style={{
@@ -262,7 +263,7 @@ export default function RetiroMaterialView() {
                   </View>
 
                   {/* Acciones a la derecha */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
                     {multiState ? (
                       inCart && numericQtyInCart > 0 ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
