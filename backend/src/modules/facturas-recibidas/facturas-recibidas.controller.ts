@@ -13,7 +13,7 @@ export const getFacturasRecibidas = async (req: Request, res: Response) => {
 
     try {
       const { rows } = await pool.query(
-        `SELECT id, uuid, rfc_emisor, nombre_emisor, rfc_receptor, fecha_emision, subtotal, descuento, iva, retencion_isr, retencion_iva, total, moneda, tipo_comprobante, estado_sat, xml_url, pdf_url, created_at
+        `SELECT id, uuid, rfc_emisor, nombre_emisor, rfc_receptor, rfc_pac, fecha_emision, subtotal, descuento, iva, retencion_isr, retencion_iva, total, moneda, tipo_comprobante, estado_sat, xml_url, pdf_url, created_at
          FROM facturas_recibidas
          ORDER BY fecha_emision DESC
          LIMIT 1000`
@@ -84,6 +84,7 @@ export const importFactura = async (req: Request, res: Response) => {
       rfc_emisor: parsed.rfcEmisor,
       nombre_emisor: parsed.nombreEmisor,
       rfc_receptor: parsed.rfcReceptor,
+      rfc_pac: parsed.rfcPac || null,
       fecha_emision: parsed.fechaEmision,
       subtotal: parsed.subtotal,
       descuento: parsed.descuento,

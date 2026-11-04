@@ -71,14 +71,14 @@ export async function processSatSync(company: string, env: string, options: any 
                     
                     await pool.query(
                       `INSERT INTO facturas_recibidas (
-                        uuid, rfc_emisor, nombre_emisor, rfc_receptor, fecha_emision,
+                        uuid, rfc_emisor, nombre_emisor, rfc_receptor, rfc_pac, fecha_emision,
                         subtotal, descuento, iva, retencion_isr, retencion_iva, total,
                         moneda, tipo_comprobante, estado_sat, xml_url, conceptos_json, updated_at
-                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
                       ON CONFLICT (uuid) DO UPDATE SET
-                        estado_sat = EXCLUDED.estado_sat, xml_url = EXCLUDED.xml_url, updated_at = NOW()`,
+                        estado_sat = EXCLUDED.estado_sat, xml_url = EXCLUDED.xml_url, rfc_pac = COALESCE(EXCLUDED.rfc_pac, facturas_recibidas.rfc_pac), updated_at = NOW()`,
                       [
-                        parsed.uuid, parsed.rfcEmisor, parsed.nombreEmisor, parsed.rfcReceptor, parsed.fechaEmision,
+                        parsed.uuid, parsed.rfcEmisor, parsed.nombreEmisor, parsed.rfcReceptor, parsed.rfcPac || null, parsed.fechaEmision,
                         parsed.subtotal, parsed.descuento, parsed.iva, parsed.retencionIsr, parsed.retencionIva, parsed.total,
                         parsed.moneda, parsed.tipoComprobante, parsed.estadoSat, xmlUrl, JSON.stringify(parsed.conceptos)
                       ]

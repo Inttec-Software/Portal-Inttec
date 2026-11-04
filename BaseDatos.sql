@@ -1466,6 +1466,7 @@ CREATE TABLE public.facturas_recibidas (
 	rfc_emisor text NOT NULL,
 	nombre_emisor text NOT NULL,
 	rfc_receptor text NOT NULL,
+	rfc_pac text NULL,
 	fecha_emision timestamptz NOT NULL,
 	subtotal numeric DEFAULT 0 NULL,
 	descuento numeric DEFAULT 0 NULL,
