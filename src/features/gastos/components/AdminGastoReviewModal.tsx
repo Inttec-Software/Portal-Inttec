@@ -77,6 +77,16 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
     parseJustificacion,
   } = vm;
 
+  const [uuidInput, setUuidInput] = React.useState('');
+
+  React.useEffect(() => {
+    if (selectedGasto) {
+      setUuidInput(selectedGasto.factura_recibida_rel?.uuid || '');
+    } else {
+      setUuidInput('');
+    }
+  }, [selectedGasto?.id, selectedGasto?.factura_recibida_rel?.uuid]);
+
   return (
     <>
     <Modal statusBarTranslucent={true}
@@ -810,6 +820,19 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                         </View>
 
                         {/* Secciones según el toggle */}
+                        {(selectedGasto.facturado || (!selectedGasto.facturado && !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE'))) && (
+                          <View style={{ marginBottom: Spacing.two }}>
+                            <CustomInput
+                              label="UUID"
+                              placeholder="Ingresa el UUID..."
+                              value={uuidInput}
+                              onChangeText={setUuidInput}
+                              style={{ height: 40 }}
+                              iconName="key-outline"
+                              autoCapitalize="characters"
+                            />
+                          </View>
+                        )}
                         {selectedGasto.facturado ? (
                           <View style={{ gap: Spacing.one }}>
                             {selectedGasto.factura_recibida_rel && (
