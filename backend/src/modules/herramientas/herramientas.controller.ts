@@ -360,6 +360,18 @@ export const asignarHerramientaEmpleado = async (req: Request, res: Response) =>
       return res.status(400).json({ error: 'empleado_id y herramienta_id son requeridos' });
     }
 
+    // Validar que no se exceda el inventario registrado de la herramienta
+    const { rows: toolRows } = await pool.query('SELECT id, nombre, cantidad FROM herramientas WHERE id = $1', [herramienta_id]);
+    const tool = toolRows[0];
+    if (tool && tool.cantidad != null) {
+      const requestedQty = Number(cantidad) || 1;
+      if (requestedQty > tool.cantidad) {
+        return res.status(400).json({
+          error: `No se pueden asignar ${requestedQty} piezas de "${tool.nombre}". El inventario registrado es de solo ${tool.cantidad} pieza(s).`
+        });
+      }
+    }
+
     const { rows: existingRows } = await pool.query(
       'SELECT id FROM inventario_herramientas_empleado WHERE empleado_id = $1 AND herramienta_id = $2 LIMIT 1',
       [empleado_id, herramienta_id]
@@ -529,6 +541,18 @@ export const asignarHerramientaVehiculo = async (req: Request, res: Response) =>
 
     if (!vehiculo_id || !herramienta_id) {
       return res.status(400).json({ error: 'vehiculo_id y herramienta_id son requeridos' });
+    }
+
+    // Validar que no se exceda el inventario registrado de la herramienta
+    const { rows: toolRows } = await pool.query('SELECT id, nombre, cantidad FROM herramientas WHERE id = $1', [herramienta_id]);
+    const tool = toolRows[0];
+    if (tool && tool.cantidad != null) {
+      const requestedQty = Number(cantidad) || 1;
+      if (requestedQty > tool.cantidad) {
+        return res.status(400).json({
+          error: `No se pueden asignar ${requestedQty} piezas de "${tool.nombre}". El inventario registrado es de solo ${tool.cantidad} pieza(s).`
+        });
+      }
     }
 
     const { rows: existingRows } = await pool.query(

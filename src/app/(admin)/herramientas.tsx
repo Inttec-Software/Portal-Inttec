@@ -98,6 +98,7 @@ export default function AdminHerramientasScreen() {
   const [selectedToolsToAssignEmp, setSelectedToolsToAssignEmp] = useState<string[]>([]);
   const [searchEmpAssignTool, setSearchEmpAssignTool] = useState('');
   const [assignEmpQty, setAssignEmpQty] = useState('1');
+  const [assignEmpQuantities, setAssignEmpQuantities] = useState<Record<string, number>>({});
   const [assignEmpCondicion, setAssignEmpCondicion] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO'>('NUEVO');
   const [assignEmpNotas, setAssignEmpNotas] = useState('');
   const [isSavingAssignEmp, setIsSavingAssignEmp] = useState(false);
@@ -110,9 +111,35 @@ export default function AdminHerramientasScreen() {
   const [selectedToolsToAssignVeh, setSelectedToolsToAssignVeh] = useState<string[]>([]);
   const [searchVehAssignTool, setSearchVehAssignTool] = useState('');
   const [assignVehQty, setAssignVehQty] = useState('1');
+  const [assignVehQuantities, setAssignVehQuantities] = useState<Record<string, number>>({});
   const [assignVehCondicion, setAssignVehCondicion] = useState<'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO'>('NUEVO');
   const [assignVehNotas, setAssignVehNotas] = useState('');
   const [isSavingAssignVeh, setIsSavingAssignVeh] = useState(false);
+
+  // Modal Edición Rápida de Piezas Asignadas (Empleado o Vehículo)
+  const [editKitModalVisible, setEditKitModalVisible] = useState(false);
+  const [editingKitItem, setEditingKitItem] = useState<{
+    tipo: 'EMPLEADO' | 'VEHICULO';
+    id: string;
+    herramientaId: string;
+    targetId: string;
+    nombreHerramienta: string;
+    codigoHerramienta: string;
+    cantidad: number;
+    condicion: 'NUEVO' | 'BUENO' | 'REGULAR' | 'INCOMPLETO' | 'DANADO';
+    notas: string;
+    stockMax?: number;
+  } | null>(null);
+  const [isSavingEditKit, setIsSavingEditKit] = useState(false);
+
+  // Totales dinámicos de piezas a asignar
+  const totalPiezasEmp = selectedToolsToAssignEmp.reduce((acc, id) => {
+    return acc + (assignEmpQuantities[id] || 1);
+  }, 0);
+
+  const totalPiezasVeh = selectedToolsToAssignVeh.reduce((acc, id) => {
+    return acc + (assignVehQuantities[id] || 1);
+  }, 0);
 
   // Checklists
   const [checklists, setChecklists] = useState<ChecklistVehiculoHerramientas[]>([]);
@@ -452,9 +479,17 @@ export default function AdminHerramientasScreen() {
 
   // Toggle selección de herramienta para empleado
   const toggleSelectToolForEmp = (toolId: string) => {
-    setSelectedToolsToAssignEmp((prev) =>
-      prev.includes(toolId) ? prev.filter((id) => id !== toolId) : [...prev, toolId]
-    );
+    setSelectedToolsToAssignEmp((prev) => {
+      if (prev.includes(toolId)) {
+        return prev.filter((id) => id !== toolId);
+      } else {
+        setAssignEmpQuantities((q) => ({
+          ...q,
+          [toolId]: q[toolId] || 1,
+        }));
+        return [...prev, toolId];
+      }
+    });
   };
 
   const handleSelectAllToolsForEmp = (toolList: Herramienta[]) => {
@@ -462,36 +497,70 @@ export default function AdminHerramientasScreen() {
       setSelectedToolsToAssignEmp([]);
     } else {
       setSelectedToolsToAssignEmp(toolList.map((t) => t.id));
+      setAssignEmpQuantities((prev) => {
+        const next = { ...prev };
+        toolList.forEach((t) => {
+          if (!next[t.id]) next[t.id] = 1;
+        });
+        return next;
+      });
     }
   };
 
-  // Asignar Herramientas a Empleado (con Soporte Multi-Selección y Buscador)
+  const updateEmpToolQty = (toolId: string, val: number) => {
+    const tool = herramientas.find((t) => t.id === toolId);
+    const maxStock = Math.max(1, tool?.cantidad || 1);
+    const clamped = Math.min(maxStock, Math.max(1, Math.floor(val) || 1));
+    setAssignEmpQuantities((prev) => ({
+      ...prev,
+      [toolId]: clamped,
+    }));
+  };
+
+  // Asignar Herramientas a Empleado (con Soporte de Piezas Individuales por Herramienta)
   const handleAssignToEmployee = async () => {
     if (!selectedEmpleadoId || selectedToolsToAssignEmp.length === 0) {
       showAlert('Validación', 'Selecciona al menos una herramienta para asignar.');
       return;
     }
 
+    // Validación estricta de inventario: no permitir exceder el stock disponible
+    for (const toolId of selectedToolsToAssignEmp) {
+      const tool = herramientas.find((t) => t.id === toolId);
+      const maxStock = Math.max(1, tool?.cantidad || 1);
+      const qty = assignEmpQuantities[toolId] || 1;
+      if (qty > maxStock) {
+        showAlert(
+          'Inventario Insuficiente',
+          `No es posible asignar ${qty} piezas de "${tool?.nombre || 'Herramienta'}". El inventario máximo disponible es de solo ${maxStock} ${maxStock === 1 ? 'pieza' : 'piezas'}.`
+        );
+        return;
+      }
+    }
+
     setIsSavingAssignEmp(true);
     try {
-      const qty = parseInt(assignEmpQty, 10) || 1;
-      const promises = selectedToolsToAssignEmp.map((toolId) =>
-        HerramientasService.asignarHerramientaEmpleado({
+      const promises = selectedToolsToAssignEmp.map((toolId) => {
+        const tool = herramientas.find((t) => t.id === toolId);
+        const maxStock = Math.max(1, tool?.cantidad || 1);
+        const qty = Math.min(maxStock, Math.max(1, assignEmpQuantities[toolId] || 1));
+        return HerramientasService.asignarHerramientaEmpleado({
           empleado_id: selectedEmpleadoId,
           herramienta_id: toolId,
           cantidad: qty,
           condicion: assignEmpCondicion,
           notas: assignEmpNotas.trim(),
-        })
-      );
+        });
+      });
 
       await Promise.all(promises);
       showAlert(
         'Asignación Exitosa',
-        `Se ${selectedToolsToAssignEmp.length === 1 ? 'añadió 1 herramienta' : `añadieron ${selectedToolsToAssignEmp.length} herramientas`} al kit personal del empleado.`
+        `Se ${selectedToolsToAssignEmp.length === 1 ? 'añadió 1 herramienta' : `añadieron ${selectedToolsToAssignEmp.length} herramientas`} (${totalPiezasEmp} piezas en total) al kit personal del empleado.`
       );
       setAssignEmpModalVisible(false);
       setSelectedToolsToAssignEmp([]);
+      setAssignEmpQuantities({});
       setAssignEmpNotas('');
       setSearchEmpAssignTool('');
       const updated = await HerramientasService.getKitsEmpleados(selectedEmpleadoId);
@@ -528,9 +597,17 @@ export default function AdminHerramientasScreen() {
 
   // Toggle selección de herramienta para vehículo
   const toggleSelectToolForVeh = (toolId: string) => {
-    setSelectedToolsToAssignVeh((prev) =>
-      prev.includes(toolId) ? prev.filter((id) => id !== toolId) : [...prev, toolId]
-    );
+    setSelectedToolsToAssignVeh((prev) => {
+      if (prev.includes(toolId)) {
+        return prev.filter((id) => id !== toolId);
+      } else {
+        setAssignVehQuantities((q) => ({
+          ...q,
+          [toolId]: q[toolId] || 1,
+        }));
+        return [...prev, toolId];
+      }
+    });
   };
 
   const handleSelectAllToolsForVeh = (toolList: Herramienta[]) => {
@@ -538,36 +615,70 @@ export default function AdminHerramientasScreen() {
       setSelectedToolsToAssignVeh([]);
     } else {
       setSelectedToolsToAssignVeh(toolList.map((t) => t.id));
+      setAssignVehQuantities((prev) => {
+        const next = { ...prev };
+        toolList.forEach((t) => {
+          if (!next[t.id]) next[t.id] = 1;
+        });
+        return next;
+      });
     }
   };
 
-  // Asignar Herramientas a Vehículo (Multi-Selección)
+  const updateVehToolQty = (toolId: string, val: number) => {
+    const tool = herramientas.find((t) => t.id === toolId);
+    const maxStock = Math.max(1, tool?.cantidad || 1);
+    const clamped = Math.min(maxStock, Math.max(1, Math.floor(val) || 1));
+    setAssignVehQuantities((prev) => ({
+      ...prev,
+      [toolId]: clamped,
+    }));
+  };
+
+  // Asignar Herramientas a Vehículo (con Soporte de Piezas Individuales por Herramienta)
   const handleAssignToVehiculo = async () => {
     if (!selectedVehiculoId || selectedToolsToAssignVeh.length === 0) {
       showAlert('Validación', 'Selecciona al menos una herramienta para asignar al vehículo.');
       return;
     }
 
+    // Validación estricta de inventario: no permitir exceder el stock disponible
+    for (const toolId of selectedToolsToAssignVeh) {
+      const tool = herramientas.find((t) => t.id === toolId);
+      const maxStock = Math.max(1, tool?.cantidad || 1);
+      const qty = assignVehQuantities[toolId] || 1;
+      if (qty > maxStock) {
+        showAlert(
+          'Inventario Insuficiente',
+          `No es posible asignar ${qty} piezas de "${tool?.nombre || 'Herramienta'}". El inventario máximo disponible es de solo ${maxStock} ${maxStock === 1 ? 'pieza' : 'piezas'}.`
+        );
+        return;
+      }
+    }
+
     setIsSavingAssignVeh(true);
     try {
-      const qty = parseInt(assignVehQty, 10) || 1;
-      const promises = selectedToolsToAssignVeh.map((toolId) =>
-        HerramientasService.asignarHerramientaVehiculo({
+      const promises = selectedToolsToAssignVeh.map((toolId) => {
+        const tool = herramientas.find((t) => t.id === toolId);
+        const maxStock = Math.max(1, tool?.cantidad || 1);
+        const qty = Math.min(maxStock, Math.max(1, assignVehQuantities[toolId] || 1));
+        return HerramientasService.asignarHerramientaVehiculo({
           vehiculo_id: selectedVehiculoId,
           herramienta_id: toolId,
           cantidad: qty,
           condicion: assignVehCondicion,
           notas: assignVehNotas.trim(),
-        })
-      );
+        });
+      });
 
       await Promise.all(promises);
       showAlert(
         'Kit Actualizado',
-        `Se ${selectedToolsToAssignVeh.length === 1 ? 'asignó 1 herramienta' : `asignaron ${selectedToolsToAssignVeh.length} herramientas`} al kit oficial del vehículo.`
+        `Se ${selectedToolsToAssignVeh.length === 1 ? 'asignó 1 herramienta' : `asignaron ${selectedToolsToAssignVeh.length} herramientas`} (${totalPiezasVeh} piezas en total) al kit oficial del vehículo.`
       );
       setAssignVehModalVisible(false);
       setSelectedToolsToAssignVeh([]);
+      setAssignVehQuantities({});
       setAssignVehNotas('');
       setSearchVehAssignTool('');
       const updated = await HerramientasService.getKitsVehiculos(selectedVehiculoId);
@@ -576,6 +687,54 @@ export default function AdminHerramientasScreen() {
       showAlert('Error', err.message || 'No se pudieron asignar las herramientas.');
     } finally {
       setIsSavingAssignVeh(false);
+    }
+  };
+
+  // Guardar edición rápida de cantidad y condición para kit asignado
+  const handleSaveEditKitItem = async () => {
+    if (!editingKitItem) return;
+
+    const maxStock = editingKitItem.stockMax ? Math.max(1, editingKitItem.stockMax) : undefined;
+    const qty = Math.max(1, editingKitItem.cantidad || 1);
+    if (maxStock && qty > maxStock) {
+      showAlert(
+        'Inventario Insuficiente',
+        `No puedes asignar ${qty} piezas de "${editingKitItem.nombreHerramienta}". El inventario registrado es de solo ${maxStock} ${maxStock === 1 ? 'pieza' : 'piezas'}.`
+      );
+      return;
+    }
+
+    setIsSavingEditKit(true);
+    try {
+      if (editingKitItem.tipo === 'EMPLEADO') {
+        await HerramientasService.asignarHerramientaEmpleado({
+          empleado_id: editingKitItem.targetId,
+          herramienta_id: editingKitItem.herramientaId,
+          cantidad: qty,
+          condicion: editingKitItem.condicion,
+          notas: (editingKitItem.notas || '').trim(),
+        });
+        showAlert('Kit Actualizado', 'Se actualizaron las piezas y condiciones de la herramienta en el empleado.');
+        const updated = await HerramientasService.getKitsEmpleados(editingKitItem.targetId);
+        setKitsEmpleado(updated);
+      } else {
+        await HerramientasService.asignarHerramientaVehiculo({
+          vehiculo_id: editingKitItem.targetId,
+          herramienta_id: editingKitItem.herramientaId,
+          cantidad: qty,
+          condicion: editingKitItem.condicion,
+          notas: (editingKitItem.notas || '').trim(),
+        });
+        showAlert('Kit Actualizado', 'Se actualizaron las piezas y condiciones de la herramienta en el vehículo.');
+        const updated = await HerramientasService.getKitsVehiculos(editingKitItem.targetId);
+        setKitsVehiculo(updated);
+      }
+      setEditKitModalVisible(false);
+      setEditingKitItem(null);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo actualizar la herramienta.');
+    } finally {
+      setIsSavingEditKit(false);
     }
   };
 
@@ -1122,15 +1281,38 @@ export default function AdminHerramientasScreen() {
                       ) : null}
                     </View>
 
-                    <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                    <View style={{ alignItems: 'flex-end', gap: 6 }}>
                       {getStatusBadge(item.condicion)}
-                      <TouchableOpacity
-                        onPress={() => handleUnassignFromEmployee(item.id, item.herramienta?.nombre || 'Herramienta')}
-                        style={[styles.unassignBtn, { backgroundColor: Colors.light.danger + '15' }]}
-                      >
-                        <Ionicons name="trash-outline" size={14} color={Colors.light.danger} />
-                        <Text style={{ color: Colors.light.danger, fontSize: 11, fontWeight: '700' }}>Remover</Text>
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setEditingKitItem({
+                              tipo: 'EMPLEADO',
+                              id: item.id,
+                              herramientaId: item.herramienta_id,
+                              targetId: selectedEmpleadoId,
+                              nombreHerramienta: item.herramienta?.nombre || 'Herramienta',
+                              codigoHerramienta: item.herramienta?.codigo || 'HER',
+                              cantidad: item.cantidad || 1,
+                              condicion: item.condicion || 'BUENO',
+                              notas: item.notas || '',
+                              stockMax: item.herramienta?.cantidad,
+                            });
+                            setEditKitModalVisible(true);
+                          }}
+                          style={[styles.unassignBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary + '30', borderWidth: 1 }]}
+                        >
+                          <Ionicons name="create-outline" size={14} color={themeColors.primary} />
+                          <Text style={{ color: themeColors.primary, fontSize: 11, fontWeight: '700' }}>Editar Piezas</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleUnassignFromEmployee(item.id, item.herramienta?.nombre || 'Herramienta')}
+                          style={[styles.unassignBtn, { backgroundColor: Colors.light.danger + '15' }]}
+                        >
+                          <Ionicons name="trash-outline" size={14} color={Colors.light.danger} />
+                          <Text style={{ color: Colors.light.danger, fontSize: 11, fontWeight: '700' }}>Remover</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   </View>
                 ))}
@@ -1256,15 +1438,38 @@ export default function AdminHerramientasScreen() {
                       ) : null}
                     </View>
 
-                    <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                    <View style={{ alignItems: 'flex-end', gap: 6 }}>
                       {getStatusBadge(item.notas && item.notas.includes('[FALTANTE]') ? 'BAJA' : item.condicion)}
-                      <TouchableOpacity
-                        onPress={() => handleUnassignFromVehiculo(item.id, item.herramienta?.nombre || 'Herramienta')}
-                        style={[styles.unassignBtn, { backgroundColor: Colors.light.danger + '15' }]}
-                      >
-                        <Ionicons name="trash-outline" size={14} color={Colors.light.danger} />
-                        <Text style={{ color: Colors.light.danger, fontSize: 11, fontWeight: '700' }}>Remover</Text>
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setEditingKitItem({
+                              tipo: 'VEHICULO',
+                              id: item.id,
+                              herramientaId: item.herramienta_id,
+                              targetId: selectedVehiculoId,
+                              nombreHerramienta: item.herramienta?.nombre || 'Herramienta',
+                              codigoHerramienta: item.herramienta?.codigo || 'HER',
+                              cantidad: item.cantidad || 1,
+                              condicion: item.condicion || 'BUENO',
+                              notas: item.notas || '',
+                              stockMax: item.herramienta?.cantidad,
+                            });
+                            setEditKitModalVisible(true);
+                          }}
+                          style={[styles.unassignBtn, { backgroundColor: themeColors.primary + '15', borderColor: themeColors.primary + '30', borderWidth: 1 }]}
+                        >
+                          <Ionicons name="create-outline" size={14} color={themeColors.primary} />
+                          <Text style={{ color: themeColors.primary, fontSize: 11, fontWeight: '700' }}>Editar Piezas</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleUnassignFromVehiculo(item.id, item.herramienta?.nombre || 'Herramienta')}
+                          style={[styles.unassignBtn, { backgroundColor: Colors.light.danger + '15' }]}
+                        >
+                          <Ionicons name="trash-outline" size={14} color={Colors.light.danger} />
+                          <Text style={{ color: Colors.light.danger, fontSize: 11, fontWeight: '700' }}>Remover</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   </View>
                 ))}
@@ -1589,8 +1794,8 @@ export default function AdminHerramientasScreen() {
                 </View>
 
                 {/* Lista de Herramientas Filtradas con Checkboxes */}
-                <View style={{ gap: 6, maxHeight: 220 }}>
-                  <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>
+                <View style={{ gap: 6, maxHeight: 180 }}>
+                  <ScrollView nestedScrollEnabled style={{ maxHeight: 180 }}>
                     {herramientas
                       .filter((t) => {
                         const q = normalizeText(searchEmpAssignTool);
@@ -1604,6 +1809,7 @@ export default function AdminHerramientasScreen() {
                       })
                       .map((tool) => {
                         const isSelected = selectedToolsToAssignEmp.includes(tool.id);
+                        const assignedPzas = assignEmpQuantities[tool.id] || 1;
                         return (
                           <TouchableOpacity
                             key={tool.id}
@@ -1627,12 +1833,14 @@ export default function AdminHerramientasScreen() {
                                 [{tool.codigo}] {tool.nombre}
                               </Text>
                               <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                                {tool.categoria} {tool.numero_serie ? `• N/S: ${tool.numero_serie}` : ''}
+                                {tool.categoria} • Stock catálogo: {tool.cantidad || 1} {tool.cantidad === 1 ? 'unidad' : 'unidades'} {tool.numero_serie ? `• N/S: ${tool.numero_serie}` : ''}
                               </Text>
                             </View>
                             {isSelected && (
                               <View style={{ backgroundColor: themeColors.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>SELECCIONADA</Text>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>
+                                  {assignedPzas} {assignedPzas === 1 ? 'PZA' : 'PZAS'}
+                                </Text>
                               </View>
                             )}
                           </TouchableOpacity>
@@ -1642,13 +1850,132 @@ export default function AdminHerramientasScreen() {
                 </View>
               </View>
 
-              <CustomInput
-                label="Cantidad por cada Herramienta"
-                value={assignEmpQty}
-                onChangeText={setAssignEmpQty}
-                keyboardType="numeric"
-                placeholder="1"
-              />
+              {/* Sección de Configuración de Piezas Individuales por Herramienta */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <Text style={[styles.inputLabel, { color: themeColors.text, marginBottom: 0 }]}>
+                    Piezas a Asignar ({selectedToolsToAssignEmp.length} herramientas • {totalPiezasEmp} piezas en total)
+                  </Text>
+                </View>
+
+                {selectedToolsToAssignEmp.length === 0 ? (
+                  <View style={{ padding: 12, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, backgroundColor: themeColors.background, alignItems: 'center' }}>
+                    <Ionicons name="hand-left-outline" size={24} color={themeColors.textSecondary} />
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4, textAlign: 'center' }}>
+                      Selecciona una o más herramientas en la lista para asignar sus piezas específicas.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ gap: 8 }}>
+                    {selectedToolsToAssignEmp.map((toolId) => {
+                      const tool = herramientas.find((t) => t.id === toolId);
+                      if (!tool) return null;
+                      const currentQty = assignEmpQuantities[toolId] || 1;
+                      const stockTotal = tool.cantidad || 1;
+                      const excedeStock = currentQty > stockTotal;
+
+                      return (
+                        <View
+                          key={toolId}
+                          style={[
+                            styles.selectedToolCard,
+                            {
+                              backgroundColor: themeColors.background,
+                              borderColor: excedeStock ? '#e67e22' : themeColors.border,
+                            },
+                          ]}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <View style={{ flex: 1, marginRight: 8 }}>
+                              <Text style={{ fontWeight: '700', color: themeColors.text, fontSize: 13 }}>
+                                [{tool.codigo}] {tool.nombre}
+                              </Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+                                <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                                  {tool.categoria}
+                                </Text>
+                                <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                                  <Text style={{ fontSize: 10, fontWeight: '700', color: themeColors.primary }}>
+                                    Stock catálogo: {stockTotal} {stockTotal === 1 ? 'pza' : 'pzas'}
+                                  </Text>
+                                </View>
+                                {currentQty >= stockTotal && (
+                                  <View style={{ backgroundColor: '#27ae6020', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#27ae60' }}>
+                                      Máximo disponible ({stockTotal})
+                                    </Text>
+                                  </View>
+                                )}
+                              </View>
+                            </View>
+
+                            <TouchableOpacity
+                              onPress={() => toggleSelectToolForEmp(toolId)}
+                              style={{ padding: 4 }}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Stepper de Piezas */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: themeColors.border + '60' }}>
+                            <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>
+                              Cantidad de piezas:
+                            </Text>
+
+                            <View style={styles.stepperContainer}>
+                              <TouchableOpacity
+                                style={[styles.stepperBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                                onPress={() => updateEmpToolQty(toolId, currentQty - 1)}
+                                disabled={currentQty <= 1}
+                              >
+                                <Ionicons name="remove" size={16} color={currentQty <= 1 ? themeColors.textSecondary + '40' : themeColors.text} />
+                              </TouchableOpacity>
+
+                              <TextInput
+                                style={[
+                                  styles.stepperInput,
+                                  {
+                                    backgroundColor: themeColors.backgroundElement,
+                                    borderColor: currentQty >= stockTotal ? '#27ae60' : themeColors.border,
+                                    color: themeColors.text,
+                                  },
+                                ]}
+                                value={String(currentQty)}
+                                onChangeText={(txt) => {
+                                  const parsed = parseInt(txt.replace(/[^0-9]/g, ''), 10);
+                                  updateEmpToolQty(toolId, isNaN(parsed) ? 1 : parsed);
+                                }}
+                                keyboardType="numeric"
+                              />
+
+                              <TouchableOpacity
+                                style={[
+                                  styles.stepperBtn,
+                                  {
+                                    backgroundColor: themeColors.backgroundElement,
+                                    borderColor: themeColors.border,
+                                    opacity: currentQty >= stockTotal ? 0.4 : 1,
+                                  },
+                                ]}
+                                onPress={() => updateEmpToolQty(toolId, currentQty + 1)}
+                                disabled={currentQty >= stockTotal}
+                              >
+                                <Ionicons name="add" size={16} color={currentQty >= stockTotal ? themeColors.textSecondary : themeColors.text} />
+                              </TouchableOpacity>
+
+                              <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginLeft: 4 }}>
+                                {currentQty === 1 ? 'pieza' : 'piezas'}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
 
               <Text style={[styles.inputLabel, { color: themeColors.text }]}>Condición de Entrega</Text>
               <View style={{ flexDirection: 'row', gap: 6, marginBottom: Spacing.two }}>
@@ -1692,10 +2019,17 @@ export default function AdminHerramientasScreen() {
                 style={{ flex: 1, marginRight: 8 }}
               />
               <CustomButton
-                title="Confirmar Asignación"
+                title={
+                  isSavingAssignEmp
+                    ? 'Asignando...'
+                    : selectedToolsToAssignEmp.length === 0
+                    ? 'Selecciona Herramientas'
+                    : `Confirmar Asignación (${totalPiezasEmp} ${totalPiezasEmp === 1 ? 'pieza' : 'piezas'})`
+                }
                 variant="primary"
                 onPress={handleAssignToEmployee}
                 loading={isSavingAssignEmp}
+                disabled={selectedToolsToAssignEmp.length === 0}
                 style={{ flex: 1 }}
               />
             </View>
@@ -1781,6 +2115,7 @@ export default function AdminHerramientasScreen() {
                       })
                       .map((tool) => {
                         const isSelected = selectedToolsToAssignVeh.includes(tool.id);
+                        const assignedPzas = assignVehQuantities[tool.id] || 1;
                         return (
                           <TouchableOpacity
                             key={tool.id}
@@ -1804,12 +2139,14 @@ export default function AdminHerramientasScreen() {
                                 [{tool.codigo}] {tool.nombre}
                               </Text>
                               <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                                {tool.categoria} {tool.numero_serie ? `• N/S: ${tool.numero_serie}` : ''}
+                                {tool.categoria} • Stock catálogo: {tool.cantidad || 1} {tool.cantidad === 1 ? 'unidad' : 'unidades'} {tool.numero_serie ? `• N/S: ${tool.numero_serie}` : ''}
                               </Text>
                             </View>
                             {isSelected && (
                               <View style={{ backgroundColor: themeColors.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>SELECCIONADA</Text>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>
+                                  {assignedPzas} {assignedPzas === 1 ? 'PZA' : 'PZAS'}
+                                </Text>
                               </View>
                             )}
                           </TouchableOpacity>
@@ -1819,13 +2156,132 @@ export default function AdminHerramientasScreen() {
                 </View>
               </View>
 
-              <CustomInput
-                label="Cantidad por cada Herramienta"
-                value={assignVehQty}
-                onChangeText={setAssignVehQty}
-                keyboardType="numeric"
-                placeholder="1"
-              />
+              {/* Sección de Configuración de Piezas Individuales por Herramienta para Vehículo */}
+              <View style={{ marginBottom: Spacing.two }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <Text style={[styles.inputLabel, { color: themeColors.text, marginBottom: 0 }]}>
+                    Piezas a Asignar al Vehículo ({selectedToolsToAssignVeh.length} herramientas • {totalPiezasVeh} piezas en total)
+                  </Text>
+                </View>
+
+                {selectedToolsToAssignVeh.length === 0 ? (
+                  <View style={{ padding: 12, borderRadius: BorderRadius.small, borderWidth: 1, borderColor: themeColors.border, backgroundColor: themeColors.background, alignItems: 'center' }}>
+                    <Ionicons name="hand-left-outline" size={24} color={themeColors.textSecondary} />
+                    <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4, textAlign: 'center' }}>
+                      Selecciona una o más herramientas en la lista para asignar sus piezas al vehículo.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ gap: 8 }}>
+                    {selectedToolsToAssignVeh.map((toolId) => {
+                      const tool = herramientas.find((t) => t.id === toolId);
+                      if (!tool) return null;
+                      const currentQty = assignVehQuantities[toolId] || 1;
+                      const stockTotal = tool.cantidad || 1;
+                      const excedeStock = currentQty > stockTotal;
+
+                      return (
+                        <View
+                          key={toolId}
+                          style={[
+                            styles.selectedToolCard,
+                            {
+                              backgroundColor: themeColors.background,
+                              borderColor: excedeStock ? '#e67e22' : themeColors.border,
+                            },
+                          ]}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <View style={{ flex: 1, marginRight: 8 }}>
+                              <Text style={{ fontWeight: '700', color: themeColors.text, fontSize: 13 }}>
+                                [{tool.codigo}] {tool.nombre}
+                              </Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+                                <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                                  {tool.categoria}
+                                </Text>
+                                <View style={{ backgroundColor: themeColors.primary + '15', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                                  <Text style={{ fontSize: 10, fontWeight: '700', color: themeColors.primary }}>
+                                    Stock catálogo: {stockTotal} {stockTotal === 1 ? 'pza' : 'pzas'}
+                                  </Text>
+                                </View>
+                                {currentQty >= stockTotal && (
+                                  <View style={{ backgroundColor: '#27ae6020', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#27ae60' }}>
+                                      Máximo disponible ({stockTotal})
+                                    </Text>
+                                  </View>
+                                )}
+                              </View>
+                            </View>
+
+                            <TouchableOpacity
+                              onPress={() => toggleSelectToolForVeh(toolId)}
+                              style={{ padding: 4 }}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Stepper de Piezas */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: themeColors.border + '60' }}>
+                            <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>
+                              Cantidad requerida:
+                            </Text>
+
+                            <View style={styles.stepperContainer}>
+                              <TouchableOpacity
+                                style={[styles.stepperBtn, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+                                onPress={() => updateVehToolQty(toolId, currentQty - 1)}
+                                disabled={currentQty <= 1}
+                              >
+                                <Ionicons name="remove" size={16} color={currentQty <= 1 ? themeColors.textSecondary + '40' : themeColors.text} />
+                              </TouchableOpacity>
+
+                              <TextInput
+                                style={[
+                                  styles.stepperInput,
+                                  {
+                                    backgroundColor: themeColors.backgroundElement,
+                                    borderColor: currentQty >= stockTotal ? '#27ae60' : themeColors.border,
+                                    color: themeColors.text,
+                                  },
+                                ]}
+                                value={String(currentQty)}
+                                onChangeText={(txt) => {
+                                  const parsed = parseInt(txt.replace(/[^0-9]/g, ''), 10);
+                                  updateVehToolQty(toolId, isNaN(parsed) ? 1 : parsed);
+                                }}
+                                keyboardType="numeric"
+                              />
+
+                              <TouchableOpacity
+                                style={[
+                                  styles.stepperBtn,
+                                  {
+                                    backgroundColor: themeColors.backgroundElement,
+                                    borderColor: themeColors.border,
+                                    opacity: currentQty >= stockTotal ? 0.4 : 1,
+                                  },
+                                ]}
+                                onPress={() => updateVehToolQty(toolId, currentQty + 1)}
+                                disabled={currentQty >= stockTotal}
+                              >
+                                <Ionicons name="add" size={16} color={currentQty >= stockTotal ? themeColors.textSecondary : themeColors.text} />
+                              </TouchableOpacity>
+
+                              <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginLeft: 4 }}>
+                                {currentQty === 1 ? 'pieza' : 'piezas'}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
 
               <Text style={[styles.inputLabel, { color: themeColors.text }]}>Condición de Entrega</Text>
               <View style={{ flexDirection: 'row', gap: 6, marginBottom: Spacing.two }}>
@@ -1870,14 +2326,162 @@ export default function AdminHerramientasScreen() {
               />
               <CustomButton
                 title={
-                  selectedToolsToAssignVeh.length > 1
-                    ? `Asignar (${selectedToolsToAssignVeh.length}) al Vehículo`
-                    : 'Asignar al Vehículo'
+                  isSavingAssignVeh
+                    ? 'Asignando...'
+                    : selectedToolsToAssignVeh.length === 0
+                    ? 'Selecciona Herramientas'
+                    : `Asignar al Vehículo (${totalPiezasVeh} ${totalPiezasVeh === 1 ? 'pieza' : 'piezas'})`
                 }
                 variant="primary"
                 onPress={handleAssignToVehiculo}
                 loading={isSavingAssignVeh}
                 disabled={selectedToolsToAssignVeh.length === 0}
+                style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ========================================================================= */}
+      {/* MODAL: EDITAR PIEZAS ASIGNADAS (EMPLEADO O VEHÍCULO) */}
+      {/* ========================================================================= */}
+      <Modal visible={editKitModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, maxWidth: 460 }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                  Editar Piezas Asignadas
+                </Text>
+                <Text style={{ fontSize: 12, color: themeColors.primary, fontWeight: '600', marginTop: 2 }}>
+                  {editingKitItem?.codigoHerramienta ? `[${editingKitItem.codigoHerramienta}] ` : ''}{editingKitItem?.nombreHerramienta}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setEditKitModalVisible(false)}>
+                <Ionicons name="close" size={24} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {editingKitItem && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={{ marginBottom: Spacing.two }}>
+                  <Text style={[styles.inputLabel, { color: themeColors.text }]}>Cantidad de Piezas Asignadas</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                    <TouchableOpacity
+                      style={[styles.stepperBtn, { backgroundColor: themeColors.background, borderColor: themeColors.border, width: 40, height: 40 }]}
+                      onPress={() => setEditingKitItem((prev) => prev ? { ...prev, cantidad: Math.max(1, prev.cantidad - 1) } : null)}
+                      disabled={editingKitItem.cantidad <= 1}
+                    >
+                      <Ionicons name="remove" size={20} color={editingKitItem.cantidad <= 1 ? themeColors.textSecondary + '40' : themeColors.text} />
+                    </TouchableOpacity>
+
+                    <TextInput
+                      style={[
+                        styles.stepperInput,
+                        {
+                          backgroundColor: themeColors.background,
+                          borderColor: (editingKitItem.stockMax && editingKitItem.cantidad >= editingKitItem.stockMax) ? '#27ae60' : themeColors.border,
+                          color: themeColors.text,
+                          width: 80,
+                          height: 40,
+                          fontSize: 16,
+                        },
+                      ]}
+                      value={String(editingKitItem.cantidad)}
+                      onChangeText={(txt) => {
+                        const parsed = parseInt(txt.replace(/[^0-9]/g, ''), 10);
+                        const maxStock = editingKitItem.stockMax ? Math.max(1, editingKitItem.stockMax) : Infinity;
+                        setEditingKitItem((prev) => prev ? { ...prev, cantidad: isNaN(parsed) ? 1 : Math.min(maxStock, Math.max(1, parsed)) } : null);
+                      }}
+                      keyboardType="numeric"
+                    />
+
+                    <TouchableOpacity
+                      style={[
+                        styles.stepperBtn,
+                        {
+                          backgroundColor: themeColors.background,
+                          borderColor: themeColors.border,
+                          width: 40,
+                          height: 40,
+                          opacity: (editingKitItem.stockMax && editingKitItem.cantidad >= editingKitItem.stockMax) ? 0.4 : 1,
+                        },
+                      ]}
+                      onPress={() => {
+                        const maxStock = editingKitItem.stockMax ? Math.max(1, editingKitItem.stockMax) : Infinity;
+                        setEditingKitItem((prev) => prev ? { ...prev, cantidad: Math.min(maxStock, prev.cantidad + 1) } : null);
+                      }}
+                      disabled={editingKitItem.stockMax ? editingKitItem.cantidad >= editingKitItem.stockMax : false}
+                    >
+                      <Ionicons
+                        name="add"
+                        size={20}
+                        color={(editingKitItem.stockMax && editingKitItem.cantidad >= editingKitItem.stockMax) ? themeColors.textSecondary : themeColors.text}
+                      />
+                    </TouchableOpacity>
+
+                    <Text style={{ fontSize: 13, color: themeColors.textSecondary, fontWeight: '600', marginLeft: 4 }}>
+                      {editingKitItem.cantidad === 1 ? 'pieza' : 'piezas'}
+                    </Text>
+                  </View>
+                  {editingKitItem.stockMax ? (
+                    <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 6 }}>
+                      Stock total en catálogo: {editingKitItem.stockMax} {editingKitItem.stockMax === 1 ? 'pieza' : 'piezas'}
+                    </Text>
+                  ) : null}
+                </View>
+
+                <Text style={[styles.inputLabel, { color: themeColors.text }]}>Condición Actual</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginBottom: Spacing.two }}>
+                  {[
+                    { value: 'NUEVO' as const, label: 'Nuevo', color: '#0984e3' },
+                    { value: 'BUENO' as const, label: 'Bueno', color: '#10ac84' },
+                    { value: 'REGULAR' as const, label: 'Regular', color: '#f39c12' },
+                    { value: 'DANADO' as const, label: 'Dañado', color: '#e74c3c' },
+                  ].map((c) => (
+                    <TouchableOpacity
+                      key={c.value}
+                      style={[
+                        styles.categoryPill,
+                        {
+                          backgroundColor: editingKitItem.condicion === c.value ? c.color : themeColors.background,
+                          borderColor: themeColors.border,
+                        },
+                      ]}
+                      onPress={() => setEditingKitItem((prev) => prev ? { ...prev, condicion: c.value } : null)}
+                    >
+                      <Text style={{ color: editingKitItem.condicion === c.value ? '#fff' : themeColors.text, fontSize: 12, fontWeight: '600' }}>
+                        {c.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <CustomInput
+                  label="Observaciones / Notas"
+                  value={editingKitItem.notas}
+                  onChangeText={(txt) => setEditingKitItem((prev) => prev ? { ...prev, notas: txt } : null)}
+                  placeholder="Detalles de entrega, condición o serie..."
+                />
+              </ScrollView>
+            )}
+
+            <View style={styles.modalFooter}>
+              <CustomButton
+                title="Cancelar"
+                variant="secondary"
+                onPress={() => {
+                  setEditKitModalVisible(false);
+                  setEditingKitItem(null);
+                }}
+                style={{ flex: 1, marginRight: 8 }}
+              />
+              <CustomButton
+                title="Guardar Cambios"
+                variant="primary"
+                onPress={handleSaveEditKitItem}
+                loading={isSavingEditKit}
                 style={{ flex: 1 }}
               />
             </View>
@@ -2855,6 +3459,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    padding: Spacing.two,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  stepperBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stepperInput: {
+    minWidth: 46,
+    height: 32,
+    borderWidth: 1,
+    borderRadius: 6,
+    textAlign: 'center',
+    fontWeight: '700',
+    fontSize: 14,
+    paddingHorizontal: 4,
+    paddingVertical: 0,
+  },
+  selectedToolCard: {
     padding: Spacing.two,
     borderRadius: BorderRadius.small,
     borderWidth: 1,
