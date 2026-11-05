@@ -1,49 +1,16 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
 
-const initializedConciliacionPools = new WeakSet<any>();
 
-export const ensureGastosConciliacionSchema = async (pool: any) => {
-  if (initializedConciliacionPools.has(pool)) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS facturas_recibidas (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        uuid TEXT UNIQUE NOT NULL,
-        rfc_emisor TEXT,
-        nombre_emisor TEXT,
-        rfc_receptor TEXT,
-        fecha_emision TIMESTAMPTZ,
-        subtotal NUMERIC(15,2) DEFAULT 0,
-        descuento NUMERIC(15,2) DEFAULT 0,
-        iva NUMERIC(15,2) DEFAULT 0,
-        retencion_isr NUMERIC(15,2) DEFAULT 0,
-        retencion_iva NUMERIC(15,2) DEFAULT 0,
-        total NUMERIC(15,2) DEFAULT 0,
-        moneda TEXT DEFAULT 'MXN',
-        tipo_comprobante TEXT DEFAULT 'I',
-        estado_sat TEXT DEFAULT 'VIGENTE',
-        xml_url TEXT,
-        pdf_url TEXT,
-        conceptos_json JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-      ALTER TABLE gastos ADD COLUMN IF NOT EXISTS conciliacion_activa BOOLEAN DEFAULT FALSE;
-      ALTER TABLE gastos ADD COLUMN IF NOT EXISTS factura_recibida_id UUID NULL;
-      ALTER TABLE gastos ADD COLUMN IF NOT EXISTS factura_sugerida_id UUID NULL;
-      ALTER TABLE gastos ADD COLUMN IF NOT EXISTS devuelto_por_factura BOOLEAN DEFAULT FALSE;
-      ALTER TABLE gastos ADD COLUMN IF NOT EXISTS facturas_descartadas_ids TEXT[] DEFAULT '{}';
-    `);
-    initializedConciliacionPools.add(pool);
-  } catch (err: any) {
-    console.warn('[ensureGastosConciliacionSchema] Warning:', err.message);
-  }
+
+export const ensureGastosConciliacionSchema = async (_pool?: any): Promise<void> => {
+  // No-op intencional: el esquema se gestiona mediante migraciones SQL de base de datos.
+  return;
 };
 
 export const reconcilePendingInvoicesForPool = async (pool: any): Promise<number> => {
   try {
-    await ensureGastosConciliacionSchema(pool);
+
 
     // 1. Limpiar sugerencias obsoletas (gastos ya facturados, ya no pendientes de factura, o facturas canceladas/ocupadas)
     await pool.query(`
@@ -200,7 +167,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    await reconcilePendingInvoicesForPool(pool);
+
 
     const isPaginated = req.query.page !== undefined || (req.query.limit !== undefined && req.query.limit !== 'all');
     const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
@@ -431,7 +398,7 @@ export const getEmpleadoGastos = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
     
-    await ensureGastosConciliacionSchema(pool);
+
 
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'No autorizado' });
@@ -482,7 +449,7 @@ export const getGastoById = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    await ensureGastosConciliacionSchema(pool);
+
 
     const { id } = req.params;
 
@@ -518,7 +485,7 @@ export const updateGastoStatus = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    await ensureGastosConciliacionSchema(pool);
+
 
     const { id } = req.params;
     const { status, payload, actor_id, monto, force_unlink_venta } = req.body;
@@ -806,7 +773,7 @@ export const updateGasto = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    await ensureGastosConciliacionSchema(pool);
+
 
     const { id } = req.params;
     const { updatePayload, gasolinaPayload, ...restPayload } = req.body;
@@ -882,7 +849,7 @@ export const updateGasto = async (req: Request, res: Response) => {
       await recalculateVentaTotalsInternal(pool, oldGasto.venta_id);
     }
 
-    await reconcilePendingInvoicesForPool(pool);
+
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -1123,7 +1090,7 @@ export const createGastos = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    await ensureGastosConciliacionSchema(pool);
+
 
     const { payloadsToInsert, gasolinaPayload, createNotifications, employeeName, totalGasto, categoriaNombre, ...singleGastoBody } = req.body;
 
@@ -1163,7 +1130,7 @@ export const createGastos = async (req: Request, res: Response) => {
     }
 
     // Ejecutar conciliación inmediatamente para que si ya existe una factura recibida con ese monto, se vincule como sugerencia
-    await reconcilePendingInvoicesForPool(pool);
+
 
     if (createNotifications && insertedGastos.length > 0) {
       try {
@@ -1201,7 +1168,7 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    await ensureGastosConciliacionSchema(pool);
+
 
     const { id } = req.params;
     const { factura_id, approve_directly, factura_url: customFacturaUrl, actor_id } = req.body;
@@ -1312,7 +1279,7 @@ export const dismissSatFacturaFromGasto = async (req: Request, res: Response) =>
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    await ensureGastosConciliacionSchema(pool);
+
 
     const { id } = req.params;
     const { factura_id, actor_id } = req.body;
@@ -1344,7 +1311,7 @@ export const dismissSatFacturaFromGasto = async (req: Request, res: Response) =>
     );
 
     // Re-ejecutar conciliación por si existe otra factura distinta del mismo monto
-    await reconcilePendingInvoicesForPool(pool);
+
 
     try {
       const actor = req.user?.id || actor_id;
