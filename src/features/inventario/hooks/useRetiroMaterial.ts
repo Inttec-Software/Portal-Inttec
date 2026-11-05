@@ -28,6 +28,9 @@ export function useRetiroMaterial() {
   const [signatureModalVisible, setSignatureModalVisible] = useState(false);
   const [pendingWithdrawPayload, setPendingWithdrawPayload] = useState<any>(null);
 
+  // Lista de campos con error de validación
+  const [formErrors, setFormErrors] = useState<string[]>([]);
+
   // Catálogos
   const [clientes, setClientes] = useState<CatalogoItem[]>([]);
   const [sucursalesCliente, setSucursalesCliente] = useState<SucursalCliente[]>([]);
@@ -150,30 +153,19 @@ export function useRetiroMaterial() {
     const saveDraft = async () => {
       try {
         const draftKey = `retiro_material_draft_${currentUser.id}`;
-        const hasData =
-          cart.length > 0 ||
-          motivoRetiro.trim() !== '' ||
-          detalleServicioProyecto.trim() !== '' ||
-          selectedCliente.trim() !== '';
-
-        if (hasData) {
-          const draft = {
-            cart,
-            motivoRetiro,
-            tipoGasto,
-            detalleServicioProyecto,
-            selectedCliente,
-            selectedClienteId,
-            sucursal,
-            selectedSucursalId,
-            updatedAt: Date.now(),
-          };
-          await AsyncStorage.setItem(draftKey, JSON.stringify(draft));
-        } else {
-          await AsyncStorage.removeItem(draftKey);
-        }
-      } catch (err) {
-        console.warn('Error al guardar borrador de carrito:', err);
+        const draft = {
+          cart,
+          motivoRetiro,
+          tipoGasto,
+          detalleServicioProyecto,
+          selectedCliente,
+          selectedClienteId,
+          sucursal,
+          selectedSucursalId,
+        };
+        await AsyncStorage.setItem(draftKey, JSON.stringify(draft));
+      } catch (e) {
+        console.warn('Error al guardar borrador del carrito:', e);
       }
     };
 
@@ -188,86 +180,126 @@ export function useRetiroMaterial() {
     sucursal,
     selectedSucursalId,
     isDraftLoaded,
-    currentUser?.id,
+    currentUser,
   ]);
 
-  const normQuery = normalizeText(searchQuery);
-  const filteredProductos = productos.filter(
-    (p) =>
-      !normQuery ||
-      normalizeText(p.nombre_oficial).includes(normQuery) ||
-      normalizeText(p.sku_interno).includes(normQuery)
-  );
+  const filteredProductos = productos.filter((p) => {
+    if (!searchQuery.trim()) return true;
+    const q = normalizeText(searchQuery);
+    const matchNombre = normalizeText(p.nombre_oficial).includes(q);
+    const matchSku = normalizeText(p.sku_interno).includes(q);
+    return matchNombre || matchSku;
+  });
 
-  const addToCart = (producto: Producto, qty: number = 1) => {
-    const unit = getProductoUnidad(producto);
-    const totalMax = getTotalStock(producto);
+  const addToCart = (producto: Producto) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.producto.id === producto.id);
+      const totalStock = getTotalStock(producto);
+
       if (existing) {
-        const currentQty = typeof existing.cantidad === 'number' ? existing.cantidad : 0;
-        const newQty = Math.round((currentQty + qty) * 100) / 100;
-        if (newQty > totalMax) {
-          Alert.alert('Stock Insuficiente', `Solo hay ${totalMax} ${unit} disponibles.`);
-          return prev;
+        const curQty = typeof existing.cantidad === 'number' ? existing.cantidad : 0;
+        if (curQty < totalStock) {
+          const nextQty = curQty + 1;
+          const sNuevo = getStockNuevo(producto);
+          const nextNuevo = Math.min(nextQty, sNuevo);
+          const nextUsado = Math.min(
+            Math.max(0, nextQty - nextNuevo),
+            producto.stock_usado || 0
+          );
+          const nextPorRev = Math.min(
+            Math.max(0, nextQty - nextNuevo - nextUsado),
+            producto.stock_por_revisar || 0
+          );
+
+          return prev.map((item) =>
+            item.producto.id === producto.id
+              ? {
+                  ...item,
+                  cantidad: nextQty,
+                  cantidad_nuevo: nextNuevo,
+                  cantidad_usado: nextUsado,
+                  cantidad_por_revisar: nextPorRev,
+                }
+              : item
+          );
         }
+        return prev;
+      }
+
+      if (totalStock > 0) {
+        const sNuevo = getStockNuevo(producto);
+        const qNuevo = Math.min(1, sNuevo);
+        const qUsado = qNuevo < 1 ? Math.min(1, producto.stock_usado || 0) : 0;
+        const qPorRev = qNuevo + qUsado < 1 ? Math.min(1, producto.stock_por_revisar || 0) : 0;
+
+        return [
+          ...prev,
+          {
+            producto,
+            cantidad: 1,
+            cantidad_nuevo: qNuevo,
+            cantidad_usado: qUsado,
+            cantidad_por_revisar: qPorRev,
+          },
+        ];
+      }
+      return prev;
+    });
+  };
+
+  const updateCartQty = (productoId: string, textOrNum: number | string) => {
+    setCart((prev) => {
+      const existing = prev.find((item) => item.producto.id === productoId);
+      if (!existing) return prev;
+
+      const totalStock = getTotalStock(existing.producto);
+
+      if (textOrNum === '') {
         return prev.map((item) =>
-          item.producto.id === producto.id
+          item.producto.id === productoId
             ? {
                 ...item,
-                cantidad: newQty,
-                cantidad_nuevo: hasMultipleStockStates(producto)
-                  ? typeof item.cantidad_nuevo === 'number'
-                    ? item.cantidad_nuevo + qty
-                    : qty
-                  : newQty,
+                cantidad: '',
+                cantidad_nuevo: '',
+                cantidad_usado: '',
+                cantidad_por_revisar: '',
               }
             : item
         );
       }
-      return [
-        ...prev,
-        {
-          producto,
-          cantidad: qty,
-          cantidad_nuevo: qty,
-          cantidad_usado: 0,
-          cantidad_por_revisar: 0,
-        },
-      ];
-    });
-  };
 
-  const updateCartQty = (productoId: string, text: string) => {
-    setCart((prev) => {
-      const item = prev.find((i) => i.producto.id === productoId);
-      if (!item) return prev;
+      let parsed = typeof textOrNum === 'number' ? textOrNum : parseFloat(textOrNum) || 0;
+      if (parsed < 0) parsed = 0;
+      if (parsed > totalStock) parsed = totalStock;
 
-      const unit = getProductoUnidad(item.producto);
-      const totalMax = getTotalStock(item.producto);
-
-      if (text.trim() === '') {
-        return prev.map((i) =>
-          i.producto.id === productoId ? { ...i, cantidad: '', cantidad_nuevo: '' } : i
-        );
+      if (parsed === 0) {
+        return prev.filter((item) => item.producto.id !== productoId);
       }
 
-      const qty = parseFloat(text.replace(/[^0-9.]/g, ''));
-      if (isNaN(qty)) {
-        return prev.map((i) =>
-          i.producto.id === productoId ? { ...i, cantidad: '', cantidad_nuevo: '' } : i
-        );
-      }
+      let remaining = parsed;
+      const sNuevo = getStockNuevo(existing.producto);
+      const sUsado = existing.producto.stock_usado || 0;
+      const sPorRev = existing.producto.stock_por_revisar || 0;
 
-      if (qty > totalMax) {
-        Alert.alert('Stock Insuficiente', `Solo hay ${totalMax} ${unit} disponibles.`);
-        return prev.map((i) =>
-          i.producto.id === productoId ? { ...i, cantidad: totalMax, cantidad_nuevo: totalMax } : i
-        );
-      }
+      const assignNuevo = Math.min(sNuevo, remaining);
+      remaining -= assignNuevo;
 
-      return prev.map((i) =>
-        i.producto.id === productoId ? { ...i, cantidad: qty, cantidad_nuevo: qty } : i
+      const assignUsado = Math.min(sUsado, remaining);
+      remaining -= assignUsado;
+
+      const assignPorRev = Math.min(sPorRev, remaining);
+      remaining -= assignPorRev;
+
+      return prev.map((item) =>
+        item.producto.id === productoId
+          ? {
+              ...item,
+              cantidad: parsed,
+              cantidad_nuevo: assignNuevo,
+              cantidad_usado: assignUsado,
+              cantidad_por_revisar: assignPorRev,
+            }
+          : item
       );
     });
   };
@@ -277,56 +309,67 @@ export function useRetiroMaterial() {
     state: 'nuevo' | 'usado' | 'por_revisar',
     val: number | ''
   ) => {
-    const unit = getProductoUnidad(producto);
-    const maxStock =
-      state === 'nuevo'
-        ? getStockNuevo(producto)
-        : state === 'usado'
-        ? producto.stock_usado || 0
-        : producto.stock_por_revisar || 0;
-
-    let numVal: number | '' = val;
-    if (typeof val === 'number') {
-      if (val > maxStock) {
-        Alert.alert('Stock Insuficiente', `Solo hay ${maxStock} ${unit} de este estado.`);
-        numVal = maxStock;
-      } else if (val < 0) {
-        numVal = 0;
-      }
-    }
-
     setCart((prev) => {
-      const existing = prev.find((i) => i.producto.id === producto.id);
-      let currentNuevo = existing?.cantidad_nuevo ?? 0;
-      let currentUsado = existing?.cantidad_usado ?? 0;
-      let currentPorRevisar = existing?.cantidad_por_revisar ?? 0;
+      const existing = prev.find((item) => item.producto.id === producto.id);
+      const totalStock = getTotalStock(producto);
 
-      if (state === 'nuevo') currentNuevo = numVal;
-      if (state === 'usado') currentUsado = numVal;
-      if (state === 'por_revisar') currentPorRevisar = numVal;
+      const sNuevo = getStockNuevo(producto);
+      const sUsado = producto.stock_usado || 0;
+      const sPorRev = producto.stock_por_revisar || 0;
 
-      const nNuevo = typeof currentNuevo === 'number' ? currentNuevo : 0;
-      const nUsado = typeof currentUsado === 'number' ? currentUsado : 0;
-      const nPorRev = typeof currentPorRevisar === 'number' ? currentPorRevisar : 0;
-      const total = Math.round((nNuevo + nUsado + nPorRev) * 100) / 100;
+      let curNuevo =
+        existing && typeof existing.cantidad_nuevo === 'number' ? existing.cantidad_nuevo : 0;
+      let curUsado =
+        existing && typeof existing.cantidad_usado === 'number' ? existing.cantidad_usado : 0;
+      let curPorRev =
+        existing && typeof existing.cantidad_por_revisar === 'number'
+          ? existing.cantidad_por_revisar
+          : 0;
 
-      if (total <= 0 && currentNuevo !== '' && currentUsado !== '' && currentPorRevisar !== '') {
-        return prev.filter((i) => i.producto.id !== producto.id);
+      let maxForState = state === 'nuevo' ? sNuevo : state === 'usado' ? sUsado : sPorRev;
+      let targetVal: number | '' = val;
+
+      if (typeof val === 'number') {
+        if (val < 0) targetVal = 0;
+        else if (val > maxForState) targetVal = maxForState;
       }
 
-      const updatedItem: CartItem = {
-        producto,
-        cantidad: total,
-        cantidad_nuevo: currentNuevo,
-        cantidad_usado: currentUsado,
-        cantidad_por_revisar: currentPorRevisar,
-      };
+      if (state === 'nuevo') curNuevo = typeof targetVal === 'number' ? targetVal : 0;
+      if (state === 'usado') curUsado = typeof targetVal === 'number' ? targetVal : 0;
+      if (state === 'por_revisar') curPorRev = typeof targetVal === 'number' ? targetVal : 0;
 
-      if (existing) {
-        return prev.map((i) => (i.producto.id === producto.id ? updatedItem : i));
-      } else {
-        return [...prev, updatedItem];
+      const sum = Math.round((curNuevo + curUsado + curPorRev) * 100) / 100;
+      if (sum > totalStock) return prev;
+
+      if (sum === 0 && targetVal === 0) {
+        return prev.filter((item) => item.producto.id !== producto.id);
       }
+
+      if (!existing) {
+        return [
+          ...prev,
+          {
+            producto,
+            cantidad: sum,
+            cantidad_nuevo: state === 'nuevo' ? targetVal : 0,
+            cantidad_usado: state === 'usado' ? targetVal : 0,
+            cantidad_por_revisar: state === 'por_revisar' ? targetVal : 0,
+          },
+        ];
+      }
+
+      return prev.map((item) =>
+        item.producto.id === producto.id
+          ? {
+              ...item,
+              cantidad: sum,
+              cantidad_nuevo: state === 'nuevo' ? targetVal : existing.cantidad_nuevo,
+              cantidad_usado: state === 'usado' ? targetVal : existing.cantidad_usado,
+              cantidad_por_revisar:
+                state === 'por_revisar' ? targetVal : existing.cantidad_por_revisar,
+            }
+          : item
+      );
     });
   };
 
@@ -357,28 +400,47 @@ export function useRetiroMaterial() {
         };
       });
 
+    // Validar y acumular todos los campos obligatorios faltantes
+    const missingFields: string[] = [];
+
     if (validCart.length === 0) {
-      Alert.alert(
-        'Carrito Vacío',
-        'Agrega al menos un material con cantidad mayor a 0 para retirar.'
-      );
-      return;
+      missingFields.push('Materiales a retirar (agrega al menos un material con cantidad mayor a 0)');
     }
 
     if (!detalleServicioProyecto.trim()) {
-      Alert.alert('Validación', 'Por favor ingresa el Detalle de Servicio o Proyecto.');
-      return;
+      missingFields.push('Detalle de Servicio o Proyecto');
     }
 
-    if (!selectedCliente) {
-      Alert.alert('Validación', 'Por favor selecciona el Cliente Relacionado.');
-      return;
+    if (!selectedCliente || !selectedCliente.trim()) {
+      missingFields.push('Cliente Relacionado');
+    }
+
+    // Si hay un cliente seleccionado y tiene sucursales disponibles en el catálogo, la sucursal es obligatoria
+    const clientBranches = selectedClienteId
+      ? sucursalesCliente.filter((s) => s.cliente_id === selectedClienteId)
+      : [];
+    if (clientBranches.length > 0 && (!sucursal || !sucursal.trim())) {
+      missingFields.push('Sucursal del cliente');
     }
 
     if (!motivoRetiro.trim()) {
-      Alert.alert('Validación', 'Por favor ingresa un motivo o referencia para el retiro.');
+      missingFields.push('Motivo o Referencia del Retiro');
+    }
+
+    if (missingFields.length > 0) {
+      setFormErrors(missingFields);
+      const bulletList = missingFields.map((f) => `• ${f}`).join('\n');
+      const alertTitle = 'Campos Obligatorios Incompletos';
+      const alertMessage = `Te falta completar los siguientes campos obligatorios:\n\n${bulletList}`;
+      if (Platform.OS === 'web') {
+        window.alert(`${alertTitle}\n\n${alertMessage}`);
+      } else {
+        Alert.alert(alertTitle, alertMessage);
+      }
       return;
     }
+
+    setFormErrors([]);
 
     if (!currentUser) return;
 
@@ -426,6 +488,7 @@ export function useRetiroMaterial() {
       setSelectedClienteId(null);
       setSucursal('');
       setSelectedSucursalId(null);
+      setFormErrors([]);
       if (currentUser?.id) {
         await AsyncStorage.removeItem(`retiro_material_draft_${currentUser.id}`).catch(() => {});
       }
@@ -460,6 +523,7 @@ export function useRetiroMaterial() {
             setSelectedClienteId(null);
             setSucursal('');
             setSelectedSucursalId(null);
+            setFormErrors([]);
             if (currentUser?.id) {
               await AsyncStorage.removeItem(`retiro_material_draft_${currentUser.id}`).catch(
                 () => {}
@@ -516,6 +580,8 @@ export function useRetiroMaterial() {
     setShowSucursalDropdown,
     stateModalProduct,
     setStateModalProduct,
+    formErrors,
+    setFormErrors,
     addToCart,
     updateCartQty,
     updateCartStateQty,

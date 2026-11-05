@@ -1,6 +1,6 @@
 import React from 'react';
-import DevolucionesView from '@/features/inventario/components/DevolucionesView';
+import { Redirect } from 'expo-router';
 
 export default function DevolucionesEmpleadoScreen() {
-  return <DevolucionesView />;
+  return <Redirect href="/(empleado)/inventario" />;
 }

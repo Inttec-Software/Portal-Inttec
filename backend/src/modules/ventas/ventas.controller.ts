@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
-import { ensureGastosConciliacionSchema } from '../reportes/reportes.controller';
+
 
 // Helper: calcular estado de pago
 function calcularEstadoPago(precioTotal: number, totalPagado: number): string {
@@ -180,7 +180,7 @@ export const getVentaDetalle = async (req: Request, res: Response) => {
 
     const { id } = req.params;
 
-    await ensureGastosConciliacionSchema(pool);
+
 
     const [partidasRes, gastosRes, pagosRes] = await Promise.all([
       pool.query('SELECT * FROM ventas_partidas WHERE venta_id = $1', [id]),

@@ -1206,6 +1206,11 @@ CREATE TABLE public.gastos (
 	cliente_id uuid NULL,
 	sucursal_id uuid NULL,
 	estado_reembolso text DEFAULT 'NORMAL'::text NULL,
+	conciliacion_activa bool DEFAULT false NULL,
+	factura_recibida_id uuid NULL,
+	factura_sugerida_id uuid NULL,
+	devuelto_por_factura bool DEFAULT false NULL,
+	facturas_descartadas_ids _text DEFAULT '{}'::text[] NULL,
 	CONSTRAINT gastos_estado_reembolso_check CHECK ((estado_reembolso = ANY (ARRAY['NORMAL'::text, 'PENDIENTE_REEMBOLSO'::text, 'REEMBOLSADO'::text]))),
 	CONSTRAINT gastos_metodo_pago_check CHECK ((metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text, 'transferencia'::text, 'monedero_electronico'::text]))),
 	CONSTRAINT gastos_pkey PRIMARY KEY (id),
@@ -1479,13 +1484,12 @@ CREATE TABLE public.facturas_recibidas (
 	estado_sat text DEFAULT 'VIGENTE'::text NULL,
 	xml_url text NULL,
 	pdf_url text NULL,
-	conciliado_gasto_id uuid NULL,
 	conceptos_json jsonb DEFAULT '[]'::jsonb NULL,
 	created_at timestamptz DEFAULT now() NULL,
 	updated_at timestamptz DEFAULT now() NULL,
 	CONSTRAINT facturas_recibidas_pkey PRIMARY KEY (id),
-	CONSTRAINT facturas_recibidas_uuid_key UNIQUE (uuid),
-	CONSTRAINT facturas_recibidas_gasto_fkey FOREIGN KEY (conciliado_gasto_id) REFERENCES public.gastos(id) ON DELETE SET NULL
+	CONSTRAINT facturas_recibidas_uuid_key UNIQUE (uuid)
+
 );
 CREATE INDEX idx_facturas_recibidas_estado ON public.facturas_recibidas USING btree (estado_sat);
 CREATE INDEX idx_facturas_recibidas_fecha ON public.facturas_recibidas USING btree (fecha_emision DESC);

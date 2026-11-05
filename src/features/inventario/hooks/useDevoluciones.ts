@@ -1,23 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AuthService, CatalogoItem, SucursalCliente } from '@/services/supabase';
 import {
   InventarioItem,
   MaterialItem,
-  DevolucionTabType,
+  EmpleadoInventarioTabType,
   TipoGastoMaterial,
 } from '../types';
 import { InventarioApi } from '../api/inventarioApi';
 
-export function useDevoluciones() {
+export function useDevoluciones(defaultTab: EmpleadoInventarioTabType = 'stock') {
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<DevolucionTabType>('devolucion');
+  const [activeTab, setActiveTab] = useState<EmpleadoInventarioTabType>(defaultTab);
 
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [inventario, setInventario] = useState<InventarioItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Búsqueda en catálogo personal de materiales
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Catálogos para gasto
   const [clientes, setClientes] = useState<CatalogoItem[]>([]);
@@ -396,9 +399,9 @@ export function useDevoluciones() {
       });
 
       showNotification('success', 'Tu solicitud de devolución ha sido enviada al administrador.');
-      setTimeout(() => {
-        router.replace('/(empleado)/gastos');
-      }, 1500);
+      setObservacionesDevolucion('');
+      await loadInventario(currentUser.id);
+      setActiveTab('stock');
     } catch (err: any) {
       console.error(err);
       if (Platform.OS === 'web') {
@@ -481,6 +484,7 @@ export function useDevoluciones() {
       setSucursal('');
       setSelectedSucursalId(null);
       await loadInventario(currentUser.id);
+      setActiveTab('stock');
 
       if (Platform.OS !== 'web') {
         Alert.alert('Éxito', successMsg);
@@ -496,6 +500,48 @@ export function useDevoluciones() {
     }
   };
 
+  // Filtrado de materiales en posesión para la vista 'stock'
+  const filteredInventario = useMemo(() => {
+    if (!searchQuery.trim()) return inventario;
+    const q = searchQuery.toLowerCase().trim();
+    return inventario.filter((item) => {
+      const prod = Array.isArray(item.producto) ? item.producto[0] : item.producto;
+      const nombre = (prod?.nombre_oficial || '').toLowerCase();
+      const sku = (prod?.sku_interno || '').toLowerCase();
+      return nombre.includes(q) || sku.includes(q);
+    });
+  }, [inventario, searchQuery]);
+
+  // Totales y estadísticas del inventario del empleado
+  const totalArticulosDistintos = inventario.length;
+  const totalPiezasEnPosesion = inventario.reduce(
+    (acc, curr) => acc + (Number(curr.cantidad_disponible) || 0),
+    0
+  );
+  const totalNuevoEnPosesion = inventario.reduce(
+    (acc, curr) => acc + (Number(curr.cantidad_nuevo) || 0),
+    0
+  );
+  const totalUsadoEnPosesion = inventario.reduce(
+    (acc, curr) => acc + (Number(curr.cantidad_usado) || 0),
+    0
+  );
+  const totalPorRevisarEnPosesion = inventario.reduce(
+    (acc, curr) => acc + (Number(curr.cantidad_por_revisar) || 0),
+    0
+  );
+
+  // Acciones rápidas desde la tarjeta de un producto en posesión
+  const handleSelectForGasto = (productoId: string) => {
+    setActiveTab('gasto');
+    setExpandedGasto((prev) => ({ ...prev, [productoId]: true }));
+  };
+
+  const handleSelectForDevolucion = (productoId: string) => {
+    setActiveTab('devolucion');
+    setExpandedDevolucion((prev) => ({ ...prev, [productoId]: true }));
+  };
+
   const totalDevolverGeneral = materialesDevolver.reduce(
     (acc, curr) => acc + (curr.cantidad || 0),
     0
@@ -504,10 +550,27 @@ export function useDevoluciones() {
   const totalPosesionGeneral = materialesGasto.reduce((acc, curr) => acc + (curr.maximo || 0), 0);
   const totalRestanteGeneral = Math.max(0, totalPosesionGeneral - totalGastoGeneral);
 
+  const refreshInventario = () => {
+    if (currentUser?.id) {
+      loadInventario(currentUser.id);
+    }
+  };
+
   return {
     activeTab,
     setActiveTab,
     inventario,
+    filteredInventario,
+    searchQuery,
+    setSearchQuery,
+    totalArticulosDistintos,
+    totalPiezasEnPosesion,
+    totalNuevoEnPosesion,
+    totalUsadoEnPosesion,
+    totalPorRevisarEnPosesion,
+    handleSelectForGasto,
+    handleSelectForDevolucion,
+    refreshInventario,
     isLoading,
     clientes,
     sucursalesCliente,
@@ -556,3 +619,5 @@ export function useDevoluciones() {
     handleEnviarGasto,
   };
 }
+
+export const useEmpleadoInventario = useDevoluciones;

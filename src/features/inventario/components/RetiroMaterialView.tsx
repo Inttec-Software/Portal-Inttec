@@ -70,6 +70,8 @@ export default function RetiroMaterialView() {
     removeFromCart,
     handleConfirmarRetiro,
     handleProcessSignedRetiro,
+    formErrors,
+    setFormErrors,
     handleClearCart,
   } = useRetiroMaterial();
 
@@ -365,7 +367,7 @@ export default function RetiroMaterialView() {
                             styles.stepperBtn,
                             { backgroundColor: themeColors.primary + '18' },
                           ]}
-                          onPress={() => addToCart(prod, 1)}
+                          onPress={() => addToCart(prod)}
                         >
                           <Ionicons name="add" size={16} color={themeColors.primary} />
                         </TouchableOpacity>
@@ -373,7 +375,7 @@ export default function RetiroMaterialView() {
                     ) : (
                       <TouchableOpacity
                         style={[styles.addBtn, { backgroundColor: themeColors.primary }]}
-                        onPress={() => addToCart(prod, 1)}
+                        onPress={() => addToCart(prod)}
                         activeOpacity={0.8}
                       >
                         <Ionicons name="add" size={22} color="#ffffff" />
@@ -461,6 +463,8 @@ export default function RetiroMaterialView() {
         removeFromCart={removeFromCart}
         handleClearCart={handleClearCart}
         handleConfirmarRetiro={handleConfirmarRetiro}
+        formErrors={formErrors}
+        setFormErrors={setFormErrors}
         handleProcessSignedRetiro={handleProcessSignedRetiro}
       />
     </View>
