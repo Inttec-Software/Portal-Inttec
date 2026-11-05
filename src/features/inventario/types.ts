@@ -125,5 +125,6 @@ export type AdminTabType =
   | 'empleados_stock'
   | 'inventario_personal';
 
-export type DevolucionTabType = 'devolucion' | 'gasto';
+export type EmpleadoInventarioTabType = 'stock' | 'devolucion' | 'gasto';
+export type DevolucionTabType = EmpleadoInventarioTabType;
 export type TipoGastoMaterial = 'Servicio' | 'Proyecto' | 'Venta' | 'Operativo';

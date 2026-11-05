@@ -70,6 +70,8 @@ interface RetiroCartDrawerProps {
   ) => void;
   removeFromCart: (productoId: string) => void;
   handleClearCart: () => void;
+  formErrors?: string[];
+  setFormErrors?: React.Dispatch<React.SetStateAction<string[]>>;
   handleConfirmarRetiro: () => void;
   handleProcessSignedRetiro: (signatureBase64: string) => Promise<void>;
 }
@@ -110,6 +112,8 @@ export default function RetiroCartDrawer({
   updateCartStateQty,
   removeFromCart,
   handleClearCart,
+  formErrors = [],
+  setFormErrors,
   handleConfirmarRetiro,
   handleProcessSignedRetiro,
 }: RetiroCartDrawerProps) {
@@ -462,7 +466,7 @@ export default function RetiroCartDrawer({
                                   }}
                                 >
                                   <Text
-                                    style={{ fontSize: 12, fontWeight: '600', color: '#DC2626', flex: 1, marginRight: 6 }}
+                                    style={{ fontSize: 12, fontWeight: '600', color: themeColors.danger, flex: 1, marginRight: 6 }}
                                   >
                                     🔴 Dañado/Incompleto (Stock: {stockPorRevisar})
                                   </Text>
@@ -581,6 +585,31 @@ export default function RetiroCartDrawer({
                   </View>
 
                   {/* SECCIÓN 2: CAMPOS DE ASIGNACIÓN */}
+                  {formErrors.length > 0 && (
+                    <View
+                      style={{
+                        backgroundColor: themeColors.danger + '18',
+                        borderColor: themeColors.danger,
+                        borderWidth: 1.5,
+                        borderRadius: 8,
+                        padding: 12,
+                        marginBottom: Spacing.two,
+                        gap: 4,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="alert-circle" size={18} color="#DC2626" />
+                        <Text style={{ color: themeColors.danger, fontWeight: 'bold', fontSize: 13 }}>
+                          Campos obligatorios incompletos:
+                        </Text>
+                      </View>
+                      {formErrors.map((err, idx) => (
+                        <Text key={idx} style={{ color: themeColors.danger, fontSize: 12, marginLeft: 24, fontWeight: '500' }}>
+                          • {err}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
                   <Text
                     style={{
                       fontSize: 14,
@@ -1244,7 +1273,7 @@ export default function RetiroCartDrawer({
                           }}
                         >
                           <View style={{ flex: 1, paddingRight: 8, minWidth: 0 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.danger }}>
                               🔴 Dañado / Incompleto
                             </Text>
                             <Text

@@ -54,6 +54,7 @@ function EmpleadoLayoutContent() {
     if (lastPart === 'agregar-evidencia') return 'Nueva Evidencia';
     if (lastPart === 'editar-evidencia') return 'Editar Evidencia';
     if (lastPart === 'evidencia') return 'Evidencias';
+    if (lastPart === 'inventario') return 'Mi Inventario';
     if (lastPart === 'retiro-material') return 'Retiro de Material';
     if (lastPart === 'devoluciones') return 'Devoluciones';
     if (lastPart === 'vehiculos') return 'Vehículos';
@@ -69,8 +70,8 @@ function EmpleadoLayoutContent() {
     { route: '/(empleado)/gastos', icon: 'cash-outline', color: '#feca57', name: 'Gastos' },
     { route: '/(empleado)/asistencia', icon: 'time-outline', color: '#1dd1a1', name: 'Asistencia' },
     { route: '/(empleado)/evidencia', icon: 'briefcase-outline', color: '#ff5252', name: 'Evidencias' },
+    { route: '/(empleado)/inventario', icon: 'cube-outline', color: '#0284c7', name: 'Mi Inventario' },
     { route: '/(empleado)/retiro-material', icon: 'cart-outline', color: '#ff7f50', name: 'Retiro de Material' },
-    { route: '/(empleado)/devoluciones', icon: 'return-up-back-outline', color: '#2ed573', name: 'Devoluciones' },
     { route: '/(empleado)/vehiculos', icon: 'car-outline', color: '#ff9ff3', name: 'Vehículos' },
     { route: '/(empleado)/herramientas', icon: 'build-outline', color: '#00cec9', name: 'Herramientas' },
     { route: '/(empleado)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
