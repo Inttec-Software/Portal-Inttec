@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseClient } from '../../config/supabase';
-import { buildUnsignedCFDI } from './finkok/xmlBuilder';
+import { buildUnsignedCFDI, getEmisorConfig } from './finkok/xmlBuilder';
 import { buildUnsignedCFDIPagos, CFDIPagoParams, DoctoRelacionadoParam } from './finkok/xmlBuilderPagos';
 import { signStampFinkok, signCancelFinkok, sanitizeCfdiXmlAttributes } from './finkok/soapClient';
 import { invalidateCache } from '../../middlewares/cache.middleware';
@@ -434,8 +434,8 @@ router.post('/timbrar-factura', async (req: Request, res: Response) => {
       throw new Error('Credenciales de Finkok no configuradas en el entorno');
     }
 
-    // Construir CFDI 4.0 XML con hora local correcta
-    const xmlSinSellar = await buildUnsignedCFDI(venta, cliente, partidas, isProduction);
+    // Construir CFDI 4.0 XML con hora local correcta y emisor según empresa activa (inttec / daravisa)
+    const xmlSinSellar = await buildUnsignedCFDI(venta, cliente, partidas, isProduction, company);
 
     // Timbrar en Finkok
     const stampResult = await signStampFinkok(
@@ -1494,7 +1494,7 @@ router.post('/cancelar-factura', async (req: Request, res: Response) => {
       throw new Error('El comprobante no se encuentra timbrado o ya fue cancelado');
     }
 
-    const rfcEmisor = process.env.EMISOR_RFC || (isProduction ? 'FETR83041461A' : 'EKU9003173C9');
+    const { rfc: rfcEmisor } = getEmisorConfig(company, isProduction);
 
     const cancelResult = await signCancelFinkok(
       targetUUID,
@@ -2133,11 +2133,8 @@ router.post('/timbrar-pago', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Credenciales de Finkok no configuradas en el backend' });
     }
 
-    // Configuración del Emisor
-    const emisorRfc = process.env.EMISOR_RFC || (isProduction ? 'FETR83041461A' : 'EKU9003173C9');
-    const emisorNombre = process.env.EMISOR_NOMBRE || (isProduction ? 'RAFAEL ALONSO FERNANDEZ TINAJERO' : 'ESCUELA KEMPER URATE');
-    const emisorRegimen = process.env.EMISOR_REGIMEN || (isProduction ? '612' : '601');
-    const emisorCP = process.env.EMISOR_CP || (isProduction ? '31110' : '77500');
+    // Configuración del Emisor según empresa activa (inttec / daravisa)
+    const { rfc: emisorRfc, nombre: emisorNombre, regimen: emisorRegimen, cp: emisorCP } = getEmisorConfig(company, isProduction);
 
     // 1. Resolver y calcular cada Documento Relacionado
     const doctosRelacionados: DoctoRelacionadoParam[] = [];
@@ -2582,7 +2579,7 @@ router.post('/cancelar-pago', async (req: Request, res: Response) => {
     const FINKOK_PASSWORD = process.env.FINKOK_PASSWORD;
     const FINKOK_ENV = (req.body.finkok_env || process.env.FINKOK_ENV || 'production').toLowerCase();
     const isProduction = FINKOK_ENV === 'production';
-    const emisorRfc = process.env.EMISOR_RFC || (isProduction ? 'FETR83041461A' : 'EKU9003173C9');
+    const { rfc: emisorRfc } = getEmisorConfig(company, isProduction);
 
     if (!FINKOK_USERNAME || !FINKOK_PASSWORD) {
       return res.status(500).json({ error: 'Credenciales de Finkok no configuradas' });
