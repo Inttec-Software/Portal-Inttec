@@ -1140,12 +1140,19 @@ export default function FacturacionScreen() {
           rate: 0.16,
           type: 'IVA'
         }],
-        issuer: {
-          tax_id: 'FETR83041461A',
-          legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
-          tax_system: '612',
-          zip: '31110'
-        },
+        issuer: CompanyService.getActiveCompany() === 'daravisa'
+          ? {
+              tax_id: 'DST2102127T9',
+              legal_name: 'DARAVISA SOLUCIONES Y TECNOLOGIA',
+              tax_system: '601',
+              zip: '31110'
+            }
+          : {
+              tax_id: 'FETR83041461A',
+              legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
+              tax_system: '612',
+              zip: '31110'
+            },
         customer: {
           tax_id: draftData?.receptor?.rfc || (factura as any).cliente_rfc || 'XAXX010101000',
           legal_name: clienteVal,
@@ -1654,12 +1661,19 @@ export default function FacturacionScreen() {
             rate: 0.16,
           }
         ],
-        issuer: {
-          tax_id: 'FETR83041461A',
-          legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
-          tax_system: '612',
-          zip: '31110',
-        },
+        issuer: CompanyService.getActiveCompany() === 'daravisa'
+          ? {
+              tax_id: 'DST2102127T9',
+              legal_name: 'DARAVISA SOLUCIONES Y TECNOLOGIA',
+              tax_system: '601',
+              zip: '31110',
+            }
+          : {
+              tax_id: 'FETR83041461A',
+              legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
+              tax_system: '612',
+              zip: '31110',
+            },
         customer: {
           tax_id: clienteRfc,
           legal_name: clienteNombre || 'PUBLICO EN GENERAL',

@@ -19,10 +19,24 @@ export async function processSatSync(company: string, env: string, options: any 
     idNuevaSolicitud: null as string | null
   };
 
-  const satRfc = (process.env.SAT_RFC || process.env[`${company.toUpperCase()}_SAT_RFC`] || '').trim().toUpperCase();
-  const satCerB64 = process.env.SAT_CER_B64 || process.env[`${company.toUpperCase()}_SAT_CER_B64`] || '';
-  const satKeyB64 = process.env.SAT_KEY_B64 || process.env[`${company.toUpperCase()}_SAT_KEY_B64`] || '';
-  const satPassword = process.env.SAT_PASSWORD || process.env[`${company.toUpperCase()}_SAT_PASSWORD`] || '';
+  const isDaravisa = company.toLowerCase() === 'daravisa';
+  const satRfc = (
+    process.env[`${company.toUpperCase()}_SAT_RFC`] ||
+    (!isDaravisa ? process.env.SAT_RFC : '') ||
+    ''
+  ).trim().toUpperCase();
+  const satCerB64 =
+    process.env[`${company.toUpperCase()}_SAT_CER_B64`] ||
+    (!isDaravisa ? process.env.SAT_CER_B64 : '') ||
+    '';
+  const satKeyB64 =
+    process.env[`${company.toUpperCase()}_SAT_KEY_B64`] ||
+    (!isDaravisa ? process.env.SAT_KEY_B64 : '') ||
+    '';
+  const satPassword =
+    process.env[`${company.toUpperCase()}_SAT_PASSWORD`] ||
+    (!isDaravisa ? process.env.SAT_PASSWORD : '') ||
+    '';
 
   if (!satRfc || !satCerB64 || !satKeyB64 || !satPassword) {
     return { missingCredentials: true, message: 'Faltan credenciales SAT (RFC, CER, KEY, PASSWORD)' };
