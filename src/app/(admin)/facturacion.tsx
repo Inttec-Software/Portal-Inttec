@@ -18,6 +18,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useAuth } from '@/context/AuthContext';
 import { CompanyService, supabase, inttecClient, daravisaClient } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
@@ -286,6 +287,8 @@ export default function FacturacionScreen() {
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && width >= 1024;
+  const { company: authCompany, changeCompany } = useAuth();
+  const currentCompany = authCompany || CompanyService.getActiveCompany();
 
   const [activeTab, setActiveTab] = useState<'emitir' | 'historial' | 'pagos'>('historial');
 
@@ -412,10 +415,10 @@ export default function FacturacionScreen() {
     fetchClientes();
     fetchProductos();
     fetchHistorialFacturas();
-    fetchSiguienteFolio('A');
+    fetchSiguienteFolio(serie || 'A');
     fetchComplementosList();
-    fetchSiguienteFolioPago('P');
-  }, []);
+    fetchSiguienteFolioPago(seriePago || 'P');
+  }, [currentCompany]);
 
   // === Recibir parámetros de Cotización o Venta para Facturación ===
   useEffect(() => {
@@ -2739,6 +2742,54 @@ export default function FacturacionScreen() {
           </View>
         )}
 
+        {/* Selector de Empresa Emisora ERP */}
+        <View style={{
+          flexDirection: 'row',
+          backgroundColor: themeColors.background,
+          borderRadius: 20,
+          padding: 2,
+          borderWidth: 1,
+          borderColor: themeColors.border,
+          marginRight: 8,
+        }}>
+          <TouchableOpacity
+            onPress={() => currentCompany !== 'inttec' && changeCompany && changeCompany('inttec')}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 5,
+              borderRadius: 16,
+              backgroundColor: currentCompany === 'inttec' ? '#0284c7' : 'transparent',
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: currentCompany === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+            }}>
+              INTTEC
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => currentCompany !== 'daravisa' && changeCompany && changeCompany('daravisa')}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 5,
+              borderRadius: 16,
+              backgroundColor: currentCompany === 'daravisa' ? '#059669' : 'transparent',
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: currentCompany === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+            }}>
+              DARAVISA
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Botón de Acción Principal */}
         {activeTab === 'historial' ? (
           <TouchableOpacity
@@ -2799,6 +2850,17 @@ export default function FacturacionScreen() {
             <Text style={[styles.countBadgeText, { color: '#d97706' }]}>Borrador #{currentDraftId}</Text>
           </View>
         ) : null}
+
+        <View style={[styles.countBadge, {
+          backgroundColor: currentCompany === 'daravisa' ? 'rgba(5, 150, 105, 0.15)' : 'rgba(2, 132, 199, 0.15)',
+          borderColor: currentCompany === 'daravisa' ? '#059669' : '#0284c7',
+          borderWidth: 1,
+          marginLeft: 6,
+        }]}>
+          <Text style={[styles.countBadgeText, { color: currentCompany === 'daravisa' ? '#059669' : '#0284c7', fontWeight: '700' }]}>
+            Emisor: {currentCompany === 'daravisa' ? 'DARAVISA (DST2102127T9)' : 'INTTEC (FETR83041461A)'}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.desktopToolbarRight}>
@@ -3343,6 +3405,37 @@ export default function FacturacionScreen() {
                 <Text style={[styles.screenTitle, { color: themeColors.text }]} numberOfLines={1}>Módulo de Facturación CFDI 4.0</Text>
                 <Text style={{ fontSize: 11, color: themeColors.textSecondary }} numberOfLines={2}>Emisión, timbrado oficial ante el SAT y gestión de comprobantes</Text>
               </View>
+            </View>
+            <View style={{
+              flexDirection: 'row',
+              backgroundColor: themeColors.background,
+              borderRadius: 16,
+              padding: 2,
+              borderWidth: 1,
+              borderColor: themeColors.border,
+            }}>
+              <TouchableOpacity
+                onPress={() => currentCompany !== 'inttec' && changeCompany && changeCompany('inttec')}
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: 14,
+                  backgroundColor: currentCompany === 'inttec' ? '#0284c7' : 'transparent',
+                }}
+              >
+                <Text style={{ fontSize: 10, fontWeight: '700', color: currentCompany === 'inttec' ? '#fff' : themeColors.textSecondary }}>INTTEC</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => currentCompany !== 'daravisa' && changeCompany && changeCompany('daravisa')}
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: 14,
+                  backgroundColor: currentCompany === 'daravisa' ? '#059669' : 'transparent',
+                }}
+              >
+                <Text style={{ fontSize: 10, fontWeight: '700', color: currentCompany === 'daravisa' ? '#fff' : themeColors.textSecondary }}>DARAVISA</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
