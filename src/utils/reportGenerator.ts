@@ -23,6 +23,11 @@ const getCompanyBranding = async () => {
       legalName: 'DARAVISA SOLUCIONES Y TECNOLOGIA',
       regimenFiscal: '601',
       cp: '31110',
+      addressLine1: 'Ozorno 811',
+      addressLine2: '31110 Chihuahua, CHH',
+      phone: '6142477119',
+      email: 'admin@daravisa.com',
+      logoStyle: 'max-height: 85px; max-width: 360px; width: auto; height: auto; object-fit: contain; object-position: left center; margin-top: 20px; z-index: 10; position: relative;',
     };
   }
   const { LOGO_BASE64 } = await import('./logoBase64');
@@ -34,6 +39,11 @@ const getCompanyBranding = async () => {
     legalName: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
     regimenFiscal: '612',
     cp: '31110',
+    addressLine1: 'Ozorno 811',
+    addressLine2: '31107 Chihuahua, CHH',
+    phone: '6142477119',
+    email: 'rfernandez@inttec.net',
+    logoStyle: 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;',
   };
 };
 
@@ -4369,14 +4379,12 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
         
         <div class="header-content">
           <div style="width: 50%;">
-            <img src="${branding.logo}" alt="Logo" style="max-height: 150px; 
-            height: 170px; width: 450px; margin-top: 
-            -10px; z-index: 10; position: relative;">
+            <img src="${branding.logo}" alt="Logo" style="${branding.logoStyle || 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;'}">
           </div>
           <div class="company-details" style="width: 50%;">
             <div>${branding.name}</div>
-            <div>Ozorno 811</div>
-            <div>31107 Chihuahua, CHH</div>
+            <div>${branding.addressLine1}</div>
+            <div>${branding.addressLine2}</div>
             <div>México</div>
           </div>
         </div>
@@ -4486,10 +4494,10 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
         <!-- FOOTER FIXED -->
         <div class="footer-bank">
           <div style="width: 40%;">
-            <strong>RAFAEL ALONSO FERNANDEZ TINAJERO</strong><br>
-            RFC: FETR83041461A<br>
-            TEL: 6142477119<br>
-            MAIL: rfernandez@inttec.net
+            <strong>${branding.legalName}</strong><br>
+            RFC: ${branding.rfc}<br>
+            TEL: ${branding.phone}<br>
+            MAIL: ${branding.email}
           </div>
           <div style="width: 45%;">
             <strong>CUENTA BANCARIA BBVA</strong><br>
@@ -5225,14 +5233,12 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
 
         <div class="header-content">
           <div style="width: 50%;">
-            <img src="${branding.logo}" alt="Logo" style="max-height: 150px; 
-            height: 170px; width: 450px; margin-top: 
-            -10px; z-index: 10; position: relative;">
+            <img src="${branding.logo}" alt="Logo" style="${branding.logoStyle || 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;'}">
           </div>
           <div class="company-details" style="width: 50%;">
             <div>${branding.name}</div>
-            <div>Ozorno 811</div>
-            <div>31107 Chihuahua, CHH</div>
+            <div>${branding.addressLine1}</div>
+            <div>${branding.addressLine2}</div>
             <div>México</div>
           </div>
         </div>
@@ -5383,8 +5389,8 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
             <div style="width: 45%;">
               <strong>${emisorLegalName}</strong><br>
               RFC: ${emisorRfc} | Régimen: ${emisorRegimen}<br>
-              Ozorno 811, Chihuahua, Chih., CP: 31107 | TEL: 6142477119<br>
-              MAIL: rfernandez@inttec.net
+              ${branding.addressLine1}, Chihuahua, Chih., CP: ${branding.cp} | TEL: ${branding.phone}<br>
+              MAIL: ${branding.email}
             </div>
             <div style="width: 25%; text-align: center;">
               <strong>DATOS BANCARIOS</strong><br>
@@ -5704,8 +5710,8 @@ export async function generarReciboPagoHTML(complemento: any, doctos: any[] = []
           </div>
           <div style="text-align: right; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; line-height: 1.4; color: #111827;">
             <div style="font-weight: 700; font-size: 11.5px; margin-bottom: 1px;">${branding.name}</div>
-            <div>Ozorno 811</div>
-            <div>31107 Chihuahua, CHH</div>
+            <div>${branding.addressLine1}</div>
+            <div>${branding.addressLine2}</div>
             <div>México</div>
           </div>
         </div>
