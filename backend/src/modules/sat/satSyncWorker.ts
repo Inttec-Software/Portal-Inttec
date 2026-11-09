@@ -2,6 +2,8 @@ import { getDbPool } from '../../config/database';
 import { uploadFileToStorage } from '../../config/storage';
 import { SatSoapClient } from './satSoapClient';
 import { parseCfdiXml } from './xmlParser';
+import { reconcilePendingInvoicesForPool } from '../reportes/reportes.controller';
+import { invalidateCache } from '../../middlewares/cache.middleware';
 import JSZip from 'jszip';
 
 export async function processSatSync(company: string, env: string, options: any = {}) {
@@ -17,10 +19,24 @@ export async function processSatSync(company: string, env: string, options: any 
     idNuevaSolicitud: null as string | null
   };
 
-  const satRfc = (process.env.SAT_RFC || process.env[`${company.toUpperCase()}_SAT_RFC`] || '').trim().toUpperCase();
-  const satCerB64 = process.env.SAT_CER_B64 || process.env[`${company.toUpperCase()}_SAT_CER_B64`] || '';
-  const satKeyB64 = process.env.SAT_KEY_B64 || process.env[`${company.toUpperCase()}_SAT_KEY_B64`] || '';
-  const satPassword = process.env.SAT_PASSWORD || process.env[`${company.toUpperCase()}_SAT_PASSWORD`] || '';
+  const isDaravisa = company.toLowerCase() === 'daravisa';
+  const satRfc = (
+    process.env[`${company.toUpperCase()}_SAT_RFC`] ||
+    (!isDaravisa ? process.env.SAT_RFC : '') ||
+    ''
+  ).trim().toUpperCase();
+  const satCerB64 =
+    process.env[`${company.toUpperCase()}_SAT_CER_B64`] ||
+    (!isDaravisa ? process.env.SAT_CER_B64 : '') ||
+    '';
+  const satKeyB64 =
+    process.env[`${company.toUpperCase()}_SAT_KEY_B64`] ||
+    (!isDaravisa ? process.env.SAT_KEY_B64 : '') ||
+    '';
+  const satPassword =
+    process.env[`${company.toUpperCase()}_SAT_PASSWORD`] ||
+    (!isDaravisa ? process.env.SAT_PASSWORD : '') ||
+    '';
 
   if (!satRfc || !satCerB64 || !satKeyB64 || !satPassword) {
     return { missingCredentials: true, message: 'Faltan credenciales SAT (RFC, CER, KEY, PASSWORD)' };
@@ -69,14 +85,14 @@ export async function processSatSync(company: string, env: string, options: any 
                     
                     await pool.query(
                       `INSERT INTO facturas_recibidas (
-                        uuid, rfc_emisor, nombre_emisor, rfc_receptor, fecha_emision,
+                        uuid, rfc_emisor, nombre_emisor, rfc_receptor, rfc_pac, fecha_emision,
                         subtotal, descuento, iva, retencion_isr, retencion_iva, total,
                         moneda, tipo_comprobante, estado_sat, xml_url, conceptos_json, updated_at
-                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
+                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
                       ON CONFLICT (uuid) DO UPDATE SET
-                        estado_sat = EXCLUDED.estado_sat, xml_url = EXCLUDED.xml_url, updated_at = NOW()`,
+                        estado_sat = EXCLUDED.estado_sat, xml_url = EXCLUDED.xml_url, rfc_pac = COALESCE(EXCLUDED.rfc_pac, facturas_recibidas.rfc_pac), updated_at = NOW()`,
                       [
-                        parsed.uuid, parsed.rfcEmisor, parsed.nombreEmisor, parsed.rfcReceptor, parsed.fechaEmision,
+                        parsed.uuid, parsed.rfcEmisor, parsed.nombreEmisor, parsed.rfcReceptor, parsed.rfcPac || null, parsed.fechaEmision,
                         parsed.subtotal, parsed.descuento, parsed.iva, parsed.retencionIsr, parsed.retencionIva, parsed.total,
                         parsed.moneda, parsed.tipoComprobante, parsed.estadoSat, xmlUrl, JSON.stringify(parsed.conceptos)
                       ]
@@ -135,6 +151,15 @@ export async function processSatSync(company: string, env: string, options: any 
         resumen.nuevaSolicitudCreada = true;
         resumen.idNuevaSolicitud = solResult.idSolicitud;
       }
+    }
+  }
+
+  if (resumen.facturasProcesadas > 0) {
+    try {
+      await reconcilePendingInvoicesForPool(pool);
+      invalidateCache('reportes');
+    } catch (recErr) {
+      console.warn('[SAT Worker] Error ejecutando conciliación de gastos con facturas pendientes:', recErr);
     }
   }
 

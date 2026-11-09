@@ -19,6 +19,15 @@ const getCompanyBranding = async () => {
       logo: LOGO_DARAVISA_BASE64,
       name: 'DARAVISA',
       tagline: 'DARAVISA S.A. DE C.V.',
+      rfc: 'DST2102127T9',
+      legalName: 'DARAVISA SOLUCIONES Y TECNOLOGIA',
+      regimenFiscal: '601',
+      cp: '31110',
+      addressLine1: 'Ozorno 811',
+      addressLine2: '31110 Chihuahua, CHH',
+      phone: '6142477119',
+      email: 'admin@daravisa.com',
+      logoStyle: 'max-height: 85px; max-width: 360px; width: auto; height: auto; object-fit: contain; object-position: left center; margin-top: 20px; z-index: 10; position: relative;',
     };
   }
   const { LOGO_BASE64 } = await import('./logoBase64');
@@ -26,6 +35,15 @@ const getCompanyBranding = async () => {
     logo: LOGO_BASE64,
     name: 'INTTEC',
     tagline: 'INTEGRACION DE TECNOLOGIAS',
+    rfc: 'FETR83041461A',
+    legalName: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
+    regimenFiscal: '612',
+    cp: '31110',
+    addressLine1: 'Ozorno 811',
+    addressLine2: '31107 Chihuahua, CHH',
+    phone: '6142477119',
+    email: 'rfernandez@inttec.net',
+    logoStyle: 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;',
   };
 };
 
@@ -4361,14 +4379,12 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
         
         <div class="header-content">
           <div style="width: 50%;">
-            <img src="${branding.logo}" alt="Logo" style="max-height: 150px; 
-            height: 170px; width: 450px; margin-top: 
-            -10px; z-index: 10; position: relative;">
+            <img src="${branding.logo}" alt="Logo" style="${branding.logoStyle || 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;'}">
           </div>
           <div class="company-details" style="width: 50%;">
             <div>${branding.name}</div>
-            <div>Ozorno 811</div>
-            <div>31107 Chihuahua, CHH</div>
+            <div>${branding.addressLine1}</div>
+            <div>${branding.addressLine2}</div>
             <div>México</div>
           </div>
         </div>
@@ -4478,10 +4494,10 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
         <!-- FOOTER FIXED -->
         <div class="footer-bank">
           <div style="width: 40%;">
-            <strong>RAFAEL ALONSO FERNANDEZ TINAJERO</strong><br>
-            RFC: FETR83041461A<br>
-            TEL: 6142477119<br>
-            MAIL: rfernandez@inttec.net
+            <strong>${branding.legalName}</strong><br>
+            RFC: ${branding.rfc}<br>
+            TEL: ${branding.phone}<br>
+            MAIL: ${branding.email}
           </div>
           <div style="width: 45%;">
             <strong>CUENTA BANCARIA BBVA</strong><br>
@@ -4894,7 +4910,9 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
     (effectiveUuid ? `||1.1|${effectiveUuid}|${fechaTimbradoStr}|${pacRfc}|${selloEmisor}|${satCertNumber}||` : '')
   );
 
-  const emisorRfc = facturaData?.issuer?.tax_id || 'FETR83041461A';
+  const emisorRfc = facturaData?.issuer?.tax_id || branding.rfc;
+  const emisorLegalName = facturaData?.issuer?.legal_name || branding.legalName;
+  const emisorRegimen = facturaData?.issuer?.tax_system || branding.regimenFiscal;
   const receptorRfc = facturaData?.customer?.tax_id || venta?.cliente_rfc || 'XAXX010101000';
 
   const satVerificationUrl = facturaData?.verification_url || (
@@ -5215,14 +5233,12 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
 
         <div class="header-content">
           <div style="width: 50%;">
-            <img src="${branding.logo}" alt="Logo" style="max-height: 150px; 
-            height: 170px; width: 450px; margin-top: 
-            -10px; z-index: 10; position: relative;">
+            <img src="${branding.logo}" alt="Logo" style="${branding.logoStyle || 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;'}">
           </div>
           <div class="company-details" style="width: 50%;">
             <div>${branding.name}</div>
-            <div>Ozorno 811</div>
-            <div>31107 Chihuahua, CHH</div>
+            <div>${branding.addressLine1}</div>
+            <div>${branding.addressLine2}</div>
             <div>México</div>
           </div>
         </div>
@@ -5371,10 +5387,10 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
           <!-- FOOTER -->
           <div class="footer-bank">
             <div style="width: 45%;">
-              <strong>RAFAEL ALONSO FERNANDEZ TINAJERO</strong><br>
-              RFC: FETR83041461A | Régimen: 601<br>
-              Ozorno 811, Chihuahua, Chih., CP: 31107 | TEL: 6142477119<br>
-              MAIL: rfernandez@inttec.net
+              <strong>${emisorLegalName}</strong><br>
+              RFC: ${emisorRfc} | Régimen: ${emisorRegimen}<br>
+              ${branding.addressLine1}, Chihuahua, Chih., CP: ${branding.cp} | TEL: ${branding.phone}<br>
+              MAIL: ${branding.email}
             </div>
             <div style="width: 25%; text-align: center;">
               <strong>DATOS BANCARIOS</strong><br>
@@ -5557,7 +5573,7 @@ export async function generarReciboPagoHTML(complemento: any, doctos: any[] = []
   const rawEmision = complemento.created_at || new Date().toISOString();
 
   const uuid = (complemento.cfdi_uuid || 'B750BB00-241C-5CF9-9FE3-8FB9A6539CC9').toUpperCase();
-  const rfcEmisor = 'FETR83041461A';
+  const rfcEmisor = complemento.rfc_emisor || branding.rfc;
   const rfcReceptor = (complemento.cliente_rfc || 'XAXX010101000').toUpperCase();
   const clienteNombre = (complemento.cliente_nombre || complemento.cliente_razon_social || complemento.receptor_nombre || 'Electronica BRK de Mexico').trim();
   const montoTotal = Number(complemento.monto_total || 0);
@@ -5572,8 +5588,8 @@ export async function generarReciboPagoHTML(complemento: any, doctos: any[] = []
   const selloSat = complemento.sello_sat || 'm84UzXzwkBpqFsNk3x7Jz7fq1aD0U2x7W0/Mg1BjdtMGdFAUmDvRCyr/EQJWXFav9+up/BrknU1Iz0x/xujVH+H7oqBc4yjUVbIgcaxe/Wpr8eDhrSDUAFXMkj9Tm8rnvIWvCJMJ5Tj0pwd46dKYIPCzqF9x1k3iWKoZfo5Oaw2hjkBh5SOkDQe49BGPN9Y0FO3DFPmhupJi4qL7gJEufeSMt3HmvHUJtzSsWOV2OOluMTdtSghY9X660HDoxWavNKB1y/31c3CKJglX00DTAGbeGP50V3nFQRjXINMU4rnWbKjeOyawnkYdxf3wLMbxKtMBJOoNitotH9WRw==';
   const noCertificadoSat = complemento.no_certificado_sat || '00001000000707310321';
   const noCertificadoEmisor = complemento.no_certificado_emisor || complemento.no_certificado || '00001000000518827763';
-  const lugarExpedicion = complemento.lugar_expedicion || '31107';
-  const regimenFiscal = complemento.regimen_fiscal_emisor || complemento.regimen_fiscal || '612';
+  const lugarExpedicion = complemento.lugar_expedicion || branding.cp;
+  const regimenFiscal = complemento.regimen_fiscal_emisor || complemento.regimen_fiscal || branding.regimenFiscal;
   const fechaEmisionFull = rawEmision.replace('T', ' ').slice(0, 19);
   const fechaCertificacionFull = (complemento.fecha_timbrado || rawEmision).replace('T', ' ').slice(0, 19);
   const cadenaOriginal = complemento.cadena_original || `||1.1|${uuid}|${fechaEmisionFull}|CVD110412TF6|${selloEmisor.slice(0, 80)}...|${noCertificadoSat}||`;
@@ -5690,12 +5706,12 @@ export async function generarReciboPagoHTML(complemento: any, doctos: any[] = []
         <!-- Header Banner -->
         <div class="top-banner-bg">
           <div style="flex: 1;">
-            ${branding.logo ? `<img src="${branding.logo}" style="height: 58px; max-width: 290px; object-fit: contain;" alt="INTTEC" />` : `<h2 style="margin: 0; font-size: 26px; font-weight: 900; color: #111;">INTTEC</h2>`}
+            ${branding.logo ? `<img src="${branding.logo}" style="height: 58px; max-width: 290px; object-fit: contain;" alt="${branding.name}" />` : `<h2 style="margin: 0; font-size: 26px; font-weight: 900; color: #111;">${branding.name}</h2>`}
           </div>
           <div style="text-align: right; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; line-height: 1.4; color: #111827;">
-            <div style="font-weight: 700; font-size: 11.5px; margin-bottom: 1px;">INTTEC</div>
-            <div>Ozorno 811</div>
-            <div>31107 Chihuahua, CHH</div>
+            <div style="font-weight: 700; font-size: 11.5px; margin-bottom: 1px;">${branding.name}</div>
+            <div>${branding.addressLine1}</div>
+            <div>${branding.addressLine2}</div>
             <div>México</div>
           </div>
         </div>

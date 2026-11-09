@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
 import { SatSyncService } from '../../services/satSyncService';
+import { reconcilePendingInvoicesForPool } from '../reportes/reportes.controller';
+import { invalidateCache } from '../../middlewares/cache.middleware';
 
 // === GET /api/facturas-recibidas ===
 export const getFacturasRecibidas = async (req: Request, res: Response) => {
@@ -11,7 +13,7 @@ export const getFacturasRecibidas = async (req: Request, res: Response) => {
 
     try {
       const { rows } = await pool.query(
-        `SELECT id, uuid, rfc_emisor, nombre_emisor, rfc_receptor, fecha_emision, subtotal, descuento, iva, retencion_isr, retencion_iva, total, moneda, tipo_comprobante, estado_sat, xml_url, pdf_url, created_at
+        `SELECT id, uuid, rfc_emisor, nombre_emisor, rfc_receptor, rfc_pac, fecha_emision, subtotal, descuento, iva, retencion_isr, retencion_iva, total, moneda, tipo_comprobante, estado_sat, xml_url, pdf_url, created_at
          FROM facturas_recibidas
          ORDER BY fecha_emision DESC
          LIMIT 1000`
@@ -82,6 +84,7 @@ export const importFactura = async (req: Request, res: Response) => {
       rfc_emisor: parsed.rfcEmisor,
       nombre_emisor: parsed.nombreEmisor,
       rfc_receptor: parsed.rfcReceptor,
+      rfc_pac: parsed.rfcPac || null,
       fecha_emision: parsed.fechaEmision,
       subtotal: parsed.subtotal,
       descuento: parsed.descuento,
@@ -105,6 +108,13 @@ export const importFactura = async (req: Request, res: Response) => {
       `INSERT INTO facturas_recibidas (${keys.join(', ')}) VALUES (${placeholders}) ON CONFLICT (uuid) DO UPDATE SET ${updateEx} RETURNING *`,
       values
     );
+
+    try {
+      await reconcilePendingInvoicesForPool(pool);
+      invalidateCache('reportes');
+    } catch (recErr) {
+      console.warn('[importFactura] Error ejecutando conciliación de gastos:', recErr);
+    }
 
     return res.json({ success: true, factura: rows[0] });
   } catch (error: any) {

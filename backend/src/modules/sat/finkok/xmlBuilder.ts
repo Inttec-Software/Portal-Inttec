@@ -62,12 +62,40 @@ function cleanFolio(rawFolio?: any): string {
   return str;
 }
 
-export async function buildUnsignedCFDI(ventaData: any, clienteData: any, partidas: any[], isProduction: boolean = false) {
-  // Configuración del Emisor (Variables de Entorno o defaults)
-  const emisorRfc = process.env.EMISOR_RFC || (isProduction ? 'FETR83041461A' : 'EKU9003173C9');
-  const emisorNombre = process.env.EMISOR_NOMBRE || (isProduction ? 'RAFAEL ALONSO FERNANDEZ TINAJERO' : 'ESCUELA KEMPER URATE');
-  const emisorRegimen = process.env.EMISOR_REGIMEN || (isProduction ? '612' : '601');
-  const emisorCP = process.env.EMISOR_CP || (isProduction ? '31110' : '77500');
+export function getEmisorConfig(company: string = 'inttec', isProduction: boolean = true) {
+  if (!isProduction) {
+    return {
+      rfc: process.env.EMISOR_RFC_DEMO || 'EKU9003173C9',
+      nombre: process.env.EMISOR_NOMBRE_DEMO || 'ESCUELA KEMPER URATE',
+      regimen: process.env.EMISOR_REGIMEN_DEMO || '601',
+      cp: process.env.EMISOR_CP_DEMO || '77500',
+    };
+  }
+  if (String(company).toLowerCase().trim() === 'daravisa') {
+    return {
+      rfc: process.env.DARAVISA_EMISOR_RFC || 'DST2102127T9',
+      nombre: process.env.DARAVISA_EMISOR_NOMBRE || 'DARAVISA SOLUCIONES Y TECNOLOGIA',
+      regimen: process.env.DARAVISA_EMISOR_REGIMEN || '601',
+      cp: process.env.DARAVISA_EMISOR_CP || '31110',
+    };
+  }
+  return {
+    rfc: process.env.EMISOR_RFC || 'FETR83041461A',
+    nombre: process.env.EMISOR_NOMBRE || 'RAFAEL ALONSO FERNANDEZ TINAJERO',
+    regimen: process.env.EMISOR_REGIMEN || '612',
+    cp: process.env.EMISOR_CP || '31110',
+  };
+}
+
+export async function buildUnsignedCFDI(
+  ventaData: any,
+  clienteData: any,
+  partidas: any[],
+  isProduction: boolean = false,
+  company: string = 'inttec'
+) {
+  // Configuración del Emisor según la empresa activa (Inttec vs Daravisa)
+  const { rfc: emisorRfc, nombre: emisorNombre, regimen: emisorRegimen, cp: emisorCP } = getEmisorConfig(company, isProduction);
 
   // Mapeo de conceptos/partidas
   const conceptos: CFDIConcepto[] = partidas.map((p: any) => {

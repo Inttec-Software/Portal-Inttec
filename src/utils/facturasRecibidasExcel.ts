@@ -241,6 +241,8 @@ export function buildFacturasRecibidasMatrix(facturas: FacturaRecibidaExportItem
     if (!nombreReceptor) {
       if (rfcReceptor === 'FETR83041461A') {
         nombreReceptor = 'RAFAEL ALONSO FERNANDEZ TINAJERO';
+      } else if (rfcReceptor === 'DST2102127T9') {
+        nombreReceptor = 'DARAVISA SOLUCIONES Y TECNOLOGIA';
       } else {
         nombreReceptor = 'INTTEC';
       }

@@ -18,12 +18,13 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useAuth } from '@/context/AuthContext';
 import { CompanyService, supabase, inttecClient, daravisaClient } from '@/services/supabase';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import SatCatalogAutocomplete from '@/components/SatCatalogAutocomplete';
 import CustomInput from '@/components/CustomInput';
 import CustomButton from '@/components/CustomButton';
-import { parseCFDIXML } from '@/utils/cfdiParser';
+import { parseCFDIXML, sanitizeCfdiXmlAttributes } from '@/utils/cfdiParser';
 import { exportarFacturaOdooPDF, exportarReciboPagoPDF, generarReciboPagoHTML, cleanFolio } from '@/utils/reportGenerator';
 import FacturaPreviewModal from '@/components/FacturaPreviewModal';
 import { FacturacionTableSkeleton, FacturacionCardsListSkeleton } from '@/components/skeleton';
@@ -286,6 +287,8 @@ export default function FacturacionScreen() {
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
   const isDesktop = Platform.OS === 'web' && width >= 1024;
+  const { company: authCompany, changeCompany } = useAuth();
+  const currentCompany = authCompany || CompanyService.getActiveCompany();
 
   const [activeTab, setActiveTab] = useState<'emitir' | 'historial' | 'pagos'>('historial');
 
@@ -412,10 +415,10 @@ export default function FacturacionScreen() {
     fetchClientes();
     fetchProductos();
     fetchHistorialFacturas();
-    fetchSiguienteFolio('A');
+    fetchSiguienteFolio(serie || 'A');
     fetchComplementosList();
-    fetchSiguienteFolioPago('P');
-  }, []);
+    fetchSiguienteFolioPago(seriePago || 'P');
+  }, [currentCompany]);
 
   // === Recibir parámetros de Cotización o Venta para Facturación ===
   useEffect(() => {
@@ -1140,12 +1143,19 @@ export default function FacturacionScreen() {
           rate: 0.16,
           type: 'IVA'
         }],
-        issuer: {
-          tax_id: 'FETR83041461A',
-          legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
-          tax_system: '612',
-          zip: '31110'
-        },
+        issuer: CompanyService.getActiveCompany() === 'daravisa'
+          ? {
+              tax_id: 'DST2102127T9',
+              legal_name: 'DARAVISA SOLUCIONES Y TECNOLOGIA',
+              tax_system: '601',
+              zip: '31110'
+            }
+          : {
+              tax_id: 'FETR83041461A',
+              legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
+              tax_system: '612',
+              zip: '31110'
+            },
         customer: {
           tax_id: draftData?.receptor?.rfc || (factura as any).cliente_rfc || 'XAXX010101000',
           legal_name: clienteVal,
@@ -1654,12 +1664,19 @@ export default function FacturacionScreen() {
             rate: 0.16,
           }
         ],
-        issuer: {
-          tax_id: 'FETR83041461A',
-          legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
-          tax_system: '612',
-          zip: '31110',
-        },
+        issuer: CompanyService.getActiveCompany() === 'daravisa'
+          ? {
+              tax_id: 'DST2102127T9',
+              legal_name: 'DARAVISA SOLUCIONES Y TECNOLOGIA',
+              tax_system: '601',
+              zip: '31110',
+            }
+          : {
+              tax_id: 'FETR83041461A',
+              legal_name: 'RAFAEL ALONSO FERNANDEZ TINAJERO',
+              tax_system: '612',
+              zip: '31110',
+            },
         customer: {
           tax_id: clienteRfc,
           legal_name: clienteNombre || 'PUBLICO EN GENERAL',
@@ -1732,7 +1749,7 @@ export default function FacturacionScreen() {
         if (j.notas && !(factura as any).notas) {
           (factura as any).notas = j.notas;
         }
-        if (j.xml && j.xml.includes('<')) return j.xml;
+        if (j.xml && j.xml.includes('<')) return sanitizeCfdiXmlAttributes(j.xml);
       }
     } catch (_) {}
 
@@ -1740,7 +1757,7 @@ export default function FacturacionScreen() {
     if (factura.cfdi_xml_url && factura.cfdi_xml_url.startsWith('data:application/xml;base64,')) {
       try {
         const b64 = factura.cfdi_xml_url.replace('data:application/xml;base64,', '');
-        return decodeURIComponent(escape(atob(b64)));
+        return sanitizeCfdiXmlAttributes(decodeURIComponent(escape(atob(b64))));
       } catch (_) {}
     }
 
@@ -1750,7 +1767,7 @@ export default function FacturacionScreen() {
         const resp = await fetch(factura.cfdi_xml_url);
         if (resp.ok) {
           const text = await resp.text();
-          if (text && text.includes('<')) return text;
+          if (text && text.includes('<')) return sanitizeCfdiXmlAttributes(text);
         }
       } catch (_) {}
     }
@@ -1759,12 +1776,12 @@ export default function FacturacionScreen() {
     if (factura.cfdi_uuid) {
       try {
         const { data: dUpper } = await supabase.storage.from('facturas').download(`${factura.cfdi_uuid.toUpperCase()}.xml`);
-        if (dUpper) return await dUpper.text();
+        if (dUpper) return sanitizeCfdiXmlAttributes(await dUpper.text());
       } catch (_) {}
 
       try {
         const { data: dLower } = await supabase.storage.from('facturas').download(`${factura.cfdi_uuid.toLowerCase()}.xml`);
-        if (dLower) return await dLower.text();
+        if (dLower) return sanitizeCfdiXmlAttributes(await dLower.text());
       } catch (_) {}
     }
 
@@ -2496,7 +2513,8 @@ export default function FacturacionScreen() {
         const cl = normalizeText(f.cliente || '');
         const fo = normalizeText(f.folio || '');
         const uu = normalizeText(f.cfdi_uuid || '');
-        return cl.includes(q) || fo.includes(q) || uu.includes(q);
+        const oc = normalizeText(f.orden_compra || '');
+        return cl.includes(q) || fo.includes(q) || uu.includes(q) || oc.includes(q);
       }
       return true;
     });
@@ -2724,6 +2742,54 @@ export default function FacturacionScreen() {
           </View>
         )}
 
+        {/* Selector de Empresa Emisora ERP */}
+        <View style={{
+          flexDirection: 'row',
+          backgroundColor: themeColors.background,
+          borderRadius: 20,
+          padding: 2,
+          borderWidth: 1,
+          borderColor: themeColors.border,
+          marginRight: 8,
+        }}>
+          <TouchableOpacity
+            onPress={() => currentCompany !== 'inttec' && changeCompany && changeCompany('inttec')}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 5,
+              borderRadius: 16,
+              backgroundColor: currentCompany === 'inttec' ? '#0284c7' : 'transparent',
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: currentCompany === 'inttec' ? '#ffffff' : themeColors.textSecondary,
+            }}>
+              INTTEC
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => currentCompany !== 'daravisa' && changeCompany && changeCompany('daravisa')}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 5,
+              borderRadius: 16,
+              backgroundColor: currentCompany === 'daravisa' ? '#059669' : 'transparent',
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: currentCompany === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
+            }}>
+              DARAVISA
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Botón de Acción Principal */}
         {activeTab === 'historial' ? (
           <TouchableOpacity
@@ -2784,6 +2850,17 @@ export default function FacturacionScreen() {
             <Text style={[styles.countBadgeText, { color: '#d97706' }]}>Borrador #{currentDraftId}</Text>
           </View>
         ) : null}
+
+        <View style={[styles.countBadge, {
+          backgroundColor: currentCompany === 'daravisa' ? 'rgba(5, 150, 105, 0.15)' : 'rgba(2, 132, 199, 0.15)',
+          borderColor: currentCompany === 'daravisa' ? '#059669' : '#0284c7',
+          borderWidth: 1,
+          marginLeft: 6,
+        }]}>
+          <Text style={[styles.countBadgeText, { color: currentCompany === 'daravisa' ? '#059669' : '#0284c7', fontWeight: '700' }]}>
+            Emisor: {currentCompany === 'daravisa' ? 'DARAVISA (DST2102127T9)' : 'INTTEC (FETR83041461A)'}
+          </Text>
+        </View>
       </View>
 
       <View style={styles.desktopToolbarRight}>
@@ -2849,6 +2926,7 @@ export default function FacturacionScreen() {
           </TouchableOpacity>
           <Text style={[styles.facturasTableHeaderCell, { width: 110, color: themeColors.text }]}>Número</Text>
           <Text style={[styles.facturasTableHeaderCell, { flex: 1, minWidth: 200, color: themeColors.text }]}>Cliente</Text>
+          <Text style={[styles.facturasTableHeaderCell, { width: 140, color: themeColors.text }]}>Orden de compra</Text>
           <Text style={[styles.facturasTableHeaderCell, { width: 130, color: themeColors.text }]}>Etiqueta</Text>
           <Text style={[styles.facturasTableHeaderCell, { width: 125, color: themeColors.text }]}>Fecha de factura</Text>
           <Text style={[styles.facturasTableHeaderCell, { width: 135, textAlign: 'right', paddingRight: 10, color: themeColors.text }]}>Total</Text>
@@ -2921,6 +2999,24 @@ export default function FacturacionScreen() {
                     {factura.cfdi_uuid}
                   </Text>
                 ) : null}
+              </View>
+
+              {/* Orden de compra */}
+              <View style={{ width: 140, justifyContent: 'center', paddingRight: 8 }}>
+                {(factura.orden_compra || factura.notas?.config?.orden_compra) ? (
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontSize: 12,
+                      fontWeight: '600',
+                      color: themeColors.text,
+                    }}
+                  >
+                    {factura.orden_compra || factura.notas?.config?.orden_compra}
+                  </Text>
+                ) : (
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary + '70' }}>--</Text>
+                )}
               </View>
 
               {/* Etiqueta */}
@@ -3309,6 +3405,37 @@ export default function FacturacionScreen() {
                 <Text style={[styles.screenTitle, { color: themeColors.text }]} numberOfLines={1}>Módulo de Facturación CFDI 4.0</Text>
                 <Text style={{ fontSize: 11, color: themeColors.textSecondary }} numberOfLines={2}>Emisión, timbrado oficial ante el SAT y gestión de comprobantes</Text>
               </View>
+            </View>
+            <View style={{
+              flexDirection: 'row',
+              backgroundColor: themeColors.background,
+              borderRadius: 16,
+              padding: 2,
+              borderWidth: 1,
+              borderColor: themeColors.border,
+            }}>
+              <TouchableOpacity
+                onPress={() => currentCompany !== 'inttec' && changeCompany && changeCompany('inttec')}
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: 14,
+                  backgroundColor: currentCompany === 'inttec' ? '#0284c7' : 'transparent',
+                }}
+              >
+                <Text style={{ fontSize: 10, fontWeight: '700', color: currentCompany === 'inttec' ? '#fff' : themeColors.textSecondary }}>INTTEC</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => currentCompany !== 'daravisa' && changeCompany && changeCompany('daravisa')}
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: 14,
+                  backgroundColor: currentCompany === 'daravisa' ? '#059669' : 'transparent',
+                }}
+              >
+                <Text style={{ fontSize: 10, fontWeight: '700', color: currentCompany === 'daravisa' ? '#fff' : themeColors.textSecondary }}>DARAVISA</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -4520,6 +4647,7 @@ export default function FacturacionScreen() {
                       </TouchableOpacity>
                       <Text style={[styles.facturasTableHeaderCell, { width: 110, color: themeColors.text }]}>Número</Text>
                       <Text style={[styles.facturasTableHeaderCell, { flex: 1, minWidth: 200, color: themeColors.text }]}>Cliente</Text>
+                      <Text style={[styles.facturasTableHeaderCell, { width: 140, color: themeColors.text }]}>Orden de compra</Text>
                       <Text style={[styles.facturasTableHeaderCell, { width: 130, color: themeColors.text }]}>Etiqueta</Text>
                       <Text style={[styles.facturasTableHeaderCell, { width: 125, color: themeColors.text }]}>Fecha de factura</Text>
                       <Text style={[styles.facturasTableHeaderCell, { width: 135, textAlign: 'right', paddingRight: 10, color: themeColors.text }]}>Total</Text>
@@ -4592,6 +4720,24 @@ export default function FacturacionScreen() {
                                   {factura.cfdi_uuid}
                                 </Text>
                               ) : null}
+                            </View>
+
+                            {/* Orden de compra */}
+                            <View style={{ width: 140, justifyContent: 'center', paddingRight: 8 }}>
+                              {(factura.orden_compra || factura.notas?.config?.orden_compra) ? (
+                                <Text
+                                  numberOfLines={1}
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: '600',
+                                    color: themeColors.text,
+                                  }}
+                                >
+                                  {factura.orden_compra || factura.notas?.config?.orden_compra}
+                                </Text>
+                              ) : (
+                                <Text style={{ fontSize: 11, color: themeColors.textSecondary + '70' }}>--</Text>
+                              )}
                             </View>
 
                             {/* Etiqueta */}
@@ -4904,6 +5050,20 @@ export default function FacturacionScreen() {
                             <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
                               📅 {formatFechaFactura(factura.fecha || factura.created_at)}
                             </Text>
+                            {factura.orden_compra ? (
+                              <View
+                                style={{
+                                  backgroundColor: '#0284c715',
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '600', color: '#0284c7' }}>
+                                  OC: {factura.orden_compra}
+                                </Text>
+                              </View>
+                            ) : null}
                             {factura.etiqueta ? (
                               <View
                                 style={{

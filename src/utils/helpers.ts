@@ -87,3 +87,25 @@ export const formatFriendlyDate = (dateStr?: string | null): string => {
   return cleanStr;
 };
 
+
+
+/**
+ * Decodifica entidades HTML comunes que vienen de importaciones XML/CFDI o catálogos externos.
+ * Ej: &TRADE; -> ™, &SUP2; -> ², &amp; -> &, &quot; -> ", etc.
+ */
+export const decodeHtmlEntities = (text: string | null | undefined): string => {
+  if (!text) return '';
+  return String(text)
+    .replace(/&trade;/gi, '™')
+    .replace(/&sup2;/gi, '²')
+    .replace(/&sup3;/gi, '³')
+    .replace(/&deg;/gi, '°')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+};
