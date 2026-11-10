@@ -16,6 +16,7 @@ import { GastoHelper } from '@/services/supabase';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import GastoFotosGallery from '@/components/GastoFotosGallery';
+import { SatFacturaLinker } from './SatFacturaLinker';
 import { styles } from './adminGastosStyles';
 import { useAdminGastos } from '../hooks/useAdminGastos';
 
@@ -58,6 +59,7 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
     handlePreviewSatFactura,
     handleDownloadSatFacturaPdf,
     handleAttachSatFacturaAndSend,
+    handleDetachSatFactura,
     handleDismissSatFactura,
     handleOpenRelinkSaleModal,
     handleDirectUnlinkSale,
@@ -76,16 +78,6 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
     formatFriendlyDate,
     parseJustificacion,
   } = vm;
-
-  const [uuidInput, setUuidInput] = React.useState('');
-
-  React.useEffect(() => {
-    if (selectedGasto) {
-      setUuidInput(selectedGasto.factura_recibida_rel?.uuid || '');
-    } else {
-      setUuidInput('');
-    }
-  }, [selectedGasto?.id, selectedGasto?.factura_recibida_rel?.uuid]);
 
   return (
     <>
@@ -819,80 +811,21 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                           })()}
                         </View>
 
-                        {/* Secciones según el toggle */}
-                        {(selectedGasto.facturado || (!selectedGasto.facturado && !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE'))) && (
-                          <View style={{ marginBottom: Spacing.two }}>
-                            <CustomInput
-                              label="UUID"
-                              placeholder="Ingresa el UUID..."
-                              value={uuidInput}
-                              onChangeText={setUuidInput}
-                              style={{ height: 40 }}
-                              iconName="key-outline"
-                              autoCapitalize="characters"
-                            />
-                          </View>
+                        {/* Vinculación Inteligente de Facturas SAT */}
+                        {(selectedGasto.facturado || selectedGasto.factura_recibida_rel || (!selectedGasto.facturado && !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE'))) && (
+                          <SatFacturaLinker
+                            gasto={selectedGasto}
+                            themeColors={themeColors}
+                            onAttachFactura={handleAttachSatFacturaAndSend}
+                            onDetachFactura={handleDetachSatFactura}
+                            onPreviewFactura={handlePreviewSatFactura}
+                            onDownloadPdf={handleDownloadSatFacturaPdf}
+                            isExportingSatPdf={isExportingSatPdf}
+                            isAttaching={isAttachingSatFactura}
+                          />
                         )}
                         {selectedGasto.facturado ? (
                           <View style={{ gap: Spacing.one }}>
-                            {selectedGasto.factura_recibida_rel && (
-                              <View style={{
-                                backgroundColor: themeColors.success + '12',
-                                borderWidth: 1,
-                                borderColor: themeColors.success + '50',
-                                borderRadius: BorderRadius.small,
-                                padding: Spacing.two,
-                                marginBottom: 4,
-                                gap: 6,
-                              }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                  <Ionicons name="shield-checkmark" size={16} color={themeColors.success} />
-                                  <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.success, flex: 1 }}>
-                                    CFDI SAT Vinculado: {selectedGasto.factura_recibida_rel.nombre_emisor || selectedGasto.factura_recibida_rel.rfc_emisor}
-                                  </Text>
-                                </View>
-                                <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                                  UUID: {selectedGasto.factura_recibida_rel.uuid}
-                                </Text>
-                                <View style={{ flexDirection: 'row', gap: 8 }}>
-                                  <TouchableOpacity
-                                    onPress={() => handlePreviewSatFactura(selectedGasto.factura_recibida_rel)}
-                                    style={{
-                                      flex: 1,
-                                      flexDirection: 'row',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      gap: 4,
-                                      backgroundColor: themeColors.backgroundElement,
-                                      borderWidth: 1,
-                                      borderColor: themeColors.border,
-                                      paddingVertical: 6,
-                                      borderRadius: BorderRadius.small,
-                                    }}
-                                  >
-                                    <Ionicons name="eye-outline" size={14} color={themeColors.text} />
-                                    <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>Mostrar CFDI</Text>
-                                  </TouchableOpacity>
-                                  <TouchableOpacity
-                                    onPress={() => handleDownloadSatFacturaPdf(selectedGasto.factura_recibida_rel)}
-                                    disabled={isExportingSatPdf}
-                                    style={{
-                                      flex: 1,
-                                      flexDirection: 'row',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      gap: 4,
-                                      backgroundColor: '#e74c3c',
-                                      paddingVertical: 6,
-                                      borderRadius: BorderRadius.small,
-                                    }}
-                                  >
-                                    <Ionicons name="download-outline" size={14} color="#fff" />
-                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>Descargar PDF SAT</Text>
-                                  </TouchableOpacity>
-                                </View>
-                              </View>
-                            )}
                             <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 2 }}>
                               Archivos de Factura Adjuntos ({GastoHelper.getFacturaUrls(selectedGasto).length}):
                             </Text>

@@ -81,21 +81,21 @@ export const importFactura = async (req: Request, res: Response) => {
 
     const payload = {
       uuid: parsed.uuid,
-      rfc_emisor: parsed.rfcEmisor,
-      nombre_emisor: parsed.nombreEmisor,
-      rfc_receptor: parsed.rfcReceptor,
-      rfc_pac: parsed.rfcPac || null,
-      fecha_emision: parsed.fechaEmision,
-      subtotal: parsed.subtotal,
-      descuento: parsed.descuento,
-      iva: parsed.iva,
-      retencion_isr: parsed.retencionIsr,
-      retencion_iva: parsed.retencionIva,
-      total: parsed.total,
-      moneda: parsed.moneda,
-      tipo_comprobante: parsed.tipoComprobante,
-      estado_sat: parsed.estadoSat,
-      conceptos_json: JSON.stringify(parsed.conceptos || []),
+      rfc_emisor: parsed.rfcEmisor || parsed.issuer?.tax_id || '',
+      nombre_emisor: parsed.nombreEmisor || parsed.issuer?.legal_name || 'Proveedor SAT',
+      rfc_receptor: parsed.rfcReceptor || parsed.customer?.tax_id || '',
+      rfc_pac: parsed.rfcPac || parsed.stamp?.pac_rfc || null,
+      fecha_emision: parsed.fechaEmision || parsed.created_at || new Date().toISOString(),
+      subtotal: Number(parsed.subtotal) || 0,
+      descuento: Number(parsed.descuento) || 0,
+      iva: Number(parsed.iva) || Number(parsed.total_impuestos_trasladados) || 0,
+      retencion_isr: Number(parsed.retencionIsr) || 0,
+      retencion_iva: Number(parsed.retencionIva) || 0,
+      total: Number(parsed.total) || 0,
+      moneda: parsed.moneda || parsed.currency || 'MXN',
+      tipo_comprobante: parsed.tipoComprobante || 'I',
+      estado_sat: parsed.estadoSat || 'VIGENTE',
+      conceptos_json: JSON.stringify(parsed.conceptos || parsed.items || []),
       updated_at: new Date().toISOString(),
     };
 
@@ -118,6 +118,80 @@ export const importFactura = async (req: Request, res: Response) => {
 
     return res.json({ success: true, factura: rows[0] });
   } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// === GET /api/facturas-recibidas/lookup ===
+export const lookupFacturasRecibidas = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const pool = getDbPool(tenant.company, tenant.env);
+
+    const q = String(req.query.q || '').trim();
+    const currentGastoId = req.query.gasto_id ? String(req.query.gasto_id).trim() : null;
+
+    if (!q) {
+      return res.json({ facturas: [] });
+    }
+
+    const searchTerm = `%${q}%`;
+    const { rows } = await pool.query(
+      `SELECT f.id, f.uuid, f.rfc_emisor, f.nombre_emisor, f.rfc_receptor, f.fecha_emision,
+              f.subtotal, f.descuento, f.iva, f.retencion_isr, f.retencion_iva, f.total,
+              f.moneda, f.tipo_comprobante, f.estado_sat, f.xml_url, f.pdf_url,
+              (
+                SELECT COALESCE(json_agg(json_build_object(
+                  'id', g.id,
+                  'empleado_nombre', g.empleado_nombre,
+                  'monto', g.monto,
+                  'monto_propina', COALESCE(g.monto_propina, 0),
+                  'monto_consumido', (COALESCE(g.monto, 0) - COALESCE(g.monto_propina, 0)),
+                  'status', g.status,
+                  'justificacion', g.justificacion,
+                  'fecha_comprobante', g.fecha_comprobante,
+                  'created_at', g.created_at
+                )), '[]'::json)
+                FROM gastos g
+                WHERE g.factura_recibida_id = f.id
+              ) as gastos_vinculados
+       FROM facturas_recibidas f
+       WHERE (
+         f.uuid ILIKE $1 
+         OR f.rfc_emisor ILIKE $1 
+         OR f.nombre_emisor ILIKE $1
+       )
+       ORDER BY f.fecha_emision DESC
+       LIMIT 25`,
+      [searchTerm]
+    );
+
+    const results = rows.map((fac: any) => {
+      const vinculados: any[] = Array.isArray(fac.gastos_vinculados) ? fac.gastos_vinculados : [];
+      const otrosGastos = currentGastoId 
+        ? vinculados.filter(g => g.id !== currentGastoId)
+        : vinculados;
+
+      const totalFactura = Number(fac.total || 0);
+      const montoConsumidoTotal = vinculados.reduce((sum, g) => sum + Number(g.monto_consumido || 0), 0);
+      const montoConsumidoOtros = otrosGastos.reduce((sum, g) => sum + Number(g.monto_consumido || 0), 0);
+      const saldoDisponible = Math.max(0, totalFactura - montoConsumidoOtros);
+
+      return {
+        ...fac,
+        gastos_vinculados: vinculados,
+        total_consumido: Number(montoConsumidoTotal.toFixed(2)),
+        total_consumido_otros: Number(montoConsumidoOtros.toFixed(2)),
+        saldo_disponible: Number(saldoDisponible.toFixed(2)),
+        es_ya_vinculada: otrosGastos.length > 0,
+        otros_gastos: otrosGastos,
+      };
+    });
+
+    return res.json({ facturas: results });
+  } catch (error: any) {
+    console.error('[lookupFacturasRecibidas] Error:', error);
     return res.status(500).json({ error: error.message });
   }
 };

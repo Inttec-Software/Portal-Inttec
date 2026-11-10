@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAdminReportes, updateGastoStatus, getSalesForLinking, getExportData, updateGasto, recalculateVentaTotals, deleteGasto, saveQuickSale, getFormCatalogs, createGastos, getEmpleadoGastos, getGastoById, relinkGastoVenta, attachSatFacturaToGasto, dismissSatFacturaFromGasto } from './reportes.controller';
+import { getAdminReportes, updateGastoStatus, getSalesForLinking, getExportData, updateGasto, recalculateVentaTotals, deleteGasto, saveQuickSale, getFormCatalogs, createGastos, getEmpleadoGastos, getGastoById, relinkGastoVenta, attachSatFacturaToGasto, detachSatFacturaFromGasto, dismissSatFacturaFromGasto } from './reportes.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
 
@@ -25,6 +25,7 @@ router.post('/ventas/quick', reportesMutate, saveQuickSale);
 router.put('/gastos/:id/status', reportesMutate, updateGastoStatus);
 router.put('/gastos/:id/relink-venta', reportesMutate, relinkGastoVenta);
 router.post('/gastos/:id/attach-sat-factura', reportesMutate, attachSatFacturaToGasto);
+router.post('/gastos/:id/detach-sat-factura', reportesMutate, detachSatFacturaFromGasto);
 router.post('/gastos/:id/dismiss-sat-factura', reportesMutate, dismissSatFacturaFromGasto);
 router.put('/gastos/:id', reportesMutate, updateGasto);
 router.post('/gastos', reportesMutate, createGastos);

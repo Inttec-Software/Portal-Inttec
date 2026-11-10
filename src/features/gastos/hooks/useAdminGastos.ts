@@ -751,7 +751,11 @@ export function useAdminGastos() {
     }
   };
 
-  const handleAttachSatFacturaAndSend = async (factura: any, approveDirectly: boolean) => {
+  const handleAttachSatFacturaAndSend = async (
+    factura: any, 
+    approveDirectly: boolean,
+    extraOptions?: { monto_propina?: number; es_compartida?: boolean }
+  ) => {
     if (!selectedGasto || !adminUser || !factura) return;
 
     if (approveDirectly) {
@@ -776,6 +780,8 @@ export function useAdminGastos() {
           factura_id: factura.id,
           approve_directly: approveDirectly,
           actor_id: adminUser.id,
+          monto_propina: extraOptions?.monto_propina || 0,
+          es_compartida: extraOptions?.es_compartida || false,
         }),
       });
 
@@ -793,6 +799,8 @@ export function useAdminGastos() {
         factura_sugerida_id: null,
         factura_recibida_rel: factura,
         factura_sugerida_rel: null,
+        monto_propina: extraOptions?.monto_propina || 0,
+        es_factura_compartida: extraOptions?.es_compartida || false,
         devuelto_por_factura: approveDirectly ? false : selectedGasto.devuelto_por_factura,
         status: approveDirectly ? 'APPROVED' : selectedGasto.status,
       };
@@ -820,6 +828,45 @@ export function useAdminGastos() {
       await refreshData(true);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo vincular la factura recibida.');
+    } finally {
+      setIsAttachingSatFactura(false);
+    }
+  };
+
+  const handleDetachSatFactura = async () => {
+    if (!selectedGasto || !adminUser) return;
+    const targetGastoId = selectedGasto.id;
+    setIsAttachingSatFactura(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}/detach-sat-factura`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          actor_id: adminUser.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al desvincular la factura');
+      }
+
+      const data = await res.json();
+      const updatedGasto: Gasto = data.gasto || {
+        ...selectedGasto,
+        factura_recibida_id: null,
+        factura_recibida_rel: null,
+        monto_propina: 0,
+        es_factura_compartida: false,
+      };
+
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === targetGastoId ? updatedGasto : g));
+      showAlert('Factura Desvinculada', 'La factura recibida ha sido desvinculada del gasto.');
+      await refreshData(true);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo desvincular la factura.');
     } finally {
       setIsAttachingSatFactura(false);
     }
@@ -2318,6 +2365,8 @@ export function useAdminGastos() {
         const subCatName = (GastoHelper.getSubcategoria(g) || '').toLowerCase();
         const provName = (GastoHelper.getProveedor(g) || '').toLowerCase();
         const detailStr = (g.detalle_servicio_proyecto || '').toLowerCase();
+        const uuidStr = (g.factura_recibida_rel?.uuid || '').toLowerCase();
+        const emisorStr = (g.factura_recibida_rel?.nombre_emisor || g.factura_recibida_rel?.rfc_emisor || '').toLowerCase();
         const amountQuery = normalizeAmountQuery(searchQuery);
         const amountValue = Number(g.monto) || 0;
 
@@ -2327,7 +2376,9 @@ export function useAdminGastos() {
           catName.includes(query) ||
           subCatName.includes(query) ||
           provName.includes(query) ||
-          detailStr.includes(query);
+          detailStr.includes(query) ||
+          uuidStr.includes(query) ||
+          emisorStr.includes(query);
 
         const digitsQuery = query.replace(/[$,.\s]/g, '');
         const isQueryNumeric = digitsQuery.length > 0 && /^\d+$/.test(digitsQuery);
@@ -2631,6 +2682,7 @@ export function useAdminGastos() {
     handlePreviewSatFactura,
     handleDownloadSatFacturaPdf,
     handleAttachSatFacturaAndSend,
+    handleDetachSatFactura,
     handleDismissSatFactura,
     handleOpenRelinkSaleModal,
     executeRelinkGastoVenta,
