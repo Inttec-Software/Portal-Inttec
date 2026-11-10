@@ -5,7 +5,8 @@ import {
   importFactura,
   getSatSyncStatus,
   triggerSatSync,
-  getFacturaById
+  getFacturaById,
+  lookupFacturasRecibidas
 } from './facturas-recibidas.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -19,6 +20,7 @@ router.get('/sat-solicitudes', getSatSolicitudes);
 router.get('/sync-status', getSatSyncStatus);
 router.post('/sync-now', triggerSatSync);
 router.post('/import', importFactura);
+router.get('/lookup', lookupFacturasRecibidas);
 router.get('/', getFacturasRecibidas);
 router.get('/:id', getFacturaById);
 

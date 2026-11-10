@@ -131,6 +131,8 @@ export interface Gasto {
   conciliacion_activa?: boolean | null;
   factura_recibida_id?: string | null;
   factura_sugerida_id?: string | null;
+  monto_propina?: number | null;
+  es_factura_compartida?: boolean | null;
   devuelto_por_factura?: boolean | null;
   facturas_descartadas_ids?: string[] | null;
   factura_sugerida_rel?: {
@@ -152,6 +154,8 @@ export interface Gasto {
     xml_url?: string | null;
     pdf_url?: string | null;
     conceptos_json?: any;
+    total_consumido?: number;
+    total_gastos_vinculados?: number;
   } | null;
   factura_recibida_rel?: {
     id: string;
@@ -172,6 +176,8 @@ export interface Gasto {
     xml_url?: string | null;
     pdf_url?: string | null;
     conceptos_json?: any;
+    total_consumido?: number;
+    total_gastos_vinculados?: number;
   } | null;
 }
 

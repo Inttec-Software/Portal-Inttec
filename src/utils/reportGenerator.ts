@@ -3588,7 +3588,33 @@ export const ReportGenerator = {
             if (gastos.length === 0) {
               throw new Error('No hay gastos para exportar.');
             }
-            const headers = ['ID','Fecha','Empleado Nombre','Monto','Categoria','Subcategoria','Proveedor','Cliente','Servicio/Proyecto','Detalle','Sucursal','Venta Vinculada','Metodo Pago','Tipo Tarjeta','Estado Factura','Motivo Sin Factura','Status','Estado Reembolso','Comentarios'];
+            const headers = [
+              'ID',
+              'Fecha',
+              'Empleado Nombre',
+              'Monto Gasto',
+              'Monto Propina',
+              'UUID CFDI (SAT)',
+              'Emisor CFDI (SAT)',
+              'Total CFDI (SAT)',
+              'Factura Compartida',
+              'Comprobación SAT',
+              'Categoria',
+              'Subcategoria',
+              'Proveedor',
+              'Cliente',
+              'Servicio/Proyecto',
+              'Detalle',
+              'Sucursal',
+              'Venta Vinculada',
+              'Metodo Pago',
+              'Tipo Tarjeta',
+              'Estado Factura',
+              'Motivo Sin Factura',
+              'Status',
+              'Estado Reembolso',
+              'Comentarios'
+            ];
             const rows = gastos.map(g => {
               const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
               let estadoFactura = 'No Facturado';
@@ -3597,7 +3623,49 @@ export const ReportGenerator = {
               const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
               const estadoReembolso = g.estado_reembolso === 'REEMBOLSADO' ? 'Reembolsado' : 'No';
               const ventaVinc = g.venta_id ? `Venta #${String(g.venta_id).slice(0, 8)}` : 'Sin Venta';
-              return [ g.id, fecha, g.empleado_nombre, g.monto, GastoHelper.getCategoria(g), GastoHelper.getSubcategoria(g), GastoHelper.getProveedor(g), GastoHelper.getCliente(g), g.tipo_servicio_proyecto, g.detalle_servicio_proyecto, GastoHelper.getSucursal(g), ventaVinc, g.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : g.metodo_pago, g.tipo_tarjeta, estadoFactura, g.motivo_sin_factura, g.status, estadoReembolso, commentText ];
+
+              const uuidCfdi = g.factura_recibida_rel?.uuid || '';
+              const emisorCfdi = g.factura_recibida_rel ? (g.factura_recibida_rel.nombre_emisor || g.factura_recibida_rel.rfc_emisor || '') : '';
+              const totalFacturaSat = g.factura_recibida_rel?.total !== undefined ? Number(g.factura_recibida_rel.total) : '';
+              const montoPropina = Number(g.monto_propina || 0) > 0 ? Number(g.monto_propina) : 0;
+              const esCompartida = g.es_factura_compartida ? 'Sí' : 'No';
+
+              let comprobacionSat = 'Sin CFDI';
+              if (g.factura_recibida_rel || g.factura_recibida_id) {
+                comprobacionSat = 'Comprobado con CFDI';
+              } else if (g.facturado) {
+                comprobacionSat = 'Factura Adjunta (Pendiente SAT)';
+              } else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) {
+                comprobacionSat = 'Pendiente de Facturar';
+              }
+
+              return [
+                g.id,
+                fecha,
+                g.empleado_nombre,
+                g.monto,
+                montoPropina,
+                uuidCfdi,
+                emisorCfdi,
+                totalFacturaSat,
+                esCompartida,
+                comprobacionSat,
+                GastoHelper.getCategoria(g),
+                GastoHelper.getSubcategoria(g),
+                GastoHelper.getProveedor(g),
+                GastoHelper.getCliente(g),
+                g.tipo_servicio_proyecto,
+                g.detalle_servicio_proyecto,
+                GastoHelper.getSucursal(g),
+                ventaVinc,
+                g.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : g.metodo_pago,
+                g.tipo_tarjeta,
+                estadoFactura,
+                g.motivo_sin_factura,
+                g.status,
+                estadoReembolso,
+                commentText
+              ];
             });
             await ReportGenerator._exportArrayToXLSX('Gastos', headers, rows, fileName);
     },

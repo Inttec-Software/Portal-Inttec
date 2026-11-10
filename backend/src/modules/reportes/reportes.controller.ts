@@ -120,7 +120,17 @@ const FACTURA_REL_SUBQUERIES_SQL = `
   (SELECT row_to_json(fr_obj) FROM (
     SELECT f.id, f.uuid, f.rfc_emisor, f.nombre_emisor, f.rfc_receptor, f.fecha_emision,
            f.subtotal, f.descuento, f.iva, f.retencion_isr, f.retencion_iva, f.total,
-           f.moneda, f.tipo_comprobante, f.estado_sat, f.xml_url, f.pdf_url, f.conceptos_json
+           f.moneda, f.tipo_comprobante, f.estado_sat, f.xml_url, f.pdf_url, f.conceptos_json,
+           (
+             SELECT COALESCE(SUM(COALESCE(g2.monto, 0) - COALESCE(g2.monto_propina, 0)), 0)
+             FROM gastos g2
+             WHERE g2.factura_recibida_id = f.id
+           ) as total_consumido,
+           (
+             SELECT COALESCE(COUNT(g2.id), 0)
+             FROM gastos g2
+             WHERE g2.factura_recibida_id = f.id
+           ) as total_gastos_vinculados
     FROM facturas_recibidas f WHERE f.id = g.factura_recibida_id
   ) fr_obj) as factura_recibida_rel
 `;
@@ -147,6 +157,8 @@ const formatGasto = (g: any) => {
 
   return {
     ...g,
+    monto_propina: Number(g.monto_propina || 0),
+    es_factura_compartida: Boolean(g.es_factura_compartida),
     cat, subcat, prov, cli, suc, // Props legadas
     categoria_nombre: cat,
     subcategoria_nombre: subcat,
@@ -418,7 +430,8 @@ export const getEmpleadoGastos = async (req: Request, res: Response) => {
           ) s_obj) as subcategoria_rel,
           (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
           (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
+          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
+          ${FACTURA_REL_SUBQUERIES_SQL}
         FROM gastos g
         WHERE g.empleado_id = $1
         ORDER BY g.created_at DESC
@@ -738,7 +751,8 @@ export const getExportData = async (req: Request, res: Response) => {
           ) s_obj) as subcategoria_rel,
           (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
           (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
+          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
+          ${FACTURA_REL_SUBQUERIES_SQL}
         FROM gastos g
       `;
       const params: any[] = [];
@@ -1168,10 +1182,15 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-
-
     const { id } = req.params;
-    const { factura_id, approve_directly, factura_url: customFacturaUrl, actor_id } = req.body;
+    const { 
+      factura_id, 
+      approve_directly, 
+      factura_url: customFacturaUrl, 
+      actor_id,
+      monto_propina = 0,
+      es_compartida = false 
+    } = req.body;
 
     const gastoRes = await pool.query('SELECT * FROM gastos WHERE id = $1', [id]);
     const gasto = gastoRes.rows[0];
@@ -1186,6 +1205,22 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
     const factura = facRes.rows[0];
     if (!factura) {
       return res.status(404).json({ error: 'Factura recibida no encontrada' });
+    }
+
+    // Validar si hay otros gastos vinculados a esta misma factura
+    const otrosGastosRes = await pool.query(
+      'SELECT id, monto, COALESCE(monto_propina, 0) as monto_propina FROM gastos WHERE factura_recibida_id = $1 AND id != $2',
+      [factura.id, id]
+    );
+    const otrosGastos = otrosGastosRes.rows;
+    const esCompartidaEfectiva = Boolean(es_compartida || otrosGastos.length > 0);
+
+    // Si ya hay otros gastos vinculados o se marca compartida, actualizar la bandera en todos
+    if (esCompartidaEfectiva) {
+      await pool.query(
+        'UPDATE gastos SET es_factura_compartida = TRUE WHERE factura_recibida_id = $1',
+        [factura.id]
+      );
     }
 
     // Construir URL de factura a guardar en el gasto (conservando las previas si había)
@@ -1218,11 +1253,21 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
            factura_url = $1,
            factura_recibida_id = $2,
            factura_sugerida_id = NULL,
-           devuelto_por_factura = CASE WHEN $3 = 'APPROVED' THEN FALSE ELSE devuelto_por_factura END,
-           status = $3,
-           approved_at = $4
-       WHERE id = $5`,
-      [newFacturaUrlStr, factura.id, newStatus, newApprovedAt, id]
+           monto_propina = $3,
+           es_factura_compartida = $4,
+           devuelto_por_factura = CASE WHEN $5 = 'APPROVED' THEN FALSE ELSE devuelto_por_factura END,
+           status = $5,
+           approved_at = $6
+       WHERE id = $7`,
+      [
+        newFacturaUrlStr, 
+        factura.id, 
+        Math.max(0, Number(monto_propina) || 0), 
+        esCompartidaEfectiva, 
+        newStatus, 
+        newApprovedAt, 
+        id
+      ]
     );
 
     if (gasto.venta_id) {
@@ -1235,13 +1280,18 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
 
     try {
       const actor = req.user?.id || actor_id;
+      const propinaNum = Math.max(0, Number(monto_propina) || 0);
+      const propinaText = propinaNum > 0 ? ` (Propina: $${propinaNum.toFixed(2)})` : '';
+      const compartidaText = esCompartidaEfectiva ? ' [Factura Compartida]' : '';
+      const auditDetails = `Factura recibida SAT (${factura.uuid} - ${factura.nombre_emisor || factura.rfc_emisor}) vinculada al gasto por $${Number(gasto.monto || 0).toFixed(2)}${propinaText}.${compartidaText}${shouldApproveDirectly ? ' Enviado directamente a Historial (Aprobado).' : ''}`;
+
       await pool.query(
         `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)`,
         [
           shouldApproveDirectly ? 'APPROVE' : 'UPDATE',
           actor,
           id,
-          `Factura recibida SAT (${factura.uuid} - ${factura.nombre_emisor || factura.rfc_emisor}) vinculada al gasto por $${Number(gasto.monto || 0).toFixed(2)}.${shouldApproveDirectly ? ' Enviado directamente a Historial (Aprobado).' : ''}`
+          auditDetails
         ]
       );
     } catch (_) {}
@@ -1268,6 +1318,96 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
       approvedDirectly: shouldApproveDirectly,
     });
   } catch (error: any) {
+    console.error('[attachSatFacturaToGasto] Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const detachSatFacturaFromGasto = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const pool = getDbPool(company, env);
+
+    const { id } = req.params;
+    const { actor_id } = req.body;
+
+    const gastoRes = await pool.query('SELECT * FROM gastos WHERE id = $1', [id]);
+    const gasto = gastoRes.rows[0];
+    if (!gasto) return res.status(404).json({ error: 'Gasto no encontrado' });
+
+    const oldFacturaId = gasto.factura_recibida_id;
+    if (!oldFacturaId) {
+      return res.status(400).json({ error: 'Este gasto no tiene ninguna factura SAT vinculada' });
+    }
+
+    // Desvincular factura en el gasto
+    await pool.query(
+      `UPDATE gastos
+       SET factura_recibida_id = NULL,
+           monto_propina = 0,
+           es_factura_compartida = FALSE
+       WHERE id = $1`,
+      [id]
+    );
+
+    // Revisar si la factura sigue compartida con otros gastos
+    const restantesRes = await pool.query(
+      'SELECT id FROM gastos WHERE factura_recibida_id = $1',
+      [oldFacturaId]
+    );
+    if (restantesRes.rows.length <= 1) {
+      // Si sólo queda 1 o ninguno, ya no es factura compartida
+      await pool.query(
+        'UPDATE gastos SET es_factura_compartida = FALSE WHERE factura_recibida_id = $1',
+        [oldFacturaId]
+      );
+    }
+
+    if (gasto.venta_id) {
+      try {
+        await recalculateVentaTotalsInternal(pool, gasto.venta_id);
+      } catch (e: any) {
+        console.warn('[detachSatFacturaFromGasto] Error recalculando venta:', e.message);
+      }
+    }
+
+    try {
+      const actor = req.user?.id || actor_id;
+      await pool.query(
+        `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)`,
+        [
+          'UPDATE',
+          actor,
+          id,
+          `Factura SAT recibida desvinculada del gasto por administración.`
+        ]
+      );
+    } catch (_) {}
+
+    const updatedRes = await pool.query(`
+      SELECT g.*,
+        (SELECT row_to_json(s_obj) FROM (
+          SELECT s.id, s.nombre, s.categoria_id,
+                 (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
+          FROM subcategorias s WHERE s.id = g.subcategoria_id
+        ) s_obj) as subcategoria_rel,
+        (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
+        (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
+        (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
+        (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel,
+        ${FACTURA_REL_SUBQUERIES_SQL}
+      FROM gastos g
+      WHERE g.id = $1
+    `, [id]);
+
+    return res.json({
+      success: true,
+      gasto: updatedRes.rows[0] ? formatGasto(updatedRes.rows[0]) : null,
+    });
+  } catch (error: any) {
+    console.error('[detachSatFacturaFromGasto] Error:', error);
     return res.status(500).json({ error: error.message });
   }
 };

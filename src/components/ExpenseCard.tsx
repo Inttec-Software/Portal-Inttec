@@ -124,7 +124,14 @@ function ExpenseCard({
         {/* Badges de Estado */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 1 }}>
           {/* Factura Badge */}
-          {gasto.facturado ? (
+          {(gasto.factura_recibida_rel || gasto.factura_recibida_id) ? (
+            <View style={[styles.statusBadge, { backgroundColor: themeColors.success + '18' }]}>
+              <Ionicons name="shield-checkmark" size={11} color={themeColors.success} />
+              <Text style={[styles.statusText, { color: themeColors.success }]}>
+                CFDI SAT{gasto.es_factura_compartida ? ' (Comp)' : ''}
+              </Text>
+            </View>
+          ) : gasto.facturado ? (
             <View style={[styles.statusBadge, { backgroundColor: themeColors.success + '18' }]}>
               <Ionicons name="checkmark-circle-outline" size={11} color={themeColors.success} />
               <Text style={[styles.statusText, { color: themeColors.success }]}>Facturado</Text>
@@ -138,6 +145,15 @@ function ExpenseCard({
             <View style={[styles.statusBadge, { backgroundColor: themeColors.danger + '15' }]}>
               <Ionicons name="document-text-outline" size={11} color={themeColors.danger} />
               <Text style={[styles.statusText, { color: themeColors.danger }]}>Sin Factura</Text>
+            </View>
+          )}
+
+          {Number(gasto.monto_propina || 0) > 0 && (
+            <View style={[styles.statusBadge, { backgroundColor: '#f59e0b18' }]}>
+              <Ionicons name="restaurant-outline" size={11} color="#d97706" />
+              <Text style={[styles.statusText, { color: '#d97706' }]}>
+                Propina ${Number(gasto.monto_propina).toFixed(2)}
+              </Text>
             </View>
           )}
 
@@ -256,6 +272,9 @@ const ExpenseCardMemo = React.memo(ExpenseCard, (prevProps, nextProps) => {
     prevProps.gasto.proveedor_id === nextProps.gasto.proveedor_id &&
     prevProps.gasto.devuelto_por_factura === nextProps.gasto.devuelto_por_factura &&
     prevProps.gasto.factura_sugerida_id === nextProps.gasto.factura_sugerida_id &&
+    prevProps.gasto.factura_recibida_id === nextProps.gasto.factura_recibida_id &&
+    prevProps.gasto.monto_propina === nextProps.gasto.monto_propina &&
+    prevProps.gasto.es_factura_compartida === nextProps.gasto.es_factura_compartida &&
     prevProps.showEmployeeName === nextProps.showEmployeeName
   );
 });
