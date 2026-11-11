@@ -754,7 +754,12 @@ export function useAdminGastos() {
   const handleAttachSatFacturaAndSend = async (
     factura: any, 
     approveDirectly: boolean,
-    extraOptions?: { monto_propina?: number; es_compartida?: boolean }
+    extraOptions?: { 
+      monto_propina?: number; 
+      es_compartida?: boolean;
+      motivo_diferencia?: string | null;
+      detalle_diferencia?: string | null;
+    }
   ) => {
     if (!selectedGasto || !adminUser || !factura) return;
 
@@ -782,6 +787,8 @@ export function useAdminGastos() {
           actor_id: adminUser.id,
           monto_propina: extraOptions?.monto_propina || 0,
           es_compartida: extraOptions?.es_compartida || false,
+          motivo_diferencia: extraOptions?.motivo_diferencia || null,
+          detalle_diferencia: extraOptions?.detalle_diferencia || null,
         }),
       });
 
@@ -2365,19 +2372,43 @@ export function useAdminGastos() {
         const subCatName = (GastoHelper.getSubcategoria(g) || '').toLowerCase();
         const provName = (GastoHelper.getProveedor(g) || '').toLowerCase();
         const detailStr = (g.detalle_servicio_proyecto || '').toLowerCase();
-        const uuidStr = (g.factura_recibida_rel?.uuid || '').toLowerCase();
-        const emisorStr = (g.factura_recibida_rel?.nombre_emisor || g.factura_recibida_rel?.rfc_emisor || '').toLowerCase();
+        
+        // Búsqueda flexible de ID de Gasto y UUID de Factura SAT (con y sin guiones)
+        const gastoId = (g.id || '').toLowerCase();
+        const uuidRecibida = (g.factura_recibida_rel?.uuid || '').toLowerCase();
+        const uuidSugerida = (g.factura_sugerida_rel?.uuid || '').toLowerCase();
+        const cleanQuery = query.replace(/[^a-z0-9]/g, '');
+        const cleanGastoId = gastoId.replace(/[^a-z0-9]/g, '');
+        const cleanRecibida = uuidRecibida.replace(/[^a-z0-9]/g, '');
+        const cleanSugerida = uuidSugerida.replace(/[^a-z0-9]/g, '');
+
+        const matchesIdOrUuid = gastoId.includes(query) ||
+          uuidRecibida.includes(query) ||
+          uuidSugerida.includes(query) ||
+          (cleanQuery.length >= 4 && (
+            cleanGastoId.includes(cleanQuery) ||
+            cleanRecibida.includes(cleanQuery) || 
+            cleanSugerida.includes(cleanQuery)
+          ));
+
+        const emisorStr = (
+          g.factura_recibida_rel?.nombre_emisor || 
+          g.factura_recibida_rel?.rfc_emisor || 
+          g.factura_sugerida_rel?.nombre_emisor || 
+          g.factura_sugerida_rel?.rfc_emisor || 
+          ''
+        ).toLowerCase();
         const amountQuery = normalizeAmountQuery(searchQuery);
         const amountValue = Number(g.monto) || 0;
 
-        const matchesText = empName.includes(query) ||
+        const matchesText = matchesIdOrUuid ||
+          empName.includes(query) ||
           clientName.includes(query) ||
           branchName.includes(query) ||
           catName.includes(query) ||
           subCatName.includes(query) ||
           provName.includes(query) ||
           detailStr.includes(query) ||
-          uuidStr.includes(query) ||
           emisorStr.includes(query);
 
         const digitsQuery = query.replace(/[$,.\s]/g, '');

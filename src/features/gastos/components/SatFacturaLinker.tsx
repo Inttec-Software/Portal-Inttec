@@ -23,7 +23,12 @@ interface SatFacturaLinkerProps {
   onAttachFactura: (
     factura: any,
     approveDirectly: boolean,
-    extra?: { monto_propina?: number; es_compartida?: boolean }
+    extra?: { 
+      monto_propina?: number; 
+      es_compartida?: boolean;
+      motivo_diferencia?: string | null;
+      detalle_diferencia?: string | null;
+    }
   ) => Promise<void>;
   onDetachFactura: () => Promise<void>;
   onPreviewFactura: (factura: any) => void;
@@ -42,26 +47,93 @@ export function SatFacturaLinker({
   isExportingSatPdf = false,
   isAttaching = false,
 }: SatFacturaLinkerProps) {
-  // Búsqueda por texto
+  // Búsqueda por texto / UUID
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const searchTimeoutRef = useRef<any>(null);
 
   // Procesamiento de XML y Dropzone
   const [isProcessingXml, setIsProcessingXml] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const dropzoneRef = useRef<any>(null);
+
+  // Estado de confirmación de desvinculación (inline para evitar problemas de Alert en web)
+  const [isConfirmingDetach, setIsConfirmingDetach] = useState(false);
 
   // Candidata seleccionada para vinculación
   const [candidateFactura, setCandidateFactura] = useState<any | null>(null);
 
-  // Configuración de propina y factura compartida para la candidata
+  // Configuración de propina, diferencia y factura compartida para la candidata
   const [montoPropina, setMontoPropina] = useState<number>(0);
-  const [isPropinaActive, setIsPropinaActive] = useState<boolean>(false);
+  const [motivoDiferencia, setMotivoDiferencia] = useState<'PROPINA' | 'COMISION_PLATAFORMA' | 'DIFERENCIA_AUTORIZADA' | null>(null);
+  const [detalleDiferencia, setDetalleDiferencia] = useState<string>('');
   const [isCompartidaActive, setIsCompartidaActive] = useState<boolean>(false);
 
-  // Copiar UUID
+  // Prevenir que el navegador web abra el XML en otra pestaña al arrastrarlo
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+
+    const preventDefaultGlobal = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    window.addEventListener('dragover', preventDefaultGlobal);
+    window.addEventListener('drop', preventDefaultGlobal);
+
+    const el = dropzoneRef.current as any;
+    const domNode = el?.addEventListener ? el : el?._nativeNode;
+
+    const handleDropNative = async (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        const file = e.dataTransfer.files[0];
+        if (file.name.toLowerCase().endsWith('.xml')) {
+          const text = await file.text();
+          await processXmlString(text);
+        } else {
+          Alert.alert('Archivo Inválido', 'Por favor selecciona o arrastra un archivo XML válido de CFDI 4.0.');
+        }
+      }
+    };
+
+    const handleDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(true);
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+    };
+
+    if (domNode) {
+      domNode.addEventListener('dragenter', handleDragEnter);
+      domNode.addEventListener('dragover', handleDragEnter);
+      domNode.addEventListener('dragleave', handleDragLeave);
+      domNode.addEventListener('drop', handleDropNative);
+    }
+
+    return () => {
+      window.removeEventListener('dragover', preventDefaultGlobal);
+      window.removeEventListener('drop', preventDefaultGlobal);
+      if (domNode) {
+        domNode.removeEventListener('dragenter', handleDragEnter);
+        domNode.removeEventListener('dragover', handleDragEnter);
+        domNode.removeEventListener('dragleave', handleDragLeave);
+        domNode.removeEventListener('drop', handleDropNative);
+      }
+    };
+  }, []);
+
+  // Copiar UUID al portapapeles
   const handleCopyUuid = (uuid: string) => {
     if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(uuid);
@@ -74,13 +146,15 @@ export function SatFacturaLinker({
   // Buscar facturas por texto (UUID, RFC, Emisor)
   const performLookup = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || trimmed.length < 3) {
+    if (!trimmed) {
       setSearchResults([]);
+      setHasSearched(false);
       setIsSearching(false);
       return;
     }
 
     setIsSearching(true);
+    setHasSearched(true);
     try {
       const headers = await getApiHeaders();
       const res = await fetch(
@@ -90,7 +164,6 @@ export function SatFacturaLinker({
       if (res.ok) {
         const data = await res.json();
         setSearchResults(data.facturas || []);
-        setShowSearchResults(true);
       }
     } catch (e) {
       console.warn('[SatFacturaLinker] Error buscando facturas:', e);
@@ -104,12 +177,12 @@ export function SatFacturaLinker({
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     if (!text.trim()) {
       setSearchResults([]);
-      setShowSearchResults(false);
+      setHasSearched(false);
       return;
     }
     searchTimeoutRef.current = setTimeout(() => {
       performLookup(text);
-    }, 400);
+    }, 450);
   };
 
   // Procesar contenido XML (desde archivo o drag & drop)
@@ -118,7 +191,7 @@ export function SatFacturaLinker({
     try {
       const parsed = parseCFDIXML(xmlText);
       if (!parsed || !parsed.uuid) {
-        Alert.alert('XML Inválido', 'No se pudo extraer el Folio Fiscal (UUID) del XML.');
+        Alert.alert('XML Inválido', 'No se pudo extraer el Folio Fiscal (UUID) del archivo XML.');
         return;
       }
 
@@ -173,10 +246,10 @@ export function SatFacturaLinker({
             total_consumido: 0,
             saldo_disponible: Number(imported.total || parsed.total || 0),
             es_ya_vinculada: false,
+            es_factura_compartida: false,
             otros_gastos: [],
           };
         } else {
-          // Si falló el guardado, armar objeto mínimo para que no se bloquee
           foundFactura = {
             id: null,
             uuid: parsed.uuid,
@@ -188,6 +261,7 @@ export function SatFacturaLinker({
             total_consumido: 0,
             saldo_disponible: parsed.total,
             es_ya_vinculada: false,
+            es_factura_compartida: false,
             otros_gastos: [],
           };
         }
@@ -195,7 +269,8 @@ export function SatFacturaLinker({
 
       selectCandidate(foundFactura);
       setSearchQuery('');
-      setShowSearchResults(false);
+      setSearchResults([]);
+      setHasSearched(false);
     } catch (err: any) {
       console.error('[processXmlString] Error procesando XML:', err);
       Alert.alert('Error', 'Hubo un error al leer el archivo XML: ' + (err.message || 'Formato no soportado'));
@@ -231,26 +306,33 @@ export function SatFacturaLinker({
     }
   };
 
-  // Seleccionar candidata y preconfigurar propina o compartida
+  // Seleccionar candidata y configurar condiciones de validación
   const selectCandidate = (fac: any) => {
     setCandidateFactura(fac);
-    setShowSearchResults(false);
+    setSearchResults([]);
+    setHasSearched(false);
 
     const gastoMonto = Number(gasto.monto || 0);
     const facTotal = Number(fac.total || 0);
     const diff = gastoMonto - facTotal;
 
-    // Si el gasto es mayor que la factura, sugerir propina automáticamente
-    if (diff > 0.01) {
+    // Si el gasto es mayor que la factura, sugerir motivo
+    if (diff > 0.05) {
       setMontoPropina(Number(diff.toFixed(2)));
-      setIsPropinaActive(true);
+      const cat = (gasto.categoria || gasto.subcategoria || '').toLowerCase();
+      if (cat.includes('comida') || cat.includes('alimento') || cat.includes('restaurante')) {
+        setMotivoDiferencia('PROPINA');
+      } else {
+        setMotivoDiferencia('COMISION_PLATAFORMA');
+      }
     } else {
       setMontoPropina(0);
-      setIsPropinaActive(false);
+      setMotivoDiferencia(null);
     }
+    setDetalleDiferencia('');
 
-    // Si ya está vinculada a otros gastos, sugerir compartida
-    if (fac.es_ya_vinculada) {
+    // Si ya está marcada como compartida, mantener la bandera activa
+    if (fac.es_factura_compartida || fac.es_ya_vinculada) {
       setIsCompartidaActive(true);
     } else {
       setIsCompartidaActive(false);
@@ -261,33 +343,17 @@ export function SatFacturaLinker({
   const handleConfirmAttach = async (approveDirectly: boolean) => {
     if (!candidateFactura) return;
 
-    const propinaFinal = isPropinaActive ? Math.max(0, Number(montoPropina) || 0) : 0;
-    const isCompartidaFinal = Boolean(isCompartidaActive || candidateFactura.es_ya_vinculada);
+    const propinaFinal = motivoDiferencia === 'PROPINA' ? Math.max(0, Number(montoPropina) || 0) : 0;
+    const isCompartidaFinal = Boolean(isCompartidaActive || candidateFactura.es_factura_compartida);
 
     await onAttachFactura(candidateFactura, approveDirectly, {
       monto_propina: propinaFinal,
       es_compartida: isCompartidaFinal,
+      motivo_diferencia: motivoDiferencia,
+      detalle_diferencia: detalleDiferencia.trim() || null,
     });
 
     setCandidateFactura(null);
-  };
-
-  // Confirmación para desvincular
-  const handleConfirmDetach = () => {
-    Alert.alert(
-      'Desvincular Factura Recibida',
-      '¿Estás segura de que deseas desvincular este CFDI del gasto? El gasto quedará pendiente de factura o no facturado.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sí, Desvincular',
-          style: 'destructive',
-          onPress: async () => {
-            await onDetachFactura();
-          },
-        },
-      ]
-    );
   };
 
   // ==========================================
@@ -325,6 +391,22 @@ export function SatFacturaLinker({
                 <Ionicons name="restaurant-outline" size={12} color="#d97706" />
                 <Text style={[styles.badgeText, { color: '#d97706' }]}>
                   Propina: +${propina.toFixed(2)}
+                </Text>
+              </View>
+            )}
+            {gasto.motivo_sin_factura?.startsWith('COMISION_PLATAFORMA') && (
+              <View style={[styles.badge, { backgroundColor: '#8b5cf620', borderColor: '#8b5cf650' }]}>
+                <Ionicons name="globe-outline" size={12} color="#7c3aed" />
+                <Text style={[styles.badgeText, { color: '#7c3aed' }]}>
+                  Comisión Plataforma
+                </Text>
+              </View>
+            )}
+            {gasto.motivo_sin_factura?.startsWith('DIFERENCIA_AUTORIZADA') && (
+              <View style={[styles.badge, { backgroundColor: '#64748b20', borderColor: '#64748b50' }]}>
+                <Ionicons name="shield-outline" size={12} color="#475569" />
+                <Text style={[styles.badgeText, { color: '#475569' }]}>
+                  Diferencia Autorizada
                 </Text>
               </View>
             )}
@@ -378,6 +460,14 @@ export function SatFacturaLinker({
               <Text style={[styles.amountVal, { color: '#d97706' }]}>+${propina.toFixed(2)}</Text>
             </View>
           )}
+          {gasto.motivo_sin_factura && (gasto.motivo_sin_factura.startsWith('COMISION_PLATAFORMA') || gasto.motivo_sin_factura.startsWith('DIFERENCIA_AUTORIZADA')) && (
+            <View style={styles.amountCol}>
+              <Text style={[styles.amountLabel, { color: '#7c3aed' }]}>Diferencia Justificada</Text>
+              <Text style={[styles.amountVal, { color: '#7c3aed' }]}>
+                +${Math.max(0, Number(gasto.monto || 0) - totalSat).toFixed(2)}
+              </Text>
+            </View>
+          )}
           {esCompartida && (
             <View style={styles.amountCol}>
               <Text style={[styles.amountLabel, { color: '#2563eb' }]}>Consumido Total</Text>
@@ -386,40 +476,80 @@ export function SatFacturaLinker({
           )}
         </View>
 
-        {/* Botones de acción */}
-        <View style={styles.actionButtonsRow}>
-          <TouchableOpacity
-            onPress={() => onPreviewFactura(fac)}
-            style={[styles.btnOutline, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-          >
-            <Ionicons name="eye-outline" size={14} color={themeColors.text} />
-            <Text style={[styles.btnOutlineText, { color: themeColors.text }]}>Mostrar CFDI</Text>
-          </TouchableOpacity>
+        {/* Detalle o nota de diferencia si existe */}
+        {gasto.motivo_sin_factura && (gasto.motivo_sin_factura.startsWith('COMISION_PLATAFORMA') || gasto.motivo_sin_factura.startsWith('DIFERENCIA_AUTORIZADA')) && (
+          <Text style={{ fontSize: 11, color: themeColors.textSecondary, fontStyle: 'italic', marginTop: 4 }}>
+            Nota: {gasto.motivo_sin_factura}
+          </Text>
+        )}
 
-          <TouchableOpacity
-            onPress={() => onDownloadPdf(fac)}
-            disabled={isExportingSatPdf}
-            style={[styles.btnOutline, { backgroundColor: '#e74c3c', borderColor: '#e74c3c' }]}
-          >
-            {isExportingSatPdf ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="download-outline" size={14} color="#fff" />
-                <Text style={[styles.btnOutlineText, { color: '#fff' }]}>Descargar PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
+        {/* Confirmación inline para desvincular */}
+        {isConfirmingDetach ? (
+          <View style={[styles.bannerAlert, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger + '50', marginTop: 6 }]}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.danger }}>
+              ¿Desvincular esta factura del gasto?
+            </Text>
+            <Text style={{ fontSize: 11, color: themeColors.text, marginVertical: 4 }}>
+              El gasto volverá a quedar sin CFDI y se restablecerá el saldo disponible en la factura.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+              <TouchableOpacity
+                onPress={() => setIsConfirmingDetach(false)}
+                style={[styles.btnOutline, { flex: 1, backgroundColor: themeColors.background, borderColor: themeColors.border }]}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.textSecondary }}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={async () => {
+                  setIsConfirmingDetach(false);
+                  await onDetachFactura();
+                }}
+                disabled={isAttaching}
+                style={[styles.btnOutline, { flex: 1, backgroundColor: themeColors.danger, borderColor: themeColors.danger }]}
+              >
+                {isAttaching ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>Sí, Desvincular</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.actionButtonsRow}>
+            <TouchableOpacity
+              onPress={() => onPreviewFactura(fac)}
+              style={[styles.btnOutline, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+            >
+              <Ionicons name="eye-outline" size={14} color={themeColors.text} />
+              <Text style={[styles.btnOutlineText, { color: themeColors.text }]}>Mostrar CFDI</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={handleConfirmDetach}
-            disabled={isAttaching}
-            style={[styles.btnOutline, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger + '40' }]}
-          >
-            <Ionicons name="unlink-outline" size={14} color={themeColors.danger} />
-            <Text style={[styles.btnOutlineText, { color: themeColors.danger }]}>Desvincular</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity
+              onPress={() => onDownloadPdf(fac)}
+              disabled={isExportingSatPdf}
+              style={[styles.btnOutline, { backgroundColor: '#e74c3c', borderColor: '#e74c3c' }]}
+            >
+              {isExportingSatPdf ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={14} color="#fff" />
+                  <Text style={[styles.btnOutlineText, { color: '#fff' }]}>Descargar PDF</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setIsConfirmingDetach(true)}
+              disabled={isAttaching}
+              style={[styles.btnOutline, { backgroundColor: themeColors.danger + '15', borderColor: themeColors.danger + '40' }]}
+            >
+              <Ionicons name="unlink-outline" size={14} color={themeColors.danger} />
+              <Text style={[styles.btnOutlineText, { color: themeColors.danger }]}>Desvincular</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   }
@@ -431,18 +561,37 @@ export function SatFacturaLinker({
     const gastoMonto = Number(gasto.monto || 0);
     const facTotal = Number(candidateFactura.total || 0);
     const diff = gastoMonto - facTotal;
-    const esExacto = Math.abs(diff) < 0.01;
+    const esExacto = Math.abs(diff) <= 0.05;
+    const esFacturaMayor = facTotal > gastoMonto + 0.05;
+    const esGastoMayor = gastoMonto > facTotal + 0.05;
+
     const saldoDisp = Number(candidateFactura.saldo_disponible ?? facTotal);
     const otrosGastosCount = candidateFactura.otros_gastos?.length || 0;
-    const finalPropina = isPropinaActive ? Number(montoPropina || 0) : 0;
-    const consumoEfectivo = gastoMonto - finalPropina;
-    const saldoInsuficiente = candidateFactura.es_ya_vinculada && saldoDisp < consumoEfectivo;
+    const finalPropina = motivoDiferencia === 'PROPINA' ? Number(montoPropina || 0) : 0;
+    const consumoRequerido = Math.max(0, gastoMonto - finalPropina);
+
+    // Validación 1: Factura ya vinculada y NO compartida -> BLOQUEO TOTAL
+    const estaBloqueadaPorNoCompartida = candidateFactura.es_ya_vinculada && !candidateFactura.es_factura_compartida;
+
+    // Validación 2: Factura compartida pero sin saldo suficiente -> BLOQUEO TOTAL
+    const estaBloqueadaPorSaldoInsuficiente = candidateFactura.es_ya_vinculada && candidateFactura.es_factura_compartida && saldoDisp < consumoRequerido - 0.05;
+
+    // Validación 3: Factura mayor a gasto menor sin marcarse como compartida (sólo en la primera vinculación) -> BLOQUEO HASTA MARCAR
+    const requiereMarcarCompartida = !candidateFactura.es_ya_vinculada && esFacturaMayor && !isCompartidaActive;
+
+    // Validación 4: Gasto mayor a factura sin justificar o con propina descuadrada
+    const requiereResolverDiferencia = esGastoMayor && (
+      !motivoDiferencia ||
+      (motivoDiferencia === 'PROPINA' && Math.abs((gastoMonto - finalPropina) - facTotal) > 0.05)
+    );
+
+    const puedeVincular = !estaBloqueadaPorNoCompartida && !estaBloqueadaPorSaldoInsuficiente && !requiereMarcarCompartida && !requiereResolverDiferencia;
 
     return (
       <View style={[styles.candidateCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.accent }]}>
         <View style={styles.rowBetween}>
           <Text style={[styles.candidateTitle, { color: themeColors.accent }]}>
-            Confirmar Vinculación de CFDI
+            Revisión de Factura Recibida
           </Text>
           <TouchableOpacity onPress={() => setCandidateFactura(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Ionicons name="close-circle-outline" size={20} color={themeColors.textSecondary} />
@@ -450,7 +599,7 @@ export function SatFacturaLinker({
         </View>
 
         {/* Datos del CFDI candidato */}
-        <View style={{ gap: 3, marginTop: 4 }}>
+        <View style={{ gap: 2, marginTop: 4 }}>
           <Text style={{ fontWeight: '800', fontSize: 13, color: themeColors.text }}>
             {candidateFactura.nombre_emisor || 'Proveedor SAT'}
           </Text>
@@ -463,7 +612,7 @@ export function SatFacturaLinker({
         </View>
 
         {/* Resumen comparativo de montos */}
-        <View style={[styles.amountsRow, { backgroundColor: themeColors.background, borderRadius: BorderRadius.small, padding: 8, marginVertical: 8 }]}>
+        <View style={[styles.amountsRow, { backgroundColor: themeColors.background, borderRadius: BorderRadius.small, padding: 8, marginVertical: 6 }]}>
           <View style={styles.amountCol}>
             <Text style={[styles.amountLabel, { color: themeColors.textSecondary }]}>Monto del Gasto</Text>
             <Text style={[styles.amountVal, { color: themeColors.text }]}>${gastoMonto.toFixed(2)}</Text>
@@ -475,51 +624,201 @@ export function SatFacturaLinker({
           {candidateFactura.es_ya_vinculada && (
             <View style={styles.amountCol}>
               <Text style={[styles.amountLabel, { color: '#2563eb' }]}>Saldo Disponible</Text>
-              <Text style={[styles.amountVal, { color: '#2563eb' }]}>${saldoDisp.toFixed(2)}</Text>
+              <Text style={[styles.amountVal, { color: saldoDisp < consumoRequerido ? themeColors.danger : '#2563eb' }]}>
+                ${saldoDisp.toFixed(2)}
+              </Text>
             </View>
           )}
         </View>
 
-        {/* Notificación de Match Exacto */}
-        {esExacto && (
-          <View style={[styles.bannerAlert, { backgroundColor: themeColors.success + '15', borderColor: themeColors.success + '40' }]}>
-            <Ionicons name="checkmark-circle" size={16} color={themeColors.success} />
-            <Text style={{ fontSize: 11, color: themeColors.success, fontWeight: '700', flex: 1 }}>
-              Coincidencia exacta de importe (${gastoMonto.toFixed(2)}).
-            </Text>
+        {/* 1. BLOQUEO: Factura ya vinculada y NO compartida */}
+        {estaBloqueadaPorNoCompartida && (
+          <View style={[styles.bannerAlert, { backgroundColor: themeColors.danger + '18', borderColor: themeColors.danger }]}>
+            <Ionicons name="close-circle" size={18} color={themeColors.danger} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.danger }}>
+                FACTURA YA VINCULADA (BLOQUEADA)
+              </Text>
+              <Text style={{ fontSize: 11, color: themeColors.text }}>
+                Esta factura ya se encuentra vinculada de manera exclusiva al Gasto #{candidateFactura.otros_gastos[0]?.id?.slice(0, 8)} ({candidateFactura.otros_gastos[0]?.empleado_nombre || 'Empleado'}) por ${Number(candidateFactura.otros_gastos[0]?.monto || 0).toFixed(2)}. No puede asignarse a más gastos.
+              </Text>
+            </View>
           </View>
         )}
 
-        {/* Notificación y Configuración de Propina (Gasto > Factura) */}
-        {diff > 0.01 && (
-          <View style={[styles.bannerAlert, { backgroundColor: '#f59e0b15', borderColor: '#f59e0b40', flexDirection: 'column', alignItems: 'flex-start' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Ionicons name="restaurant" size={16} color="#d97706" />
-              <Text style={{ fontSize: 12, fontWeight: '800', color: '#d97706' }}>
-                Diferencia de ${diff.toFixed(2)} detectada
+        {/* 2. BLOQUEO: Saldo insuficiente en factura compartida */}
+        {estaBloqueadaPorSaldoInsuficiente && (
+          <View style={[styles.bannerAlert, { backgroundColor: themeColors.danger + '18', borderColor: themeColors.danger }]}>
+            <Ionicons name="alert-circle" size={18} color={themeColors.danger} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.danger }}>
+                SALDO INSUFICIENTE EN FACTURA COMPARTIDA
+              </Text>
+              <Text style={{ fontSize: 11, color: themeColors.text }}>
+                El saldo libre de esta factura es de ${saldoDisp.toFixed(2)}, pero este gasto requiere ${consumoRequerido.toFixed(2)}. No es posible sobreconsumir la factura.
               </Text>
             </View>
-            <Text style={{ fontSize: 11, color: themeColors.text, marginTop: 2 }}>
-              El monto reportado es mayor al CFDI timbrado. ¿Corresponde a propina de restaurante/alimentos?
-            </Text>
+          </View>
+        )}
+
+        {/* 3. PERMITIDO: Factura compartida con saldo suficiente */}
+        {candidateFactura.es_ya_vinculada && candidateFactura.es_factura_compartida && !estaBloqueadaPorSaldoInsuficiente && (
+          <View style={[styles.bannerAlert, { backgroundColor: '#3b82f615', borderColor: '#3b82f640' }]}>
+            <Ionicons name="git-branch" size={16} color="#2563eb" />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#2563eb' }}>
+                Factura Compartida Válida
+              </Text>
+              <Text style={{ fontSize: 11, color: themeColors.text }}>
+                Saldo actual: ${saldoDisp.toFixed(2)} • Consumo de este gasto: ${consumoRequerido.toFixed(2)} • Saldo libre restante: ${(saldoDisp - consumoRequerido).toFixed(2)}.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* 4. REGLA: Factura mayor a gasto menor sin vincular aún */}
+        {!candidateFactura.es_ya_vinculada && esFacturaMayor && (
+          <View style={[styles.bannerAlert, { backgroundColor: isCompartidaActive ? '#3b82f615' : '#f59e0b15', borderColor: isCompartidaActive ? '#3b82f640' : '#f59e0b50', flexDirection: 'column', alignItems: 'flex-start' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="alert-circle" size={16} color={isCompartidaActive ? '#2563eb' : '#d97706'} />
+              <Text style={{ fontSize: 12, fontWeight: '800', color: isCompartidaActive ? '#2563eb' : '#d97706' }}>
+                Factura Mayor al Gasto (${facTotal.toFixed(2)} vs ${gastoMonto.toFixed(2)})
+              </Text>
+            </View>
+            
 
             <TouchableOpacity
-              onPress={() => setIsPropinaActive(!isPropinaActive)}
+              onPress={() => setIsCompartidaActive(!isCompartidaActive)}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}
             >
               <Ionicons
-                name={isPropinaActive ? 'checkbox' : 'square-outline'}
+                name={isCompartidaActive ? 'checkbox' : 'square-outline'}
                 size={18}
-                color={isPropinaActive ? '#d97706' : themeColors.textSecondary}
+                color={isCompartidaActive ? '#2563eb' : themeColors.textSecondary}
               />
               <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
-                Registrar propina en este gasto
+                Declarar como Factura Compartida (el saldo restante quedará libre)
               </Text>
             </TouchableOpacity>
+          </View>
+        )}
 
-            {isPropinaActive && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, width: '100%' }}>
-                <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>Importe de propina ($):</Text>
+        {/* 5. REGLA: Gasto mayor a factura (Diferencia a clasificar: Propina o Comisión) */}
+        {!candidateFactura.es_ya_vinculada && esGastoMayor && (
+          <View style={[styles.bannerAlert, { backgroundColor: '#f59e0b10', borderColor: '#f59e0b40', flexDirection: 'column', alignItems: 'stretch' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="warning-outline" size={16} color="#d97706" />
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#d97706' }}>
+                Diferencia no facturada: ${diff.toFixed(2)}
+              </Text>
+            </View>
+            <Text style={{ fontSize: 11, color: themeColors.text, marginTop: 2 }}>
+              El ticket pagado (${gastoMonto.toFixed(2)}) supera al CFDI timbrado (${facTotal.toFixed(2)}). Selecciona cómo clasificar la diferencia:
+            </Text>
+
+            {/* Opciones de Motivo */}
+            <View style={{ gap: 6, marginTop: 8 }}>
+              {/* Opción 1: PROPINA */}
+              <TouchableOpacity
+                onPress={() => {
+                  setMotivoDiferencia('PROPINA');
+                  setMontoPropina(Number(diff.toFixed(2)));
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: 8,
+                  borderRadius: BorderRadius.small,
+                  borderWidth: 1,
+                  backgroundColor: motivoDiferencia === 'PROPINA' ? '#f59e0b20' : themeColors.background,
+                  borderColor: motivoDiferencia === 'PROPINA' ? '#d97706' : themeColors.border,
+                }}
+              >
+                <Ionicons
+                  name={motivoDiferencia === 'PROPINA' ? 'radio-button-on' : 'radio-button-off'}
+                  size={16}
+                  color={motivoDiferencia === 'PROPINA' ? '#d97706' : themeColors.textSecondary}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>
+                    Propina en Alimentos / Restaurante (+${diff.toFixed(2)})
+                  </Text>
+                  <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>
+                    El restaurante timbró solo el consumo de alimentos; la propina se pagó voluntariamente.
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Opción 2: COMISION_PLATAFORMA */}
+              <TouchableOpacity
+                onPress={() => {
+                  setMotivoDiferencia('COMISION_PLATAFORMA');
+                  setMontoPropina(0);
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: 8,
+                  borderRadius: BorderRadius.small,
+                  borderWidth: 1,
+                  backgroundColor: motivoDiferencia === 'COMISION_PLATAFORMA' ? '#8b5cf620' : themeColors.background,
+                  borderColor: motivoDiferencia === 'COMISION_PLATAFORMA' ? '#7c3aed' : themeColors.border,
+                }}
+              >
+                <Ionicons
+                  name={motivoDiferencia === 'COMISION_PLATAFORMA' ? 'radio-button-on' : 'radio-button-off'}
+                  size={16}
+                  color={motivoDiferencia === 'COMISION_PLATAFORMA' ? '#7c3aed' : themeColors.textSecondary}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>
+                    Comisión de Plataforma / Intermediario (+${diff.toFixed(2)})
+                  </Text>
+                  <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>
+                    Para Expedia, Booking, Uber, etc., donde el proveedor timbró un monto menor al cobro total.
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Opción 3: DIFERENCIA_AUTORIZADA */}
+              <TouchableOpacity
+                onPress={() => {
+                  setMotivoDiferencia('DIFERENCIA_AUTORIZADA');
+                  setMontoPropina(0);
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: 8,
+                  borderRadius: BorderRadius.small,
+                  borderWidth: 1,
+                  backgroundColor: motivoDiferencia === 'DIFERENCIA_AUTORIZADA' ? '#64748b20' : themeColors.background,
+                  borderColor: motivoDiferencia === 'DIFERENCIA_AUTORIZADA' ? '#475569' : themeColors.border,
+                }}
+              >
+                <Ionicons
+                  name={motivoDiferencia === 'DIFERENCIA_AUTORIZADA' ? 'radio-button-on' : 'radio-button-off'}
+                  size={16}
+                  color={motivoDiferencia === 'DIFERENCIA_AUTORIZADA' ? '#475569' : themeColors.textSecondary}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>
+                    Otra Diferencia Autorizada por Administración
+                  </Text>
+                  <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>
+                    Variación aceptada administrativamente que se absorbe sin comprobante fiscal.
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            {/* Inputs adicionales según la opción elegida */}
+            {motivoDiferencia === 'PROPINA' && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, width: '100%' }}>
+                <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>Confirmar importe de propina ($):</Text>
                 <TextInput
                   value={String(montoPropina)}
                   onChangeText={(val) => setMontoPropina(Number(val) || 0)}
@@ -537,60 +836,55 @@ export function SatFacturaLinker({
                     minWidth: 80,
                   }}
                 />
+                {Math.abs((gastoMonto - (Number(montoPropina) || 0)) - facTotal) > 0.05 && (
+                  <Text style={{ fontSize: 10, color: themeColors.danger, fontWeight: '600', flex: 1 }}>
+                    La propina debe ser ${diff.toFixed(2)} para cuadrar con el gasto.
+                  </Text>
+                )}
               </View>
             )}
-          </View>
-        )}
 
-        {/* Notificación y Configuración de Factura Compartida (Ya Vinculada) */}
-        {candidateFactura.es_ya_vinculada && (
-          <View style={[styles.bannerAlert, { backgroundColor: '#3b82f615', borderColor: '#3b82f640', flexDirection: 'column', alignItems: 'flex-start' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Ionicons name="git-branch" size={16} color="#2563eb" />
-              <Text style={{ fontSize: 12, fontWeight: '800', color: '#2563eb' }}>
-                Factura ya vinculada ({otrosGastosCount} gasto{otrosGastosCount > 1 ? 's' : ''})
-              </Text>
-            </View>
-            <Text style={{ fontSize: 11, color: themeColors.text, marginTop: 2 }}>
-              Total: ${facTotal.toFixed(2)} • Consumido previo: ${Number(candidateFactura.total_consumido_otros || 0).toFixed(2)} • Saldo libre: ${saldoDisp.toFixed(2)}.
-            </Text>
-
-            {saldoInsuficiente && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                <Ionicons name="alert-circle" size={14} color={themeColors.danger} />
-                <Text style={{ fontSize: 11, color: themeColors.danger, fontWeight: '700' }}>
-                  Atención: El saldo disponible (${saldoDisp.toFixed(2)}) es menor al gasto (${consumoEfectivo.toFixed(2)}).
+            {(motivoDiferencia === 'COMISION_PLATAFORMA' || motivoDiferencia === 'DIFERENCIA_AUTORIZADA') && (
+              <View style={{ marginTop: 8, width: '100%' }}>
+                <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginBottom: 4 }}>
+                  Detalle / Justificación (opcional):
                 </Text>
+                <TextInput
+                  value={detalleDiferencia}
+                  onChangeText={setDetalleDiferencia}
+                  placeholder={
+                    motivoDiferencia === 'COMISION_PLATAFORMA'
+                      ? 'Ej: Comisión por intermediación Expedia / Booking'
+                      : 'Ej: Cargo por servicio administrativo autorizado'
+                  }
+                  placeholderTextColor={themeColors.textSecondary}
+                  style={{
+                    backgroundColor: themeColors.background,
+                    borderWidth: 1,
+                    borderColor: themeColors.border,
+                    borderRadius: BorderRadius.small,
+                    paddingHorizontal: 8,
+                    paddingVertical: 4,
+                    fontSize: 12,
+                    color: themeColors.text,
+                  }}
+                />
               </View>
             )}
-
-            <TouchableOpacity
-              onPress={() => setIsCompartidaActive(!isCompartidaActive)}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}
-            >
-              <Ionicons
-                name={isCompartidaActive ? 'checkbox' : 'square-outline'}
-                size={18}
-                color={isCompartidaActive ? '#2563eb' : themeColors.textSecondary}
-              />
-              <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
-                Vincular como Factura Compartida
-              </Text>
-            </TouchableOpacity>
           </View>
         )}
 
-        {/* Factura mayor al gasto (Sin propina y sin gastos previos) */}
-        {facTotal > gastoMonto && !candidateFactura.es_ya_vinculada && (
-          <View style={[styles.bannerAlert, { backgroundColor: '#0284c715', borderColor: '#0284c740' }]}>
-            <Ionicons name="information-circle" size={16} color="#0284c7" />
-            <Text style={{ fontSize: 11, color: '#0284c7', flex: 1 }}>
-              La factura es por un monto mayor (${facTotal.toFixed(2)}). El saldo remanente (${(facTotal - gastoMonto).toFixed(2)}) quedará disponible para otros gastos.
+        {/* 6. Coincidencia Exacta */}
+        {!candidateFactura.es_ya_vinculada && esExacto && (
+          <View style={[styles.bannerAlert, { backgroundColor: themeColors.success + '15', borderColor: themeColors.success + '40' }]}>
+            <Ionicons name="checkmark-circle" size={16} color={themeColors.success} />
+            <Text style={{ fontSize: 11, color: themeColors.success, fontWeight: '700', flex: 1 }}>
+              Coincidencia exacta de importe (${gastoMonto.toFixed(2)}).
             </Text>
           </View>
         )}
 
-        {/* Botones para Vincular */}
+        {/* Botones de Acción */}
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
           <TouchableOpacity
             onPress={() => setCandidateFactura(null)}
@@ -601,20 +895,29 @@ export function SatFacturaLinker({
 
           <TouchableOpacity
             onPress={() => handleConfirmAttach(false)}
-            disabled={isAttaching}
-            style={[styles.btnOutline, { backgroundColor: themeColors.accent, borderColor: themeColors.accent, flex: 2 }]}
+            disabled={!puedeVincular || isAttaching}
+            style={[
+              styles.btnOutline,
+              {
+                backgroundColor: puedeVincular ? themeColors.accent : themeColors.border,
+                borderColor: puedeVincular ? themeColors.accent : themeColors.border,
+                flex: 2,
+              },
+            ]}
           >
             {isAttaching ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <>
                 <Ionicons name="link-outline" size={14} color="#fff" />
-                <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>Vincular Factura</Text>
+                <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>
+                  {puedeVincular ? 'Vincular Factura' : 'No Permitido'}
+                </Text>
               </>
             )}
           </TouchableOpacity>
 
-          {gasto.status === 'PENDING' && (
+          {gasto.status === 'PENDING' && puedeVincular && (
             <TouchableOpacity
               onPress={() => handleConfirmAttach(true)}
               disabled={isAttaching}
@@ -630,85 +933,62 @@ export function SatFacturaLinker({
   }
 
   // ==========================================
-  // CASO 3: SELECTOR (DROPZONE XML + BÚSQUEDA)
+  // CASO 3: SELECTOR (DROPZONE XML + BÚSQUEDA / UUID)
   // ==========================================
   return (
-    <View style={{ gap: 8, marginBottom: Spacing.two }}>
+    <View style={{ gap: 10, marginBottom: Spacing.two }}>
       <Text style={[styles.sectionTitle, { color: themeColors.textSecondary }]}>
         VINCULAR FACTURA RECIBIDA (CFDI SAT)
       </Text>
 
-      {/* Dropzone y botón de subida de XML */}
+      {/* Dropzone y selector de XML */}
       <View
-        // Soporte drag & drop en web
-        {...(Platform.OS === 'web'
-          ? {
-              onDragOver: (e: any) => {
-                e.preventDefault();
-                setIsDragOver(true);
-              },
-              onDragLeave: () => setIsDragOver(false),
-              onDrop: async (e: any) => {
-                e.preventDefault();
-                setIsDragOver(false);
-                if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
-                  const file = e.dataTransfer.files[0];
-                  if (file.name.toLowerCase().endsWith('.xml')) {
-                    const text = await file.text();
-                    await processXmlString(text);
-                  } else {
-                    Alert.alert('Archivo Inválido', 'Por favor arrastra únicamente un archivo XML con timbre fiscal.');
-                  }
-                }
-              },
-            }
-          : {})}
+        ref={dropzoneRef}
         style={[
           styles.dropzone,
           {
-            backgroundColor: isDragOver ? themeColors.accent + '15' : themeColors.backgroundElement,
+            backgroundColor: isDragOver ? themeColors.accent + '20' : themeColors.backgroundElement,
             borderColor: isDragOver ? themeColors.accent : themeColors.border,
           },
         ]}
       >
         {isProcessingXml ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 14 }}>
             <ActivityIndicator size="small" color={themeColors.accent} />
             <Text style={{ fontSize: 12, color: themeColors.text, fontWeight: '600' }}>
-              Extrayendo CFDI y verificando con SAT...
+              Leyendo CFDI y validando contra el SAT...
             </Text>
           </View>
         ) : (
           <TouchableOpacity
             onPress={handlePickXmlFile}
-            style={{ width: '100%', alignItems: 'center', paddingVertical: 12, gap: 4 }}
+            style={{ width: '100%', alignItems: 'center', paddingVertical: 14, gap: 4 }}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Ionicons name="document-attach-outline" size={20} color={themeColors.accent} />
+              <Ionicons name="cloud-upload-outline" size={22} color={themeColors.accent} />
               <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.accent }}>
-                {Platform.OS === 'web' ? 'Arrastrar archivo XML aquí o Clic para Seleccionar' : 'Seleccionar Archivo XML del CFDI'}
+                Seleccionar o Arrastrar Archivo XML
               </Text>
             </View>
             <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-              Detecta automáticamente UUID, Emisor, Total y Propinas
+              Extrae UUID, emisor e importes automáticamente
             </Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Buscador de facturas por texto */}
-      <View style={{ position: 'relative' }}>
+      {/* Buscador de facturas e ingreso de UUID manual */}
+      <View style={{ gap: 6 }}>
         <View style={[styles.searchInputContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
           <Ionicons name="search-outline" size={16} color={themeColors.textSecondary} />
           <TextInput
-            placeholder="O buscar por UUID, RFC o Proveedor..."
+            placeholder="Pegar Folio Fiscal (UUID) o buscar por RFC / Proveedor..."
             placeholderTextColor={themeColors.textSecondary + '90'}
             value={searchQuery}
             onChangeText={handleSearchChange}
-            onFocus={() => {
-              if (searchResults.length > 0) setShowSearchResults(true);
-            }}
+            onSubmitEditing={() => performLookup(searchQuery)}
             style={[styles.searchInput, { color: themeColors.text }]}
+            autoCapitalize="characters"
           />
           {isSearching ? (
             <ActivityIndicator size="small" color={themeColors.accent} />
@@ -717,17 +997,34 @@ export function SatFacturaLinker({
               onPress={() => {
                 setSearchQuery('');
                 setSearchResults([]);
-                setShowSearchResults(false);
+                setHasSearched(false);
               }}
             >
               <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
             </TouchableOpacity>
           ) : null}
+
+          <TouchableOpacity
+            onPress={() => performLookup(searchQuery)}
+            disabled={!searchQuery.trim() || isSearching}
+            style={{
+              backgroundColor: searchQuery.trim() ? themeColors.accent : themeColors.border,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              borderRadius: BorderRadius.small,
+              marginLeft: 4,
+            }}
+          >
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>Buscar</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Lista flotante de resultados de búsqueda */}
-        {showSearchResults && searchResults.length > 0 && (
-          <View style={[styles.dropdownResults, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+        {/* Resultados mostrados INLINE (en el flujo normal del layout, sin empalmarse) */}
+        {searchResults.length > 0 && (
+          <View style={[styles.inlineResultsContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+            <Text style={{ fontSize: 10, fontWeight: '800', color: themeColors.textSecondary, marginBottom: 4, textTransform: 'uppercase' }}>
+              Facturas encontradas ({searchResults.length}):
+            </Text>
             {searchResults.map((item) => (
               <TouchableOpacity
                 key={item.id || item.uuid}
@@ -739,16 +1036,21 @@ export function SatFacturaLinker({
                     {item.nombre_emisor || 'Proveedor SAT'}
                   </Text>
                   <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>
-                    RFC: {item.rfc_emisor} • {item.fecha_emision ? item.fecha_emision.split('T')[0] : ''} • UUID: {item.uuid.slice(0, 16)}...
+                    RFC: {item.rfc_emisor} • {item.fecha_emision ? item.fecha_emision.split('T')[0] : ''}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>
+                    UUID: {item.uuid}
                   </Text>
                   {item.es_ya_vinculada && (
-                    <Text style={{ fontSize: 10, color: '#2563eb', fontWeight: '700' }}>
-                      ⚠️ Compartida ({item.gastos_vinculados?.length} gasto{item.gastos_vinculados?.length > 1 ? 's' : ''}) • Saldo disp: ${Number(item.saldo_disponible || 0).toFixed(2)}
+                    <Text style={{ fontSize: 10, color: item.es_factura_compartida ? '#2563eb' : themeColors.danger, fontWeight: '700' }}>
+                      {item.es_factura_compartida
+                        ? `🔗 Compartida (${item.gastos_vinculados?.length} gastos) • Saldo disp: $${Number(item.saldo_disponible || 0).toFixed(2)}`
+                        : `🚫 Vinculada exclusivamente a otro gasto`}
                     </Text>
                   )}
                 </View>
 
-                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                <View style={{ alignItems: 'flex-end', gap: 4, marginLeft: 8 }}>
                   <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.success }}>
                     ${Number(item.total || 0).toFixed(2)}
                   </Text>
@@ -761,10 +1063,10 @@ export function SatFacturaLinker({
           </View>
         )}
 
-        {showSearchResults && searchResults.length === 0 && !isSearching && searchQuery.length >= 3 && (
-          <View style={[styles.dropdownResults, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, padding: 12, alignItems: 'center' }]}>
+        {hasSearched && searchResults.length === 0 && !isSearching && searchQuery.length >= 3 && (
+          <View style={[styles.inlineResultsContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, padding: 12, alignItems: 'center' }]}>
             <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-              No se encontraron facturas recibidas con "{searchQuery}"
+              No se encontró ninguna factura recibida con "{searchQuery}"
             </Text>
           </View>
         )}
@@ -894,37 +1196,30 @@ const styles = StyleSheet.create({
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     borderWidth: 1,
     borderRadius: BorderRadius.small,
     paddingHorizontal: 10,
-    height: 40,
+    height: 42,
   },
   searchInput: {
     flex: 1,
     fontSize: 12,
     height: '100%',
   },
-  dropdownResults: {
-    position: 'absolute',
-    top: 44,
-    left: 0,
-    right: 0,
+  inlineResultsContainer: {
     borderWidth: 1,
     borderRadius: BorderRadius.small,
-    maxHeight: 220,
-    zIndex: 999,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 6,
+    padding: 8,
+    gap: 4,
+    marginTop: 4,
   },
   resultItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingHorizontal: 6,
     borderBottomWidth: 1,
   },
   selectChip: {
@@ -933,6 +1228,8 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   bannerAlert: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
     borderRadius: BorderRadius.small,
     padding: 8,

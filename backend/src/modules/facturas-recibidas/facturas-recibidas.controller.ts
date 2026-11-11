@@ -148,6 +148,7 @@ export const lookupFacturasRecibidas = async (req: Request, res: Response) => {
                   'monto', g.monto,
                   'monto_propina', COALESCE(g.monto_propina, 0),
                   'monto_consumido', (COALESCE(g.monto, 0) - COALESCE(g.monto_propina, 0)),
+                  'es_factura_compartida', COALESCE(g.es_factura_compartida, false),
                   'status', g.status,
                   'justificacion', g.justificacion,
                   'fecha_comprobante', g.fecha_comprobante,
@@ -177,6 +178,7 @@ export const lookupFacturasRecibidas = async (req: Request, res: Response) => {
       const montoConsumidoTotal = vinculados.reduce((sum, g) => sum + Number(g.monto_consumido || 0), 0);
       const montoConsumidoOtros = otrosGastos.reduce((sum, g) => sum + Number(g.monto_consumido || 0), 0);
       const saldoDisponible = Math.max(0, totalFactura - montoConsumidoOtros);
+      const esCompartida = otrosGastos.some(g => g.es_factura_compartida === true);
 
       return {
         ...fac,
@@ -185,6 +187,7 @@ export const lookupFacturasRecibidas = async (req: Request, res: Response) => {
         total_consumido_otros: Number(montoConsumidoOtros.toFixed(2)),
         saldo_disponible: Number(saldoDisponible.toFixed(2)),
         es_ya_vinculada: otrosGastos.length > 0,
+        es_factura_compartida: esCompartida,
         otros_gastos: otrosGastos,
       };
     });

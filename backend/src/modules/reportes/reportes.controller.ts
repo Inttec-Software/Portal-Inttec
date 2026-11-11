@@ -219,7 +219,19 @@ export const getAdminReportes = async (req: Request, res: Response) => {
           amountMatchSql = ` OR g.monto::text LIKE $${baseParams.length}`;
         }
 
+        // Búsqueda flexible de UUID (ID del gasto o UUID de factura SAT, con o sin guiones)
+        const cleanSearch = search.replace(/[^a-zA-Z0-9]/g, '');
+        let cleanMatchSql = '';
+        let cleanParamIdx: number | null = null;
+        if (cleanSearch.length >= 4) {
+          baseParams.push(`%${cleanSearch}%`);
+          cleanParamIdx = baseParams.length;
+          cleanMatchSql = ` OR replace(g.id::text, '-', '') ILIKE $${cleanParamIdx}`;
+        }
+
         baseConditions.push(`(
+          g.id::text ILIKE $${pIdx}
+          ${cleanMatchSql} OR
           g.empleado_nombre ILIKE $${pIdx} OR
           g.detalle_servicio_proyecto ILIKE $${pIdx} OR
           g.motivo_sin_factura ILIKE $${pIdx} OR
@@ -231,6 +243,16 @@ export const getAdminReportes = async (req: Request, res: Response) => {
             SELECT 1 FROM subcategorias sub 
             JOIN categorias cat ON cat.id = sub.categoria_id 
             WHERE sub.id = g.subcategoria_id AND cat.nombre ILIKE $${pIdx}
+          ) OR
+          EXISTS (
+            SELECT 1 FROM facturas_recibidas fr 
+            WHERE (fr.id = g.factura_recibida_id OR fr.id = g.factura_sugerida_id) 
+            AND (
+              fr.uuid ILIKE $${pIdx}
+              ${cleanParamIdx ? `OR replace(fr.uuid, '-', '') ILIKE $${cleanParamIdx}` : ''}
+              OR fr.rfc_emisor ILIKE $${pIdx}
+              OR fr.nombre_emisor ILIKE $${pIdx}
+            )
           )
           ${amountMatchSql}
         )`);
@@ -1189,7 +1211,9 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
       factura_url: customFacturaUrl, 
       actor_id,
       monto_propina = 0,
-      es_compartida = false 
+      es_compartida = false,
+      motivo_diferencia = null,
+      detalle_diferencia = null
     } = req.body;
 
     const gastoRes = await pool.query('SELECT * FROM gastos WHERE id = $1', [id]);
@@ -1209,13 +1233,77 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
 
     // Validar si hay otros gastos vinculados a esta misma factura
     const otrosGastosRes = await pool.query(
-      'SELECT id, monto, COALESCE(monto_propina, 0) as monto_propina FROM gastos WHERE factura_recibida_id = $1 AND id != $2',
+      'SELECT id, monto, COALESCE(monto_propina, 0) as monto_propina, COALESCE(es_factura_compartida, false) as es_factura_compartida FROM gastos WHERE factura_recibida_id = $1 AND id != $2',
       [factura.id, id]
     );
     const otrosGastos = otrosGastosRes.rows;
+
+    const gastoMonto = Number(gasto.monto || 0);
+    const facTotal = Number(factura.total || 0);
+    const propinaNum = Math.max(0, Number(monto_propina) || 0);
+    const consumoActual = gastoMonto - propinaNum;
+
+    if (otrosGastos.length > 0) {
+      // Si la factura ya fue vinculada a otro gasto, debe estar registrada como factura compartida
+      const esPreviamenteCompartida = otrosGastos.some(g => g.es_factura_compartida === true);
+      if (!esPreviamenteCompartida && !es_compartida) {
+        return res.status(400).json({
+          error: `Esta factura ya se encuentra vinculada exclusivamente a otro gasto (#${otrosGastos[0].id}) y no está registrada como Factura Compartida.`,
+        });
+      }
+
+      // Validar saldo disponible de la factura compartida
+      const consumidoOtros = otrosGastos.reduce(
+        (sum, g) => sum + (Number(g.monto || 0) - Number(g.monto_propina || 0)),
+        0
+      );
+      const saldoDisponible = Math.max(0, facTotal - consumidoOtros);
+
+      if (consumoActual > saldoDisponible + 0.05) {
+        return res.status(400).json({
+          error: `Saldo insuficiente en la factura compartida. Saldo disponible: $${saldoDisponible.toFixed(2)}, pero este gasto requiere $${consumoActual.toFixed(2)}.`,
+        });
+      }
+    } else {
+      // Primera vinculación de esta factura
+      if (facTotal > gastoMonto + 0.05 && !es_compartida) {
+        return res.status(400).json({
+          error: `El total de la factura ($${facTotal.toFixed(2)}) es mayor al monto del gasto ($${gastoMonto.toFixed(2)}). Para usar una factura mayor debe marcarse como Factura Compartida.`,
+        });
+      }
+
+      if (gastoMonto > facTotal + 0.05) {
+        const diff = gastoMonto - facTotal;
+        const motivoValido = Boolean(motivo_diferencia && motivo_diferencia !== 'NINGUNO');
+        if (!motivoValido && Math.abs(diff - propinaNum) > 0.05) {
+          return res.status(400).json({
+            error: `El monto del gasto ($${gastoMonto.toFixed(2)}) es mayor al CFDI ($${facTotal.toFixed(2)}). Debes justificar la diferencia de $${diff.toFixed(2)} (ej. Propina o Comisión de plataforma).`,
+          });
+        }
+      }
+    }
+
+    // Determinar propina final y motivo_sin_factura
+    let newMotivoSinFactura: string | null = null;
+    let propinaFinal = 0;
+    if (gastoMonto > facTotal + 0.05) {
+      const diff = gastoMonto - facTotal;
+      if (motivo_diferencia === 'COMISION_PLATAFORMA') {
+        newMotivoSinFactura = `COMISION_PLATAFORMA: $${diff.toFixed(2)}${detalle_diferencia ? ` - ${detalle_diferencia}` : ''}`;
+        propinaFinal = 0;
+      } else if (motivo_diferencia === 'DIFERENCIA_AUTORIZADA') {
+        newMotivoSinFactura = `DIFERENCIA_AUTORIZADA: $${diff.toFixed(2)}${detalle_diferencia ? ` - ${detalle_diferencia}` : ''}`;
+        propinaFinal = 0;
+      } else {
+        // PROPINA
+        propinaFinal = propinaNum > 0 ? propinaNum : diff;
+        newMotivoSinFactura = null;
+      }
+    }
+
     const esCompartidaEfectiva = Boolean(es_compartida || otrosGastos.length > 0);
 
-    // Si ya hay otros gastos vinculados o se marca compartida, actualizar la bandera en todos
+    // Si es compartida, actualizar la bandera en todos los gastos asociados
     if (esCompartidaEfectiva) {
       await pool.query(
         'UPDATE gastos SET es_factura_compartida = TRUE WHERE factura_recibida_id = $1',
@@ -1223,22 +1311,8 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
       );
     }
 
-    // Construir URL de factura a guardar en el gasto (conservando las previas si había)
-    const urlToAttach = customFacturaUrl || factura.pdf_url || factura.xml_url || `cfdi://${factura.uuid}`;
-    let existingUrls: string[] = [];
-    if (gasto.factura_url) {
-      try {
-        const parsed = JSON.parse(gasto.factura_url);
-        if (Array.isArray(parsed)) existingUrls = parsed;
-        else existingUrls = [gasto.factura_url];
-      } catch {
-        existingUrls = [gasto.factura_url];
-      }
-    }
-    if (urlToAttach && !existingUrls.includes(urlToAttach)) {
-      existingUrls.push(urlToAttach);
-    }
-    const newFacturaUrlStr = existingUrls.length === 1 ? existingUrls[0] : JSON.stringify(existingUrls);
+    // Conservar la factura_url que el usuario ya tenía (archivos subidos). No concatenar cfdi:// ni volverlo array JSON.
+    const newFacturaUrlStr = gasto.factura_url || factura.pdf_url || null;
 
     // Determinar si debe aprobarse directamente (por defecto sí cuando devuelto_por_factura es true o approve_directly = true)
     const shouldApproveDirectly = approve_directly !== undefined ? Boolean(approve_directly) : Boolean(gasto.devuelto_por_factura);
@@ -1249,20 +1323,21 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
     await pool.query(
       `UPDATE gastos
        SET facturado = TRUE,
-           motivo_sin_factura = NULL,
-           factura_url = $1,
-           factura_recibida_id = $2,
+           motivo_sin_factura = $1,
+           factura_url = $2,
+           factura_recibida_id = $3,
            factura_sugerida_id = NULL,
-           monto_propina = $3,
-           es_factura_compartida = $4,
-           devuelto_por_factura = CASE WHEN $5 = 'APPROVED' THEN FALSE ELSE devuelto_por_factura END,
-           status = $5,
-           approved_at = $6
-       WHERE id = $7`,
+           monto_propina = $4,
+           es_factura_compartida = $5,
+           devuelto_por_factura = CASE WHEN $6 = 'APPROVED' THEN FALSE ELSE devuelto_por_factura END,
+           status = $6,
+           approved_at = $7
+       WHERE id = $8`,
       [
+        newMotivoSinFactura,
         newFacturaUrlStr, 
         factura.id, 
-        Math.max(0, Number(monto_propina) || 0), 
+        propinaFinal, 
         esCompartidaEfectiva, 
         newStatus, 
         newApprovedAt, 
@@ -1280,10 +1355,19 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
 
     try {
       const actor = req.user?.id || actor_id;
-      const propinaNum = Math.max(0, Number(monto_propina) || 0);
-      const propinaText = propinaNum > 0 ? ` (Propina: $${propinaNum.toFixed(2)})` : '';
+      let diffAudit = '';
+      if (gastoMonto > facTotal + 0.05) {
+        const diff = gastoMonto - facTotal;
+        if (motivo_diferencia === 'COMISION_PLATAFORMA') {
+          diffAudit = ` (Comisión de plataforma no comprobable: $${diff.toFixed(2)})`;
+        } else if (motivo_diferencia === 'DIFERENCIA_AUTORIZADA') {
+          diffAudit = ` (Diferencia autorizada: $${diff.toFixed(2)})`;
+        } else {
+          diffAudit = ` (Propina: $${propinaFinal.toFixed(2)})`;
+        }
+      }
       const compartidaText = esCompartidaEfectiva ? ' [Factura Compartida]' : '';
-      const auditDetails = `Factura recibida SAT (${factura.uuid} - ${factura.nombre_emisor || factura.rfc_emisor}) vinculada al gasto por $${Number(gasto.monto || 0).toFixed(2)}${propinaText}.${compartidaText}${shouldApproveDirectly ? ' Enviado directamente a Historial (Aprobado).' : ''}`;
+      const auditDetails = `Factura recibida SAT (${factura.uuid} - ${factura.nombre_emisor || factura.rfc_emisor}) vinculada al gasto por $${gastoMonto.toFixed(2)}${diffAudit}.${compartidaText}${shouldApproveDirectly ? ' Enviado directamente a Historial (Aprobado).' : ''}`;
 
       await pool.query(
         `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)`,
