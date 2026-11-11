@@ -1243,16 +1243,26 @@ export function useAdminInventario() {
   };
 
   const handleQuickAddStock = async (product: Producto) => {
-    const valueStr = quickStockAdjustments[product.id] || '';
-    const toAdd = parseFloat(valueStr);
+    const rawStr = (quickStockAdjustments[product.id] ?? '').trim();
+    const toAdd = rawStr === '' ? 1 : parseFloat(rawStr);
 
     if (isNaN(toAdd) || toAdd <= 0) {
-      Alert.alert('Validación', 'Por favor ingresa un número mayor a 0 para añadir al stock.');
+      showAlert('Validación', 'Por favor ingresa un número mayor a 0 para añadir al stock.');
       return;
     }
 
-    const newStock = product.stock_actual + toAdd;
-    setProductos(prev => prev.map(prod => prod.id === product.id ? { ...prod, stock_actual: newStock } : prod));
+    const prevStock = Number(product.stock_actual) || 0;
+    const prevNuevo = Number(product.stock_nuevo) || 0;
+    const newStock = Math.round((prevStock + toAdd) * 100) / 100;
+    const newNuevo = Math.round((prevNuevo + toAdd) * 100) / 100;
+
+    setProductos(prev =>
+      prev.map(prod =>
+        prod.id === product.id
+          ? { ...prod, stock_actual: newStock, stock_nuevo: newNuevo }
+          : prod
+      )
+    );
     setQuickStockAdjustments(prev => ({ ...prev, [product.id]: '' }));
 
     try {
@@ -1263,21 +1273,27 @@ export function useAdminInventario() {
         body: JSON.stringify({
           cantidad: toAdd,
           motivo: 'AJUSTE_RAPIDO',
-          currentStock: product.stock_actual
+          currentStock: prevStock
         })
       });
 
       if (!res.ok) {
-        setProductos(prev => prev.map(prod => prod.id === product.id ? { ...prod, stock_actual: product.stock_actual } : prod));
+        setProductos(prev =>
+          prev.map(prod =>
+            prod.id === product.id
+              ? { ...prod, stock_actual: prevStock, stock_nuevo: prevNuevo }
+              : prod
+          )
+        );
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Error al añadir stock');
       }
 
-      const finalNewStock = Math.round((Number(product.stock_actual) + toAdd) * 100) / 100;
+      ModuleCache.invalidate('inventario_dashboard');
       setQuickStockAdjustments(prev => ({ ...prev, [product.id]: '' }));
 
-      showAlert('Éxito', `Se añadieron ${toAdd} ${product.unidad || 'unidades'} a "${product.nombre_oficial}". Stock actual: ${finalNewStock} ${product.unidad || 'pzas'}`);
-      await loadAllData();
+      showAlert('Éxito', `Se añadieron ${toAdd} ${product.unidad || 'unidades'} a "${product.nombre_oficial}". Stock actual: ${newStock} ${product.unidad || 'pzas'}`);
+      await loadAllData(true);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo actualizar el stock del producto.');
     }

@@ -27,20 +27,22 @@ export const getTotalStock = (prod: Partial<Producto> | null | undefined): numbe
   const sNuevo = Number(prod.stock_nuevo) || 0;
   const sUsado = Number(prod.stock_usado) || 0;
   const sPorRev = Number(prod.stock_por_revisar) || 0;
+  const sActual = Number(prod.stock_actual) || 0;
   const sum = Math.round((sNuevo + sUsado + sPorRev) * 100) / 100;
-  if (sum > 0) return sum;
-  return Number(prod.stock_actual) || 0;
+  return Math.max(sActual, sum);
 };
 
 export const getStockNuevo = (prod: Partial<Producto> | null | undefined): number => {
   if (!prod) return 0;
-  if (prod.stock_nuevo !== undefined && prod.stock_nuevo !== null) return Number(prod.stock_nuevo) || 0;
+  const sNuevo = Number(prod.stock_nuevo) || 0;
   const sUsado = Number(prod.stock_usado) || 0;
   const sPorRev = Number(prod.stock_por_revisar) || 0;
-  if (sUsado > 0 || sPorRev > 0) {
-    return Math.max(0, (Number(prod.stock_actual) || 0) - (sUsado + sPorRev));
+  const sActual = Number(prod.stock_actual) || 0;
+  const sum = Math.round((sNuevo + sUsado + sPorRev) * 100) / 100;
+  if (sActual > sum) {
+    return Math.round((sNuevo + (sActual - sum)) * 100) / 100;
   }
-  return Number(prod.stock_actual) || 0;
+  return sNuevo;
 };
 
 export const normalizeRetiroProductos = (data: any[]): Producto[] => {
@@ -48,12 +50,16 @@ export const normalizeRetiroProductos = (data: any[]): Producto[] => {
     const sNuevo = Number(p.stock_nuevo) || 0;
     const sUsado = Number(p.stock_usado) || 0;
     const sPorRev = Number(p.stock_por_revisar) || 0;
+    const sActual = Number(p.stock_actual) || 0;
     const sum = Math.round((sNuevo + sUsado + sPorRev) * 100) / 100;
-    const total = sum > 0 ? sum : (Number(p.stock_actual) || 0);
+    const total = Math.max(sActual, sum);
+    const effectiveNuevo = total > sum
+      ? Math.round((sNuevo + (total - sum)) * 100) / 100
+      : sNuevo;
     return {
       ...p,
       stock_actual: total,
-      stock_nuevo: sNuevo > 0 ? sNuevo : (sUsado === 0 && sPorRev === 0 ? total : 0),
+      stock_nuevo: effectiveNuevo,
       stock_usado: sUsado,
       stock_por_revisar: sPorRev,
     };

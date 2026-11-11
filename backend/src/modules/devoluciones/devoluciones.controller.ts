@@ -28,8 +28,14 @@ export const getInventarioEmpleado = async (req: Request, res: Response) => {
         const cNuevo = Number(item.cantidad_nuevo) || 0;
         const cUsado = Number(item.cantidad_usado) || 0;
         const cPorRev = Number(item.cantidad_por_revisar) || 0;
-        if (cNuevo === 0 && cUsado === 0 && cPorRev === 0 && cTotal > 0) {
-          return { ...item, cantidad_nuevo: cTotal, cantidad_usado: 0, cantidad_por_revisar: 0 };
+        const sumCond = Math.round((cNuevo + cUsado + cPorRev) * 100) / 100;
+        if (cTotal > sumCond) {
+          return {
+            ...item,
+            cantidad_nuevo: Math.round((cNuevo + (cTotal - sumCond)) * 100) / 100,
+            cantidad_usado: cUsado,
+            cantidad_por_revisar: cPorRev
+          };
         }
         return item;
       });

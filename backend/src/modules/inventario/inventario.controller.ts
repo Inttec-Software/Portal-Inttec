@@ -51,13 +51,17 @@ export const getDashboardData = async (req: Request, res: Response) => {
       const sNuevo = Number(p.stock_nuevo) || 0;
       const sUsado = Number(p.stock_usado) || 0;
       const sPorRev = Number(p.stock_por_revisar) || 0;
+      const rawActual = Number(p.stock_actual) || 0;
       const sumConditions = Math.round((sNuevo + sUsado + sPorRev) * 100) / 100;
-      const totalStock = sumConditions > 0 ? sumConditions : (Number(p.stock_actual) || 0);
+      const totalStock = Math.max(rawActual, sumConditions);
+      const effectiveNuevo = totalStock > sumConditions
+        ? Math.round((sNuevo + (totalStock - sumConditions)) * 100) / 100
+        : sNuevo;
 
       return {
         ...p,
         stock_actual: totalStock,
-        stock_nuevo: sNuevo > 0 ? sNuevo : (sUsado === 0 && sPorRev === 0 ? totalStock : 0),
+        stock_nuevo: effectiveNuevo,
         stock_usado: sUsado,
         stock_por_revisar: sPorRev
       };
@@ -335,10 +339,14 @@ export const addStock = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const { company, env } = tenant;
+    const { company, env, user } = tenant;
     const pool = getDbPool(company, env);
     const { id } = req.params;
     const { cantidad, motivo, currentStock, estado } = req.body;
+    const numCantidad = Number(cantidad) || 0;
+    if (numCantidad <= 0) {
+      return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' });
+    }
 
     const { rows } = await pool.query(`SELECT * FROM productos WHERE id = $1`, [id]);
     const prodData = rows[0];
@@ -349,16 +357,33 @@ export const addStock = async (req: Request, res: Response) => {
       const curNuevo = Number(prodData.stock_nuevo) || 0;
       const curUsado = Number(prodData.stock_usado) || 0;
       const curPorRevisar = Number(prodData.stock_por_revisar) || 0;
+      const sumCond = Math.round((curNuevo + curUsado + curPorRevisar) * 100) / 100;
+      const totalBase = Math.max(curStock, sumCond);
+      const baseNuevo = totalBase > sumCond
+        ? Math.round((curNuevo + (totalBase - sumCond)) * 100) / 100
+        : curNuevo;
 
       if (estado === 'USADO') {
-        updates = { stock_usado: curUsado + cantidad, stock_actual: curStock + cantidad };
+        updates = {
+          stock_nuevo: baseNuevo,
+          stock_usado: Math.round((curUsado + numCantidad) * 100) / 100,
+          stock_actual: Math.round((totalBase + numCantidad) * 100) / 100
+        };
       } else if (estado === 'POR_REVISAR') {
-        updates = { stock_por_revisar: curPorRevisar + cantidad, stock_actual: curStock + cantidad };
+        updates = {
+          stock_nuevo: baseNuevo,
+          stock_por_revisar: Math.round((curPorRevisar + numCantidad) * 100) / 100,
+          stock_actual: Math.round((totalBase + numCantidad) * 100) / 100
+        };
       } else {
-        updates = { stock_nuevo: curNuevo + cantidad, stock_actual: curStock + cantidad };
+        updates = {
+          stock_nuevo: Math.round((baseNuevo + numCantidad) * 100) / 100,
+          stock_actual: Math.round((totalBase + numCantidad) * 100) / 100
+        };
       }
     } else {
-      updates = { stock_actual: (currentStock || 0) + cantidad };
+      const nextStock = Math.round(((Number(currentStock) || 0) + numCantidad) * 100) / 100;
+      updates = { stock_actual: nextStock, stock_nuevo: nextStock };
     }
 
     const setClauses = [];
@@ -372,13 +397,16 @@ export const addStock = async (req: Request, res: Response) => {
     values.push(id);
     await pool.query(`UPDATE productos SET ${setClauses.join(', ')} WHERE id = $${i}`, values);
 
+    const folioMov = (motivo && String(motivo).trim()) || 'AJUSTE RÁPIDO DE STOCK';
+    const creadoPor = (req as any).user?.id || user?.id || null;
     await pool.query(
-      `INSERT INTO movimientos_inventario (producto_id, cantidad, tipo, motivo) VALUES ($1, $2, $3, $4)`,
-      [id, cantidad, 'ENTRADA', motivo]
+      `INSERT INTO movimientos_inventario (producto_id, cantidad, tipo, folio_factura, creado_por) VALUES ($1, $2, $3, $4, $5)`,
+      [id, numCantidad, 'ENTRADA', folioMov, creadoPor]
     );
 
-    return res.json({ success: true });
+    return res.json({ success: true, stock_actual: updates.stock_actual, stock_nuevo: updates.stock_nuevo });
   } catch (error: any) {
+    console.error('Error in addStock:', error);
     return res.status(500).json({ error: error.message });
   }
 };
@@ -396,10 +424,16 @@ export const guardarConsumo = async (req: Request, res: Response) => {
       const prodData = rows[0];
 
       if (prodData) {
-        let toDiscount = item.qty;
-        let nuevo = Number(prodData.stock_nuevo) || 0;
+        let toDiscount = Number(item.qty) || 0;
+        const curStock = Number(prodData.stock_actual) || 0;
+        const curNuevo = Number(prodData.stock_nuevo) || 0;
         let usado = Number(prodData.stock_usado) || 0;
         let porRevisar = Number(prodData.stock_por_revisar) || 0;
+        const sumCond = Math.round((curNuevo + usado + porRevisar) * 100) / 100;
+        const totalBase = Math.max(curStock, sumCond);
+        let nuevo = totalBase > sumCond
+          ? Math.round((curNuevo + (totalBase - sumCond)) * 100) / 100
+          : curNuevo;
 
         if (nuevo >= toDiscount) {
           nuevo -= toDiscount;
@@ -438,7 +472,7 @@ export const guardarConsumo = async (req: Request, res: Response) => {
         if (invEmp) {
           await pool.query(
             `UPDATE inventario_empleados SET cantidad_disponible = $1, updated_at = $2 WHERE id = $3`,
-            [invEmp.cantidad_disponible + item.qty, new Date().toISOString(), invEmp.id]
+            [(Number(invEmp.cantidad_disponible) || 0) + (Number(item.qty) || 0), new Date().toISOString(), invEmp.id]
           );
         } else {
           await pool.query(
@@ -448,9 +482,10 @@ export const guardarConsumo = async (req: Request, res: Response) => {
         }
       }
 
+      const folioConsumo = motivoGeneral ? `CONSUMO: ${String(motivoGeneral).trim()}` : 'CONSUMO DE MATERIAL';
       await pool.query(
-        `INSERT INTO movimientos_inventario (producto_id, empleado_id, cantidad, tipo, motivo) VALUES ($1, $2, $3, $4, $5)`,
-        [item.productoId, esAsignacionEmpleado ? destinoId : (user ? user.id : null), item.qty, 'SALIDA', motivoGeneral]
+        `INSERT INTO movimientos_inventario (producto_id, creado_por, cantidad, tipo, folio_factura) VALUES ($1, $2, $3, $4, $5)`,
+        [item.productoId, esAsignacionEmpleado ? destinoId : ((req as any).user?.id || user?.id || null), item.qty, 'SALIDA', folioConsumo]
       );
     }
 
@@ -652,12 +687,20 @@ export const guardarImportacion = async (req: Request, res: Response) => {
           [proveedorId, finalProductId, item.descripcionFactura]
         );
       } else if (finalProductId) {
-        const { rows: pRows } = await pool.query(`SELECT stock_actual, stock_nuevo, precio_unitario FROM productos WHERE id = $1`, [finalProductId]);
+        const { rows: pRows } = await pool.query(`SELECT stock_actual, stock_nuevo, stock_usado, stock_por_revisar, precio_unitario FROM productos WHERE id = $1`, [finalProductId]);
         const pData = pRows[0];
         
         if (pData) {
-          const newActual = (Number(pData.stock_actual) || 0) + item.cantidad;
-          const newNuevo = (Number(pData.stock_nuevo) || 0) + item.cantidad;
+          const curActual = Number(pData.stock_actual) || 0;
+          const curNuevo = Number(pData.stock_nuevo) || 0;
+          const curUsado = Number(pData.stock_usado) || 0;
+          const curPorRev = Number(pData.stock_por_revisar) || 0;
+          const sumCond = Math.round((curNuevo + curUsado + curPorRev) * 100) / 100;
+          const totalBase = Math.max(curActual, sumCond);
+          const baseNuevo = totalBase > sumCond ? Math.round((curNuevo + (totalBase - sumCond)) * 100) / 100 : curNuevo;
+          const addQty = Number(item.cantidad) || 0;
+          const newActual = Math.round((totalBase + addQty) * 100) / 100;
+          const newNuevo = Math.round((baseNuevo + addQty) * 100) / 100;
           
           if (item.precioUnitario > 0) {
             await pool.query(`UPDATE productos SET stock_actual = $1, stock_nuevo = $2, precio_unitario = $3 WHERE id = $4`, [newActual, newNuevo, item.precioUnitario, finalProductId]);
@@ -784,6 +827,13 @@ export const bulkUpdateProductos = async (req: Request, res: Response) => {
       if (updates[key] !== undefined) {
         cleanUpdates[key] = updates[key];
       }
+    }
+    if (cleanUpdates.stock_actual !== undefined) {
+      const targetStock = Math.max(0, Number(cleanUpdates.stock_actual) || 0);
+      cleanUpdates.stock_actual = targetStock;
+      cleanUpdates.stock_nuevo = targetStock;
+      cleanUpdates.stock_usado = 0;
+      cleanUpdates.stock_por_revisar = 0;
     }
 
     if (Object.keys(cleanUpdates).length === 0) {

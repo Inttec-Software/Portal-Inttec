@@ -95,7 +95,10 @@ export function useDevoluciones(defaultTab: EmpleadoInventarioTabType = 'stock')
             const cUsado = Number(item.cantidad_usado) || 0;
             const cPorRev = Number(item.cantidad_por_revisar) || 0;
 
-            const posNuevo = cNuevo === 0 && cUsado === 0 && cPorRev === 0 ? maximo : cNuevo;
+            const sumCond = Math.round((cNuevo + cUsado + cPorRev) * 100) / 100;
+            const posNuevo = maximo > sumCond
+              ? Math.round((cNuevo + (maximo - sumCond)) * 100) / 100
+              : cNuevo;
             const posUsado = cUsado;
             const posPorRev = cPorRev;
 

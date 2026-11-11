@@ -30,13 +30,17 @@ export const getProductosDisponibles = async (req: Request, res: Response) => {
       const sNuevo = Number(p.stock_nuevo) || 0;
       const sUsado = Number(p.stock_usado) || 0;
       const sPorRev = Number(p.stock_por_revisar) || 0;
+      const rawActual = Number(p.stock_actual) || 0;
       const sumConditions = Math.round((sNuevo + sUsado + sPorRev) * 100) / 100;
-      const totalStock = sumConditions > 0 ? sumConditions : (Number(p.stock_actual) || 0);
+      const totalStock = Math.max(rawActual, sumConditions);
+      const effectiveNuevo = totalStock > sumConditions
+        ? Math.round((sNuevo + (totalStock - sumConditions)) * 100) / 100
+        : sNuevo;
 
       return {
         ...p,
         stock_actual: totalStock,
-        stock_nuevo: sNuevo > 0 ? sNuevo : (sUsado === 0 && sPorRev === 0 ? totalStock : 0),
+        stock_nuevo: effectiveNuevo,
         stock_usado: sUsado,
         stock_por_revisar: sPorRev,
         unidad
@@ -141,9 +145,15 @@ export const confirmarRetiro = async (req: Request, res: Response) => {
         
       if (!prodData) continue;
       
-      let nuevo = Number(prodData.stock_nuevo) || 0;
+      const rawActual = Number(prodData.stock_actual) || 0;
+      const rawNuevo = Number(prodData.stock_nuevo) || 0;
       let usado = Number(prodData.stock_usado) || 0;
       let porRevisar = Number(prodData.stock_por_revisar) || 0;
+      const sumCond = Math.round((rawNuevo + usado + porRevisar) * 100) / 100;
+      const totalBase = Math.max(rawActual, sumCond);
+      let nuevo = totalBase > sumCond
+        ? Math.round((rawNuevo + (totalBase - sumCond)) * 100) / 100
+        : rawNuevo;
 
       const reqNuevo = Number(item.cantidad_nuevo) || 0;
       const reqUsado = Number(item.cantidad_usado) || 0;
