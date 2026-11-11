@@ -191,7 +191,14 @@ export default function AdminEvidenciasScreen() {
                   (item.foto_despues_url ? 1 : 0) +
                   (item.fotos_adicionales_urls?.length || 0);
 
-                const techName = item.creado_por_nombre || item.usuario?.nombre || 'Técnico';
+                const empId = item.empleado_id || item.creado_por || item.usuario?.id;
+                const matchedEmp = empId ? employees.find((e: any) => e.id === empId) : null;
+                const techName =
+                  item.empleado_nombre ||
+                  item.creado_por_nombre ||
+                  item.usuario?.nombre ||
+                  matchedEmp?.nombre ||
+                  'Técnico';
 
                 return (
                   <Pressable
@@ -256,7 +263,14 @@ export default function AdminEvidenciasScreen() {
               (item.foto_antes_url ? 1 : 0) +
               (item.foto_despues_url ? 1 : 0) +
               (item.fotos_adicionales_urls?.length || 0);
-            const techName = item.creado_por_nombre || item.usuario?.nombre || 'Técnico';
+            const empId = item.empleado_id || item.creado_por || item.usuario?.id;
+            const matchedEmp = empId ? employees.find((e: any) => e.id === empId) : null;
+            const techName =
+              item.empleado_nombre ||
+              item.creado_por_nombre ||
+              item.usuario?.nombre ||
+              matchedEmp?.nombre ||
+              'Técnico';
 
             return (
               <TouchableOpacity

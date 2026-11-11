@@ -271,12 +271,32 @@ export const getAdminEvidencias = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    const evidencesRes = await pool.query('SELECT * FROM evidencias ORDER BY created_at DESC');
-    const employeesRes = await pool.query("SELECT * FROM usuarios WHERE rol = 'EMPLEADO' ORDER BY nombre");
+    const [evidencesRes, allUsersRes] = await Promise.all([
+      pool.query('SELECT * FROM evidencias ORDER BY created_at DESC'),
+      pool.query('SELECT id, nombre, email, rol FROM usuarios ORDER BY nombre'),
+    ]);
+
+    const allUsers = allUsersRes.rows || [];
+    const userMap = new Map<string, any>(allUsers.map((u: any) => [u.id, u]));
+    const employees = allUsers.filter((u: any) => u.rol === 'EMPLEADO');
+
+    const enrichedEvidencias = (evidencesRes.rows || []).map((row: any) => {
+      const empId = row.empleado_id || row.creado_por;
+      const matchedUser = empId ? userMap.get(empId) : null;
+      const resolvedName = row.empleado_nombre || row.creado_por_nombre || matchedUser?.nombre || null;
+      return {
+        ...row,
+        empleado_id: empId,
+        empleado_nombre: resolvedName,
+        creado_por: empId,
+        creado_por_nombre: resolvedName,
+        usuario: matchedUser ? { id: matchedUser.id, nombre: matchedUser.nombre, email: matchedUser.email } : undefined,
+      };
+    });
 
     return res.json({
-      evidencias: evidencesRes.rows || [],
-      employees: employeesRes.rows || []
+      evidencias: enrichedEvidencias,
+      employees,
     });
 
   } catch (error: any) {

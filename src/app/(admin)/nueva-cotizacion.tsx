@@ -77,6 +77,7 @@ export default function NuevaCotizacionScreen() {
     clienteCP: '',
     direccionFactura: '',
     fechaCreacion: new Date().toLocaleDateString(),
+    fechaVencimiento: '',
     vendedor: user?.nombre || '',
     moneda: 'MXN',
     lineas: [],
@@ -99,6 +100,8 @@ export default function NuevaCotizacionScreen() {
 
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [showExpirationDatePicker, setShowExpirationDatePicker] = useState(false);
+  const [expirationDate, setExpirationDate] = useState(new Date());
 
   const [productSearchResults, setProductSearchResults] = useState<any[]>([]);
   const [activeProductLineId, setActiveProductLineId] = useState<string | null>(null);
@@ -108,6 +111,14 @@ export default function NuevaCotizacionScreen() {
     if (selectedDate) {
       setCurrentDate(selectedDate);
       setCotizacion({ ...cotizacion, fechaCreacion: selectedDate.toLocaleDateString() });
+    }
+  };
+
+  const onExpirationDateChange = (event: any, selectedDate?: Date) => {
+    setShowExpirationDatePicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setExpirationDate(selectedDate);
+      setCotizacion({ ...cotizacion, fechaVencimiento: selectedDate.toLocaleDateString() });
     }
   };
 
@@ -230,10 +241,12 @@ export default function NuevaCotizacionScreen() {
               direccionFactura: clientData?.direccion || '',
               sucursal: cotData.sucursal || '',
               fechaCreacion: cotData.fecha_creacion,
+              fechaVencimiento: cotData.fecha_vencimiento || '',
               vendedor: cotData.vendedor || user?.nombre || '',
               moneda: cotData.moneda || 'MXN',
               lineas: cotData.lineas || [],
               terminosCondiciones: cotData.terminos_condiciones || 'https://inttec.odoo.com/terms',
+              notasObservaciones: cotData.notas_observaciones || '',
               estado: (!cotData.estado || cotData.estado.toLowerCase() === 'borrador') ? 'Cotización' : cotData.estado,
               subtotal: cotData.subtotal || 0,
               iva: cotData.iva || 0,
@@ -414,6 +427,7 @@ export default function NuevaCotizacionScreen() {
         vendedor: cotizacion.vendedor,
         moneda: cotizacion.moneda,
         fecha_creacion: cotizacion.fechaCreacion,
+        fecha_vencimiento: cotizacion.fechaVencimiento || null,
         subtotal,
         iva,
         total,
@@ -668,33 +682,134 @@ export default function NuevaCotizacionScreen() {
                 value={cotizacion.vendedor} 
                 onChangeText={(t) => setCotizacion({...cotizacion, vendedor: t})} 
               />
-              <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two, zIndex: 1 }}>
-                <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two, zIndex: 1, flexWrap: 'wrap' }}>
+                <View style={{ flex: 1, minWidth: 140 }}>
                   <ThemedText style={{ fontSize: 12, fontWeight: '600', color: themeColors.textSecondary, marginBottom: 4 }}>Fecha</ThemedText>
-                  <TouchableOpacity 
-                    onPress={() => setShowDatePicker(true)}
-                    style={{ 
-                      paddingVertical: 12, 
-                      paddingHorizontal: 12,
-                      borderWidth: 1, 
-                      borderColor: themeColors.border,
-                      backgroundColor: themeColors.backgroundElement,
-                      borderRadius: 8
-                    }}
-                  >
-                    <ThemedText style={{ color: themeColors.text }}>{cotizacion.fechaCreacion}</ThemedText>
-                  </TouchableOpacity>
-                  {showDatePicker && (
+                  <View style={{ position: 'relative' }}>
+                    <TouchableOpacity 
+                      onPress={() => setShowDatePicker(true)}
+                      style={{ 
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingVertical: 12, 
+                        paddingHorizontal: 12,
+                        borderWidth: 1, 
+                        borderColor: themeColors.border,
+                        backgroundColor: themeColors.backgroundElement,
+                        borderRadius: 8
+                      }}
+                    >
+                      <ThemedText style={{ color: themeColors.text }}>{cotizacion.fechaCreacion}</ThemedText>
+                      <Ionicons name="calendar-outline" size={16} color={themeColors.textSecondary} />
+                    </TouchableOpacity>
+                    {Platform.OS === 'web' && React.createElement('input', {
+                      type: 'date',
+                      onChange: (e: any) => {
+                        const val = e.target.value;
+                        if (val) {
+                          const [y, m, d] = val.split('-').map(Number);
+                          const picked = new Date(y, m - 1, d);
+                          setCurrentDate(picked);
+                          setCotizacion(prev => ({ ...prev, fechaCreacion: picked.toLocaleDateString() }));
+                        }
+                      },
+                      onClick: (e: any) => {
+                        try { e.currentTarget.showPicker?.(); } catch {}
+                      },
+                      style: {
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        width: '100%',
+                        height: '100%',
+                        opacity: 0,
+                        cursor: 'pointer',
+                      },
+                    })}
+                  </View>
+                  {showDatePicker && Platform.OS !== 'web' && (
                     <DateTimePicker
                       value={currentDate}
                       mode="date"
                       display="default"
-                      onValueChange={onDateChange}
-                      onDismiss={() => setShowDatePicker(false)}
+                      onChange={onDateChange}
                     />
                   )}
                 </View>
-                <View style={{ flex: 1 }}>
+
+                <View style={{ flex: 1, minWidth: 150 }}>
+                  <ThemedText style={{ fontSize: 12, fontWeight: '600', color: themeColors.textSecondary, marginBottom: 4 }}>Fecha de Vencimiento</ThemedText>
+                  <View style={{ position: 'relative', flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ flex: 1, position: 'relative' }}>
+                      <TouchableOpacity 
+                        onPress={() => setShowExpirationDatePicker(true)}
+                        style={{ 
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          paddingVertical: 12, 
+                          paddingHorizontal: 12,
+                          borderWidth: 1, 
+                          borderColor: themeColors.border,
+                          backgroundColor: themeColors.backgroundElement,
+                          borderRadius: 8
+                        }}
+                      >
+                        <ThemedText style={{ color: cotizacion.fechaVencimiento ? themeColors.text : themeColors.textSecondary }}>
+                          {cotizacion.fechaVencimiento || 'Seleccionar fecha'}
+                        </ThemedText>
+                        <Ionicons name="calendar-outline" size={16} color={themeColors.textSecondary} />
+                      </TouchableOpacity>
+                      {Platform.OS === 'web' && React.createElement('input', {
+                        type: 'date',
+                        onChange: (e: any) => {
+                          const val = e.target.value;
+                          if (val) {
+                            const [y, m, d] = val.split('-').map(Number);
+                            const picked = new Date(y, m - 1, d);
+                            setExpirationDate(picked);
+                            setCotizacion(prev => ({ ...prev, fechaVencimiento: picked.toLocaleDateString() }));
+                          }
+                        },
+                        onClick: (e: any) => {
+                          try { e.currentTarget.showPicker?.(); } catch {}
+                        },
+                        style: {
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          width: '100%',
+                          height: '100%',
+                          opacity: 0,
+                          cursor: 'pointer',
+                        },
+                      })}
+                    </View>
+                    {!!cotizacion.fechaVencimiento && (
+                      <TouchableOpacity
+                        onPress={() => setCotizacion(prev => ({ ...prev, fechaVencimiento: '' }))}
+                        style={{ marginLeft: 6, padding: 4 }}
+                      >
+                        <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  {showExpirationDatePicker && Platform.OS !== 'web' && (
+                    <DateTimePicker
+                      value={expirationDate}
+                      mode="date"
+                      display="default"
+                      onChange={onExpirationDateChange}
+                    />
+                  )}
+                </View>
+
+                <View style={{ flex: 1, minWidth: 140 }}>
                   <ThemedText style={{ fontSize: 12, fontWeight: '600', color: themeColors.textSecondary, marginBottom: 4 }}>Moneda</ThemedText>
                   <View style={{ flexDirection: 'row', gap: 4 }}>
                     {['MXN', 'USD', 'EUR'].map(m => (
@@ -703,12 +818,12 @@ export default function NuevaCotizacionScreen() {
                         onPress={() => setCotizacion({...cotizacion, moneda: m})}
                         style={{ 
                           flex: 1, 
-                          paddingVertical: 8, 
+                          paddingVertical: 11, 
                           alignItems: 'center', 
                           borderWidth: 1, 
                           borderColor: cotizacion.moneda === m ? themeColors.primary : themeColors.border,
                           backgroundColor: cotizacion.moneda === m ? themeColors.primary : themeColors.backgroundElement,
-                          borderRadius: 4
+                          borderRadius: 6
                         }}
                       >
                         <ThemedText style={{ fontSize: 12, color: cotizacion.moneda === m ? '#fff' : themeColors.text }}>{m}</ThemedText>

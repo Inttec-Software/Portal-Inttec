@@ -70,21 +70,28 @@ export function useEvidenciasList({ isAdmin = false }: UseEvidenciasListProps = 
   // Filtrado
   const filteredEvidencias = useMemo(() => {
     return evidencias.filter((ev) => {
-      if (selectedEmployeeId && (ev.creado_por || ev.usuario?.id) !== selectedEmployeeId) {
+      const evEmpId = ev.empleado_id || ev.creado_por || ev.usuario?.id;
+      if (selectedEmployeeId && evEmpId !== selectedEmployeeId) {
         return false;
       }
       if (searchQuery.trim().length > 0) {
         const q = searchQuery.toLowerCase().trim();
         const clienteMatch = ev.cliente?.toLowerCase().includes(q);
-        const empleadoMatch =
-          ev.creado_por_nombre?.toLowerCase().includes(q) ||
-          ev.usuario?.nombre?.toLowerCase().includes(q);
+        const matchedEmp = evEmpId ? employees.find((e: any) => e.id === evEmpId) : null;
+        const resolvedTechName = (
+          ev.empleado_nombre ||
+          ev.creado_por_nombre ||
+          ev.usuario?.nombre ||
+          matchedEmp?.nombre ||
+          ''
+        ).toLowerCase();
+        const empleadoMatch = resolvedTechName.includes(q);
         const fechaMatch = (ev.fecha || ev.created_at || '').includes(q);
         return clienteMatch || empleadoMatch || fechaMatch;
       }
       return true;
     });
-  }, [evidencias, selectedEmployeeId, searchQuery]);
+  }, [evidencias, employees, selectedEmployeeId, searchQuery]);
 
   // Paginación
   const totalPages = Math.ceil(filteredEvidencias.length / pageSize) || 1;
@@ -128,8 +135,11 @@ export function useEvidenciasList({ isAdmin = false }: UseEvidenciasListProps = 
         }
       } catch {}
 
+      const evEmpId = evidencia.empleado_id || evidencia.creado_por || evidencia.usuario?.id || '';
+      const matchedEmp = evEmpId ? employees.find((e: any) => e.id === evEmpId) : null;
+
       const evData = {
-        empleado_id: evidencia.creado_por || evidencia.usuario?.id || '',
+        empleado_id: evEmpId,
         cliente: evidencia.cliente,
         descripcion_trabajo: parsedTrabajos,
         materiales_usados: evidencia.materiales_usados,
@@ -143,8 +153,10 @@ export function useEvidenciasList({ isAdmin = false }: UseEvidenciasListProps = 
       };
 
       const techName =
+        evidencia.empleado_nombre ||
         evidencia.creado_por_nombre ||
         evidencia.usuario?.nombre ||
+        matchedEmp?.nombre ||
         'Técnico Autorizado';
 
       await EvidenceReportGenerator.exportToPDF(evData as any, techName);

@@ -26,6 +26,7 @@ export interface Cotizacion {
   direccionFactura?: string;
   sucursal?: string;
   fechaCreacion: string;
+  fechaVencimiento?: string;
   vendedor: string; // Ej: 'Rafael Fernandez'
   moneda: string; // Ej: 'MXN'
   lineas: CotizacionLinea[];

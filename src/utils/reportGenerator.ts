@@ -4417,6 +4417,11 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
                           <td class="label-col">Fecha:</td>
                           <td class="value-col">${cotizacion.fechaCreacion}</td>
                       </tr>
+                      ${cotizacion.fechaVencimiento ? `
+                      <tr>
+                          <td class="label-col">Vencimiento:</td>
+                          <td class="value-col">${escapeHtml(cotizacion.fechaVencimiento)}</td>
+                      </tr>` : ''}
                       <tr>
                           <td class="label-col">Vendedor:</td>
                           <td class="value-col">${cotizacion.vendedor || 'Rafael Fernandez'}</td>

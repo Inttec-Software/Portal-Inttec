@@ -1,9 +1,18 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
 
-// Helper para adaptar el payload si la columna 'notas_observaciones' no existe en la BDD
+// Helper para adaptar el payload si las columnas 'notas_observaciones' o 'fecha_vencimiento' no existen en la BDD
 const prepareFallbackPayload = (payload: any) => {
   const fbPayload = { ...payload };
+  if (fbPayload.fecha_vencimiento && String(fbPayload.fecha_vencimiento).trim() !== '') {
+    const vencStr = String(fbPayload.fecha_vencimiento).trim();
+    const existingTerms = fbPayload.terminos_condiciones ? String(fbPayload.terminos_condiciones).trim() : '';
+    fbPayload.terminos_condiciones = existingTerms
+      ? `${existingTerms}\n\n[Fecha de Vencimiento]:\n${vencStr}`
+      : `[Fecha de Vencimiento]:\n${vencStr}`;
+  }
+  delete fbPayload.fecha_vencimiento;
+
   if (fbPayload.notas_observaciones && String(fbPayload.notas_observaciones).trim() !== '') {
     const notesStr = String(fbPayload.notas_observaciones).trim();
     const existingTerms = fbPayload.terminos_condiciones ? String(fbPayload.terminos_condiciones).trim() : '';
@@ -15,7 +24,7 @@ const prepareFallbackPayload = (payload: any) => {
   return fbPayload;
 };
 
-// Helper para extraer 'notas_observaciones' si fue concatenado en 'terminos_condiciones'
+// Helper para extraer 'notas_observaciones' y 'fecha_vencimiento' si fueron concatenados en 'terminos_condiciones'
 const formatCotizacionResponse = (cot: any) => {
   if (!cot) return cot;
   const formatted = { ...cot };
@@ -25,6 +34,14 @@ const formatCotizacionResponse = (cot: any) => {
     if (index !== -1) {
       formatted.notas_observaciones = formatted.terminos_condiciones.substring(index + marker.length).trim();
       formatted.terminos_condiciones = formatted.terminos_condiciones.substring(0, index).trim();
+    }
+  }
+  if ((!formatted.fecha_vencimiento || String(formatted.fecha_vencimiento).trim() === '') && formatted.terminos_condiciones) {
+    const vencMarker = '[Fecha de Vencimiento]:';
+    const vencIndex = formatted.terminos_condiciones.indexOf(vencMarker);
+    if (vencIndex !== -1) {
+      formatted.fecha_vencimiento = formatted.terminos_condiciones.substring(vencIndex + vencMarker.length).trim();
+      formatted.terminos_condiciones = formatted.terminos_condiciones.substring(0, vencIndex).trim();
     }
   }
   return formatted;
@@ -283,18 +300,21 @@ export const duplicateCotizacion = async (req: Request, res: Response) => {
     const existingFolios = foliosRes.rows.map((r: any) => String(r.folio || '').trim());
     const newFolio = calculateNextFolio(datePrefix, existingFolios);
 
+    const origFormatted = formatCotizacionResponse(original);
+
     const payload = {
       folio: newFolio,
-      cliente_nombre: original.cliente_nombre,
-      vendedor: original.vendedor,
-      moneda: original.moneda || 'MXN',
+      cliente_nombre: origFormatted.cliente_nombre,
+      vendedor: origFormatted.vendedor,
+      moneda: origFormatted.moneda || 'MXN',
       fecha_creacion: today.toLocaleDateString('es-MX'),
-      subtotal: original.subtotal || 0,
-      iva: original.iva || 0,
-      total: original.total || 0,
-      lineas: original.lineas ? JSON.stringify(original.lineas) : '[]',
-      terminos_condiciones: original.terminos_condiciones,
-      notas_observaciones: original.notas_observaciones || null,
+      fecha_vencimiento: origFormatted.fecha_vencimiento || null,
+      subtotal: origFormatted.subtotal || 0,
+      iva: origFormatted.iva || 0,
+      total: origFormatted.total || 0,
+      lineas: origFormatted.lineas ? JSON.stringify(origFormatted.lineas) : '[]',
+      terminos_condiciones: origFormatted.terminos_condiciones,
+      notas_observaciones: origFormatted.notas_observaciones || null,
       estado: 'Cotización'
     };
 
@@ -306,7 +326,7 @@ export const duplicateCotizacion = async (req: Request, res: Response) => {
     try {
       await pool.query(qry, vals);
     } catch (insError: any) {
-      if (insError.message?.includes('notas_observaciones')) {
+      if (insError.message?.includes('notas_observaciones') || insError.message?.includes('fecha_vencimiento') || insError.code === '42703') {
         const fbPayload = prepareFallbackPayload(payload);
         const fbCols = Object.keys(fbPayload);
         const fbVals = Object.values(fbPayload);
@@ -400,7 +420,7 @@ export const createCotizacion = async (req: Request, res: Response) => {
       const resInsert = await pool.query(qry, vals);
       result = resInsert.rows[0];
     } catch (err: any) {
-      if (err.message?.includes('notas_observaciones')) {
+      if (err.message?.includes('notas_observaciones') || err.message?.includes('fecha_vencimiento') || err.code === '42703') {
         const fbPayload = prepareFallbackPayload(payload);
         const fbCols = Object.keys(fbPayload);
         const fbVals = Object.values(fbPayload);
@@ -494,7 +514,7 @@ export const updateCotizacion = async (req: Request, res: Response) => {
     try {
       await pool.query(qry, vals);
     } catch (err: any) {
-      if (err.message?.includes('notas_observaciones')) {
+      if (err.message?.includes('notas_observaciones') || err.message?.includes('fecha_vencimiento') || err.code === '42703') {
         const fbPayload = prepareFallbackPayload(payload);
         const fbKeys = Object.keys(fbPayload);
         const fbVals = Object.values(fbPayload);
