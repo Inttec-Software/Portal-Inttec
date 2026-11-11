@@ -839,9 +839,7 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                                         <TouchableOpacity
                                           style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15', flex: 1, height: 40, justifyContent: 'center', borderRadius: BorderRadius.small }]}
                                           onPress={() => {
-                                            if ((url.startsWith('cfdi://') || url.toLowerCase().endsWith('.xml')) && selectedGasto.factura_recibida_rel) {
-                                              handleDownloadSatFacturaPdf(selectedGasto.factura_recibida_rel);
-                                            } else if (url.toLowerCase().includes('.pdf') || url.toLowerCase().endsWith('.xml')) {
+                                            if (url.toLowerCase().includes('.pdf') || url.toLowerCase().endsWith('.xml')) {
                                               Linking.openURL(url).catch(() => {
                                                 Alert.alert('Error', 'No se pudo abrir el archivo de factura.');
                                               });

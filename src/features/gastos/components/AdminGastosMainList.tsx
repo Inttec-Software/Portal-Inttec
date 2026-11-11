@@ -162,7 +162,7 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: themeColors.backgroundElement, borderRadius: BorderRadius.medium, borderWidth: 1, borderColor: themeColors.border, paddingHorizontal: Spacing.two, height: 42 }}>
             <Ionicons name="search-outline" size={18} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
             <TextInput
-              placeholder="Buscar empleado, cliente, sucursal, categoría, proveedor, detalle o monto..."
+              placeholder="Buscar por empleado, proveedor, UUID, cliente, sucursal o monto..."
               placeholderTextColor={themeColors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}

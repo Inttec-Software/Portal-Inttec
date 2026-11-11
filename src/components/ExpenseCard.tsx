@@ -157,6 +157,20 @@ function ExpenseCard({
             </View>
           )}
 
+          {gasto.motivo_sin_factura?.startsWith('COMISION_PLATAFORMA') && (
+            <View style={[styles.statusBadge, { backgroundColor: '#8b5cf618' }]}>
+              <Ionicons name="globe-outline" size={11} color="#7c3aed" />
+              <Text style={[styles.statusText, { color: '#7c3aed' }]}>Comisión</Text>
+            </View>
+          )}
+
+          {gasto.motivo_sin_factura?.startsWith('DIFERENCIA_AUTORIZADA') && (
+            <View style={[styles.statusBadge, { backgroundColor: '#64748b18' }]}>
+              <Ionicons name="shield-outline" size={11} color="#475569" />
+              <Text style={[styles.statusText, { color: '#475569' }]}>Dif. Autorizada</Text>
+            </View>
+          )}
+
           <View style={[styles.statusBadge, { backgroundColor: statusColor + '18' }]}>
             <Ionicons name={statusIcon} size={11} color={statusColor} />
             <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>
