@@ -1097,13 +1097,14 @@ export const getFormCatalogs = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    const [catRes, subRes, cliRes, usersRes, sucRes, provRes] = await Promise.all([
+    const [catRes, subRes, cliRes, usersRes, sucRes, provRes, vehRes] = await Promise.all([
       pool.query('SELECT * FROM categorias ORDER BY nombre'),
       pool.query('SELECT * FROM subcategorias ORDER BY nombre'),
       pool.query('SELECT * FROM clientes ORDER BY nombre'),
       pool.query('SELECT * FROM usuarios ORDER BY nombre'),
       pool.query('SELECT * FROM sucursales_cliente ORDER BY nombre'),
       pool.query('SELECT * FROM proveedores ORDER BY nombre'),
+      pool.query('SELECT * FROM vehiculos WHERE activo = true ORDER BY marca ASC'),
     ]);
 
     return res.json({
@@ -1113,6 +1114,7 @@ export const getFormCatalogs = async (req: Request, res: Response) => {
       usuarios: usersRes.rows || [],
       sucursales: sucRes.rows || [],
       proveedores: provRes.rows || [],
+      vehiculos: vehRes.rows || [],
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
