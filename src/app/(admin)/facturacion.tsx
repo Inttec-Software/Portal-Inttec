@@ -298,6 +298,14 @@ export default function FacturacionScreen() {
   const [currentDraftId, setCurrentDraftId] = useState<string | number | null>(null);
   const [origenVentaId, setOrigenVentaId] = useState<string | number | null>(null);
   const [origenVentaFolio, setOrigenVentaFolio] = useState<string | null>(null);
+  const [ventasSinFactura, setVentasSinFactura] = useState<any[]>([]);
+  const [isLoadingVentasSinFactura, setIsLoadingVentasSinFactura] = useState(false);
+  const [isVincularVentaModalOpen, setIsVincularVentaModalOpen] = useState(false);
+  const [vincularSearch, setVincularSearch] = useState('');
+  const [hasPromptedVentaLink, setHasPromptedVentaLink] = useState(false);
+  const [vincularTargetFacturaId, setVincularTargetFacturaId] = useState<string | number | null>(null);
+  const [origenVentaTotal, setOrigenVentaTotal] = useState<number | null>(null);
+  const [backendSinConexion, setBackendSinConexion] = useState(false);
   const [clientSuggestions, setClientSuggestions] = useState<ClienteCatalogo[]>([]);
   const [isSearchingClients, setIsSearchingClients] = useState(false);
   const [showClientDropdown, setShowClientDropdown] = useState(false);
@@ -411,14 +419,446 @@ export default function FacturacionScreen() {
   const [previewTitle, setPreviewTitle] = useState<string>('');
   const [returnToPagoModal, setReturnToPagoModal] = useState<boolean>(false);
 
+  const getActiveDbClient = () => (currentCompany === 'daravisa' ? daravisaClient : inttecClient);
+
+  const fetchVentasSinFactura = async () => {
+    try {
+      setIsLoadingVentasSinFactura(true);
+      let loadedFromBackend = false;
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/ventas-sin-factura`, { headers });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.ventas)) {
+            setVentasSinFactura(json.ventas);
+            setBackendSinConexion(false);
+            loadedFromBackend = true;
+          }
+        }
+      } catch (_) {
+        // Fallback directo a Supabase abajo
+      }
+
+      if (loadedFromBackend) return;
+
+      const db = getActiveDbClient();
+      const { data: ventasRaw, error: ventasErr } = await db
+        .from('ventas')
+        .select('id, folio, fecha, cliente, descripcion, orden_compra, factura_referencia, precio_total_facturado, agregar_iva, total_pagado, saldo_pendiente, estado_pago, sucursal, cfdi_uuid, cfdi_estado, created_at')
+        .order('created_at', { ascending: false })
+        .limit(80);
+
+      if (ventasErr) throw ventasErr;
+
+      const ventasList = (ventasRaw || [])
+        .filter((v: any) => !v.cfdi_uuid && v.cfdi_estado !== 'TIMBRADA')
+        .slice(0, 50);
+      const ventaIds = ventasList.map((v: any) => v.id).filter(Boolean);
+      const partidasByVenta: Record<string, any[]> = {};
+      const borradorByVenta: Record<string, any> = {};
+
+      if (ventaIds.length > 0) {
+        const [{ data: partidasData }, { data: borradoresData }] = await Promise.all([
+          db
+            .from('ventas_partidas')
+            .select('id, venta_id, descripcion, cantidad, unidad, precio_unitario_venta, precio_total_venta')
+            .in('venta_id', ventaIds),
+          db
+            .from('facturas_emitidas')
+            .select('id, serie, folio, venta_id, cfdi_estado')
+            .in('venta_id', ventaIds)
+            .eq('cfdi_estado', 'BORRADOR'),
+        ]);
+
+        if (partidasData) {
+          for (const p of partidasData) {
+            const key = String(p.venta_id);
+            if (!partidasByVenta[key]) partidasByVenta[key] = [];
+            partidasByVenta[key].push(p);
+          }
+        }
+        if (borradoresData) {
+          for (const b of borradoresData) {
+            const key = String(b.venta_id);
+            if (!borradorByVenta[key]) {
+              borradorByVenta[key] = {
+                id: b.id,
+                folio: `${b.serie || ''}${b.folio || ''}`.trim() || `#${b.id}`,
+              };
+            }
+          }
+        }
+      }
+
+      setVentasSinFactura(
+        ventasList.map((v: any) => {
+          const borr = borradorByVenta[String(v.id)] || null;
+          return {
+            ...v,
+            partidas: partidasByVenta[String(v.id)] || [],
+            borrador_id: borr ? borr.id : null,
+            borrador_folio: borr ? borr.folio : null,
+          };
+        })
+      );
+      setBackendSinConexion(false);
+    } catch (err) {
+      console.warn('Error cargando ventas sin factura:', err);
+      setBackendSinConexion(true);
+    } finally {
+      setIsLoadingVentasSinFactura(false);
+    }
+  };
+
+  const handleAplicarVentaAFormulario = (venta: any) => {
+    setOrigenVentaId(venta.id);
+    setOrigenVentaFolio(venta.folio || `Venta #${venta.id}`);
+    setOrigenVentaTotal(venta.precio_total_facturado !== undefined && venta.precio_total_facturado !== null ? Number(venta.precio_total_facturado) : null);
+    setOrdenCompra(venta.orden_compra || '');
+
+    const nombreVenta = (venta.cliente || '').trim();
+    const matchedClient = clientes.find((c: any) => {
+      const cName = (c.razon_social || c.nombre || '').trim().toLowerCase();
+      return cName && cName === nombreVenta.toLowerCase();
+    });
+
+    if (matchedClient) {
+      setSelectedClientId(matchedClient.id);
+      setClienteNombre(matchedClient.razon_social || matchedClient.nombre || nombreVenta);
+      setClienteRfc(matchedClient.rfc || 'XAXX010101000');
+      setClienteCp(matchedClient.codigo_postal || '31110');
+      setClienteDireccion(matchedClient.direccion || '');
+      setClienteRegimen(matchedClient.regimen_fiscal || '601');
+      setClienteUso(matchedClient.uso_cfdi || 'G03');
+    } else {
+      setSelectedClientId(null);
+      setClienteNombre(nombreVenta);
+    }
+
+    if (Array.isArray(venta.partidas) && venta.partidas.length > 0) {
+      setPartidas(
+        venta.partidas.map((p: any, idx: number) => ({
+          id: String(idx + 1),
+          descripcion: p.descripcion || '',
+          descripcion_detallada: '',
+          cantidad: p.cantidad !== undefined && p.cantidad !== null ? String(p.cantidad) : '1',
+          precio_unitario: p.precio_unitario_venta !== undefined && p.precio_unitario_venta !== null ? String(p.precio_unitario_venta) : '0',
+          clave_sat: '01010101',
+          clave_unidad: 'H87',
+          unidad: p.unidad || 'Pieza',
+          objeto_imp: '02',
+        }))
+      );
+    } else {
+      setPartidas([
+        {
+          id: '1',
+          descripcion: venta.descripcion || `Venta ${venta.folio || ''}`.trim(),
+          descripcion_detallada: '',
+          cantidad: '1',
+          precio_unitario: String(Number(venta.precio_total_facturado) || 0),
+          clave_sat: '01010101',
+          clave_unidad: 'H87',
+          unidad: 'Pieza',
+          objeto_imp: '02',
+        },
+      ]);
+    }
+
+    setIsVincularVentaModalOpen(false);
+    setVincularTargetFacturaId(null);
+  };
+
+  const ejecutarCrearVentaDesdeFactura = async (facturaId: string | number, marcarPagada?: boolean) => {
+    try {
+      setIsSubmitting(true);
+      let backendOk = false;
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/crear-venta-desde-factura`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            factura_id: facturaId,
+            ...(typeof marcarPagada === 'boolean' ? { marcar_pagada: marcarPagada } : {}),
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.success) {
+          backendOk = true;
+          fetchHistorialFacturas();
+          fetchVentasSinFactura();
+          showAlert('Venta Creada y Vinculada', `Se creó la Venta ${json.folio_venta || ''} en el módulo de Ventas y quedó vinculada a la factura.`);
+        } else if (res.status === 409) {
+          throw new Error(json.error || 'Esta factura ya está vinculada a una venta existente');
+        }
+      } catch (apiErr: any) {
+        if (apiErr?.message && apiErr.message.includes('ya está vinculada')) throw apiErr;
+      }
+
+      if (backendOk) return;
+
+      // Fallback directo a Supabase
+      const db = getActiveDbClient();
+      const { data: factura, error: factErr } = await db
+        .from('facturas_emitidas')
+        .select('*')
+        .eq('id', facturaId)
+        .maybeSingle();
+      if (factErr) throw factErr;
+      if (!factura) throw new Error('Factura no encontrada');
+      if (factura.venta_id) throw new Error('Esta factura ya está vinculada a una venta existente');
+
+      const { data: partidasFact } = await db
+        .from('facturas_emitidas_partidas')
+        .select('*')
+        .eq('factura_id', factura.id);
+      const rawPartidas = (partidasFact && partidasFact.length > 0)
+        ? partidasFact
+        : (Array.isArray(factura.notas?.partidas) ? factura.notas.partidas : []);
+
+      const { data: foliosRes } = await db.from('ventas').select('folio').ilike('folio', 'A%');
+      let maxNum = 3999;
+      if (foliosRes) {
+        for (const item of foliosRes) {
+          if (item.folio) {
+            const num = parseInt(String(item.folio).substring(1), 10);
+            if (!isNaN(num) && num > maxNum) maxNum = num;
+          }
+        }
+      }
+      const nextFolio = `A${maxNum + 1}`;
+      const totalFactura = Number(factura.total) || 0;
+      const isPueOrPaid = typeof marcarPagada === 'boolean'
+        ? marcarPagada
+        : (factura.estado_pago === 'PAGADO' || factura.metodo_pago === 'PUE');
+      const totalPagado = isPueOrPaid ? totalFactura : (Number(factura.total_pagado) || 0);
+      const saldoPendiente = Math.max(0, Number((totalFactura - totalPagado).toFixed(2)));
+      const estadoPago = saldoPendiente <= 0.01 ? 'PAGADO' : (totalPagado > 0 ? 'PARCIAL' : 'PENDIENTE DE PAGO');
+      const resumenDescripcion = rawPartidas.map((p: any) => p.descripcion).filter(Boolean).slice(0, 3).join(' | ');
+
+      const { data: nuevaVenta, error: insertVentaErr } = await db
+        .from('ventas')
+        .insert({
+          folio: nextFolio,
+          fecha: factura.fecha_emision ? String(factura.fecha_emision).split('T')[0] : new Date().toISOString().split('T')[0],
+          cliente: factura.cliente_nombre || 'PUBLICO EN GENERAL',
+          descripcion: resumenDescripcion || `Venta generada desde factura ${factura.serie || ''}${factura.folio || ''}`,
+          orden_compra: factura.orden_compra || null,
+          factura_referencia: `${factura.serie || ''}${factura.folio || ''}` || null,
+          precio_total_facturado: totalFactura,
+          agregar_iva: Number(factura.iva || 0) > 0,
+          total_pagado: totalPagado,
+          saldo_pendiente: saldoPendiente,
+          estado_pago: estadoPago,
+          cfdi_uuid: factura.cfdi_uuid || null,
+          cfdi_estado: factura.cfdi_estado || 'PENDIENTE',
+          cfdi_xml_url: factura.cfdi_xml_url || null,
+          cfdi_pdf_url: factura.cfdi_pdf_url || null,
+          cfdi_serie: factura.serie || null,
+          cfdi_folio: factura.folio || null,
+          sucursal: 'Matriz',
+        })
+        .select()
+        .single();
+      if (insertVentaErr) throw insertVentaErr;
+
+      if (rawPartidas.length > 0) {
+        await db.from('ventas_partidas').insert(
+          rawPartidas.map((p: any) => {
+            const cant = Number(p.cantidad) || 1;
+            const pu = Number(p.precio_unitario) || 0;
+            const imp = Number(p.importe) || Number((cant * pu).toFixed(2));
+            return {
+              venta_id: nuevaVenta.id,
+              descripcion: p.descripcion || 'Concepto facturado',
+              cantidad: cant,
+              unidad: p.unidad || 'PZA',
+              precio_unitario_venta: pu,
+              precio_total_venta: imp,
+              costo_unitario_proveedor: 0,
+              costo_total_proveedor: 0,
+            };
+          })
+        );
+      }
+
+      const { error: linkErr } = await db
+        .from('facturas_emitidas')
+        .update({ venta_id: nuevaVenta.id, updated_at: new Date().toISOString() })
+        .eq('id', factura.id);
+      if (linkErr) throw linkErr;
+
+      fetchHistorialFacturas();
+      fetchVentasSinFactura();
+      showAlert('Venta Creada y Vinculada', `Se creó la Venta ${nuevaVenta.folio || ''} en el módulo de Ventas y quedó vinculada a la factura.`);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'Error al crear la venta desde la factura.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCrearVentaDesdeFactura = async (facturaId: string | number, metodoPagoHint?: string) => {
+    const factEnHistorial = historialFacturas.find((f) => String(f.id) === String(facturaId));
+    const mp = metodoPagoHint || (factEnHistorial as any)?.metodo_pago || 'PUE';
+    if (mp === 'PUE') {
+      const msgPago = 'La factura tiene método de pago PUE.\n\n¿El pago ya fue recibido en banco? (Si eliges No, la venta se creará como PENDIENTE DE PAGO).';
+      if (Platform.OS === 'web') {
+        const pagada = window.confirm(msgPago);
+        await ejecutarCrearVentaDesdeFactura(facturaId, pagada);
+      } else {
+        Alert.alert('Estado de Pago de la Venta', msgPago, [
+          { text: 'No, Pendiente', onPress: () => ejecutarCrearVentaDesdeFactura(facturaId, false) },
+          { text: 'Sí, Marcar Pagada', onPress: () => ejecutarCrearVentaDesdeFactura(facturaId, true) },
+        ]);
+      }
+      return;
+    }
+    await ejecutarCrearVentaDesdeFactura(facturaId, false);
+  };
+
+  const ejecutarVincularVenta = async (facturaId: string | number, venta: any, sincronizarMonto: boolean) => {
+    try {
+      setIsSubmitting(true);
+      let backendOk = false;
+      try {
+        const headers = await getApiHeaders();
+        const res = await fetch(`${getApiUrl()}/api/sat/vincular-venta`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ factura_id: facturaId, venta_id: venta.id, sincronizar_monto: sincronizarMonto }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.success) {
+          backendOk = true;
+        } else if (res.status === 409) {
+          throw new Error(json.error || 'Conflicto al vincular la venta');
+        }
+      } catch (apiErr: any) {
+        if (apiErr?.message && apiErr.message.includes('Conflicto')) throw apiErr;
+      }
+
+      if (!backendOk) {
+        const db = getActiveDbClient();
+        const [{ data: factura, error: fErr }, { data: ventaDb, error: vErr }] = await Promise.all([
+          db.from('facturas_emitidas').select('*').eq('id', facturaId).maybeSingle(),
+          db.from('ventas').select('*').eq('id', venta.id).maybeSingle(),
+        ]);
+        if (fErr) throw fErr;
+        if (vErr) throw vErr;
+        if (!factura) throw new Error('Factura no encontrada');
+        if (!ventaDb) throw new Error('Venta no encontrada');
+        if (factura.venta_id && String(factura.venta_id) !== String(ventaDb.id)) {
+          throw new Error('La factura ya está vinculada a otra venta');
+        }
+        if (ventaDb.cfdi_uuid && factura.cfdi_uuid && String(ventaDb.cfdi_uuid) !== String(factura.cfdi_uuid)) {
+          throw new Error('La venta ya está vinculada a otro CFDI timbrado');
+        }
+
+        const { error: updFactErr } = await db
+          .from('facturas_emitidas')
+          .update({ venta_id: ventaDb.id, updated_at: new Date().toISOString() })
+          .eq('id', factura.id);
+        if (updFactErr) throw updFactErr;
+
+        const ventaUpdate: Record<string, any> = {
+          factura_referencia: `${factura.serie || ''}${factura.folio || ''}` || ventaDb.factura_referencia || null,
+          cfdi_serie: factura.serie || null,
+          cfdi_folio: factura.folio || null,
+          cfdi_estado: factura.cfdi_estado || ventaDb.cfdi_estado || 'PENDIENTE',
+        };
+        if (factura.cfdi_uuid) ventaUpdate.cfdi_uuid = factura.cfdi_uuid;
+        if (factura.cfdi_xml_url) ventaUpdate.cfdi_xml_url = factura.cfdi_xml_url;
+        if (factura.cfdi_pdf_url) ventaUpdate.cfdi_pdf_url = factura.cfdi_pdf_url;
+
+        if (sincronizarMonto && Number(factura.total) > 0) {
+          const nuevoTotal = Number(factura.total);
+          const pagadoActual = Number(ventaDb.total_pagado) || 0;
+          const nuevoSaldo = Math.max(0, Number((nuevoTotal - pagadoActual).toFixed(2)));
+          ventaUpdate.precio_total_facturado = nuevoTotal;
+          ventaUpdate.saldo_pendiente = nuevoSaldo;
+          ventaUpdate.estado_pago = nuevoSaldo <= 0.01 ? 'PAGADO' : (pagadoActual > 0 ? 'PARCIAL' : 'PENDIENTE DE PAGO');
+        }
+
+        const { error: updVentaErr } = await db.from('ventas').update(ventaUpdate).eq('id', ventaDb.id);
+        if (updVentaErr) throw updVentaErr;
+      }
+
+      setIsVincularVentaModalOpen(false);
+      setVincularTargetFacturaId(null);
+      fetchHistorialFacturas();
+      fetchVentasSinFactura();
+      showAlert('Vinculación Exitosa', `La factura quedó vinculada a la venta ${venta.folio || ''}.`);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'Error al vincular la venta.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleVincularVentaAFacturaExistente = async (facturaId: string | number, venta: any) => {
+    const factEnHistorial = historialFacturas.find((f) => String(f.id) === String(facturaId));
+    const totalFactura = Number(factEnHistorial?.precio_total_facturado || (factEnHistorial as any)?.total || 0);
+    const totalVenta = Number(venta.precio_total_facturado || 0);
+    if (totalFactura > 0 && Math.abs(totalFactura - totalVenta) > 0.5) {
+      const msg = `El total de la factura ($${totalFactura.toFixed(2)}) difiere del total de la venta ($${totalVenta.toFixed(2)}).\n\n¿Deseas actualizar el total de la venta para que coincida con la factura?`;
+      if (Platform.OS === 'web') {
+        const sync = window.confirm(msg);
+        await ejecutarVincularVenta(facturaId, venta, sync);
+      } else {
+        Alert.alert('Diferencia de Montos', msg, [
+          { text: 'No, mantener monto', onPress: () => ejecutarVincularVenta(facturaId, venta, false) },
+          { text: 'Sí, sincronizar monto', onPress: () => ejecutarVincularVenta(facturaId, venta, true) },
+        ]);
+      }
+      return;
+    }
+    await ejecutarVincularVenta(facturaId, venta, false);
+  };
+
+  const promptCrearVentaDesdeFactura = (facturaId?: string | number | null, folioLabel?: string) => {
+    if (!facturaId) return;
+    const msg = `La factura ${folioLabel ? `(${folioLabel}) ` : ''}se timbró sin estar ligada a una venta.\n\n¿Deseas crear automáticamente una Venta vinculada en el módulo de Ventas?`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) {
+        handleCrearVentaDesdeFactura(facturaId);
+      }
+    } else {
+      Alert.alert('Crear Venta Vinculada', msg, [
+        { text: 'No, solo factura', style: 'cancel' },
+        { text: 'Sí, crear Venta', onPress: () => handleCrearVentaDesdeFactura(facturaId) },
+      ]);
+    }
+  };
+
   useEffect(() => {
+    setHasPromptedVentaLink(false);
     fetchClientes();
     fetchProductos();
     fetchHistorialFacturas();
+    fetchVentasSinFactura();
     fetchSiguienteFolio(serie || 'A');
     fetchComplementosList();
     fetchSiguienteFolioPago(seriePago || 'P');
   }, [currentCompany]);
+
+  useEffect(() => {
+    if (
+      activeTab === 'emitir' &&
+      !hasPromptedVentaLink &&
+      !origenVentaId &&
+      !currentDraftId &&
+      params.fromVenta !== 'true' &&
+      params.fromCotizacion !== 'true' &&
+      ventasSinFactura.length > 0
+    ) {
+      setHasPromptedVentaLink(true);
+      setVincularTargetFacturaId(null);
+      setIsVincularVentaModalOpen(true);
+    }
+  }, [activeTab, ventasSinFactura.length, origenVentaId, currentDraftId, hasPromptedVentaLink, params.fromVenta, params.fromCotizacion]);
 
   // === Recibir parámetros de Cotización o Venta para Facturación ===
   useEffect(() => {
@@ -522,10 +962,12 @@ export default function FacturacionScreen() {
           if (data.ventaId) {
             setOrigenVentaId(data.ventaId);
             setOrigenVentaFolio(data.folioVenta || `Venta #${data.ventaId}`);
+            setOrigenVentaTotal(data.total ? Number(data.total) : (data.precioTotalFacturado ? Number(data.precioTotalFacturado) : null));
             setCurrentDraftId(null);
           } else {
             setOrigenVentaId(null);
             setOrigenVentaFolio(null);
+            setOrigenVentaTotal(null);
             setCurrentDraftId(null);
           }
 
@@ -965,6 +1407,7 @@ export default function FacturacionScreen() {
     setCurrentDraftId(null);
     setOrigenVentaId(null);
     setOrigenVentaFolio(null);
+    setOrigenVentaTotal(null);
     setSelectedClientId(null);
     setClienteNombre('');
     setClienteRfc('XAXX010101000');
@@ -1455,6 +1898,10 @@ export default function FacturacionScreen() {
           handleResetForm();
         }
         fetchHistorialFacturas();
+        fetchVentasSinFactura();
+        if (!factura.venta_id && !resJson.venta_id) {
+          promptCrearVentaDesdeFactura(resJson.factura_id || factura.id, `${(factura as any).serie || ''}${cleanFolio(factura.folio)}`);
+        }
       } catch (err: any) {
         console.error('Error al timbrar borrador:', err);
         showAlert('Error al Timbrar', err.message || 'No se pudo timbrar la factura.');
@@ -1590,11 +2037,19 @@ export default function FacturacionScreen() {
         throw new Error('No se pudo obtener el UUID de timbrado.');
       }
 
+      const wasUnlinked = !origenVentaId && !data.venta_id;
+      const stampedFacturaId = data.factura_id || null;
+      const stampedFolioLabel = data.fullFolio || `${serie}${folio}`;
+
       setCurrentDraftId(null);
       showAlert('Éxito', `Factura timbrada exitosamente (CFDI 4.0).\n\nFolio Fiscal (UUID):\n${data.cfdi_uuid}`);
       fetchHistorialFacturas();
+      fetchVentasSinFactura();
       setActiveTab('historial');
       handleResetForm();
+      if (wasUnlinked && stampedFacturaId) {
+        promptCrearVentaDesdeFactura(stampedFacturaId, stampedFolioLabel);
+      }
     } catch (err: any) {
       let errorMsg = err.message || 'Error desconocido al timbrar la factura.';
       if (err?.context) {
@@ -3522,13 +3977,27 @@ export default function FacturacionScreen() {
                 </View>
               )}
 
-              {origenVentaId && (
+              {origenVentaId ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#e0f2fe', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#0284c7' }}>
                   <Ionicons name="cart-outline" size={14} color="#0284c7" />
                   <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#0369a1' }}>
                     Origen: {origenVentaFolio || `Venta #${origenVentaId}`}
                   </Text>
                 </View>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => {
+                    fetchVentasSinFactura();
+                    setVincularTargetFacturaId(null);
+                    setIsVincularVentaModalOpen(true);
+                  }}
+                  style={[styles.quickSelectBtn, { borderColor: '#0284c750', backgroundColor: '#0284c712', paddingVertical: 6, paddingHorizontal: 10 }]}
+                >
+                  <Ionicons name="link-outline" size={14} color="#0284c7" />
+                  <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: '600' }}>
+                    Ligar a Venta{ventasSinFactura.length > 0 ? ` (${ventasSinFactura.length})` : ''}
+                  </Text>
+                </TouchableOpacity>
               )}
 
               {(currentDraftId || origenVentaId) && (
@@ -3585,6 +4054,11 @@ export default function FacturacionScreen() {
                   <Text style={{ fontSize: 11, color: '#0284c7' }}>
                     Se emitirá la factura fiscal oficial vinculada a esta venta operativa
                   </Text>
+                  {origenVentaTotal !== null && Math.abs(financialTotals.total - origenVentaTotal) > 0.5 && (
+                    <Text style={{ fontSize: 11, color: '#d97706', fontWeight: 'bold', marginTop: 3 }}>
+                      ⚠ El total de la factura (${financialTotals.total.toFixed(2)}) difiere del total original de la venta (${origenVentaTotal.toFixed(2)}).
+                    </Text>
+                  )}
                 </View>
               </View>
               <TouchableOpacity
@@ -4886,6 +5360,31 @@ export default function FacturacionScreen() {
                                     onPress={() => handleDescargarXML(factura)}
                                   />
 
+                                  {!isCanceled && !factura.venta_id && (
+                                    <>
+                                      <TableTooltipButton
+                                        icon="add-circle-outline"
+                                        color="#7c3aed"
+                                        bgColor="#7c3aed15"
+                                        borderColor="#7c3aed50"
+                                        tooltip="Crear Venta desde Factura"
+                                        onPress={() => handleCrearVentaDesdeFactura(factura.id)}
+                                      />
+                                      <TableTooltipButton
+                                        icon="link-outline"
+                                        color="#0284c7"
+                                        bgColor="#0284c715"
+                                        borderColor="#0284c750"
+                                        tooltip="Ligar a Venta Manual"
+                                        onPress={() => {
+                                          fetchVentasSinFactura();
+                                          setVincularTargetFacturaId(factura.id);
+                                          setIsVincularVentaModalOpen(true);
+                                        }}
+                                      />
+                                    </>
+                                  )}
+
                                   {!isCanceled && (
                                     <TableTooltipButton
                                       icon="cash-outline"
@@ -5143,6 +5642,29 @@ export default function FacturacionScreen() {
                                 <Ionicons name="code-download-outline" size={14} color="#10b981" />
                                 <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>XML</Text>
                               </TouchableOpacity>
+
+                              {!isCanceled && !factura.venta_id && (
+                                <>
+                                  <TouchableOpacity
+                                    onPress={() => handleCrearVentaDesdeFactura(factura.id)}
+                                    style={[styles.smallActionBtn, { borderColor: '#7c3aed', backgroundColor: '#7c3aed15', paddingHorizontal: 10, paddingVertical: 7, flex: 1, minWidth: 95, justifyContent: 'center' }]}
+                                  >
+                                    <Ionicons name="add-circle-outline" size={14} color="#7c3aed" />
+                                    <Text style={{ color: '#7c3aed', fontSize: 11, fontWeight: '700' }}>Crear Venta</Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      fetchVentasSinFactura();
+                                      setVincularTargetFacturaId(factura.id);
+                                      setIsVincularVentaModalOpen(true);
+                                    }}
+                                    style={[styles.smallActionBtn, { borderColor: '#0284c7', backgroundColor: '#0284c715', paddingHorizontal: 10, paddingVertical: 7, flex: 1, minWidth: 95, justifyContent: 'center' }]}
+                                  >
+                                    <Ionicons name="link-outline" size={14} color="#0284c7" />
+                                    <Text style={{ color: '#0284c7', fontSize: 11, fontWeight: '700' }}>Ligar Venta</Text>
+                                  </TouchableOpacity>
+                                </>
+                              )}
 
                               {!isCanceled && (
                                 <TouchableOpacity
@@ -5469,6 +5991,156 @@ export default function FacturacionScreen() {
 
 
       {/* MODAL PRINCIPAL: NUEVO COMPLEMENTO DE PAGO MULTI-FACTURA */}
+      <Modal visible={isVincularVentaModalOpen} animationType="fade" transparent onRequestClose={() => { setIsVincularVentaModalOpen(false); setVincularTargetFacturaId(null); }}>
+        <View style={styles.modalOverlay}>
+          <View style={{ backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, borderWidth: 1, borderRadius: 14, padding: 20, maxWidth: 620, width: '94%', maxHeight: '82%' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ fontSize: 17, fontWeight: 'bold', color: themeColors.text }}>
+                  {vincularTargetFacturaId ? 'Ligar Factura a Venta Manual' : '¿Ligar a una Venta Manual existente?'}
+                </Text>
+                <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
+                  {vincularTargetFacturaId
+                    ? 'Selecciona la venta manual sin factura a la que deseas vincular este CFDI.'
+                    : `Tienes ${ventasSinFactura.length} venta(s) manual(es) sin facturar. Selecciona una para prellenar y vincular esta factura, o factura sin ligar.`}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => { setIsVincularVentaModalOpen(false); setVincularTargetFacturaId(null); }}>
+                <Ionicons name="close" size={24} color={themeColors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              value={vincularSearch}
+              onChangeText={setVincularSearch}
+              placeholder="Buscar por folio, cliente, OC o descripción..."
+              placeholderTextColor={themeColors.textSecondary}
+              style={{
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                borderRadius: 8,
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                color: themeColors.text,
+                backgroundColor: themeColors.background,
+                marginBottom: 12,
+                fontSize: 13,
+              }}
+            />
+
+            {backendSinConexion && (
+              <View style={{ padding: 10, borderRadius: 8, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fca5a5', marginBottom: 10 }}>
+                <Text style={{ fontSize: 12, color: '#b91c1c', fontWeight: '600' }}>
+                  No se pudo conectar con el servidor backend para consultar ventas pendientes. Verifica que el backend esté activo.
+                </Text>
+              </View>
+            )}
+
+            <ScrollView style={{ maxHeight: 340 }}>
+              {isLoadingVentasSinFactura ? (
+                <ActivityIndicator size="small" color="#0284c7" style={{ marginVertical: 20 }} />
+              ) : (
+                ventasSinFactura
+                  .filter((v) => {
+                    const q = vincularSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      String(v.folio || '').toLowerCase().includes(q) ||
+                      String(v.cliente || '').toLowerCase().includes(q) ||
+                      String(v.orden_compra || '').toLowerCase().includes(q) ||
+                      String(v.descripcion || '').toLowerCase().includes(q)
+                    );
+                  })
+                  .map((v) => (
+                    <TouchableOpacity
+                      key={v.id}
+                      onPress={() => {
+                        if (vincularTargetFacturaId) {
+                          handleVincularVentaAFacturaExistente(vincularTargetFacturaId, v);
+                        } else if (v.borrador_id) {
+                          setIsVincularVentaModalOpen(false);
+                          handleModificarBorrador({ id: v.borrador_id } as any);
+                        } else {
+                          handleAplicarVentaAFormulario(v);
+                        }
+                      }}
+                      style={{
+                        padding: 12,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: v.borrador_id && !vincularTargetFacturaId ? '#f59e0b' : themeColors.border,
+                        backgroundColor: themeColors.background,
+                        marginBottom: 8,
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <Text style={{ fontWeight: 'bold', fontSize: 13, color: '#0284c7' }}>
+                            {v.folio || `Venta #${String(v.id).slice(0, 6)}`}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                            {v.fecha || ''}
+                          </Text>
+                          {!!v.borrador_id && !vincularTargetFacturaId && (
+                            <View style={{ backgroundColor: '#fef3c7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#b45309' }}>
+                                Borrador {v.borrador_folio || ''}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={{ fontWeight: '600', fontSize: 13, color: themeColors.text, marginTop: 2 }}>
+                          {v.cliente || 'Sin cliente'}
+                        </Text>
+                        {!!v.descripcion && (
+                          <Text numberOfLines={1} style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                            {v.descripcion}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={{ fontWeight: 'bold', fontSize: 13, color: themeColors.text }}>
+                          ${Number(v.precio_total_facturado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: v.borrador_id && !vincularTargetFacturaId ? '#d97706' : '#0284c7', fontWeight: '600', marginTop: 2 }}>
+                          {v.borrador_id && !vincularTargetFacturaId ? 'Abrir Borrador →' : 'Seleccionar →'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+              )}
+
+              {!isLoadingVentasSinFactura && ventasSinFactura.length === 0 && (
+                <Text style={{ textAlign: 'center', color: themeColors.textSecondary, marginVertical: 24, fontSize: 13 }}>
+                  No hay ventas manuales pendientes por facturar.
+                </Text>
+              )}
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 14, gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => { setIsVincularVentaModalOpen(false); setVincularTargetFacturaId(null); }}
+                style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  backgroundColor: themeColors.background,
+                }}
+              >
+                <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 13 }}>
+                  {vincularTargetFacturaId ? 'Cancelar' : 'Facturar sin ligar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={isPagoModalOpen} animationType="slide" transparent onRequestClose={() => setIsPagoModalOpen(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setIsPagoModalOpen(false)}>
           <Pressable onPress={e => e.stopPropagation()} style={[styles.modalContent, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, maxWidth: 850, maxHeight: '90%' }]}>

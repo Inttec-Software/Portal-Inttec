@@ -80,11 +80,13 @@ export function AdminInventarioModals({ inv }: { inv: AdminInventarioHook }) {
     bulkUpdateCategory,
     setBulkUpdateCategory,
     bulkCategoryId,
+    setBulkCategoryId,
     categorias,
     openBulkCategorySelector,
     bulkUpdateProveedor,
     setBulkUpdateProveedor,
     bulkProveedorId,
+    setBulkProveedorId,
     proveedores,
     openBulkProveedorSelector,
     bulkUpdateStock,
@@ -641,15 +643,29 @@ export function AdminInventarioModals({ inv }: { inv: AdminInventarioHook }) {
                 </TouchableOpacity>
                 {bulkUpdateCategory && (
                   <View style={{ marginTop: Spacing.one }}>
-                    <TouchableOpacity
-                      style={[styles.dropdownTrigger, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
-                      onPress={openBulkCategorySelector}
-                    >
-                      <Text style={{ color: bulkCategoryId ? themeColors.text : themeColors.textSecondary }}>
-                        {categorias.find(c => c.id === bulkCategoryId)?.nombre || 'Selecciona la categoría'}
-                      </Text>
-                      <Ionicons name="chevron-down" size={18} color={themeColors.text} />
-                    </TouchableOpacity>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 4 }}>
+                      {categorias.map(cat => {
+                        const isSelected = bulkCategoryId === cat.id;
+                        return (
+                          <TouchableOpacity
+                            key={cat.id}
+                            style={{
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              backgroundColor: isSelected ? themeColors.primary : themeColors.background,
+                              borderColor: isSelected ? themeColors.primary : themeColors.border
+                            }}
+                            onPress={() => setBulkCategoryId(cat.id)}
+                          >
+                            <Text style={{ fontSize: 13, fontWeight: isSelected ? '700' : '500', color: isSelected ? '#ffffff' : themeColors.text }}>
+                              {cat.nombre}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
                   </View>
                 )}
               </View>
@@ -670,15 +686,29 @@ export function AdminInventarioModals({ inv }: { inv: AdminInventarioHook }) {
                 </TouchableOpacity>
                 {bulkUpdateProveedor && (
                   <View style={{ marginTop: Spacing.one }}>
-                    <TouchableOpacity
-                      style={[styles.dropdownTrigger, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
-                      onPress={openBulkProveedorSelector}
-                    >
-                      <Text style={{ color: bulkProveedorId ? themeColors.text : themeColors.textSecondary }}>
-                        {proveedores.find(p => p.id === bulkProveedorId)?.nombre || 'Selecciona el proveedor'}
-                      </Text>
-                      <Ionicons name="chevron-down" size={18} color={themeColors.text} />
-                    </TouchableOpacity>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 4 }}>
+                      {proveedores.map(p => {
+                        const isSelected = bulkProveedorId === p.id;
+                        return (
+                          <TouchableOpacity
+                            key={p.id}
+                            style={{
+                              paddingHorizontal: 12,
+                              paddingVertical: 8,
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              backgroundColor: isSelected ? themeColors.primary : themeColors.background,
+                              borderColor: isSelected ? themeColors.primary : themeColors.border
+                            }}
+                            onPress={() => setBulkProveedorId(p.id)}
+                          >
+                            <Text style={{ fontSize: 13, fontWeight: isSelected ? '700' : '500', color: isSelected ? '#ffffff' : themeColors.text }}>
+                              {p.nombre}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
                   </View>
                 )}
               </View>

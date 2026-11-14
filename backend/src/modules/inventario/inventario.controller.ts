@@ -797,7 +797,7 @@ export const bulkDeleteProductos = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Se requiere un arreglo de IDs de productos.' });
     }
 
-    await pool.query(`UPDATE productos SET activo = false WHERE id = ANY($1::int[])`, [ids]);
+    await pool.query(`UPDATE productos SET activo = false WHERE id = ANY($1::uuid[])`, [ids]);
     return res.json({ success: true, count: ids.length });
   } catch (error: any) {
     console.error('Error in bulkDeleteProductos:', error);
@@ -850,7 +850,7 @@ export const bulkUpdateProductos = async (req: Request, res: Response) => {
     }
     values.push(ids);
 
-    await pool.query(`UPDATE productos SET ${setClauses.join(', ')} WHERE id = ANY($${i}::int[])`, values);
+    await pool.query(`UPDATE productos SET ${setClauses.join(', ')} WHERE id = ANY($${i}::uuid[])`, values);
     
     return res.json({ success: true, count: ids.length });
   } catch (error: any) {

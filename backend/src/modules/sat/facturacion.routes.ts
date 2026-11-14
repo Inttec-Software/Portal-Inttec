@@ -2662,5 +2662,338 @@ router.post('/cancelar-pago', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/sat/ventas-sin-factura
+ * Lista ventas manuales que aún no tienen factura timbrada vinculada.
+ */
+router.get('/ventas-sin-factura', async (req: Request, res: Response) => {
+  try {
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+
+    const { data: ventasData, error: ventasErr } = await supabaseClient
+      .from('ventas')
+      .select('id, folio, fecha, cliente, descripcion, orden_compra, factura_referencia, precio_total_facturado, agregar_iva, total_pagado, saldo_pendiente, estado_pago, sucursal, cfdi_uuid, cfdi_estado, created_at')
+      .is('cfdi_uuid', null)
+      .or('cfdi_estado.is.null,cfdi_estado.neq.TIMBRADA')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (ventasErr) throw ventasErr;
+
+    let ventasList = ventasData || [];
+    if (q) {
+      ventasList = ventasList.filter((v: any) =>
+        String(v.folio || '').toLowerCase().includes(q) ||
+        String(v.cliente || '').toLowerCase().includes(q) ||
+        String(v.orden_compra || '').toLowerCase().includes(q) ||
+        String(v.descripcion || '').toLowerCase().includes(q)
+      );
+    }
+
+    const ventaIds = ventasList.map((v: any) => v.id).filter(Boolean);
+    let partidasByVenta: Record<string, any[]> = {};
+    let borradorByVenta: Record<string, any> = {};
+
+    if (ventaIds.length > 0) {
+      const [{ data: partidasData, error: partErr }, { data: borradoresData, error: borrErr }] = await Promise.all([
+        supabaseClient
+          .from('ventas_partidas')
+          .select('id, venta_id, descripcion, cantidad, unidad, precio_unitario_venta, precio_total_venta')
+          .in('venta_id', ventaIds),
+        supabaseClient
+          .from('facturas_emitidas')
+          .select('id, serie, folio, venta_id, cfdi_estado')
+          .in('venta_id', ventaIds)
+          .eq('cfdi_estado', 'BORRADOR'),
+      ]);
+
+      if (!partErr && partidasData) {
+        for (const p of partidasData) {
+          const key = String(p.venta_id);
+          if (!partidasByVenta[key]) partidasByVenta[key] = [];
+          partidasByVenta[key].push(p);
+        }
+      }
+
+      if (!borrErr && borradoresData) {
+        for (const b of borradoresData) {
+          const key = String(b.venta_id);
+          if (!borradorByVenta[key]) {
+            borradorByVenta[key] = {
+              id: b.id,
+              folio: `${b.serie || ''}${b.folio || ''}`.trim() || `#${b.id}`,
+            };
+          }
+        }
+      }
+    }
+
+    const enriched = ventasList.map((v: any) => {
+      const borr = borradorByVenta[String(v.id)] || null;
+      return {
+        ...v,
+        partidas: partidasByVenta[String(v.id)] || [],
+        borrador_id: borr ? borr.id : null,
+        borrador_folio: borr ? borr.folio : null,
+      };
+    });
+
+    return res.json({ success: true, ventas: enriched });
+  } catch (err: any) {
+    console.error('Error listando ventas sin factura:', err);
+    return res.status(500).json({ error: err.message || 'Error al obtener ventas sin factura' });
+  }
+});
+
+/**
+ * POST /api/sat/crear-venta-desde-factura
+ * Crea una venta manual (y sus partidas) a partir de una factura independiente ("a capella")
+ * y las vincula bidireccionalmente (facturas_emitidas.venta_id <-> ventas.cfdi_*).
+ */
+router.post('/crear-venta-desde-factura', async (req: Request, res: Response) => {
+  try {
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
+
+    const { factura_id, sucursal, marcar_pagada } = req.body || {};
+    if (!factura_id) {
+      return res.status(400).json({ error: 'factura_id es requerido' });
+    }
+
+    const { data: factura, error: factErr } = await supabaseClient
+      .from('facturas_emitidas')
+      .select('*')
+      .eq('id', factura_id)
+      .maybeSingle();
+
+    if (factErr) throw factErr;
+    if (!factura) {
+      return res.status(404).json({ error: 'Factura no encontrada' });
+    }
+
+    if (factura.venta_id) {
+      return res.status(409).json({
+        error: 'Esta factura ya está vinculada a una venta existente',
+        venta_id: factura.venta_id,
+      });
+    }
+
+    const { data: partidasFact, error: partErr } = await supabaseClient
+      .from('facturas_emitidas_partidas')
+      .select('*')
+      .eq('factura_id', factura.id);
+
+    if (partErr) throw partErr;
+
+    const rawPartidas = (partidasFact && partidasFact.length > 0)
+      ? partidasFact
+      : (Array.isArray(factura.notas?.partidas) ? factura.notas.partidas : []);
+
+    // Calcular folio consecutivo A#### igual que createVenta
+    const { data: foliosRes } = await supabaseClient
+      .from('ventas')
+      .select('folio')
+      .ilike('folio', 'A%');
+
+    let maxNum = 3999;
+    if (foliosRes && foliosRes.length > 0) {
+      for (const item of foliosRes) {
+        if (item.folio) {
+          const num = parseInt(String(item.folio).substring(1), 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        }
+      }
+    }
+    const nextFolio = `A${maxNum + 1}`;
+
+    const totalFactura = Number(factura.total) || 0;
+    const isPueOrPaid = typeof marcar_pagada === 'boolean'
+      ? marcar_pagada
+      : (factura.estado_pago === 'PAGADO' || factura.metodo_pago === 'PUE');
+    const totalPagado = isPueOrPaid ? totalFactura : (Number(factura.total_pagado) || 0);
+    const saldoPendiente = Math.max(0, Number((totalFactura - totalPagado).toFixed(2)));
+    const estadoPago = saldoPendiente <= 0.01 ? 'PAGADO' : (totalPagado > 0 ? 'PARCIAL' : 'PENDIENTE DE PAGO');
+
+    const resumenDescripcion = rawPartidas
+      .map((p: any) => p.descripcion)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(' | ');
+
+    const userId = (req as any).user?.id;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const registradoPor = typeof userId === 'string' && uuidRegex.test(userId) ? userId : null;
+
+    const ventaInsert = {
+      folio: nextFolio,
+      fecha: factura.fecha_emision
+        ? String(factura.fecha_emision).split('T')[0]
+        : new Date().toISOString().split('T')[0],
+      cliente: factura.cliente_nombre || 'PUBLICO EN GENERAL',
+      descripcion: resumenDescripcion || `Venta generada desde factura ${factura.serie || ''}${factura.folio || ''}`,
+      orden_compra: factura.orden_compra || null,
+      factura_referencia: `${factura.serie || ''}${factura.folio || ''}` || null,
+      precio_total_facturado: totalFactura,
+      agregar_iva: Number(factura.iva || 0) > 0,
+      total_pagado: totalPagado,
+      saldo_pendiente: saldoPendiente,
+      estado_pago: estadoPago,
+      cfdi_uuid: factura.cfdi_uuid || null,
+      cfdi_estado: factura.cfdi_estado || 'PENDIENTE',
+      cfdi_xml_url: factura.cfdi_xml_url || null,
+      cfdi_pdf_url: factura.cfdi_pdf_url || null,
+      cfdi_serie: factura.serie || null,
+      cfdi_folio: factura.folio || null,
+      sucursal: sucursal || 'Matriz',
+      registrado_por: registradoPor,
+    };
+
+    const { data: nuevaVenta, error: insertVentaErr } = await supabaseClient
+      .from('ventas')
+      .insert(ventaInsert)
+      .select()
+      .single();
+
+    if (insertVentaErr) throw insertVentaErr;
+
+    if (rawPartidas.length > 0) {
+      const partidasToInsert = rawPartidas.map((p: any) => {
+        const cant = Number(p.cantidad) || 1;
+        const pu = Number(p.precio_unitario) || 0;
+        const imp = Number(p.importe) || Number((cant * pu).toFixed(2));
+        return {
+          venta_id: nuevaVenta.id,
+          descripcion: p.descripcion || 'Concepto facturado',
+          cantidad: cant,
+          unidad: p.unidad || 'PZA',
+          precio_unitario_venta: pu,
+          precio_total_venta: imp,
+          costo_unitario_proveedor: 0,
+          costo_total_proveedor: 0,
+        };
+      });
+
+      const { error: insertPartErr } = await supabaseClient
+        .from('ventas_partidas')
+        .insert(partidasToInsert);
+
+      if (insertPartErr) {
+        console.warn('Aviso insertando ventas_partidas desde factura:', insertPartErr);
+      }
+    }
+
+    const { error: linkErr } = await supabaseClient
+      .from('facturas_emitidas')
+      .update({ venta_id: nuevaVenta.id, updated_at: new Date().toISOString() })
+      .eq('id', factura.id);
+
+    if (linkErr) throw linkErr;
+
+    invalidateCache('facturas');
+    invalidateCache('ventas');
+
+    return res.json({
+      success: true,
+      venta: nuevaVenta,
+      factura_id: factura.id,
+      folio_venta: nuevaVenta.folio,
+    });
+  } catch (err: any) {
+    console.error('Error creando venta desde factura:', err);
+    return res.status(500).json({ error: err.message || 'Error al crear venta desde factura' });
+  }
+});
+
+/**
+ * POST /api/sat/vincular-venta
+ * Vincula una factura existente (sin venta_id) con una venta manual existente (sin cfdi_uuid).
+ */
+router.post('/vincular-venta', async (req: Request, res: Response) => {
+  try {
+    const company = (req as any).tenant?.company || 'inttec';
+    const env = (req as any).tenant?.env || 'cloud';
+    const supabaseClient = getSupabaseClient(company, env);
+
+    const { factura_id, venta_id, sincronizar_monto } = req.body || {};
+    if (!factura_id || !venta_id) {
+      return res.status(400).json({ error: 'factura_id y venta_id son requeridos' });
+    }
+
+    const [{ data: factura, error: factErr }, { data: venta, error: ventaErr }] = await Promise.all([
+      supabaseClient.from('facturas_emitidas').select('*').eq('id', factura_id).maybeSingle(),
+      supabaseClient.from('ventas').select('*').eq('id', venta_id).maybeSingle(),
+    ]);
+
+    if (factErr) throw factErr;
+    if (ventaErr) throw ventaErr;
+    if (!factura) return res.status(404).json({ error: 'Factura no encontrada' });
+    if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
+
+    if (factura.venta_id && String(factura.venta_id) === String(venta.id)) {
+      return res.json({ success: true, already_linked: true, factura_id: factura.id, venta_id: venta.id, folio_venta: venta.folio });
+    }
+
+    if (factura.venta_id && String(factura.venta_id) !== String(venta.id)) {
+      return res.status(409).json({ error: 'La factura ya está vinculada a otra venta' });
+    }
+
+    if (venta.cfdi_uuid && factura.cfdi_uuid && String(venta.cfdi_uuid) !== String(factura.cfdi_uuid)) {
+      return res.status(409).json({ error: 'La venta ya está vinculada a otro CFDI timbrado' });
+    }
+
+    const { error: updFactErr } = await supabaseClient
+      .from('facturas_emitidas')
+      .update({ venta_id: venta.id, updated_at: new Date().toISOString() })
+      .eq('id', factura.id);
+
+    if (updFactErr) throw updFactErr;
+
+    const ventaUpdate: Record<string, any> = {
+      factura_referencia: `${factura.serie || ''}${factura.folio || ''}` || venta.factura_referencia || null,
+      cfdi_serie: factura.serie || null,
+      cfdi_folio: factura.folio || null,
+      cfdi_estado: factura.cfdi_estado || venta.cfdi_estado || 'PENDIENTE',
+    };
+    if (factura.cfdi_uuid) ventaUpdate.cfdi_uuid = factura.cfdi_uuid;
+    if (factura.cfdi_xml_url) ventaUpdate.cfdi_xml_url = factura.cfdi_xml_url;
+    if (factura.cfdi_pdf_url) ventaUpdate.cfdi_pdf_url = factura.cfdi_pdf_url;
+
+    if (sincronizar_monto === true && Number(factura.total) > 0) {
+      const nuevoTotal = Number(factura.total);
+      const pagadoActual = Number(venta.total_pagado) || 0;
+      const nuevoSaldo = Math.max(0, Number((nuevoTotal - pagadoActual).toFixed(2)));
+      ventaUpdate.precio_total_facturado = nuevoTotal;
+      ventaUpdate.saldo_pendiente = nuevoSaldo;
+      ventaUpdate.estado_pago = nuevoSaldo <= 0.01 ? 'PAGADO' : (pagadoActual > 0 ? 'PARCIAL' : 'PENDIENTE DE PAGO');
+    }
+
+    const { error: updVentaErr } = await supabaseClient
+      .from('ventas')
+      .update(ventaUpdate)
+      .eq('id', venta.id);
+
+    if (updVentaErr) throw updVentaErr;
+
+    invalidateCache('facturas');
+    invalidateCache('ventas');
+
+    return res.json({
+      success: true,
+      factura_id: factura.id,
+      venta_id: venta.id,
+      folio_venta: venta.folio,
+    });
+  } catch (err: any) {
+    console.error('Error vinculando venta con factura:', err);
+    return res.status(500).json({ error: err.message || 'Error al vincular venta con factura' });
+  }
+});
+
 export default router;
 
