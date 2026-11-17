@@ -120,7 +120,17 @@ const FACTURA_REL_SUBQUERIES_SQL = `
   (SELECT row_to_json(fr_obj) FROM (
     SELECT f.id, f.uuid, f.rfc_emisor, f.nombre_emisor, f.rfc_receptor, f.fecha_emision,
            f.subtotal, f.descuento, f.iva, f.retencion_isr, f.retencion_iva, f.total,
-           f.moneda, f.tipo_comprobante, f.estado_sat, f.xml_url, f.pdf_url, f.conceptos_json
+           f.moneda, f.tipo_comprobante, f.estado_sat, f.xml_url, f.pdf_url, f.conceptos_json,
+           (
+             SELECT COALESCE(SUM(COALESCE(g2.monto, 0) - COALESCE(g2.monto_propina, 0)), 0)
+             FROM gastos g2
+             WHERE g2.factura_recibida_id = f.id
+           ) as total_consumido,
+           (
+             SELECT COALESCE(COUNT(g2.id), 0)
+             FROM gastos g2
+             WHERE g2.factura_recibida_id = f.id
+           ) as total_gastos_vinculados
     FROM facturas_recibidas f WHERE f.id = g.factura_recibida_id
   ) fr_obj) as factura_recibida_rel
 `;
@@ -147,6 +157,8 @@ const formatGasto = (g: any) => {
 
   return {
     ...g,
+    monto_propina: Number(g.monto_propina || 0),
+    es_factura_compartida: Boolean(g.es_factura_compartida),
     cat, subcat, prov, cli, suc, // Props legadas
     categoria_nombre: cat,
     subcategoria_nombre: subcat,
@@ -207,7 +219,19 @@ export const getAdminReportes = async (req: Request, res: Response) => {
           amountMatchSql = ` OR g.monto::text LIKE $${baseParams.length}`;
         }
 
+        // Búsqueda flexible de UUID (ID del gasto o UUID de factura SAT, con o sin guiones)
+        const cleanSearch = search.replace(/[^a-zA-Z0-9]/g, '');
+        let cleanMatchSql = '';
+        let cleanParamIdx: number | null = null;
+        if (cleanSearch.length >= 4) {
+          baseParams.push(`%${cleanSearch}%`);
+          cleanParamIdx = baseParams.length;
+          cleanMatchSql = ` OR replace(g.id::text, '-', '') ILIKE $${cleanParamIdx}`;
+        }
+
         baseConditions.push(`(
+          g.id::text ILIKE $${pIdx}
+          ${cleanMatchSql} OR
           g.empleado_nombre ILIKE $${pIdx} OR
           g.detalle_servicio_proyecto ILIKE $${pIdx} OR
           g.motivo_sin_factura ILIKE $${pIdx} OR
@@ -219,6 +243,16 @@ export const getAdminReportes = async (req: Request, res: Response) => {
             SELECT 1 FROM subcategorias sub 
             JOIN categorias cat ON cat.id = sub.categoria_id 
             WHERE sub.id = g.subcategoria_id AND cat.nombre ILIKE $${pIdx}
+          ) OR
+          EXISTS (
+            SELECT 1 FROM facturas_recibidas fr 
+            WHERE (fr.id = g.factura_recibida_id OR fr.id = g.factura_sugerida_id) 
+            AND (
+              fr.uuid ILIKE $${pIdx}
+              ${cleanParamIdx ? `OR replace(fr.uuid, '-', '') ILIKE $${cleanParamIdx}` : ''}
+              OR fr.rfc_emisor ILIKE $${pIdx}
+              OR fr.nombre_emisor ILIKE $${pIdx}
+            )
           )
           ${amountMatchSql}
         )`);
@@ -418,7 +452,8 @@ export const getEmpleadoGastos = async (req: Request, res: Response) => {
           ) s_obj) as subcategoria_rel,
           (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
           (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
+          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
+          ${FACTURA_REL_SUBQUERIES_SQL}
         FROM gastos g
         WHERE g.empleado_id = $1
         ORDER BY g.created_at DESC
@@ -738,7 +773,8 @@ export const getExportData = async (req: Request, res: Response) => {
           ) s_obj) as subcategoria_rel,
           (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
           (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
+          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
+          ${FACTURA_REL_SUBQUERIES_SQL}
         FROM gastos g
       `;
       const params: any[] = [];
@@ -1061,13 +1097,14 @@ export const getFormCatalogs = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    const [catRes, subRes, cliRes, usersRes, sucRes, provRes] = await Promise.all([
+    const [catRes, subRes, cliRes, usersRes, sucRes, provRes, vehRes] = await Promise.all([
       pool.query('SELECT * FROM categorias ORDER BY nombre'),
       pool.query('SELECT * FROM subcategorias ORDER BY nombre'),
       pool.query('SELECT * FROM clientes ORDER BY nombre'),
       pool.query('SELECT * FROM usuarios ORDER BY nombre'),
       pool.query('SELECT * FROM sucursales_cliente ORDER BY nombre'),
       pool.query('SELECT * FROM proveedores ORDER BY nombre'),
+      pool.query('SELECT * FROM vehiculos WHERE activo = true ORDER BY marca ASC'),
     ]);
 
     return res.json({
@@ -1077,6 +1114,7 @@ export const getFormCatalogs = async (req: Request, res: Response) => {
       usuarios: usersRes.rows || [],
       sucursales: sucRes.rows || [],
       proveedores: provRes.rows || [],
+      vehiculos: vehRes.rows || [],
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -1168,10 +1206,17 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-
-
     const { id } = req.params;
-    const { factura_id, approve_directly, factura_url: customFacturaUrl, actor_id } = req.body;
+    const { 
+      factura_id, 
+      approve_directly, 
+      factura_url: customFacturaUrl, 
+      actor_id,
+      monto_propina = 0,
+      es_compartida = false,
+      motivo_diferencia = null,
+      detalle_diferencia = null
+    } = req.body;
 
     const gastoRes = await pool.query('SELECT * FROM gastos WHERE id = $1', [id]);
     const gasto = gastoRes.rows[0];
@@ -1188,22 +1233,88 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Factura recibida no encontrada' });
     }
 
-    // Construir URL de factura a guardar en el gasto (conservando las previas si había)
-    const urlToAttach = customFacturaUrl || factura.pdf_url || factura.xml_url || `cfdi://${factura.uuid}`;
-    let existingUrls: string[] = [];
-    if (gasto.factura_url) {
-      try {
-        const parsed = JSON.parse(gasto.factura_url);
-        if (Array.isArray(parsed)) existingUrls = parsed;
-        else existingUrls = [gasto.factura_url];
-      } catch {
-        existingUrls = [gasto.factura_url];
+    // Validar si hay otros gastos vinculados a esta misma factura
+    const otrosGastosRes = await pool.query(
+      'SELECT id, monto, COALESCE(monto_propina, 0) as monto_propina, COALESCE(es_factura_compartida, false) as es_factura_compartida FROM gastos WHERE factura_recibida_id = $1 AND id != $2',
+      [factura.id, id]
+    );
+    const otrosGastos = otrosGastosRes.rows;
+
+    const gastoMonto = Number(gasto.monto || 0);
+    const facTotal = Number(factura.total || 0);
+    const propinaNum = Math.max(0, Number(monto_propina) || 0);
+    const consumoActual = gastoMonto - propinaNum;
+
+    if (otrosGastos.length > 0) {
+      // Si la factura ya fue vinculada a otro gasto, debe estar registrada como factura compartida
+      const esPreviamenteCompartida = otrosGastos.some(g => g.es_factura_compartida === true);
+      if (!esPreviamenteCompartida && !es_compartida) {
+        return res.status(400).json({
+          error: `Esta factura ya se encuentra vinculada exclusivamente a otro gasto (#${otrosGastos[0].id}) y no está registrada como Factura Compartida.`,
+        });
+      }
+
+      // Validar saldo disponible de la factura compartida
+      const consumidoOtros = otrosGastos.reduce(
+        (sum, g) => sum + (Number(g.monto || 0) - Number(g.monto_propina || 0)),
+        0
+      );
+      const saldoDisponible = Math.max(0, facTotal - consumidoOtros);
+
+      if (consumoActual > saldoDisponible + 0.05) {
+        return res.status(400).json({
+          error: `Saldo insuficiente en la factura compartida. Saldo disponible: $${saldoDisponible.toFixed(2)}, pero este gasto requiere $${consumoActual.toFixed(2)}.`,
+        });
+      }
+    } else {
+      // Primera vinculación de esta factura
+      if (facTotal > gastoMonto + 0.05 && !es_compartida) {
+        return res.status(400).json({
+          error: `El total de la factura ($${facTotal.toFixed(2)}) es mayor al monto del gasto ($${gastoMonto.toFixed(2)}). Para usar una factura mayor debe marcarse como Factura Compartida.`,
+        });
+      }
+
+      if (gastoMonto > facTotal + 0.05) {
+        const diff = gastoMonto - facTotal;
+        const motivoValido = Boolean(motivo_diferencia && motivo_diferencia !== 'NINGUNO');
+        if (!motivoValido && Math.abs(diff - propinaNum) > 0.05) {
+          return res.status(400).json({
+            error: `El monto del gasto ($${gastoMonto.toFixed(2)}) es mayor al CFDI ($${facTotal.toFixed(2)}). Debes justificar la diferencia de $${diff.toFixed(2)} (ej. Propina o Comisión de plataforma).`,
+          });
+        }
       }
     }
-    if (urlToAttach && !existingUrls.includes(urlToAttach)) {
-      existingUrls.push(urlToAttach);
+
+    // Determinar propina final y motivo_sin_factura
+    let newMotivoSinFactura: string | null = null;
+    let propinaFinal = 0;
+    if (gastoMonto > facTotal + 0.05) {
+      const diff = gastoMonto - facTotal;
+      if (motivo_diferencia === 'COMISION_PLATAFORMA') {
+        newMotivoSinFactura = `COMISION_PLATAFORMA: $${diff.toFixed(2)}${detalle_diferencia ? ` - ${detalle_diferencia}` : ''}`;
+        propinaFinal = 0;
+      } else if (motivo_diferencia === 'DIFERENCIA_AUTORIZADA') {
+        newMotivoSinFactura = `DIFERENCIA_AUTORIZADA: $${diff.toFixed(2)}${detalle_diferencia ? ` - ${detalle_diferencia}` : ''}`;
+        propinaFinal = 0;
+      } else {
+        // PROPINA
+        propinaFinal = propinaNum > 0 ? propinaNum : diff;
+        newMotivoSinFactura = null;
+      }
     }
-    const newFacturaUrlStr = existingUrls.length === 1 ? existingUrls[0] : JSON.stringify(existingUrls);
+
+    const esCompartidaEfectiva = Boolean(es_compartida || otrosGastos.length > 0);
+
+    // Si es compartida, actualizar la bandera en todos los gastos asociados
+    if (esCompartidaEfectiva) {
+      await pool.query(
+        'UPDATE gastos SET es_factura_compartida = TRUE WHERE factura_recibida_id = $1',
+        [factura.id]
+      );
+    }
+
+    // Conservar la factura_url que el usuario ya tenía (archivos subidos). No concatenar cfdi:// ni volverlo array JSON.
+    const newFacturaUrlStr = gasto.factura_url || factura.pdf_url || null;
 
     // Determinar si debe aprobarse directamente (por defecto sí cuando devuelto_por_factura es true o approve_directly = true)
     const shouldApproveDirectly = approve_directly !== undefined ? Boolean(approve_directly) : Boolean(gasto.devuelto_por_factura);
@@ -1214,15 +1325,26 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
     await pool.query(
       `UPDATE gastos
        SET facturado = TRUE,
-           motivo_sin_factura = NULL,
-           factura_url = $1,
-           factura_recibida_id = $2,
+           motivo_sin_factura = $1,
+           factura_url = $2,
+           factura_recibida_id = $3,
            factura_sugerida_id = NULL,
-           devuelto_por_factura = CASE WHEN $3 = 'APPROVED' THEN FALSE ELSE devuelto_por_factura END,
-           status = $3,
-           approved_at = $4
-       WHERE id = $5`,
-      [newFacturaUrlStr, factura.id, newStatus, newApprovedAt, id]
+           monto_propina = $4,
+           es_factura_compartida = $5,
+           devuelto_por_factura = CASE WHEN $6 = 'APPROVED' THEN FALSE ELSE devuelto_por_factura END,
+           status = $6,
+           approved_at = $7
+       WHERE id = $8`,
+      [
+        newMotivoSinFactura,
+        newFacturaUrlStr, 
+        factura.id, 
+        propinaFinal, 
+        esCompartidaEfectiva, 
+        newStatus, 
+        newApprovedAt, 
+        id
+      ]
     );
 
     if (gasto.venta_id) {
@@ -1235,13 +1357,27 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
 
     try {
       const actor = req.user?.id || actor_id;
+      let diffAudit = '';
+      if (gastoMonto > facTotal + 0.05) {
+        const diff = gastoMonto - facTotal;
+        if (motivo_diferencia === 'COMISION_PLATAFORMA') {
+          diffAudit = ` (Comisión de plataforma no comprobable: $${diff.toFixed(2)})`;
+        } else if (motivo_diferencia === 'DIFERENCIA_AUTORIZADA') {
+          diffAudit = ` (Diferencia autorizada: $${diff.toFixed(2)})`;
+        } else {
+          diffAudit = ` (Propina: $${propinaFinal.toFixed(2)})`;
+        }
+      }
+      const compartidaText = esCompartidaEfectiva ? ' [Factura Compartida]' : '';
+      const auditDetails = `Factura recibida SAT (${factura.uuid} - ${factura.nombre_emisor || factura.rfc_emisor}) vinculada al gasto por $${gastoMonto.toFixed(2)}${diffAudit}.${compartidaText}${shouldApproveDirectly ? ' Enviado directamente a Historial (Aprobado).' : ''}`;
+
       await pool.query(
         `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)`,
         [
           shouldApproveDirectly ? 'APPROVE' : 'UPDATE',
           actor,
           id,
-          `Factura recibida SAT (${factura.uuid} - ${factura.nombre_emisor || factura.rfc_emisor}) vinculada al gasto por $${Number(gasto.monto || 0).toFixed(2)}.${shouldApproveDirectly ? ' Enviado directamente a Historial (Aprobado).' : ''}`
+          auditDetails
         ]
       );
     } catch (_) {}
@@ -1268,6 +1404,96 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
       approvedDirectly: shouldApproveDirectly,
     });
   } catch (error: any) {
+    console.error('[attachSatFacturaToGasto] Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const detachSatFacturaFromGasto = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const pool = getDbPool(company, env);
+
+    const { id } = req.params;
+    const { actor_id } = req.body;
+
+    const gastoRes = await pool.query('SELECT * FROM gastos WHERE id = $1', [id]);
+    const gasto = gastoRes.rows[0];
+    if (!gasto) return res.status(404).json({ error: 'Gasto no encontrado' });
+
+    const oldFacturaId = gasto.factura_recibida_id;
+    if (!oldFacturaId) {
+      return res.status(400).json({ error: 'Este gasto no tiene ninguna factura SAT vinculada' });
+    }
+
+    // Desvincular factura en el gasto
+    await pool.query(
+      `UPDATE gastos
+       SET factura_recibida_id = NULL,
+           monto_propina = 0,
+           es_factura_compartida = FALSE
+       WHERE id = $1`,
+      [id]
+    );
+
+    // Revisar si la factura sigue compartida con otros gastos
+    const restantesRes = await pool.query(
+      'SELECT id FROM gastos WHERE factura_recibida_id = $1',
+      [oldFacturaId]
+    );
+    if (restantesRes.rows.length <= 1) {
+      // Si sólo queda 1 o ninguno, ya no es factura compartida
+      await pool.query(
+        'UPDATE gastos SET es_factura_compartida = FALSE WHERE factura_recibida_id = $1',
+        [oldFacturaId]
+      );
+    }
+
+    if (gasto.venta_id) {
+      try {
+        await recalculateVentaTotalsInternal(pool, gasto.venta_id);
+      } catch (e: any) {
+        console.warn('[detachSatFacturaFromGasto] Error recalculando venta:', e.message);
+      }
+    }
+
+    try {
+      const actor = req.user?.id || actor_id;
+      await pool.query(
+        `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)`,
+        [
+          'UPDATE',
+          actor,
+          id,
+          `Factura SAT recibida desvinculada del gasto por administración.`
+        ]
+      );
+    } catch (_) {}
+
+    const updatedRes = await pool.query(`
+      SELECT g.*,
+        (SELECT row_to_json(s_obj) FROM (
+          SELECT s.id, s.nombre, s.categoria_id,
+                 (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
+          FROM subcategorias s WHERE s.id = g.subcategoria_id
+        ) s_obj) as subcategoria_rel,
+        (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
+        (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
+        (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
+        (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel,
+        ${FACTURA_REL_SUBQUERIES_SQL}
+      FROM gastos g
+      WHERE g.id = $1
+    `, [id]);
+
+    return res.json({
+      success: true,
+      gasto: updatedRes.rows[0] ? formatGasto(updatedRes.rows[0]) : null,
+    });
+  } catch (error: any) {
+    console.error('[detachSatFacturaFromGasto] Error:', error);
     return res.status(500).json({ error: error.message });
   }
 };

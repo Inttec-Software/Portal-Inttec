@@ -37,6 +37,8 @@ export interface ColaboradorItem {
 
 export interface EvidenciaItem {
   id: string;
+  empleado_id?: string;
+  empleado_nombre?: string | null;
   cliente: string;
   descripcion_trabajo: any;
   materiales_usados?: string | null;

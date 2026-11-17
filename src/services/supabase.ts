@@ -131,6 +131,8 @@ export interface Gasto {
   conciliacion_activa?: boolean | null;
   factura_recibida_id?: string | null;
   factura_sugerida_id?: string | null;
+  monto_propina?: number | null;
+  es_factura_compartida?: boolean | null;
   devuelto_por_factura?: boolean | null;
   facturas_descartadas_ids?: string[] | null;
   factura_sugerida_rel?: {
@@ -152,6 +154,8 @@ export interface Gasto {
     xml_url?: string | null;
     pdf_url?: string | null;
     conceptos_json?: any;
+    total_consumido?: number;
+    total_gastos_vinculados?: number;
   } | null;
   factura_recibida_rel?: {
     id: string;
@@ -172,6 +176,8 @@ export interface Gasto {
     xml_url?: string | null;
     pdf_url?: string | null;
     conceptos_json?: any;
+    total_consumido?: number;
+    total_gastos_vinculados?: number;
   } | null;
 }
 
@@ -211,7 +217,27 @@ export const GastoHelper = {
   },
   getFacturaUrls: (g: Gasto | null | undefined): string[] => {
     if (!g || !g.factura_url) return [];
-    return g.factura_url.split(',').map(u => u.trim()).filter(Boolean);
+    const raw = String(g.factura_url).trim();
+    if (!raw) return [];
+
+    // Si viene serializado como JSON array: ["url1", "url2"]
+    if (raw.startsWith('[') && raw.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed
+            .map((item: any) => typeof item === 'string' ? item : item?.url || item?.uri)
+            .filter((u: any) => typeof u === 'string' && u.trim().length > 0 && !u.startsWith('cfdi://'))
+            .map((u: string) => u.trim().replace(/^[\["\']+|[\]"\']+$/g, '').trim());
+        }
+      } catch {}
+    }
+
+    // Comma-separated o single string, limpiando corchetes y comillas accidentales
+    return raw
+      .split(',')
+      .map(u => u.trim().replace(/^[\["\']+|[\]"\']+$/g, '').trim())
+      .filter(u => u.length > 0 && !u.startsWith('cfdi://'));
   },
   getFotoUrls: (g: Gasto | null | undefined): string[] => {
     if (!g) return [];

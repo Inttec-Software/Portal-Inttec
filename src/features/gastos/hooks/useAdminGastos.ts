@@ -81,6 +81,7 @@ export function useAdminGastos() {
     countConFacturaDetectada?: number;
   } | null>(null);
   const catalogsLoadedRef = React.useRef(false);
+  const handledGastoIdRef = React.useRef<string | null>(null);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
 
   // Buscador y Filtro por Calendario (Día Único o Rango de Fechas)
@@ -469,32 +470,54 @@ export function useAdminGastos() {
 
   // Manejar navegación directa a un gasto específico o búsqueda desde Ventas u otros módulos
   useEffect(() => {
+    const targetTab: 'pendientes' | 'historial' =
+      params.tab === 'pendientes' || params.tab === 'historial'
+        ? (params.tab as 'pendientes' | 'historial')
+        : 'historial';
+
     if (params.search && typeof params.search === 'string') {
       setSearchQuery(params.search);
-      setActiveTab('historial');
+      setActiveTab(targetTab);
     }
+
     if (params.gastoId && typeof params.gastoId === 'string') {
-      setActiveTab('historial');
       const gId = params.gastoId;
-      const found = gastos.find(g => String(g.id) === String(gId));
-      if (found) {
-        setSelectedGasto(found);
-        setReviewModalVisible(true);
-      } else {
-        (async () => {
-          try {
-            const { data } = await supabase.from('gastos').select('*').eq('id', gId).single();
-            if (data) {
-              setSelectedGasto(data);
-              setReviewModalVisible(true);
+      if (handledGastoIdRef.current !== gId) {
+        handledGastoIdRef.current = gId;
+        setActiveTab(targetTab);
+
+        const found = gastos.find(g => String(g.id) === String(gId));
+        if (found) {
+          setSelectedGasto(found);
+          setReviewModalVisible(true);
+        } else {
+          (async () => {
+            try {
+              const headers = await getApiHeaders();
+              const apiUrl = getApiUrl();
+              const res = await fetch(`${apiUrl}/api/reportes/admin/all?search=${encodeURIComponent(gId)}&tab=${targetTab}&limit=5`, { headers });
+              if (res.ok) {
+                const resData = await res.json();
+                const match = resData.gastos?.find((g: any) => String(g.id) === String(gId));
+                if (match) {
+                  setSelectedGasto(match);
+                  setReviewModalVisible(true);
+                  return;
+                }
+              }
+              const { data } = await supabase.from('gastos').select('*').eq('id', gId).single();
+              if (data) {
+                setSelectedGasto(data);
+                setReviewModalVisible(true);
+              }
+            } catch (err) {
+              console.warn('Error loading single gasto for detail:', err);
             }
-          } catch (err) {
-            console.warn('Error loading single gasto for detail:', err);
-          }
-        })();
+          })();
+        }
       }
     }
-  }, [params.search, params.gastoId, gastos]);
+  }, [params.search, params.gastoId, params.tab, gastos]);
 
   const handleLogout = async () => {
     const performLogout = async () => {
@@ -751,7 +774,16 @@ export function useAdminGastos() {
     }
   };
 
-  const handleAttachSatFacturaAndSend = async (factura: any, approveDirectly: boolean) => {
+  const handleAttachSatFacturaAndSend = async (
+    factura: any, 
+    approveDirectly: boolean,
+    extraOptions?: { 
+      monto_propina?: number; 
+      es_compartida?: boolean;
+      motivo_diferencia?: string | null;
+      detalle_diferencia?: string | null;
+    }
+  ) => {
     if (!selectedGasto || !adminUser || !factura) return;
 
     if (approveDirectly) {
@@ -776,6 +808,10 @@ export function useAdminGastos() {
           factura_id: factura.id,
           approve_directly: approveDirectly,
           actor_id: adminUser.id,
+          monto_propina: extraOptions?.monto_propina || 0,
+          es_compartida: extraOptions?.es_compartida || false,
+          motivo_diferencia: extraOptions?.motivo_diferencia || null,
+          detalle_diferencia: extraOptions?.detalle_diferencia || null,
         }),
       });
 
@@ -793,6 +829,8 @@ export function useAdminGastos() {
         factura_sugerida_id: null,
         factura_recibida_rel: factura,
         factura_sugerida_rel: null,
+        monto_propina: extraOptions?.monto_propina || 0,
+        es_factura_compartida: extraOptions?.es_compartida || false,
         devuelto_por_factura: approveDirectly ? false : selectedGasto.devuelto_por_factura,
         status: approveDirectly ? 'APPROVED' : selectedGasto.status,
       };
@@ -820,6 +858,45 @@ export function useAdminGastos() {
       await refreshData(true);
     } catch (err: any) {
       showAlert('Error', err.message || 'No se pudo vincular la factura recibida.');
+    } finally {
+      setIsAttachingSatFactura(false);
+    }
+  };
+
+  const handleDetachSatFactura = async () => {
+    if (!selectedGasto || !adminUser) return;
+    const targetGastoId = selectedGasto.id;
+    setIsAttachingSatFactura(true);
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/reportes/gastos/${selectedGasto.id}/detach-sat-factura`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          actor_id: adminUser.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error al desvincular la factura');
+      }
+
+      const data = await res.json();
+      const updatedGasto: Gasto = data.gasto || {
+        ...selectedGasto,
+        factura_recibida_id: null,
+        factura_recibida_rel: null,
+        monto_propina: 0,
+        es_factura_compartida: false,
+      };
+
+      setSelectedGasto(updatedGasto);
+      setGastos(prev => prev.map(g => g.id === targetGastoId ? updatedGasto : g));
+      showAlert('Factura Desvinculada', 'La factura recibida ha sido desvinculada del gasto.');
+      await refreshData(true);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo desvincular la factura.');
     } finally {
       setIsAttachingSatFactura(false);
     }
@@ -2318,16 +2395,44 @@ export function useAdminGastos() {
         const subCatName = (GastoHelper.getSubcategoria(g) || '').toLowerCase();
         const provName = (GastoHelper.getProveedor(g) || '').toLowerCase();
         const detailStr = (g.detalle_servicio_proyecto || '').toLowerCase();
+        
+        // Búsqueda flexible de ID de Gasto y UUID de Factura SAT (con y sin guiones)
+        const gastoId = (g.id || '').toLowerCase();
+        const uuidRecibida = (g.factura_recibida_rel?.uuid || '').toLowerCase();
+        const uuidSugerida = (g.factura_sugerida_rel?.uuid || '').toLowerCase();
+        const cleanQuery = query.replace(/[^a-z0-9]/g, '');
+        const cleanGastoId = gastoId.replace(/[^a-z0-9]/g, '');
+        const cleanRecibida = uuidRecibida.replace(/[^a-z0-9]/g, '');
+        const cleanSugerida = uuidSugerida.replace(/[^a-z0-9]/g, '');
+
+        const matchesIdOrUuid = gastoId.includes(query) ||
+          uuidRecibida.includes(query) ||
+          uuidSugerida.includes(query) ||
+          (cleanQuery.length >= 4 && (
+            cleanGastoId.includes(cleanQuery) ||
+            cleanRecibida.includes(cleanQuery) || 
+            cleanSugerida.includes(cleanQuery)
+          ));
+
+        const emisorStr = (
+          g.factura_recibida_rel?.nombre_emisor || 
+          g.factura_recibida_rel?.rfc_emisor || 
+          g.factura_sugerida_rel?.nombre_emisor || 
+          g.factura_sugerida_rel?.rfc_emisor || 
+          ''
+        ).toLowerCase();
         const amountQuery = normalizeAmountQuery(searchQuery);
         const amountValue = Number(g.monto) || 0;
 
-        const matchesText = empName.includes(query) ||
+        const matchesText = matchesIdOrUuid ||
+          empName.includes(query) ||
           clientName.includes(query) ||
           branchName.includes(query) ||
           catName.includes(query) ||
           subCatName.includes(query) ||
           provName.includes(query) ||
-          detailStr.includes(query);
+          detailStr.includes(query) ||
+          emisorStr.includes(query);
 
         const digitsQuery = query.replace(/[$,.\s]/g, '');
         const isQueryNumeric = digitsQuery.length > 0 && /^\d+$/.test(digitsQuery);
@@ -2631,6 +2736,7 @@ export function useAdminGastos() {
     handlePreviewSatFactura,
     handleDownloadSatFacturaPdf,
     handleAttachSatFacturaAndSend,
+    handleDetachSatFactura,
     handleDismissSatFactura,
     handleOpenRelinkSaleModal,
     executeRelinkGastoVenta,

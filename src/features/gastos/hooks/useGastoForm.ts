@@ -266,11 +266,15 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
       if (data.proveedores) setProveedores(data.proveedores);
 
       if (mode === 'create') {
-        if (role === 'admin') {
-          const vehList = await VehiculoService.getVehiculos(true);
-          if (vehList) setVehiculos(vehList);
+        if (data?.vehiculos && data.vehiculos.length > 0) {
+          setVehiculos(data.vehiculos);
         } else {
-          if (data.vehiculos) setVehiculos(data.vehiculos);
+          try {
+            const vehList = await VehiculoService.getVehiculos(true);
+            if (vehList) setVehiculos(vehList);
+          } catch (vehErr) {
+            console.warn('Error al obtener vehículos:', vehErr);
+          }
         }
       }
       return data;

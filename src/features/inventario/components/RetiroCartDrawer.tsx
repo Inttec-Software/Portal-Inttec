@@ -552,22 +552,76 @@ export default function RetiroCartDrawer({
                             </View>
                           ) : (
                             <View
-                              style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}
+                              style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}
                             >
-                              <TextInput
+                              <View
                                 style={[
-                                  styles.qtyInput,
+                                  styles.stepperContainer,
                                   {
                                     backgroundColor: themeColors.backgroundElement,
-                                    color: themeColors.text,
                                     borderColor: themeColors.border,
                                   },
                                 ]}
-                                value={item.cantidad.toString()}
-                                keyboardType="decimal-pad"
-                                selectTextOnFocus
-                                onChangeText={(val) => updateCartQty(item.producto.id, val)}
-                              />
+                              >
+                                <TouchableOpacity
+                                  style={[
+                                    styles.stepperBtn,
+                                    { backgroundColor: themeColors.danger + '18' },
+                                  ]}
+                                  onPress={() => {
+                                    const cur = Number(item.cantidad) || 0;
+                                    const next = Math.max(0, cur - 1);
+                                    if (next === 0) {
+                                      removeFromCart(item.producto.id);
+                                    } else {
+                                      updateCartQty(item.producto.id, String(next));
+                                    }
+                                  }}
+                                >
+                                  <Ionicons name="remove" size={14} color={themeColors.danger} />
+                                </TouchableOpacity>
+                                <TextInput
+                                  style={[
+                                    styles.stepperInput,
+                                    {
+                                      color: themeColors.text,
+                                      height: 32,
+                                      width: 44,
+                                      fontSize: 13,
+                                      paddingVertical: 0,
+                                      includeFontPadding: false,
+                                      textAlignVertical: 'center',
+                                    },
+                                  ]}
+                                  value={item.cantidad.toString()}
+                                  keyboardType="decimal-pad"
+                                  selectTextOnFocus
+                                  onChangeText={(val) => updateCartQty(item.producto.id, val)}
+                                />
+                                <TouchableOpacity
+                                  style={[
+                                    styles.stepperBtn,
+                                    { backgroundColor: themeColors.primary + '18' },
+                                  ]}
+                                  disabled={(Number(item.cantidad) || 0) >= getTotalStock(item.producto)}
+                                  onPress={() =>
+                                    updateCartQty(
+                                      item.producto.id,
+                                      String((Number(item.cantidad) || 0) + 1)
+                                    )
+                                  }
+                                >
+                                  <Ionicons
+                                    name="add"
+                                    size={14}
+                                    color={
+                                      (Number(item.cantidad) || 0) < getTotalStock(item.producto)
+                                        ? themeColors.primary
+                                        : themeColors.textSecondary
+                                    }
+                                  />
+                                </TouchableOpacity>
+                              </View>
                               <Text
                                 style={{
                                   color: themeColors.textSecondary,
