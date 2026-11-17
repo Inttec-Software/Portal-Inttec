@@ -669,21 +669,49 @@ GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE pub
 GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.facturas_emitidas_partidas TO inttec_admin;
 
 
+-- public.proyectos definition
+
+-- Drop table
+
+-- DROP TABLE public.proyectos;
+
+CREATE TABLE public.proyectos ( id uuid DEFAULT gen_random_uuid() NOT NULL, nombre text NOT NULL, cliente_id uuid NULL, sucursal_id uuid NULL, venta_id uuid NULL, status text DEFAULT 'ACTIVO'::text NOT NULL, notas text NULL, created_by uuid NULL, created_at timestamptz DEFAULT now() NULL, updated_at timestamptz DEFAULT now() NULL, CONSTRAINT proyectos_pkey PRIMARY KEY (id), CONSTRAINT proyectos_status_check CHECK ((status = ANY (ARRAY['ACTIVO'::text, 'CERRADO'::text]))), CONSTRAINT proyectos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE SET NULL, CONSTRAINT proyectos_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.usuarios(id) ON DELETE SET NULL, CONSTRAINT proyectos_sucursal_id_fkey FOREIGN KEY (sucursal_id) REFERENCES public.sucursales_cliente(id) ON DELETE SET NULL, CONSTRAINT proyectos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id) ON DELETE SET NULL);
+CREATE INDEX idx_proyectos_cliente_id ON public.proyectos USING btree (cliente_id);
+CREATE INDEX idx_proyectos_status ON public.proyectos USING btree (status);
+CREATE INDEX idx_proyectos_sucursal_id ON public.proyectos USING btree (sucursal_id);
+ALTER TABLE public.proyectos ENABLE ROW LEVEL SECURITY;
+
+-- Table Policies
+
+CREATE POLICY "Lectura y escritura global de proyectos" ON public.proyectos
+ AS PERMISSIVE
+ FOR ALL
+ USING (true);
+
+-- Permissions
+
+ALTER TABLE public.proyectos OWNER TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.proyectos TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.proyectos TO inttec_admin;
+
+
 -- public.gastos definition
 
 -- Drop table
 
 -- DROP TABLE public.gastos;
 
-CREATE TABLE public.gastos ( id uuid DEFAULT gen_random_uuid() NOT NULL, empleado_id uuid NOT NULL, empleado_nombre text NULL, monto numeric NOT NULL, metodo_pago text NULL, justificacion text NULL, foto_url text NULL, status text DEFAULT 'PENDING'::text NULL, rejection_feedback text NULL, created_at timestamptz DEFAULT now() NULL, approved_at timestamptz NULL, fecha_comprobante date NULL, tipo_tarjeta varchar(50) NULL, ubicacion_registro varchar(255) NULL, facturado bool DEFAULT false NULL, factura_url text NULL, motivo_sin_factura text NULL, tipo_servicio_proyecto text NULL, detalle_servicio_proyecto text NULL, venta_id uuid NULL, subcategoria_id uuid NULL, proveedor_id uuid NULL, cliente_id uuid NULL, sucursal_id uuid NULL, estado_reembolso text DEFAULT 'NORMAL'::text NULL, conciliacion_activa bool DEFAULT false NULL, factura_recibida_id uuid NULL, factura_sugerida_id uuid NULL, devuelto_por_factura bool DEFAULT false NULL, facturas_descartadas_ids _text DEFAULT '{}'::text[] NULL, monto_propina numeric(12, 2) DEFAULT 0 NULL, es_factura_compartida bool DEFAULT false NULL, CONSTRAINT gastos_estado_reembolso_check CHECK ((estado_reembolso = ANY (ARRAY['NORMAL'::text, 'PENDIENTE_REEMBOLSO'::text, 'REEMBOLSADO'::text]))), CONSTRAINT gastos_metodo_pago_check CHECK ((metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text, 'transferencia'::text, 'monedero_electronico'::text]))), CONSTRAINT gastos_pkey PRIMARY KEY (id), CONSTRAINT gastos_status_check CHECK ((status = ANY (ARRAY['PENDING'::text, 'APPROVED'::text, 'REJECTED'::text, 'ACTION_REQUIRED'::text]))), CONSTRAINT gastos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE SET NULL, CONSTRAINT gastos_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id), CONSTRAINT gastos_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id) ON DELETE SET NULL, CONSTRAINT gastos_subcategoria_id_fkey FOREIGN KEY (subcategoria_id) REFERENCES public.subcategorias(id) ON DELETE SET NULL, CONSTRAINT gastos_sucursal_id_fkey FOREIGN KEY (sucursal_id) REFERENCES public.sucursales_cliente(id) ON DELETE SET NULL, CONSTRAINT gastos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id) ON DELETE SET NULL);
+CREATE TABLE public.gastos ( id uuid DEFAULT gen_random_uuid() NOT NULL, empleado_id uuid NOT NULL, empleado_nombre text NULL, monto numeric NOT NULL, metodo_pago text NULL, justificacion text NULL, foto_url text NULL, status text DEFAULT 'PENDING'::text NULL, rejection_feedback text NULL, created_at timestamptz DEFAULT now() NULL, approved_at timestamptz NULL, fecha_comprobante date NULL, tipo_tarjeta varchar(50) NULL, ubicacion_registro varchar(255) NULL, facturado bool DEFAULT false NULL, factura_url text NULL, motivo_sin_factura text NULL, tipo_servicio_proyecto text NULL, detalle_servicio_proyecto text NULL, venta_id uuid NULL, subcategoria_id uuid NULL, proveedor_id uuid NULL, cliente_id uuid NULL, sucursal_id uuid NULL, estado_reembolso text DEFAULT 'NORMAL'::text NULL, conciliacion_activa bool DEFAULT false NULL, factura_recibida_id uuid NULL, factura_sugerida_id uuid NULL, devuelto_por_factura bool DEFAULT false NULL, facturas_descartadas_ids _text DEFAULT '{}'::text[] NULL, monto_propina numeric(12, 2) DEFAULT 0 NULL, es_factura_compartida bool DEFAULT false NULL, proyecto_id uuid NULL, tipo_gasto text NULL, subtipo_traslado text NULL, fecha_hospedaje_inicio date NULL, fecha_hospedaje_fin date NULL, CONSTRAINT gastos_estado_reembolso_check CHECK ((estado_reembolso = ANY (ARRAY['NORMAL'::text, 'PENDIENTE_REEMBOLSO'::text, 'REEMBOLSADO'::text]))), CONSTRAINT gastos_metodo_pago_check CHECK ((metodo_pago = ANY (ARRAY['efectivo'::text, 'tarjeta'::text, 'tarjeta_credito'::text, 'tarjeta_debito'::text, 'transferencia'::text, 'monedero_electronico'::text]))), CONSTRAINT gastos_pkey PRIMARY KEY (id), CONSTRAINT gastos_status_check CHECK ((status = ANY (ARRAY['PENDING'::text, 'APPROVED'::text, 'REJECTED'::text, 'ACTION_REQUIRED'::text]))), CONSTRAINT gastos_subtipo_traslado_check CHECK (((subtipo_traslado IS NULL) OR (subtipo_traslado = ANY (ARRAY['CASETAS'::text, 'ESTACIONAMIENTOS'::text, 'MULTAS'::text, 'UBER'::text, 'VUELOS'::text, 'OTRO'::text])))), CONSTRAINT gastos_tipo_gasto_check CHECK (((tipo_gasto IS NULL) OR (tipo_gasto = ANY (ARRAY['PROYECTO'::text, 'OPERATIVO'::text])))), CONSTRAINT gastos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE SET NULL, CONSTRAINT gastos_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id), CONSTRAINT gastos_proveedor_id_fkey FOREIGN KEY (proveedor_id) REFERENCES public.proveedores(id) ON DELETE SET NULL, CONSTRAINT gastos_proyecto_id_fkey FOREIGN KEY (proyecto_id) REFERENCES public.proyectos(id) ON DELETE SET NULL, CONSTRAINT gastos_subcategoria_id_fkey FOREIGN KEY (subcategoria_id) REFERENCES public.subcategorias(id) ON DELETE SET NULL, CONSTRAINT gastos_sucursal_id_fkey FOREIGN KEY (sucursal_id) REFERENCES public.sucursales_cliente(id) ON DELETE SET NULL, CONSTRAINT gastos_venta_id_fkey FOREIGN KEY (venta_id) REFERENCES public.ventas(id) ON DELETE SET NULL);
 CREATE INDEX idx_gastos_cliente_id ON public.gastos USING btree (cliente_id);
 CREATE INDEX idx_gastos_conciliacion_activa ON public.gastos USING btree (conciliacion_activa);
 CREATE INDEX idx_gastos_estado_reembolso ON public.gastos USING btree (estado_reembolso);
 CREATE INDEX idx_gastos_factura_recibida_id ON public.gastos USING btree (factura_recibida_id);
 CREATE INDEX idx_gastos_factura_sugerida_id ON public.gastos USING btree (factura_sugerida_id);
 CREATE INDEX idx_gastos_proveedor_id ON public.gastos USING btree (proveedor_id);
+CREATE INDEX idx_gastos_proyecto_id ON public.gastos USING btree (proyecto_id);
 CREATE INDEX idx_gastos_subcategoria_id ON public.gastos USING btree (subcategoria_id);
 CREATE INDEX idx_gastos_sucursal_id ON public.gastos USING btree (sucursal_id);
+CREATE INDEX idx_gastos_tipo_gasto ON public.gastos USING btree (tipo_gasto);
 ALTER TABLE public.gastos ENABLE ROW LEVEL SECURITY;
 
 -- Table Policies
@@ -698,6 +726,31 @@ CREATE POLICY "Lectura y escritura global de gastos" ON public.gastos
 ALTER TABLE public.gastos OWNER TO postgres;
 GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.gastos TO postgres;
 GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.gastos TO inttec_admin;
+
+
+-- public.gastos_hospedaje_dias definition
+
+-- Drop table
+
+-- DROP TABLE public.gastos_hospedaje_dias;
+
+CREATE TABLE public.gastos_hospedaje_dias ( id uuid DEFAULT gen_random_uuid() NOT NULL, gasto_id uuid NOT NULL, fecha date NOT NULL, monto_diario numeric(12, 2) NOT NULL, created_at timestamptz DEFAULT now() NULL, CONSTRAINT gastos_hospedaje_dias_gasto_fecha_unique UNIQUE (gasto_id, fecha), CONSTRAINT gastos_hospedaje_dias_pkey PRIMARY KEY (id), CONSTRAINT gastos_hospedaje_dias_gasto_id_fkey FOREIGN KEY (gasto_id) REFERENCES public.gastos(id) ON DELETE CASCADE);
+CREATE INDEX idx_gastos_hospedaje_dias_fecha ON public.gastos_hospedaje_dias USING btree (fecha);
+CREATE INDEX idx_gastos_hospedaje_dias_gasto_id ON public.gastos_hospedaje_dias USING btree (gasto_id);
+ALTER TABLE public.gastos_hospedaje_dias ENABLE ROW LEVEL SECURITY;
+
+-- Table Policies
+
+CREATE POLICY "Lectura y escritura global de gastos_hospedaje_dias" ON public.gastos_hospedaje_dias
+ AS PERMISSIVE
+ FOR ALL
+ USING (true);
+
+-- Permissions
+
+ALTER TABLE public.gastos_hospedaje_dias OWNER TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.gastos_hospedaje_dias TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.gastos_hospedaje_dias TO inttec_admin;
 
 
 -- public.inventario_empleados definition
