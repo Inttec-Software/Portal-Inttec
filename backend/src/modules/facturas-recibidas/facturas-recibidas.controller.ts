@@ -222,3 +222,202 @@ export const triggerSatSync = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+// === POST /api/facturas-recibidas/conciliacion-sat ===
+export const conciliarSatFacturas = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const pool = getDbPool(tenant.company, tenant.env);
+
+    const { facturasSat, periodo } = req.body;
+    if (!Array.isArray(facturasSat) || facturasSat.length === 0) {
+      return res.status(400).json({ error: 'No se enviaron facturas para conciliar.' });
+    }
+
+    // 1. Mapeo de UUIDs del archivo SAT en mayúsculas
+    const uuidMap = new Map<string, any>();
+    facturasSat.forEach((f: any) => {
+      const cleanUuid = String(f.uuid || '').trim().toUpperCase();
+      if (cleanUuid) {
+        uuidMap.set(cleanUuid, {
+          uuid: cleanUuid,
+          fechaEmision: f.fechaEmision || f['Fecha emision'] || '',
+          rfcEmisor: f.rfcEmisor || f['RFC emisor'] || '',
+          nombreEmisor: f.nombreEmisor || f['Razon emisor'] || f.proveedor || '',
+          rfcReceptor: f.rfcReceptor || f['RFC receptor'] || '',
+          total: Number(f.total !== undefined ? f.total : f.Total) || 0,
+          estadoSat: (f.estadoSat || f.Estado || 'VIGENTE').toUpperCase(),
+          conceptos: f.conceptos || f.Conceptos || '',
+          moneda: f.moneda || f.Moneda || 'MXN',
+        });
+      }
+    });
+
+    const uuidsArray = Array.from(uuidMap.keys());
+
+    // 2. Consultar qué facturas del archivo existen en la tabla facturas_recibidas del portal
+    const facturasPortalRes = await pool.query(`
+      SELECT id, UPPER(uuid) AS uuid, rfc_emisor, nombre_emisor, total
+      FROM facturas_recibidas
+      WHERE UPPER(uuid) = ANY($1)
+    `, [uuidsArray]);
+
+    const portalFacturasMap = new Map<string, any>();
+    facturasPortalRes.rows.forEach((row: any) => {
+      portalFacturasMap.set(row.uuid, row);
+    });
+
+    // 3. Consultar gastos vinculados que coincidan con estos UUIDs en la BDD
+    const vinculadosRes = await pool.query(`
+      SELECT 
+        f.id AS factura_id,
+        UPPER(f.uuid) AS uuid,
+        f.rfc_emisor,
+        f.nombre_emisor,
+        f.total AS total_sat,
+        f.fecha_emision,
+        f.estado_sat,
+        g.id AS gasto_id,
+        g.empleado_nombre,
+        g.fecha_comprobante,
+        g.created_at AS gasto_created_at,
+        g.monto AS gasto_monto,
+        COALESCE(g.monto_propina, 0) AS monto_propina,
+        g.motivo_sin_factura,
+        g.status AS gasto_status,
+        g.justificacion,
+        g.detalle_servicio_proyecto,
+        (SELECT c.nombre FROM categorias c JOIN subcategorias s ON s.categoria_id = c.id WHERE s.id = g.subcategoria_id) AS categoria_nombre,
+        (SELECT s.nombre FROM subcategorias s WHERE s.id = g.subcategoria_id) AS subcategoria_nombre,
+        (SELECT cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) AS cliente_nombre,
+        (SELECT v.cliente FROM ventas v WHERE v.id = g.venta_id) AS venta_cliente
+      FROM facturas_recibidas f
+      JOIN gastos g ON g.factura_recibida_id = f.id
+      WHERE UPPER(f.uuid) = ANY($1)
+    `, [uuidsArray]);
+
+    const vinculadosMap = new Map<string, any[]>();
+    vinculadosRes.rows.forEach((row: any) => {
+      const u = row.uuid;
+      if (!vinculadosMap.has(u)) vinculadosMap.set(u, []);
+      vinculadosMap.get(u)!.push(row);
+    });
+
+    // 4. Separar en Conciliadas vs Huérfanas SAT
+    const conciliadas: any[] = [];
+    const huerfanasSat: any[] = [];
+
+    uuidMap.forEach((satItem, uuid) => {
+      const gastosVinculados = vinculadosMap.get(uuid);
+      if (gastosVinculados && gastosVinculados.length > 0) {
+        gastosVinculados.forEach((g) => {
+          conciliadas.push({
+            sat: satItem,
+            gasto: g,
+          });
+        });
+      } else {
+        const existeEnPortal = portalFacturasMap.has(uuid);
+        huerfanasSat.push({
+          ...satItem,
+          en_portal: existeEnPortal,
+          portal_factura_id: existeEnPortal ? portalFacturasMap.get(uuid).id : null,
+        });
+      }
+    });
+
+    // 5. Rango de fechas del periodo para gastos huérfanos
+    const fechaInicio = (periodo?.inicio || '1970-01-01').substring(0, 10);
+    const fechaFin = (periodo?.fin || '2099-12-31').substring(0, 10);
+
+    // 6. Consultar Gastos del portal de ese periodo sin factura vinculada
+    const huerfanosGastosRes = await pool.query(`
+      SELECT 
+        g.id,
+        g.empleado_nombre,
+        g.fecha_comprobante,
+        g.created_at,
+        g.monto,
+        g.status,
+        g.facturado,
+        g.motivo_sin_factura,
+        g.justificacion,
+        g.detalle_servicio_proyecto,
+        (SELECT c.nombre FROM categorias c JOIN subcategorias s ON s.categoria_id = c.id WHERE s.id = g.subcategoria_id) AS categoria_nombre,
+        (SELECT s.nombre FROM subcategorias s WHERE s.id = g.subcategoria_id) AS subcategoria_nombre,
+        (SELECT p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) AS proveedor_nombre,
+        (SELECT cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) AS cliente_nombre
+      FROM gastos g
+      WHERE COALESCE(g.fecha_comprobante::text, substring(g.created_at::text, 1, 10)) >= $1
+        AND COALESCE(g.fecha_comprobante::text, substring(g.created_at::text, 1, 10)) <= $2
+        AND g.factura_recibida_id IS NULL
+        AND g.status != 'REJECTED'
+      ORDER BY g.fecha_comprobante DESC, g.created_at DESC
+    `, [fechaInicio, fechaFin]);
+
+    const huerfanosGastos = huerfanosGastosRes.rows.map((g: any) => {
+      const motivo = String(g.motivo_sin_factura || '').toUpperCase();
+      let clasificacionFiscal: 'FACTURADO_SIN_VINCULAR' | 'PENDIENTE_FACTURA' | 'NO_FACTURADO' = 'NO_FACTURADO';
+
+      if (g.facturado) {
+        clasificacionFiscal = 'FACTURADO_SIN_VINCULAR';
+      } else if (motivo.includes('PENDIENTE')) {
+        clasificacionFiscal = 'PENDIENTE_FACTURA';
+      } else {
+        clasificacionFiscal = 'NO_FACTURADO';
+      }
+
+      return {
+        ...g,
+        clasificacion_fiscal: clasificacionFiscal,
+      };
+    });
+
+    // 7. Consolidar KPIs
+    const totalSatCount = facturasSat.length;
+    const totalSatMonto = facturasSat.reduce((sum: number, f: any) => sum + (Number(f.total !== undefined ? f.total : f.Total) || 0), 0);
+    const conciliadasCount = conciliadas.length;
+    const conciliadasMontoSat = conciliadas.reduce((sum: number, c: any) => sum + (Number(c.sat.total) || 0), 0);
+    const conciliadasMontoGasto = conciliadas.reduce((sum: number, c: any) => sum + (Number(c.gasto.gasto_monto) || 0), 0);
+    const huerfanasSatCount = huerfanasSat.length;
+    const huerfanasSatMonto = huerfanasSat.reduce((sum: number, f: any) => sum + (Number(f.total) || 0), 0);
+    const huerfanasEnPortalCount = huerfanasSat.filter(h => h.en_portal).length;
+    const huerfanasNoEnPortalCount = huerfanasSat.filter(h => !h.en_portal).length;
+
+    const huerfanosGastosCount = huerfanosGastos.length;
+    const huerfanosGastosMonto = huerfanosGastos.reduce((sum: number, g: any) => sum + (Number(g.monto) || 0), 0);
+    const huerfanosFacturadoSinVincularCount = huerfanosGastos.filter(g => g.clasificacion_fiscal === 'FACTURADO_SIN_VINCULAR').length;
+    const huerfanosPendienteCount = huerfanosGastos.filter(g => g.clasificacion_fiscal === 'PENDIENTE_FACTURA').length;
+    const huerfanosNoFacturadoCount = huerfanosGastos.filter(g => g.clasificacion_fiscal === 'NO_FACTURADO').length;
+
+    return res.json({
+      kpis: {
+        totalSatCount,
+        totalSatMonto: Number(totalSatMonto.toFixed(2)),
+        conciliadasCount,
+        conciliadasMontoSat: Number(conciliadasMontoSat.toFixed(2)),
+        conciliadasMontoGasto: Number(conciliadasMontoGasto.toFixed(2)),
+        huerfanasSatCount,
+        huerfanasSatMonto: Number(huerfanasSatMonto.toFixed(2)),
+        huerfanasEnPortalCount,
+        huerfanasNoEnPortalCount,
+        huerfanosGastosCount,
+        huerfanosGastosMonto: Number(huerfanosGastosMonto.toFixed(2)),
+        huerfanosFacturadoSinVincularCount,
+        huerfanosPendienteCount,
+        huerfanosNoFacturadoCount,
+        periodo: {
+          inicio: fechaInicio,
+          fin: fechaFin,
+        },
+      },
+      conciliadas,
+      huerfanasSat,
+      huerfanosGastos,
+    });
+  } catch (error: any) {
+    console.error('[conciliarSatFacturas] Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};

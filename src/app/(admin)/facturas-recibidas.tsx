@@ -26,6 +26,7 @@ import { ModuleCache } from '@/services/moduleCache';
 import { FacturasKpiGridSkeleton, FacturasListSkeleton } from '@/components/skeleton';
 import PaginationControls from '@/components/PaginationControls';
 import { exportFacturasRecibidasToExcel } from '@/utils/facturasRecibidasExcel';
+import { ConciliacionSatModal } from '@/features/facturas-recibidas/components/ConciliacionSatModal';
 
 interface FacturaRecibida {
   id: string;
@@ -225,6 +226,7 @@ export default function FacturasRecibidasScreen() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [showSolicitudesModal, setShowSolicitudesModal] = useState(false);
+  const [showConciliacionModal, setShowConciliacionModal] = useState(false);
   const [verifyingSolId, setVerifyingSolId] = useState<string | null>(null);
   const [syncPeriodType, setSyncPeriodType] = useState<'30_dias' | 'anio_actual' | 'custom'>('30_dias');
   const [customFechaInicio, setCustomFechaInicio] = useState('');
@@ -799,6 +801,15 @@ export default function FacturasRecibidasScreen() {
           )}
         </View>
 
+        {/* Botón Conciliación Mensual SAT - destacado enseguida de Exportar */}
+        <TouchableOpacity
+          style={[styles.actionBtnOutline, { backgroundColor: '#6366f115', borderColor: '#6366f150' }]}
+          onPress={() => setShowConciliacionModal(true)}
+        >
+          <Ionicons name="git-compare-outline" size={15} color="#6366f1" />
+          <Text style={[styles.actionBtnOutlineText, { color: '#6366f1' }]}>Conciliación SAT</Text>
+        </TouchableOpacity>
+
         {/* Menú de Opciones SAT (Sincronizar / Solicitudes) */}
         <View style={{ position: 'relative', zIndex: satMenuOpen ? 502 : 10 }}>
           <TouchableOpacity
@@ -849,6 +860,19 @@ export default function FacturasRecibidasScreen() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Ionicons name="list-outline" size={16} color="#3b5998" />
                     <Text style={[styles.dropdownMenuItemText, { color: themeColors.text }]}>Estado de Solicitudes</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.dropdownMenuItem}
+                  onPress={() => {
+                    setSatMenuOpen(false);
+                    setShowConciliacionModal(true);
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="git-compare-outline" size={16} color="#6366f1" />
+                    <Text style={[styles.dropdownMenuItemText, { color: themeColors.text }]}>Conciliación Mensual SAT</Text>
                   </View>
                 </TouchableOpacity>
               </View>
@@ -1071,6 +1095,14 @@ export default function FacturasRecibidasScreen() {
                     <Text style={styles.actionBtnText}>Descargar Excel</Text>
                   </>
                 )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: '#6366f1' }]}
+                onPress={() => setShowConciliacionModal(true)}
+              >
+                <Ionicons name="git-compare-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.actionBtnText}>Conciliación SAT</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1802,6 +1834,12 @@ export default function FacturasRecibidasScreen() {
           </View>
         </View>
       </Modal>
+
+      <ConciliacionSatModal
+        visible={showConciliacionModal}
+        onClose={() => setShowConciliacionModal(false)}
+        themeColors={themeColors}
+      />
     </View>
   );
 }

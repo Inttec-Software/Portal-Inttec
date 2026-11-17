@@ -81,6 +81,7 @@ export function useAdminGastos() {
     countConFacturaDetectada?: number;
   } | null>(null);
   const catalogsLoadedRef = React.useRef(false);
+  const handledGastoIdRef = React.useRef<string | null>(null);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
 
   // Buscador y Filtro por Calendario (Día Único o Rango de Fechas)
@@ -469,32 +470,54 @@ export function useAdminGastos() {
 
   // Manejar navegación directa a un gasto específico o búsqueda desde Ventas u otros módulos
   useEffect(() => {
+    const targetTab: 'pendientes' | 'historial' =
+      params.tab === 'pendientes' || params.tab === 'historial'
+        ? (params.tab as 'pendientes' | 'historial')
+        : 'historial';
+
     if (params.search && typeof params.search === 'string') {
       setSearchQuery(params.search);
-      setActiveTab('historial');
+      setActiveTab(targetTab);
     }
+
     if (params.gastoId && typeof params.gastoId === 'string') {
-      setActiveTab('historial');
       const gId = params.gastoId;
-      const found = gastos.find(g => String(g.id) === String(gId));
-      if (found) {
-        setSelectedGasto(found);
-        setReviewModalVisible(true);
-      } else {
-        (async () => {
-          try {
-            const { data } = await supabase.from('gastos').select('*').eq('id', gId).single();
-            if (data) {
-              setSelectedGasto(data);
-              setReviewModalVisible(true);
+      if (handledGastoIdRef.current !== gId) {
+        handledGastoIdRef.current = gId;
+        setActiveTab(targetTab);
+
+        const found = gastos.find(g => String(g.id) === String(gId));
+        if (found) {
+          setSelectedGasto(found);
+          setReviewModalVisible(true);
+        } else {
+          (async () => {
+            try {
+              const headers = await getApiHeaders();
+              const apiUrl = getApiUrl();
+              const res = await fetch(`${apiUrl}/api/reportes/admin/all?search=${encodeURIComponent(gId)}&tab=${targetTab}&limit=5`, { headers });
+              if (res.ok) {
+                const resData = await res.json();
+                const match = resData.gastos?.find((g: any) => String(g.id) === String(gId));
+                if (match) {
+                  setSelectedGasto(match);
+                  setReviewModalVisible(true);
+                  return;
+                }
+              }
+              const { data } = await supabase.from('gastos').select('*').eq('id', gId).single();
+              if (data) {
+                setSelectedGasto(data);
+                setReviewModalVisible(true);
+              }
+            } catch (err) {
+              console.warn('Error loading single gasto for detail:', err);
             }
-          } catch (err) {
-            console.warn('Error loading single gasto for detail:', err);
-          }
-        })();
+          })();
+        }
       }
     }
-  }, [params.search, params.gastoId, gastos]);
+  }, [params.search, params.gastoId, params.tab, gastos]);
 
   const handleLogout = async () => {
     const performLogout = async () => {
