@@ -527,7 +527,7 @@ export function useAdminGastos() {
       // Mapear pestaña al endpoint de reportes manteniendo compatibilidad total con backend
       const backendTabParam =
         activeTab === 'pendientes'
-          ? 'pendientes'
+          ? 'por_revisar'
           : activeTab === 'operativos'
           ? 'operativos'
           : 'historial';
@@ -539,6 +539,7 @@ export function useAdminGastos() {
         page: String(currentPage),
         limit: effectiveLimit,
         tab: backendTabParam,
+        includeActionRequired: 'true',
         facturaFilter,
         pendingFilter,
         search: debouncedSearchQuery,

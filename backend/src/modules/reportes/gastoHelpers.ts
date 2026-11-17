@@ -139,40 +139,79 @@ export const classifyGastoParaProyecto = (g: any): {
   const sub = normalizeText(g.subcategoria_rel?.nombre || g.subcategoria_nombre || g.subcat);
   const subtipoTraslado = String(g.subtipo_traslado || '').trim().toUpperCase();
 
-  if (sub === 'alimentos') {
-    return { categoria_proyecto: 'ALIMENTOS', subcategoria_transporte: null };
-  }
-
-  if (sub === 'hospedaje' || (g.fecha_hospedaje_inicio && g.fecha_hospedaje_fin)) {
+  if (
+    sub.includes('hospedaje') ||
+    cat.includes('hospedaje') ||
+    sub.includes('hotel') ||
+    (g.fecha_hospedaje_inicio && g.fecha_hospedaje_fin)
+  ) {
     return { categoria_proyecto: 'HOSPEDAJE', subcategoria_transporte: null };
   }
 
-  if (cat === 'material' || sub.startsWith('material')) {
-    return { categoria_proyecto: 'MATERIAL', subcategoria_transporte: null };
+  if (
+    sub.includes('aliment') ||
+    cat.includes('aliment') ||
+    sub.includes('comida') ||
+    sub.includes('restaurante')
+  ) {
+    return { categoria_proyecto: 'ALIMENTOS', subcategoria_transporte: null };
   }
 
-  if (cat === 'equipo' || sub.startsWith('equipo')) {
-    return { categoria_proyecto: 'EQUIPO', subcategoria_transporte: null };
-  }
-
-  if (sub === 'combustible') {
+  if (
+    sub.includes('combustible') ||
+    sub.includes('gasolina') ||
+    sub.includes('diesel')
+  ) {
     return { categoria_proyecto: 'TRANSPORTE', subcategoria_transporte: 'COMBUSTIBLE' };
   }
 
   if (
-    subtipoTraslado ||
-    sub === 'traslados' ||
-    sub === 'vuelos' ||
-    sub === 'renta de autos'
+    Boolean(subtipoTraslado) ||
+    sub.includes('traslado') ||
+    sub.includes('vuelo') ||
+    sub.includes('renta de auto') ||
+    sub.includes('caseta') ||
+    sub.includes('peaje') ||
+    sub.includes('estacionamiento') ||
+    sub.includes('uber') ||
+    sub.includes('taxi') ||
+    sub.includes('multa') ||
+    sub.includes('autobus') ||
+    cat.includes('transporte')
   ) {
     return { categoria_proyecto: 'TRANSPORTE', subcategoria_transporte: 'TRASLADOS' };
   }
 
-  if (cat === 'vehiculos') {
+  if (
+    cat.includes('equipo') ||
+    sub.includes('equipo') ||
+    sub.includes('panel') ||
+    sub.includes('seguridad') ||
+    sub.includes('refrigeracion') ||
+    sub.includes('venta directa') ||
+    sub.includes('herramienta')
+  ) {
+    return { categoria_proyecto: 'EQUIPO', subcategoria_transporte: null };
+  }
+
+  if (
+    cat.includes('material') ||
+    sub.includes('material') ||
+    sub.includes('ferreteria') ||
+    sub.includes('electrico') ||
+    sub.includes('consumible')
+  ) {
+    return { categoria_proyecto: 'MATERIAL', subcategoria_transporte: null };
+  }
+
+  if (cat.includes('vehiculo')) {
     return { categoria_proyecto: 'TRANSPORTE', subcategoria_transporte: 'TRASLADOS' };
   }
 
-  return { categoria_proyecto: 'OTROS', subcategoria_transporte: null };
+  // Fallback consistente con el frontend cuando un gasto asignado a proyecto proviene de otra categoría
+  return g.proyecto_id
+    ? { categoria_proyecto: 'MATERIAL', subcategoria_transporte: null }
+    : { categoria_proyecto: 'OTROS', subcategoria_transporte: null };
 };
 
 export const formatGasto = (g: any) => {

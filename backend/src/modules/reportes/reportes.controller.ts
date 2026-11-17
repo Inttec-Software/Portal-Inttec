@@ -130,12 +130,16 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     const limit = Math.max(1, Math.min(200, parseInt(req.query.limit as string, 10) || 25));
     const offset = (page - 1) * limit;
 
-    const tab = req.query.tab as string; // 'pendientes' | 'por_revisar' | 'historial' | 'todos'
+    const tab = req.query.tab as string; // 'pendientes' | 'por_revisar' | 'operativos' | 'historial' | 'todos'
     const facturaFilter = req.query.facturaFilter as string; // 'TODOS' | 'FACTURADOS' | 'PENDIENTE_ENTREGA' | 'NO_FACTURADOS'
     const pendingFilter = req.query.pendingFilter as string; // 'TODOS' | 'NUEVOS' | 'FACTURA_DETECTADA'
     const tipoGastoFilter = String(req.query.tipo_gasto || '').trim().toUpperCase();
     const proyectoIdFilter = String(req.query.proyecto_id || '').trim();
     const sinProyectoFilter = req.query.sin_proyecto === 'true' || req.query.sin_proyecto === '1';
+    const includeActionRequired =
+      req.query.includeActionRequired === 'true' ||
+      req.query.includeActionRequired === '1' ||
+      tab === 'por_revisar';
     const search = (req.query.search as string || '').trim();
     const startDate = (req.query.startDate as string || '').trim();
     const endDate = (req.query.endDate as string || '').trim();
@@ -145,18 +149,6 @@ export const getAdminReportes = async (req: Request, res: Response) => {
       // 1. Condiciones base para filtros globales (fechas y búsqueda)
       const baseConditions: string[] = [];
       const baseParams: any[] = [];
-
-      if (tipoGastoFilter === 'PROYECTO' || tipoGastoFilter === 'OPERATIVO') {
-        baseParams.push(tipoGastoFilter);
-        baseConditions.push(`g.tipo_gasto = $${baseParams.length}`);
-      }
-
-      if (proyectoIdFilter) {
-        baseParams.push(proyectoIdFilter);
-        baseConditions.push(`g.proyecto_id = $${baseParams.length}`);
-      } else if (sinProyectoFilter) {
-        baseConditions.push(`g.proyecto_id IS NULL`);
-      }
 
       if (startDate) {
         baseParams.push(startDate);
@@ -220,9 +212,37 @@ export const getAdminReportes = async (req: Request, res: Response) => {
 
       const baseWhereSql = baseConditions.length > 0 ? `WHERE ${baseConditions.join(' AND ')}` : '';
 
-      // 2. Condiciones específicas para la vista activa (tab y facturación)
+      const OPERATIVO_SQL = `(COALESCE(g.tipo_gasto, '') = 'OPERATIVO' OR (g.tipo_gasto IS NULL AND g.proyecto_id IS NULL AND LOWER(COALESCE(g.tipo_servicio_proyecto, '')) = 'operativo'))`;
+
+      // 2. Condiciones específicas para la vista activa (pestaña, alcance de proyecto/operativo y facturación)
       const viewConditions = [...baseConditions];
       const viewParams = [...baseParams];
+
+      if (tipoGastoFilter === 'PROYECTO') {
+        viewConditions.push(`g.tipo_gasto = 'PROYECTO'`);
+      } else if (tipoGastoFilter === 'OPERATIVO' || tab === 'operativos') {
+        viewConditions.push(OPERATIVO_SQL);
+      }
+
+      if (proyectoIdFilter) {
+        viewParams.push(proyectoIdFilter);
+        viewConditions.push(`g.proyecto_id = $${viewParams.length}`);
+      } else if (sinProyectoFilter) {
+        viewConditions.push(`g.proyecto_id IS NULL`);
+        if (tab === 'historial') {
+          viewConditions.push(`NOT ${OPERATIVO_SQL}`);
+        }
+      }
+
+      const appendFacturaFilter = () => {
+        if (facturaFilter === 'FACTURADOS') {
+          viewConditions.push(`g.facturado = true`);
+        } else if (facturaFilter === 'PENDIENTE_ENTREGA') {
+          viewConditions.push(`(g.facturado IS NOT TRUE AND UPPER(COALESCE(g.motivo_sin_factura, '')) LIKE '%PENDIENTE%')`);
+        } else if (facturaFilter === 'NO_FACTURADOS') {
+          viewConditions.push(`(g.facturado IS NOT TRUE AND (g.motivo_sin_factura IS NULL OR UPPER(COALESCE(g.motivo_sin_factura, '')) NOT LIKE '%PENDIENTE%'))`);
+        }
+      };
 
       if (tab === 'pendientes' || tab === 'por_revisar') {
         viewConditions.push(
@@ -235,27 +255,25 @@ export const getAdminReportes = async (req: Request, res: Response) => {
         } else if (pendingFilter === 'NUEVOS') {
           viewConditions.push(`(COALESCE(g.devuelto_por_factura, FALSE) = FALSE AND g.factura_sugerida_id IS NULL)`);
         }
+      } else if (tab === 'operativos') {
+        appendFacturaFilter();
       } else if (tab === 'historial') {
         viewConditions.push(`g.status IN ('APPROVED', 'REJECTED', 'ACTION_REQUIRED')`);
-        
-        if (facturaFilter === 'FACTURADOS') {
-          viewConditions.push(`g.facturado = true`);
-        } else if (facturaFilter === 'PENDIENTE_ENTREGA') {
-          viewConditions.push(`(g.facturado IS NOT TRUE AND UPPER(COALESCE(g.motivo_sin_factura, '')) LIKE '%PENDIENTE%')`);
-        } else if (facturaFilter === 'NO_FACTURADOS') {
-          viewConditions.push(`(g.facturado IS NOT TRUE AND (g.motivo_sin_factura IS NULL OR UPPER(COALESCE(g.motivo_sin_factura, '')) NOT LIKE '%PENDIENTE%'))`);
-        }
+        appendFacturaFilter();
       }
 
       const viewWhereSql = viewConditions.length > 0 ? `WHERE ${viewConditions.join(' AND ')}` : '';
+      const pendingStatusFilterSql = includeActionRequired
+        ? `g.status IN ('PENDING', 'ACTION_REQUIRED')`
+        : `g.status = 'PENDING'`;
 
       // 3. Ejecutar consultas en paralelo
       const queryPromises: Promise<any>[] = [
         // Totales globales según filtros base
         pool.query(`
           SELECT 
-            COUNT(*) FILTER (WHERE g.status = 'PENDING') AS count_pendientes,
-            COALESCE(SUM(g.monto) FILTER (WHERE g.status = 'PENDING'), 0) AS total_pendientes,
+            COUNT(*) FILTER (WHERE ${pendingStatusFilterSql}) AS count_pendientes,
+            COALESCE(SUM(g.monto) FILTER (WHERE ${pendingStatusFilterSql}), 0) AS total_pendientes,
             COUNT(*) FILTER (WHERE g.status = 'APPROVED') AS count_aprobados,
             COALESCE(SUM(g.monto) FILTER (WHERE g.status = 'APPROVED'), 0) AS total_aprobados,
             COUNT(*) FILTER (WHERE g.status = 'PENDING' AND COALESCE(g.devuelto_por_factura, FALSE) = TRUE) AS count_devueltos_factura,
