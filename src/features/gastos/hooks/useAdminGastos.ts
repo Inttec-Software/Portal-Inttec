@@ -2853,7 +2853,8 @@ export function useAdminGastos() {
 
   // Pestaña 3 — "Operativos" (tipo_gasto = 'OPERATIVO' o histórico marcado como Operativo)
   const operativosGastos = useMemo(() => {
-    return filteredGastos.filter((g) => {
+    const source = activeTab === 'operativos' ? gastos : filteredGastos;
+    return source.filter((g) => {
       const isOp =
         g.tipo_gasto === 'OPERATIVO' ||
         (!g.proyecto_id &&
@@ -2861,14 +2862,18 @@ export function useAdminGastos() {
       if (!isOp) return false;
       return matchesFacturaFilter(g);
     });
-  }, [filteredGastos, matchesFacturaFilter]);
+  }, [activeTab, gastos, filteredGastos, matchesFacturaFilter]);
 
   // Pestaña 4 — "Histórico / Sin proyecto" (gastos con proyecto_id = NULL y no operativos)
   const historyGastos = useMemo(() => {
     const source = activeTab === 'historial' ? gastos : filteredGastos;
     return source.filter((g) => {
       if (g.proyecto_id || g.proyecto_rel?.id) return false;
-      if (g.tipo_gasto === 'OPERATIVO') return false;
+      const isOp =
+        g.tipo_gasto === 'OPERATIVO' ||
+        (!g.proyecto_id &&
+          (g.tipo_servicio_proyecto || '').toLowerCase() === 'operativo');
+      if (isOp) return false;
       const isHistoryStatus =
         g.status === 'APPROVED' ||
         g.status === 'REJECTED' ||

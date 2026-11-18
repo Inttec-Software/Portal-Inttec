@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { Alert, Platform, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -98,6 +98,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
   const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [isLoadingGasto, setIsLoadingGasto] = useState(mode === 'edit');
 
   // Catálogos desde Supabase
@@ -1229,6 +1230,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
 
   const handleSaveGasto = async () => {
     if (!currentUser) return;
+    if (isSubmittingRef.current || isSubmitting) return;
 
     if (mode === 'create') {
       // 1. Validar Foto de comprobante
@@ -1467,6 +1469,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         }
       }
 
+      isSubmittingRef.current = true;
       setIsSubmitting(true);
 
       const dbFecha = formatFriendlyToDb(fechaComprobante);
@@ -1539,6 +1542,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         fecha_hospedaje_fin: isHospedaje ? (fechaHospedajeFin || null) : null,
       };
 
+      isSubmittingRef.current = true;
       setIsSubmitting(true);
 
       try {
@@ -1740,8 +1744,14 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
       } catch (err: any) {
         const errorDetails = err?.message || err?.details || err?.hint || (typeof err === 'object' ? JSON.stringify(err) : String(err));
         console.error('Error al guardar gasto:', errorDetails);
-        showAlert('Error al guardar', errorDetails || 'No se pudo guardar el gasto.');
+        if (errorDetails.includes('Ya existe un gasto idéntico')) {
+          showAlert('Gasto Ya Registrado', errorDetails);
+          router.replace(redirectRoute as any);
+        } else {
+          showAlert('Error al guardar', errorDetails || 'No se pudo guardar el gasto.');
+        }
       } finally {
+        isSubmittingRef.current = false;
         setIsSubmitting(false);
       }
     } else {
@@ -1907,6 +1917,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         fecha_hospedaje_fin: isHospedaje ? (fechaHospedajeFin || null) : null,
       };
 
+      isSubmittingRef.current = true;
       setIsSubmitting(true);
 
       try {
@@ -2001,6 +2012,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
       } catch (err: any) {
         showAlert('Error al guardar', err.message || 'No se pudo guardar el gasto.');
       } finally {
+        isSubmittingRef.current = false;
         setIsSubmitting(false);
       }
     }

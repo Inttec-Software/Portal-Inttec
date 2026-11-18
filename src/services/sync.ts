@@ -327,10 +327,22 @@ export const SyncService = {
           }
 
           syncedCount++;
-        } catch (err) {
+        } catch (err: any) {
           console.error('Failed to sync offline item:', item.id, err);
-          // Volver a encolar los elementos fallidos para reintentar después
-          remainingQueue.push(item);
+          const errMsg = String(err?.message || '');
+          if (errMsg.includes('Ya existe un gasto idéntico')) {
+            // Ya existe en el servidor; limpiar archivos locales para no reintentar
+            if (item.localFotoUri) {
+              try { new File(item.localFotoUri).delete(); } catch (_) {}
+            }
+            if (item.localFacturaUri) {
+              try { new File(item.localFacturaUri).delete(); } catch (_) {}
+            }
+            syncedCount++;
+          } else {
+            // Volver a encolar los elementos fallidos para reintentar después
+            remainingQueue.push(item);
+          }
         }
       }
 

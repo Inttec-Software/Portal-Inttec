@@ -247,7 +247,13 @@ export function useEmpleadoGastos() {
 
   // Filtrar Gastos por Pestaña
   const pendingList: GastoDisplay[] = [
-    ...offlineGastos.map((g) => ({ ...g, isOffline: true, status: 'PENDING' as const })),
+    ...offlineGastos
+      .filter((off) => !gastos.some((g) =>
+        Number(g.monto) === Number(off.monto) &&
+        (g.fecha_comprobante || '').split('T')[0] === (off.fecha_comprobante || '').split('T')[0] &&
+        (g.justificacion || '').trim().toLowerCase() === (off.justificacion || '').trim().toLowerCase()
+      ))
+      .map((g) => ({ ...g, isOffline: true, status: 'PENDING' as const })),
     ...gastos.filter((g) => g.status === 'PENDING' || g.status === 'ACTION_REQUIRED'),
   ];
 

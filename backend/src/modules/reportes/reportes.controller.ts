@@ -1,11 +1,14 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
+import { KeyedMutex } from '../../utils/mutex';
 import {
   GASTO_RELATIONS_SELECT_SQL,
   formatGasto,
   sanitizeGastoWritePayload,
   syncHospedajeDias,
 } from './gastoHelpers';
+
+const gastoCreationMutex = new KeyedMutex();
 
 
 
@@ -1204,115 +1207,154 @@ export const createGastos = async (req: Request, res: Response) => {
   const { company, env } = tenant;
   const pool = getDbPool(company, env);
 
-  const client = await pool.connect();
-  let inTx = false;
+  const { payloadsToInsert, gasolinaPayload, createNotifications, employeeName, totalGasto, categoriaNombre, allow_duplicate, ...singleGastoBody } = req.body;
 
-  try {
-    const { payloadsToInsert, gasolinaPayload, createNotifications, employeeName, totalGasto, categoriaNombre, ...singleGastoBody } = req.body;
+  // Soportar tanto arreglo payloadsToInsert (formulario) como objeto directo (sync offline)
+  const listToInsert: any[] = Array.isArray(payloadsToInsert) && payloadsToInsert.length > 0
+    ? payloadsToInsert
+    : (singleGastoBody && singleGastoBody.monto !== undefined ? [singleGastoBody] : []);
 
-    // Soportar tanto arreglo payloadsToInsert (formulario) como objeto directo (sync offline)
-    const listToInsert: any[] = Array.isArray(payloadsToInsert) && payloadsToInsert.length > 0
-      ? payloadsToInsert
-      : (singleGastoBody && singleGastoBody.monto !== undefined ? [singleGastoBody] : []);
+  const employeeId = req.user?.id || listToInsert[0]?.empleado_id || 'anonymous';
+  const mutexKey = `${company}_${env}_${employeeId}`;
 
-    await client.query('BEGIN');
-    inTx = true;
+  return await gastoCreationMutex.runExclusive(mutexKey, async () => {
+    const client = await pool.connect();
+    let inTx = false;
 
-    const insertedGastos = [];
-    if (listToInsert.length > 0) {
-      for (const rawPayload of listToInsert) {
-        const cleanPayload = sanitizeGastoWritePayload(rawPayload);
-        if (cleanPayload.proyecto_id && !cleanPayload.tipo_gasto) {
-          cleanPayload.tipo_gasto = 'PROYECTO';
-        }
-        if (
-          (cleanPayload.fecha_hospedaje_inicio && !cleanPayload.fecha_hospedaje_fin) ||
-          (!cleanPayload.fecha_hospedaje_inicio && cleanPayload.fecha_hospedaje_fin)
-        ) {
-          await client.query('ROLLBACK');
-          inTx = false;
-          return res.status(400).json({ error: 'Para hospedaje debes enviar tanto fecha_hospedaje_inicio como fecha_hospedaje_fin.' });
-        }
+    try {
+      await client.query('BEGIN');
+      inTx = true;
 
-        const payload: any = {
-          ...cleanPayload,
-          // Regla de corte: Todo gasto creado a partir de ahora tiene conciliacion_activa = true
-          conciliacion_activa: true,
-        };
-        const keys = Object.keys(payload);
-        const values = Object.values(payload);
-        const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
-        const insertRes = await client.query(
-          `INSERT INTO gastos (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
-          values
-        );
-        const insertedRow = insertRes.rows[0];
+      const insertedGastos = [];
+      if (listToInsert.length > 0) {
+        for (const rawPayload of listToInsert) {
+          const cleanPayload = sanitizeGastoWritePayload(rawPayload);
+          if (cleanPayload.proyecto_id && !cleanPayload.tipo_gasto) {
+            cleanPayload.tipo_gasto = 'PROYECTO';
+          }
+          if (
+            (cleanPayload.fecha_hospedaje_inicio && !cleanPayload.fecha_hospedaje_fin) ||
+            (!cleanPayload.fecha_hospedaje_inicio && cleanPayload.fecha_hospedaje_fin)
+          ) {
+            await client.query('ROLLBACK');
+            inTx = false;
+            return res.status(400).json({ error: 'Para hospedaje debes enviar tanto fecha_hospedaje_inicio como fecha_hospedaje_fin.' });
+          }
 
-        let hospedajeDias: any[] = [];
-        if (insertedRow.fecha_hospedaje_inicio && insertedRow.fecha_hospedaje_fin) {
-          hospedajeDias = await syncHospedajeDias(
-            client,
-            insertedRow.id,
-            insertedRow.fecha_hospedaje_inicio,
-            insertedRow.fecha_hospedaje_fin,
-            Number(insertedRow.monto || 0)
+          // Bloqueo estricto de duplicados idénticos en la última hora
+          if (!allow_duplicate && cleanPayload.empleado_id && cleanPayload.monto && cleanPayload.fecha_comprobante) {
+            const dupCheckSql = `
+              SELECT id, created_at, monto FROM gastos
+              WHERE empleado_id = $1::uuid
+                AND ABS(monto - $2) < 0.01
+                AND fecha_comprobante = $3::date
+                AND created_at >= NOW() - INTERVAL '1 hour'
+                AND status != 'REJECTED'
+                AND COALESCE(subcategoria_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($4::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+                AND COALESCE(proveedor_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+                AND LOWER(TRIM(COALESCE(justificacion, ''))) = LOWER(TRIM(COALESCE($6::text, '')))
+              LIMIT 1
+            `;
+            const dupRes = await client.query(dupCheckSql, [
+              cleanPayload.empleado_id,
+              cleanPayload.monto,
+              cleanPayload.fecha_comprobante,
+              cleanPayload.subcategoria_id || null,
+              cleanPayload.proveedor_id || null,
+              cleanPayload.justificacion || '',
+            ]);
+
+            if (dupRes.rows.length > 0) {
+              await client.query('ROLLBACK');
+              inTx = false;
+              return res.status(409).json({
+                error: `Ya existe un gasto idéntico registrado en la última hora para este empleado ($${Number(cleanPayload.monto).toFixed(2)}). Se ha bloqueado el registro para evitar duplicados.`,
+                duplicate: true,
+                existingGastoId: dupRes.rows[0].id,
+              });
+            }
+          }
+
+          const payload: any = {
+            ...cleanPayload,
+            // Regla de corte: Todo gasto creado a partir de ahora tiene conciliacion_activa = true
+            conciliacion_activa: true,
+          };
+          const keys = Object.keys(payload);
+          const values = Object.values(payload);
+          const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+          const insertRes = await client.query(
+            `INSERT INTO gastos (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+            values
           );
-        }
+          const insertedRow = insertRes.rows[0];
 
-        insertedGastos.push({
-          ...insertedRow,
-          hospedaje_dias: hospedajeDias,
-        });
-      }
-    }
-
-    if (gasolinaPayload && insertedGastos.length > 0) {
-      const gasData = { ...gasolinaPayload, gasto_id: insertedGastos[0].id };
-      const gasKeys = Object.keys(gasData);
-      const gasValues = Object.values(gasData);
-      const placeholders = gasKeys.map((_, i) => `$${i + 1}`).join(', ');
-      await client.query(
-        `INSERT INTO registro_gasolina (${gasKeys.join(', ')}) VALUES (${placeholders})`,
-        gasValues
-      );
-    }
-
-    await client.query('COMMIT');
-    inTx = false;
-
-    if (createNotifications && insertedGastos.length > 0) {
-      try {
-        const adminsRes = await pool.query(`SELECT id FROM usuarios WHERE rol = 'ADMIN'`);
-        const admins = adminsRes.rows;
-        if (admins && admins.length > 0) {
-          for (const admin of admins) {
-            await pool.query(
-              `INSERT INTO notificaciones (usuario_id, titulo, mensaje, tipo, referencia_id) VALUES ($1, $2, $3, $4, $5)`,
-              [
-                admin.id,
-                'Nuevo Gasto Registrado',
-                `${employeeName || 'Un empleado'} ha registrado un gasto de $${Number(totalGasto || 0).toFixed(2)} (${categoriaNombre || 'Sin categoría'})`,
-                'GASTO_NUEVO',
-                insertedGastos[0].id
-              ]
+          let hospedajeDias: any[] = [];
+          if (insertedRow.fecha_hospedaje_inicio && insertedRow.fecha_hospedaje_fin) {
+            hospedajeDias = await syncHospedajeDias(
+              client,
+              insertedRow.id,
+              insertedRow.fecha_hospedaje_inicio,
+              insertedRow.fecha_hospedaje_fin,
+              Number(insertedRow.monto || 0)
             );
           }
-        }
-      } catch (notifErr) {
-        console.warn('Error inserting notifications:', notifErr);
-      }
-    }
 
-    return res.json({ success: true, insertedGastos });
-  } catch (error: any) {
-    if (inTx) {
-      try { await client.query('ROLLBACK'); } catch (_) {}
+          insertedGastos.push({
+            ...insertedRow,
+            hospedaje_dias: hospedajeDias,
+          });
+        }
+      }
+
+      if (gasolinaPayload && insertedGastos.length > 0) {
+        const gasData = { ...gasolinaPayload, gasto_id: insertedGastos[0].id };
+        const gasKeys = Object.keys(gasData);
+        const gasValues = Object.values(gasData);
+        const placeholders = gasKeys.map((_, i) => `$${i + 1}`).join(', ');
+        await client.query(
+          `INSERT INTO registro_gasolina (${gasKeys.join(', ')}) VALUES (${placeholders})`,
+          gasValues
+        );
+      }
+
+      await client.query('COMMIT');
+      inTx = false;
+
+      if (createNotifications && insertedGastos.length > 0) {
+        try {
+          const adminsRes = await pool.query(`SELECT id FROM usuarios WHERE rol = 'ADMIN'`);
+          const admins = adminsRes.rows;
+          if (admins && admins.length > 0) {
+            for (const admin of admins) {
+              await pool.query(
+                `INSERT INTO notificaciones (usuario_id, titulo, mensaje, tipo, referencia_id) VALUES ($1, $2, $3, $4, $5)`,
+                [
+                  admin.id,
+                  'Nuevo Gasto Registrado',
+                  `${employeeName || 'Un empleado'} ha registrado un gasto de $${Number(totalGasto || 0).toFixed(2)} (${categoriaNombre || 'Sin categoría'})`,
+                  'GASTO_NUEVO',
+                  insertedGastos[0].id
+                ]
+              );
+            }
+          }
+        } catch (notifErr) {
+          console.warn('Error inserting notifications:', notifErr);
+        }
+      }
+
+      return res.json({ success: true, insertedGastos });
+    } catch (error: any) {
+      if (inTx) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
+      }
+      const isValidationError = error.message?.includes('Fecha') || error.message?.includes('hospedaje');
+      return res.status(isValidationError ? 400 : 500).json({ error: error.message });
+    } finally {
+      client.release();
     }
-    const isValidationError = error.message?.includes('Fecha') || error.message?.includes('hospedaje');
-    return res.status(isValidationError ? 400 : 500).json({ error: error.message });
-  } finally {
-    client.release();
-  }
+  });
 };
 
 export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
