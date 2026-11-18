@@ -35,6 +35,8 @@ export default function EmpleadoGastoDetailModal({ emp, themeColors }: EmpleadoG
     formatCurrency,
     formatFriendlyDate,
     parseJustificacion,
+    getDestinoInfo,
+    getHospedajeInfo,
   } = emp;
 
   return (
@@ -100,7 +102,96 @@ export default function EmpleadoGastoDetailModal({ emp, themeColors }: EmpleadoG
                   <Text style={[styles.detailValue, { color: themeColors.text }]}>
                     {GastoHelper.getCategoria(selectedGasto) || 'Sin Categoría'} {GastoHelper.getSubcategoria(selectedGasto) ? ` > ${GastoHelper.getSubcategoria(selectedGasto)}` : ''}
                   </Text>
+                  {!!(selectedGasto as any).subtipo_traslado && (
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.primary, marginTop: 4 }}>
+                      Subtipo de Traslado: {(selectedGasto as any).subtipo_traslado}
+                    </Text>
+                  )}
                 </View>
+
+                {/* Destino del Gasto: Proyecto / Operativo / Sin proyecto */}
+                {(() => {
+                  const destino = getDestinoInfo(selectedGasto);
+                  return (
+                    <View style={styles.detailItem}>
+                      <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>
+                        Destino del Gasto
+                      </Text>
+                      <Text
+                        style={[
+                          styles.detailValue,
+                          {
+                            color: destino.tipo === 'PROYECTO_SUGERIDO' ? themeColors.warning : themeColors.primary,
+                            fontWeight: '800',
+                          },
+                        ]}
+                      >
+                        {destino.tipo === 'PROYECTO'
+                          ? `Proyecto: ${destino.label}`
+                          : destino.tipo === 'PROYECTO_SUGERIDO'
+                          ? `📝 Proyecto sugerido: ${destino.label}`
+                          : destino.label}
+                      </Text>
+                      {!!destino.sublabel && (
+                        <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
+                          {destino.sublabel}
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })()}
+
+                {/* Desglose Día por Día si es Hospedaje */}
+                {(() => {
+                  const hosp = getHospedajeInfo(selectedGasto);
+                  if (!hosp.isHospedaje) return null;
+                  return (
+                    <View
+                      style={[
+                        styles.detailItem,
+                        {
+                          backgroundColor: themeColors.primary + '10',
+                          borderColor: themeColors.primary + '35',
+                          borderWidth: 1,
+                          borderRadius: 12,
+                          padding: Spacing.two,
+                        },
+                      ]}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="bed-outline" size={18} color={themeColors.primary} />
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.primary }}>
+                            Hospedaje ({hosp.diasCount} {hosp.diasCount === 1 ? 'noche' : 'noches'})
+                          </Text>
+                        </View>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                          {formatCurrency(hosp.costoPorDia)} / día
+                        </Text>
+                      </View>
+
+                      <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginBottom: 8 }}>
+                        Estancia: {formatFriendlyDate(hosp.fechaInicio)} al {formatFriendlyDate(hosp.fechaFin)}
+                      </Text>
+
+                      <View style={{ borderTopWidth: 1, borderTopColor: themeColors.border, paddingTop: 6, gap: 4 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.textSecondary }}>
+                          Desglose diario:
+                        </Text>
+                        {hosp.dias.map((d, idx) => (
+                          <View key={(d as any).id || d.fecha} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <Text style={{ fontSize: 12, color: themeColors.text }}>
+                              Día {idx + 1} • {formatFriendlyDate(d.fecha)}
+                            </Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                              {formatCurrency(d.monto_diario)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  );
+                })()}
 
                 <View style={styles.detailItem}>
                   <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Método de Pago</Text>

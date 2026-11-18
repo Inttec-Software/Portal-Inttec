@@ -21,6 +21,7 @@ import { CatalogService } from '@/services/catalogService';
 import { SyncService } from '@/services/sync';
 import { isCombustibleExpense } from '@/utils/helpers';
 import { optimizeImage } from '@/utils/imageOptimizer';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { gastosApi } from '../api/gastosApi';
 import {
   GastoFormRole,
@@ -55,6 +56,10 @@ const cleanJustificacion = (text: string | null | undefined): string => {
   cleaned = cleaned.replace(/\s*\[Monto de propina dejado aparte:[^\]]*\]/gi, '');
   // Strip Proveedor a agregar
   cleaned = cleaned.replace(/\s*\[Proveedor a agregar:[^\]]*\]/gi, '');
+  // Strip Proyecto a agregar
+  cleaned = cleaned.replace(/\s*\[Proyecto a agregar:[^\]]*\]/gi, '');
+  // Strip Sucursal a agregar
+  cleaned = cleaned.replace(/\s*\[Sucursal a agregar:[^\]]*\]/gi, '');
   return cleaned.trim();
 };
 
@@ -62,6 +67,28 @@ export interface UseGastoFormOptions {
   role: GastoFormRole;
   mode: GastoFormMode;
   gastoId?: string;
+}
+
+export type TipoGastoDestino = 'PROYECTO' | 'OPERATIVO';
+export type BloqueProyectoCategoria = 'ALIMENTOS' | 'HOSPEDAJE' | 'MATERIAL' | 'EQUIPO' | 'TRANSPORTE';
+export type SubtipoTransporte = 'COMBUSTIBLE' | 'TRASLADOS';
+export type SubtipoTraslado = 'CASETAS' | 'ESTACIONAMIENTOS' | 'MULTAS' | 'UBER' | 'VUELOS' | 'OTRO';
+
+export interface ProyectoCatalogoItem {
+  id: string;
+  nombre: string;
+  cliente_id?: string | null;
+  cliente_nombre?: string | null;
+  sucursal_id?: string | null;
+  sucursal_nombre?: string | null;
+  status: 'ACTIVO' | 'CERRADO';
+  notas?: string | null;
+}
+
+export interface HospedajeDiaPreview {
+  fecha: string; // YYYY-MM-DD
+  fechaFriendly: string; // DD/MM/YYYY
+  monto_diario: number;
 }
 
 export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
@@ -192,6 +219,283 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
   const [splitClienteSearch, setSplitClienteSearch] = useState('');
   const [splitSucursalSearch, setSplitSucursalSearch] = useState('');
 
+  // === REWORK GASTOS POR PROYECTO (Dev 2) ===
+  const [proyectos, setProyectos] = useState<ProyectoCatalogoItem[]>([]);
+  const [selectedProyectoId, setSelectedProyectoId] = useState<string | null>(null);
+  const [comentarioProyecto, setComentarioProyecto] = useState('');
+  const [proyectoSearch, setProyectoSearch] = useState('');
+  const [showProyectoDropdown, setShowProyectoDropdown] = useState(false);
+  const [tipoGasto, setTipoGasto] = useState<TipoGastoDestino>('PROYECTO');
+  const [bloqueProyecto, setBloqueProyecto] = useState<BloqueProyectoCategoria | null>(null);
+  const [subtipoTransporte, setSubtipoTransporte] = useState<SubtipoTransporte | null>(null);
+  const [subtipoTraslado, setSubtipoTraslado] = useState<SubtipoTraslado | null>(null);
+
+  const getTodayIso = () => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const getTomorrowIso = () => {
+    const tmrw = new Date(Date.now() + 86400000);
+    const yyyy = tmrw.getFullYear();
+    const mm = String(tmrw.getMonth() + 1).padStart(2, '0');
+    const dd = String(tmrw.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const [fechaHospedajeInicio, setFechaHospedajeInicio] = useState<string>(getTodayIso());
+  const [fechaHospedajeFin, setFechaHospedajeFin] = useState<string>(getTomorrowIso());
+  const [showHospedajeInicioPicker, setShowHospedajeInicioPicker] = useState(false);
+  const [showHospedajeFinPicker, setShowHospedajeFinPicker] = useState(false);
+  const [isHistoricoSinProyecto, setIsHistoricoSinProyecto] = useState(false);
+  const [hospedajeRecienteAviso, setHospedajeRecienteAviso] = useState<string | null>(null);
+
+  const selectedProyectoObj = useMemo(
+    () => proyectos.find((p) => String(p.id) === String(selectedProyectoId)) || null,
+    [proyectos, selectedProyectoId]
+  );
+
+  const findCatName = (cats: CatalogoItem[], keywords: string[]): string => {
+    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const found = cats.find((c) => c.nombre && keywords.some((k) => norm(c.nombre).includes(norm(k))));
+    return found?.nombre || '';
+  };
+
+  const findSubName = (subs: SubcategoriaItem[], catId: string | undefined, keywords: string[]): string => {
+    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const pool = catId ? subs.filter((s) => s.categoria_id === catId) : subs;
+    const found = pool.find((s) => s.nombre && keywords.some((k) => norm(s.nombre).includes(norm(k))));
+    return found?.nombre || (pool[0]?.nombre || '');
+  };
+
+  const handleSelectTipoGasto = (nuevoTipo: TipoGastoDestino) => {
+    setTipoGasto(nuevoTipo);
+    setShowProyectoDropdown(false);
+    if (nuevoTipo === 'OPERATIVO') {
+      setSelectedProyectoId(null);
+      setComentarioProyecto('');
+      setBloqueProyecto(null);
+      setSubtipoTransporte(null);
+      setSubtipoTraslado(null);
+      setEsComida(false);
+      setTipoServicioProyecto('Operativo');
+      if (!detalleServicioProyecto.trim()) {
+        setDetalleServicioProyecto('Gasto Operativo / General');
+      }
+      const opCat = findCatName(categorias, ['oficina', 'administracion', 'operativo']);
+      if (opCat) {
+        setSelectedCategoria(opCat);
+        const catObj = categorias.find((c) => c.nombre === opCat);
+        setSelectedSubcategoria(findSubName(subcategorias, catObj?.id, ['general', 'oficina', 'papeleri', 'servicio']));
+      }
+    } else {
+      setTipoServicioProyecto('Proyecto');
+      if (selectedProyectoObj) {
+        setDetalleServicioProyecto(selectedProyectoObj.nombre);
+      }
+    }
+  };
+
+  const handleSelectProyecto = async (proj: ProyectoCatalogoItem | null) => {
+    setShowProyectoDropdown(false);
+    setProyectoSearch('');
+    if (!proj) {
+      setSelectedProyectoId(null);
+      setHospedajeRecienteAviso(null);
+      return;
+    }
+    setSelectedProyectoId(proj.id);
+    setComentarioProyecto('');
+    setTipoGasto('PROYECTO');
+    setIsHistoricoSinProyecto(false);
+    setTipoServicioProyecto('Proyecto');
+    setDetalleServicioProyecto(proj.nombre);
+
+    if (proj.cliente_nombre) {
+      setSelectedCliente(proj.cliente_nombre);
+    } else if (proj.cliente_id) {
+      const cli = clientes.find((c) => String(c.id) === String(proj.cliente_id));
+      if (cli?.nombre) setSelectedCliente(cli.nombre);
+    }
+
+    if (proj.sucursal_nombre) {
+      setSucursal(proj.sucursal_nombre);
+    } else if (proj.sucursal_id) {
+      const suc = sucursalesCliente.find((s) => String(s.id) === String(proj.sucursal_id));
+      if (suc?.nombre) setSucursal(suc.nombre);
+    }
+
+    // Consultar si hay hospedajes recientes en este proyecto para mostrar recordatorio amigable
+    try {
+      const headers = await getApiHeaders();
+      const res = await fetch(`${getApiUrl()}/api/proyectos/${proj.id}`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        const gastosProj: any[] = json?.gastos || [];
+        const hospPrevio = gastosProj.find(
+          (g) =>
+            String(g.id) !== String(gastoId || '') &&
+            g.status !== 'REJECTED' &&
+            (g.fecha_hospedaje_inicio ||
+              (g.subcategoria_rel?.nombre || '').toLowerCase().includes('hospedaje'))
+        );
+        if (hospPrevio) {
+          const rangoPrevio =
+            hospPrevio.fecha_hospedaje_inicio && hospPrevio.fecha_hospedaje_fin
+              ? ` (${hospPrevio.fecha_hospedaje_inicio} al ${hospPrevio.fecha_hospedaje_fin})`
+              : '';
+          setHospedajeRecienteAviso(
+            `Existe un gasto de hospedaje registrado en este proyecto${rangoPrevio}. Si te quedaste días extra con un nuevo ticket/factura, regístralo aquí con las nuevas fechas; si es el mismo cobro aún pendiente, puedes editar el gasto original.`
+          );
+        } else {
+          setHospedajeRecienteAviso(null);
+        }
+      }
+    } catch (_) {
+      // Silencioso si el endpoint aún no está disponible
+    }
+  };
+
+  const handleSelectBloqueProyecto = (bloque: BloqueProyectoCategoria) => {
+    setBloqueProyecto(bloque);
+    setShowCatDropdown(false);
+    setShowSubDropdown(false);
+
+    if (bloque === 'ALIMENTOS') {
+      setEsComida(true);
+      setSubtipoTransporte(null);
+      setSubtipoTraslado(null);
+      const cat = findCatName(categorias, ['viaje', 'alimento', 'viatico']);
+      const catObj = categorias.find((c) => c.nombre === cat);
+      const sub = findSubName(subcategorias, catObj?.id, ['alimento', 'comida', 'consumo']);
+      if (cat) setSelectedCategoria(cat);
+      if (sub) setSelectedSubcategoria(sub);
+    } else if (bloque === 'HOSPEDAJE') {
+      setEsComida(false);
+      setIncluyePropina(null);
+      setMontoPropina('');
+      setSelectedEmpleados([]);
+      setSubtipoTransporte(null);
+      setSubtipoTraslado(null);
+      if (!fechaHospedajeInicio) setFechaHospedajeInicio(getTodayIso());
+      if (!fechaHospedajeFin) setFechaHospedajeFin(getTomorrowIso());
+      const cat = findCatName(categorias, ['viaje', 'hospedaje', 'viatico']);
+      const catObj = categorias.find((c) => c.nombre === cat);
+      const sub = findSubName(subcategorias, catObj?.id, ['hospedaje', 'hotel', 'alojamiento']);
+      if (cat) setSelectedCategoria(cat);
+      if (sub) setSelectedSubcategoria(sub);
+    } else if (bloque === 'MATERIAL') {
+      setEsComida(false);
+      setIncluyePropina(null);
+      setMontoPropina('');
+      setSelectedEmpleados([]);
+      setSubtipoTransporte(null);
+      setSubtipoTraslado(null);
+      const cat = findCatName(categorias, ['material']);
+      const catObj = categorias.find((c) => c.nombre === cat);
+      const sub = findSubName(subcategorias, catObj?.id, ['electrico', 'ferreteria', 'material']);
+      if (cat) setSelectedCategoria(cat);
+      if (sub) setSelectedSubcategoria(sub);
+    } else if (bloque === 'EQUIPO') {
+      setEsComida(false);
+      setIncluyePropina(null);
+      setMontoPropina('');
+      setSelectedEmpleados([]);
+      setSubtipoTransporte(null);
+      setSubtipoTraslado(null);
+      const cat = findCatName(categorias, ['equipo']);
+      const catObj = categorias.find((c) => c.nombre === cat);
+      const sub = findSubName(subcategorias, catObj?.id, ['seguridad', 'panel', 'refrigeracion', 'venta', 'equipo']);
+      if (cat) setSelectedCategoria(cat);
+      if (sub) setSelectedSubcategoria(sub);
+    } else if (bloque === 'TRANSPORTE') {
+      setEsComida(false);
+      setIncluyePropina(null);
+      setMontoPropina('');
+      setSelectedEmpleados([]);
+      const nextSub = subtipoTransporte || 'COMBUSTIBLE';
+      handleSelectSubtipoTransporte(nextSub);
+    }
+  };
+
+  const handleSelectSubtipoTransporte = (sub: SubtipoTransporte) => {
+    setBloqueProyecto('TRANSPORTE');
+    setSubtipoTransporte(sub);
+    if (sub === 'COMBUSTIBLE') {
+      setSubtipoTraslado(null);
+      const cat = findCatName(categorias, ['vehiculo', 'transporte']);
+      const catObj = categorias.find((c) => c.nombre === cat);
+      const subName = findSubName(subcategorias, catObj?.id, ['combustible', 'gasolina', 'diesel']);
+      if (cat) setSelectedCategoria(cat);
+      if (subName) setSelectedSubcategoria(subName);
+    } else {
+      const defaultTraslado: SubtipoTraslado = subtipoTraslado || 'CASETAS';
+      setSubtipoTraslado(defaultTraslado);
+      const cat = findCatName(categorias, ['viaje', 'traslado', 'transporte']);
+      const catObj = categorias.find((c) => c.nombre === cat);
+      const subName = findSubName(subcategorias, catObj?.id, ['traslado', 'caseta', 'uber', 'taxi', 'peaje', 'vuelo']);
+      if (cat) setSelectedCategoria(cat);
+      if (subName) setSelectedSubcategoria(subName);
+    }
+  };
+
+  const handleSelectSubtipoTraslado = (st: SubtipoTraslado) => {
+    setSubtipoTraslado(st);
+    const cat = findCatName(categorias, ['viaje', 'traslado', 'transporte']);
+    const catObj = categorias.find((c) => c.nombre === cat);
+    if (st === 'VUELOS') {
+      const subVuelo = findSubName(subcategorias, catObj?.id, ['vuelo', 'avion', 'boleto', 'traslado']);
+      if (subVuelo) setSelectedSubcategoria(subVuelo);
+    } else {
+      const subTras = findSubName(subcategorias, catObj?.id, ['traslado', 'caseta', 'uber', 'taxi']);
+      if (subTras) setSelectedSubcategoria(subTras);
+    }
+  };
+
+  const hospedajePreview = useMemo(() => {
+    const startStr = (fechaHospedajeInicio || '').trim();
+    const endStr = (fechaHospedajeFin || '').trim();
+    const rx = /^\d{4}-\d{2}-\d{2}$/;
+    if (!rx.test(startStr) || !rx.test(endStr)) {
+      return { diasCount: 0, costoPorDia: 0, dias: [] as HospedajeDiaPreview[], error: 'Formato de fecha inválido (AAAA-MM-DD)' };
+    }
+    const [sy, sm, sd] = startStr.split('-').map(Number);
+    const [ey, em, ed] = endStr.split('-').map(Number);
+    const startDate = new Date(sy, sm - 1, sd);
+    const endDate = new Date(ey, em - 1, ed);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return { diasCount: 0, costoPorDia: 0, dias: [] as HospedajeDiaPreview[], error: 'Fecha inválida' };
+    }
+    if (endDate < startDate) {
+      return { diasCount: 0, costoPorDia: 0, dias: [] as HospedajeDiaPreview[], error: 'La fecha de salida no puede ser anterior a la entrada' };
+    }
+    const diffDays = Math.round((endDate.getTime() - startDate.getTime()) / 86400000);
+    const diasCount = Math.max(1, diffDays);
+    const totalNum = Number(monto) || 0;
+    const costoPorDia = diasCount > 0 ? Math.round((totalNum / diasCount) * 100) / 100 : 0;
+
+    const dias: HospedajeDiaPreview[] = [];
+    for (let i = 0; i < diasCount; i++) {
+      const d = new Date(sy, sm - 1, sd + i);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const isLast = i === diasCount - 1;
+      const montoDia = isLast && totalNum > 0
+        ? Math.max(0, Math.round((totalNum - costoPorDia * (diasCount - 1)) * 100) / 100)
+        : costoPorDia;
+      dias.push({
+        fecha: `${yyyy}-${mm}-${dd}`,
+        fechaFriendly: `${dd}/${mm}/${yyyy}`,
+        monto_diario: montoDia,
+      });
+    }
+    return { diasCount, costoPorDia, dias, error: null as string | null };
+  }, [fechaHospedajeInicio, fechaHospedajeFin, monto]);
+
   const alertaLocal = useMemo(() => {
     const alerts: string[] = [];
 
@@ -257,7 +561,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
 
   const loadCatalogos = async () => {
     try {
-      const data = await gastosApi.fetchFormCatalogs();
+      const data: any = await gastosApi.fetchFormCatalogs();
       if (data.categorias) setCategorias(data.categorias);
       if (data.subcategorias) setSubcategorias(data.subcategorias);
       if (data.clientes) setClientes(data.clientes);
@@ -265,19 +569,36 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
       if (data.sucursales) setSucursalesCliente(data.sucursales);
       if (data.proveedores) setProveedores(data.proveedores);
 
-      if (mode === 'create') {
-        if (data?.vehiculos && data.vehiculos.length > 0) {
-          setVehiculos(data.vehiculos);
-        } else {
-          try {
-            const vehList = await VehiculoService.getVehiculos(true);
-            if (vehList) setVehiculos(vehList);
-          } catch (vehErr) {
-            console.warn('Error al obtener vehículos:', vehErr);
+      let loadedProyectos: ProyectoCatalogoItem[] = [];
+      if (Array.isArray(data.proyectos) && data.proyectos.length > 0) {
+        loadedProyectos = data.proyectos;
+      } else {
+        try {
+          const headers = await getApiHeaders();
+          const pRes = await fetch(`${getApiUrl()}/api/proyectos?status=ACTIVO`, { headers });
+          if (pRes.ok) {
+            const pJson = await pRes.json();
+            if (Array.isArray(pJson?.proyectos)) {
+              loadedProyectos = pJson.proyectos;
+            }
           }
+        } catch (_) {
+          // Si Dev 1 aún no expone /api/proyectos, mantiene lista vacía sin tronar
         }
       }
-      return data;
+      setProyectos(loadedProyectos);
+
+      if (data?.vehiculos && data.vehiculos.length > 0) {
+        setVehiculos(data.vehiculos);
+      } else {
+        try {
+          const vehList = await VehiculoService.getVehiculos(true);
+          if (vehList) setVehiculos(vehList);
+        } catch (vehErr) {
+          console.warn('Error al obtener vehículos:', vehErr);
+        }
+      }
+      return { ...data, proyectos: loadedProyectos };
     } catch (err) {
       console.error('Error loading catalogs:', err);
       return null;
@@ -358,6 +679,85 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
 
             if (resolvedCat) setSelectedCategoria(resolvedCat);
             if (resolvedSub) setSelectedSubcategoria(resolvedSub);
+
+            // Hidratar campos nuevos del Rework por Proyecto y compatibilidad con gastos históricos
+            const rawData: any = data;
+            const projSugMatch = data.justificacion?.match(/\[Proyecto a agregar:\s*([^\]]+)\]/i);
+            if (rawData.proyecto_id) {
+              setSelectedProyectoId(String(rawData.proyecto_id));
+              setComentarioProyecto('');
+              setTipoGasto('PROYECTO');
+              setIsHistoricoSinProyecto(false);
+              if (rawData.proyecto_rel && ! (catalogs?.proyectos || []).some((p: any) => String(p.id) === String(rawData.proyecto_id))) {
+                setProyectos((prev) => [
+                  {
+                    id: String(rawData.proyecto_id),
+                    nombre: rawData.proyecto_rel.nombre || rawData.detalle_servicio_proyecto || 'Proyecto asignado',
+                    cliente_nombre: rawData.proyecto_rel.cliente_nombre || resolvedCliente || null,
+                    sucursal_nombre: rawData.proyecto_rel.sucursal_nombre || resolvedSucursal || null,
+                    status: rawData.proyecto_rel.status || 'ACTIVO',
+                  },
+                  ...prev,
+                ]);
+              }
+            } else if (projSugMatch) {
+              setSelectedProyectoId(null);
+              setComentarioProyecto(projSugMatch[1].trim());
+              setTipoGasto('PROYECTO');
+              setIsHistoricoSinProyecto(false);
+            } else if (rawData.tipo_gasto === 'OPERATIVO' || data.tipo_servicio_proyecto === 'Operativo') {
+              setSelectedProyectoId(null);
+              setComentarioProyecto('');
+              setTipoGasto('OPERATIVO');
+              setIsHistoricoSinProyecto(false);
+            } else if (rawData.tipo_gasto === 'PROYECTO') {
+              setSelectedProyectoId(null);
+              setComentarioProyecto(data.detalle_servicio_proyecto || '');
+              setTipoGasto('PROYECTO');
+              setIsHistoricoSinProyecto(false);
+            } else {
+              // Gasto histórico sin proyecto_id
+              setSelectedProyectoId(null);
+              setComentarioProyecto('');
+              setTipoGasto('PROYECTO');
+              setIsHistoricoSinProyecto(true);
+            }
+
+            if (rawData.subtipo_traslado) {
+              setSubtipoTraslado(rawData.subtipo_traslado as SubtipoTraslado);
+            }
+            if (rawData.fecha_hospedaje_inicio) {
+              setFechaHospedajeInicio(String(rawData.fecha_hospedaje_inicio).split('T')[0]);
+            }
+            if (rawData.fecha_hospedaje_fin) {
+              setFechaHospedajeFin(String(rawData.fecha_hospedaje_fin).split('T')[0]);
+            }
+
+            // Inferir bloque de proyecto según categoría/subcategoría
+            const normCat = (resolvedCat || '').toLowerCase();
+            const normSub = (resolvedSub || '').toLowerCase();
+            if (normSub.includes('alimento') || normSub.includes('comida') || normCat.includes('alimento')) {
+              setBloqueProyecto('ALIMENTOS');
+            } else if (normSub.includes('hospedaje') || normSub.includes('hotel') || rawData.fecha_hospedaje_inicio) {
+              setBloqueProyecto('HOSPEDAJE');
+            } else if (normCat.includes('material') || normSub.includes('material') || normSub.includes('ferreteria')) {
+              setBloqueProyecto('MATERIAL');
+            } else if (normCat.includes('equipo') || normSub.includes('equipo')) {
+              setBloqueProyecto('EQUIPO');
+            } else if (isCombustibleExpense(resolvedCat, resolvedSub)) {
+              setBloqueProyecto('TRANSPORTE');
+              setSubtipoTransporte('COMBUSTIBLE');
+            } else if (
+              rawData.subtipo_traslado ||
+              normSub.includes('traslado') ||
+              normSub.includes('vuelo') ||
+              normSub.includes('caseta') ||
+              normSub.includes('uber') ||
+              normSub.includes('taxi')
+            ) {
+              setBloqueProyecto('TRANSPORTE');
+              setSubtipoTransporte('TRASLADOS');
+            }
 
             if (data.motivo_sin_factura?.startsWith('PENDIENTE_ENTREGA')) {
               setFacturado(false);
@@ -897,7 +1297,22 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         return;
       }
 
-      // 8. Validar Categoría y Subcategoría
+      // 8. Validar Destino (Proyecto vs Operativo) y Categoría
+      if (tipoGasto === 'PROYECTO' && !selectedProyectoId && !comentarioProyecto.trim() && !isSplit) {
+        showAlert(
+          'Validación',
+          role === 'admin'
+            ? 'Por favor selecciona el Proyecto activo o escribe el nombre en "Proyecto a agregar" para registrarlo.'
+            : 'Por favor selecciona el Proyecto activo o indica en "Proyecto a agregar" el nombre del proyecto para que Administración pueda darlo de alta.'
+        );
+        return;
+      }
+
+      if (tipoGasto === 'PROYECTO' && !bloqueProyecto && (!selectedCategoria || !selectedSubcategoria)) {
+        showAlert('Validación', 'Por favor selecciona el tipo de gasto del proyecto (Alimentos, Hospedaje, Material, Equipo o Transporte).');
+        return;
+      }
+
       if (!selectedCategoria) {
         showAlert('Validación', 'Por favor selecciona una categoría.');
         setCurrentStep(3);
@@ -910,8 +1325,33 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         return;
       }
 
+      if (tipoGasto === 'PROYECTO' && bloqueProyecto === 'HOSPEDAJE') {
+        if (!fechaHospedajeInicio || !fechaHospedajeFin || hospedajePreview.error) {
+          showAlert('Validación de Hospedaje', hospedajePreview.error || 'Por favor selecciona las fechas de entrada y salida del hotel.');
+          return;
+        }
+      }
+
+      if (tipoGasto === 'PROYECTO' && bloqueProyecto === 'TRANSPORTE') {
+        if (!subtipoTransporte) {
+          showAlert('Validación', 'Por favor indica si el gasto de transporte es Combustible o Traslados.');
+          return;
+        }
+        if (subtipoTransporte === 'TRASLADOS' && !subtipoTraslado) {
+          showAlert('Validación', 'Por favor selecciona el subtipo de traslado (Casetas, Estacionamientos, Multas, Uber, Vuelos u Otro).');
+          return;
+        }
+      }
+
+      if (esComida && incluyePropina === null) {
+        showAlert('Validación', 'Por favor especifica si el ticket de alimentos incluye propina.');
+        return;
+      }
+
       // 10. Validar Vehículos / Gasolina / Combustible
-      const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
+      const esGasolina =
+        (tipoGasto === 'PROYECTO' && bloqueProyecto === 'TRANSPORTE' && subtipoTransporte === 'COMBUSTIBLE') ||
+        isCombustibleExpense(selectedCategoria, selectedSubcategoria);
       if (esGasolina) {
         if (!selectedVehiculoId) {
           showAlert('Validación', 'Por favor selecciona el vehículo.');
@@ -930,29 +1370,36 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         }
       }
 
-      // 11. Validar Tipo y Detalle de Servicio/Proyecto
-      if (!tipoServicioProyecto) {
-        showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto, Venta u Operativo.');
+      const effectiveTipoServicio =
+        tipoServicioProyecto || (tipoGasto === 'OPERATIVO' ? 'Operativo' : 'Proyecto');
+      const effectiveDetalleProyecto =
+        (tipoGasto === 'PROYECTO' && !selectedProyectoId && comentarioProyecto.trim()
+          ? comentarioProyecto.trim()
+          : '') ||
+        detalleServicioProyecto.trim() ||
+        selectedProyectoObj?.nombre ||
+        (tipoGasto === 'OPERATIVO' ? 'Gasto Operativo / General' : '');
+
+      // 12. Validar Comentarios / Justificación (con respaldo automático en Alimentos/Hospedaje/Combustible si se dejó vacío)
+      const defaultJustificacionByBloque =
+        bloqueProyecto === 'ALIMENTOS'
+          ? 'Consumo de alimentos'
+          : bloqueProyecto === 'HOSPEDAJE'
+          ? `Hospedaje del ${fechaHospedajeInicio} al ${fechaHospedajeFin} (${hospedajePreview.diasCount} noche(s))`
+          : esGasolina
+          ? `Carga de combustible (${litrosGasolina} L)`
+          : '';
+      const effectiveJustificacion = justificacion.trim() || defaultJustificacionByBloque;
+
+      if (!effectiveJustificacion) {
+        showAlert('Validación', 'Por favor escribe la descripción o justificación del gasto.');
         setCurrentStep(3);
         return;
       }
 
-      if (!detalleServicioProyecto.trim()) {
-        showAlert('Validación', 'Por favor ingresa el detalle del Servicio, Proyecto, Venta u Operativo.');
-        setCurrentStep(3);
-        return;
-      }
-
-      // 12. Validar Comentarios / Justificación
-      if (!justificacion.trim()) {
-        showAlert('Validación', 'Por favor escribe tus comentarios del gasto.');
-        setCurrentStep(3);
-        return;
-      }
-
-      if (!isSplit) {
+      if (!isSplit && tipoGasto === 'PROYECTO' && !selectedProyectoId) {
         if (!selectedCliente || !selectedCliente.trim()) {
-          showAlert('Validación', 'Por favor selecciona el cliente relacionado al gasto.');
+          showAlert('Validación', 'Por favor selecciona el proyecto o cliente relacionado al gasto.');
           setCurrentStep(3);
           return;
         }
@@ -1024,9 +1471,12 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
 
       const dbFecha = formatFriendlyToDb(fechaComprobante);
 
-      let finalJustificacion = justificacion.trim();
+      let finalJustificacion = effectiveJustificacion;
       if (currentUser?.rol === 'DEV') {
         finalJustificacion = `[PRUEBA] ${finalJustificacion}`;
+      }
+      if (tipoGasto === 'PROYECTO' && !selectedProyectoId && comentarioProyecto.trim()) {
+        finalJustificacion = `[Proyecto a agregar: ${comentarioProyecto.trim()}]\n\n${finalJustificacion}`;
       }
       if (!proveedor.trim() && comentarioProveedor.trim()) {
         finalJustificacion = `[Proveedor a agregar: ${comentarioProveedor.trim()}]\n\n${finalJustificacion}`;
@@ -1056,6 +1506,11 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
       const activeCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === selectedCliente.trim().toLowerCase());
       const activeSucObj = sucursalesCliente.find(s => s.nombre && s.nombre.trim().toLowerCase() === sucursal.trim().toLowerCase() && (!activeCliObj || s.cliente_id === activeCliObj.id));
 
+      const resolvedClienteId = selectedProyectoObj?.cliente_id || activeCliObj?.id || null;
+      const resolvedSucursalId = selectedProyectoObj?.sucursal_id || activeSucObj?.id || null;
+      const isHospedaje = tipoGasto === 'PROYECTO' && bloqueProyecto === 'HOSPEDAJE';
+      const isTraslado = tipoGasto === 'PROYECTO' && bloqueProyecto === 'TRANSPORTE' && subtipoTransporte === 'TRASLADOS';
+
       const gastoPayload = {
         empleado_id: currentUser.id,
         empleado_nombre: currentUser.nombre,
@@ -1065,8 +1520,8 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         justificacion: finalJustificacion,
         fecha_comprobante: dbFecha,
         proveedor_id: activeProvObj?.id || null,
-        cliente_id: activeCliObj?.id || null,
-        sucursal_id: activeSucObj?.id || null,
+        cliente_id: resolvedClienteId,
+        sucursal_id: resolvedSucursalId,
         tipo_tarjeta: (metodoPago === 'efectivo' || metodoPago === 'transferencia' || metodoPago === 'monedero_electronico') ? null : tipoTarjeta,
         ubicacion_registro: 'Móvil',
         facturado: facturado,
@@ -1075,8 +1530,13 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
           : (facturaStatus === 'PENDIENTE')
               ? (comentarioPendiente.trim() ? `PENDIENTE_ENTREGA: ${comentarioPendiente.trim()}` : 'PENDIENTE_ENTREGA')
               : (motivoSinFactura.trim() || null),
-        tipo_servicio_proyecto: tipoServicioProyecto,
-        detalle_servicio_proyecto: detalleServicioProyecto.trim(),
+        tipo_servicio_proyecto: effectiveTipoServicio,
+        detalle_servicio_proyecto: effectiveDetalleProyecto,
+        proyecto_id: tipoGasto === 'PROYECTO' ? (selectedProyectoId || null) : null,
+        tipo_gasto: tipoGasto,
+        subtipo_traslado: isTraslado ? (subtipoTraslado || 'OTRO') : null,
+        fecha_hospedaje_inicio: isHospedaje ? (fechaHospedajeInicio || null) : null,
+        fecha_hospedaje_fin: isHospedaje ? (fechaHospedajeFin || null) : null,
       };
 
       setIsSubmitting(true);
@@ -1316,28 +1776,36 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         return;
       }
 
-      if (!selectedCliente.trim()) {
-        showAlert('Validación', 'Por favor selecciona o ingresa el cliente o proyecto asignado.');
+      if (tipoGasto === 'PROYECTO' && bloqueProyecto === 'HOSPEDAJE') {
+        if (!fechaHospedajeInicio || !fechaHospedajeFin || hospedajePreview.error) {
+          showAlert('Validación de Hospedaje', hospedajePreview.error || 'Por favor selecciona las fechas de entrada y salida del hotel.');
+          return;
+        }
+      }
+
+      if (tipoGasto === 'PROYECTO' && !selectedProyectoId && !comentarioProyecto.trim() && !isHistoricoSinProyecto) {
+        showAlert(
+          'Validación',
+          'Por favor selecciona un proyecto activo, escribe uno en "Proyecto a agregar", o marca el gasto como Operativo.'
+        );
         return;
       }
 
-      if (!sucursal || !sucursal.trim()) {
-        showAlert('Validación', 'Por favor selecciona la sucursal del cliente.');
-        return;
-      }
+      const esGasolinaEdit =
+        (tipoGasto === 'PROYECTO' && bloqueProyecto === 'TRANSPORTE' && subtipoTransporte === 'COMBUSTIBLE') ||
+        isCombustibleExpense(selectedCategoria, selectedSubcategoria);
+      const defaultJustEdit =
+        bloqueProyecto === 'ALIMENTOS'
+          ? 'Consumo de alimentos'
+          : bloqueProyecto === 'HOSPEDAJE'
+          ? `Hospedaje del ${fechaHospedajeInicio} al ${fechaHospedajeFin} (${hospedajePreview.diasCount} noche(s))`
+          : esGasolinaEdit
+          ? `Carga de combustible`
+          : '';
+      const effectiveJustEdit = justificacion.trim() || defaultJustEdit;
 
-      if (!tipoServicioProyecto) {
-        showAlert('Validación', 'Por favor selecciona si es Servicio, Proyecto, Venta u Operativo.');
-        return;
-      }
-
-      if (!detalleServicioProyecto.trim()) {
-        showAlert('Validación', 'Por favor ingresa el detalle del Servicio, Proyecto, Venta u Operativo.');
-        return;
-      }
-
-      if (!justificacion.trim()) {
-        showAlert('Validación', 'Por favor escribe una justificación del gasto.');
+      if (!effectiveJustEdit) {
+        showAlert('Validación', 'Por favor escribe una justificación o descripción del gasto.');
         return;
       }
 
@@ -1369,7 +1837,10 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         : 0;
       const totalGasto = Number(monto) + extraPropina;
 
-      let finalJustificacion = justificacion.trim();
+      let finalJustificacion = effectiveJustEdit;
+      if (tipoGasto === 'PROYECTO' && !selectedProyectoId && comentarioProyecto.trim()) {
+        finalJustificacion = `[Proyecto a agregar: ${comentarioProyecto.trim()}]\n\n${finalJustificacion}`;
+      }
       if (!proveedor.trim() && comentarioProveedor.trim()) {
         finalJustificacion = `[Proveedor a agregar: ${comentarioProveedor.trim()}]\n\n${finalJustificacion}`;
       }
@@ -1395,6 +1866,20 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
       const activeCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === selectedCliente.trim().toLowerCase());
       const activeSucObj = sucursalesCliente.find(s => s.nombre && s.nombre.trim().toLowerCase() === sucursal.trim().toLowerCase() && (!activeCliObj || s.cliente_id === activeCliObj.id));
 
+      const resolvedClienteId = selectedProyectoObj?.cliente_id || activeCliObj?.id || null;
+      const resolvedSucursalId = selectedProyectoObj?.sucursal_id || activeSucObj?.id || null;
+      const isHospedaje = tipoGasto === 'PROYECTO' && bloqueProyecto === 'HOSPEDAJE';
+      const isTraslado = tipoGasto === 'PROYECTO' && bloqueProyecto === 'TRANSPORTE' && subtipoTransporte === 'TRASLADOS';
+      const effectiveTipoServicioEdit =
+        tipoServicioProyecto || (tipoGasto === 'OPERATIVO' ? 'Operativo' : 'Proyecto');
+      const effectiveDetalleEdit =
+        (tipoGasto === 'PROYECTO' && !selectedProyectoId && comentarioProyecto.trim()
+          ? comentarioProyecto.trim()
+          : '') ||
+        detalleServicioProyecto.trim() ||
+        selectedProyectoObj?.nombre ||
+        (tipoGasto === 'OPERATIVO' ? 'Gasto Operativo / General' : '');
+
       const gastoPayload: any = {
         ...(role === 'empleado' ? { empleado_id: currentUser.id, empleado_nombre: currentUser.nombre } : {}),
         monto: totalGasto,
@@ -1403,14 +1888,19 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         justificacion: finalJustificacion,
         fecha_comprobante: dbFecha,
         proveedor_id: activeProvObj?.id || null,
-        cliente_id: activeCliObj?.id || null,
-        sucursal_id: activeSucObj?.id || null,
+        cliente_id: resolvedClienteId,
+        sucursal_id: resolvedSucursalId,
         tipo_tarjeta: (metodoPago === 'efectivo' || metodoPago === 'transferencia' || metodoPago === 'monedero_electronico') ? null : tipoTarjeta,
         ubicacion_registro: 'Móvil',
         facturado: facturado,
         motivo_sin_factura: facturado ? null : (facturaStatus === 'PENDIENTE' ? `PENDIENTE_ENTREGA: ${comentarioPendiente}` : motivoSinFactura.trim() || null),
-        tipo_servicio_proyecto: tipoServicioProyecto,
-        detalle_servicio_proyecto: detalleServicioProyecto.trim(),
+        tipo_servicio_proyecto: effectiveTipoServicioEdit,
+        detalle_servicio_proyecto: effectiveDetalleEdit,
+        proyecto_id: tipoGasto === 'PROYECTO' ? (selectedProyectoId || null) : null,
+        tipo_gasto: isHistoricoSinProyecto && !selectedProyectoId && !comentarioProyecto.trim() && tipoGasto === 'PROYECTO' ? null : tipoGasto,
+        subtipo_traslado: isTraslado ? (subtipoTraslado || 'OTRO') : null,
+        fecha_hospedaje_inicio: isHospedaje ? (fechaHospedajeInicio || null) : null,
+        fecha_hospedaje_fin: isHospedaje ? (fechaHospedajeFin || null) : null,
       };
 
       setIsSubmitting(true);
@@ -1586,6 +2076,9 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
     setShowSubDropdown(false);
     setShowCliDropdown(false);
     setShowProvDropdown(false);
+    setShowProyectoDropdown(false);
+    setShowVehiculoDropdown(false);
+    setShowSucursalDropdown(false);
   };
 
   return {
@@ -1597,6 +2090,41 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
     setCurrentStep,
     isSubmitting,
     isLoadingGasto,
+    proyectos,
+    selectedProyectoId,
+    setSelectedProyectoId,
+    selectedProyectoObj,
+    comentarioProyecto,
+    setComentarioProyecto,
+    proyectoSearch,
+    setProyectoSearch,
+    showProyectoDropdown,
+    setShowProyectoDropdown,
+    tipoGasto,
+    setTipoGasto,
+    bloqueProyecto,
+    setBloqueProyecto,
+    subtipoTransporte,
+    setSubtipoTransporte,
+    subtipoTraslado,
+    setSubtipoTraslado,
+    fechaHospedajeInicio,
+    setFechaHospedajeInicio,
+    fechaHospedajeFin,
+    setFechaHospedajeFin,
+    showHospedajeInicioPicker,
+    setShowHospedajeInicioPicker,
+    showHospedajeFinPicker,
+    setShowHospedajeFinPicker,
+    isHistoricoSinProyecto,
+    setIsHistoricoSinProyecto,
+    hospedajeRecienteAviso,
+    hospedajePreview,
+    handleSelectTipoGasto,
+    handleSelectProyecto,
+    handleSelectBloqueProyecto,
+    handleSelectSubtipoTransporte,
+    handleSelectSubtipoTraslado,
     categorias,
     subcategorias,
     filteredSubcategorias,
