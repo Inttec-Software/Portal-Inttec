@@ -829,15 +829,22 @@ export function useAdminGastos() {
   };
 
   const parseJustificacion = (just: string | null | undefined) => {
-    if (!just) return { alerta: null, proveedorSugerido: null, justificacion: '' };
+    if (!just) return { alerta: null, proveedorSugerido: null, proyectoSugerido: null, justificacion: '' };
     let remaining = just;
     let alerta: string | null = null;
     let proveedorSugerido: string | null = null;
+    let proyectoSugerido: string | null = null;
 
     const alertaMatch = remaining.match(/^\[ALERTA IA:\s*([\s\S]*?)\]\s*\n\s*/);
     if (alertaMatch) {
       alerta = alertaMatch[1];
       remaining = remaining.replace(alertaMatch[0], '');
+    }
+
+    const proyMatch = remaining.match(/\[Proyecto a agregar:\s*([^\]]+)\]\s*\n?/i);
+    if (proyMatch) {
+      proyectoSugerido = proyMatch[1].trim();
+      remaining = remaining.replace(proyMatch[0], '');
     }
 
     const provMatch = remaining.match(/\[Proveedor a agregar:\s*([^\]]+)\]\s*\n?/);
@@ -846,7 +853,70 @@ export function useAdminGastos() {
       remaining = remaining.replace(provMatch[0], '');
     }
 
-    return { alerta, proveedorSugerido, justificacion: remaining.trim() };
+    return { alerta, proveedorSugerido, proyectoSugerido, justificacion: remaining.trim() };
+  };
+
+  const [isSavingQuickProy, setIsSavingQuickProy] = useState(false);
+
+  const handleQuickCreateProyectoAndAssign = async (nombreToCreate: string) => {
+    if (!selectedGasto) return;
+    const cleanName = (nombreToCreate || '').trim();
+    if (!cleanName) {
+      showAlert('Validación', 'El nombre del proyecto a crear está vacío.');
+      return;
+    }
+
+    setIsSavingQuickProy(true);
+    try {
+      let targetProyecto: any = proyectos.find(
+        (p) => p.nombre && p.nombre.trim().toLowerCase() === cleanName.toLowerCase()
+      );
+
+      if (!targetProyecto) {
+        targetProyecto = await proyectosApi.createProyecto({
+          nombre: cleanName,
+          cliente_id: selectedGasto.cliente_id || null,
+          sucursal_id: selectedGasto.sucursal_id || null,
+          created_by: adminUser?.id || null,
+        });
+      }
+
+      await proyectosApi.assignProyectoToGasto(selectedGasto.id, {
+        proyecto_id: targetProyecto.id,
+        tipo_gasto: 'PROYECTO',
+      });
+
+      const cleanedJust = String(selectedGasto.justificacion || '')
+        .replace(/\[Proyecto a agregar:\s*[^\]]+\]\s*\n*/gi, '')
+        .trim();
+
+      const updatedFields: Partial<Gasto> = {
+        proyecto_id: targetProyecto.id,
+        tipo_gasto: 'PROYECTO',
+        detalle_servicio_proyecto: targetProyecto.nombre,
+        justificacion: cleanedJust,
+        proyecto_rel: {
+          id: targetProyecto.id,
+          nombre: targetProyecto.nombre,
+          cliente_nombre: GastoHelper.getCliente(selectedGasto) || null,
+          sucursal_nombre: GastoHelper.getSucursal(selectedGasto) || null,
+          status: 'ACTIVO',
+        },
+      };
+
+      setGastos((prev) =>
+        prev.map((g) => (g.id === selectedGasto.id ? { ...g, ...updatedFields } : g))
+      );
+      setSelectedGasto((prev) => (prev ? { ...prev, ...updatedFields } : null));
+
+      await Promise.all([loadProyectos(true), refreshData(true)]);
+      showAlert('Éxito', `Proyecto "${targetProyecto.nombre}" creado y vinculado al gasto.`);
+    } catch (err: any) {
+      logger.error('Error al crear proyecto rápido:', err);
+      showAlert('Error', err.message || 'No se pudo crear y asignar el proyecto.');
+    } finally {
+      setIsSavingQuickProy(false);
+    }
   };
 
   // Acciones de Revisión de Gastos
@@ -858,6 +928,19 @@ export function useAdminGastos() {
       showAlert(
         'Indicar Proveedor',
         'No se puede aprobar este gasto porque el proveedor se encuentra en blanco.\n\nPor favor, edita el gasto y asigna un proveedor antes de aprobarlo.'
+      );
+      return;
+    }
+
+    const parsedCheck = parseJustificacion(selectedGasto.justificacion);
+    if (
+      status === 'APPROVED' &&
+      !selectedGasto.proyecto_id &&
+      (selectedGasto.tipo_gasto === 'PROYECTO' || !!parsedCheck.proyectoSugerido)
+    ) {
+      showAlert(
+        'Indicar Proyecto',
+        'No se puede aprobar este gasto porque tiene un proyecto pendiente de asignar.\n\nPor favor, crea o asigna el proyecto antes de aprobarlo.'
       );
       return;
     }
@@ -2894,6 +2977,8 @@ export function useAdminGastos() {
     quickEditProvSearch,
     setQuickEditProvSearch,
     isSavingQuickProv,
+    isSavingQuickProy,
+    handleQuickCreateProyectoAndAssign,
     showNewProvInQuickModal,
     setShowNewProvInQuickModal,
     newQuickProvName,

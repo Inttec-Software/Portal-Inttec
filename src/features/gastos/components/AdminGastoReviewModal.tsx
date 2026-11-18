@@ -61,6 +61,7 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
     setSatFacturaPreviewModalVisible,
     satFacturaToPreview,
     isSavingQuickProv,
+    isSavingQuickProy,
     handleUpdateStatus,
     handleApproveClick,
     handlePreviewSatFactura,
@@ -73,6 +74,7 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
     handleOpenAssignProyecto,
     handleOpenQuickEditProveedor,
     handleQuickCreateProveedorAndAssign,
+    handleQuickCreateProyectoAndAssign,
     handleOpenQuickEditField,
     handleCaptureAdminInvoice,
     handleSelectAdminInvoiceDocument,
@@ -467,15 +469,19 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                     selectedGasto.tipo_gasto === 'OPERATIVO' ||
                     (!selectedGasto.proyecto_id &&
                       (selectedGasto.tipo_servicio_proyecto || '').toLowerCase() === 'operativo');
+                  const parsedProy = parseJustificacion(selectedGasto.justificacion);
+                  const proySugerido =
+                    parsedProy.proyectoSugerido ||
+                    (!proyName && selectedGasto.tipo_gasto === 'PROYECTO'
+                      ? selectedGasto.detalle_servicio_proyecto || null
+                      : null);
 
                   return (
                     <View
                       style={[
                         styles.detailItem,
                         {
-                          flexDirection: 'row',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
+                          flexDirection: 'column',
                           backgroundColor: proyName
                             ? themeColors.primary + '12'
                             : isOperativo
@@ -492,102 +498,153 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                         },
                       ]}
                     >
-                      <View style={{ flex: 1, marginRight: Spacing.two, gap: 2 }}>
-                        <Text
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <View style={{ flex: 1, marginRight: Spacing.two, gap: 2 }}>
+                          <Text
+                            style={[
+                              styles.detailLabel,
+                              {
+                                color: proyName
+                                  ? themeColors.primary
+                                  : isOperativo
+                                  ? '#0284c7'
+                                  : themeColors.warning,
+                                fontWeight: '800',
+                              },
+                            ]}
+                          >
+                            {proyName
+                              ? '📁 Proyecto Asignado'
+                              : isOperativo
+                              ? '🏢 Destino: Gasto Operativo / General'
+                              : proySugerido
+                              ? '📝 Proyecto Pendiente de Dar de Alta'
+                              : '🕓 Histórico / Sin Proyecto Asignado'}
+                          </Text>
+
+                          <Text
+                            style={[
+                              styles.detailValue,
+                              {
+                                color: themeColors.text,
+                                fontWeight: '800',
+                                fontSize: 15,
+                              },
+                            ]}
+                          >
+                            {proyName ||
+                              (isOperativo
+                                ? 'Gasto Operativo / Oficina'
+                                : proySugerido
+                                ? `Sugerido: "${proySugerido}"`
+                                : 'Sin proyecto asignado')}
+                          </Text>
+
+                          {selectedGasto.proyecto_rel?.cliente_nombre ||
+                          selectedGasto.proyecto_rel?.sucursal_nombre ? (
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                color: themeColors.textSecondary,
+                              }}
+                            >
+                              {selectedGasto.proyecto_rel.cliente_nombre || ''}
+                              {selectedGasto.proyecto_rel.sucursal_nombre
+                                ? ` • Sucursal: ${selectedGasto.proyecto_rel.sucursal_nombre}`
+                                : ''}
+                            </Text>
+                          ) : null}
+
+                          {(selectedGasto.tipo_servicio_proyecto ||
+                            selectedGasto.detalle_servicio_proyecto) ? (
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                color: themeColors.textSecondary,
+                                marginTop: 2,
+                              }}
+                            >
+                              Ref. texto empleado:{' '}
+                              {selectedGasto.tipo_servicio_proyecto
+                                ? `[${selectedGasto.tipo_servicio_proyecto}] `
+                                : ''}
+                              {selectedGasto.detalle_servicio_proyecto || ''}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        <TouchableOpacity
+                          onPress={() => handleOpenAssignProyecto(selectedGasto)}
                           style={[
-                            styles.detailLabel,
+                            styles.quickFieldBtn,
                             {
-                              color: proyName
-                                ? themeColors.primary
-                                : isOperativo
-                                ? '#0284c7'
-                                : themeColors.warning,
-                              fontWeight: '800',
+                              backgroundColor: themeColors.primary,
+                              borderColor: themeColors.primary,
+                              paddingVertical: 7,
+                              paddingHorizontal: 11,
                             },
                           ]}
                         >
-                          {proyName
-                            ? '📁 Proyecto Asignado'
-                            : isOperativo
-                            ? '🏢 Destino: Gasto Operativo / General'
-                            : '🕓 Histórico / Sin Proyecto Asignado'}
-                        </Text>
-
-                        <Text
-                          style={[
-                            styles.detailValue,
-                            {
-                              color: themeColors.text,
-                              fontWeight: '800',
-                              fontSize: 15,
-                            },
-                          ]}
-                        >
-                          {proyName ||
-                            (isOperativo
-                              ? 'Gasto Operativo / Oficina'
-                              : 'Sin proyecto asignado')}
-                        </Text>
-
-                        {selectedGasto.proyecto_rel?.cliente_nombre ||
-                        selectedGasto.proyecto_rel?.sucursal_nombre ? (
+                          <Ionicons
+                            name="folder-open-outline"
+                            size={14}
+                            color="#fff"
+                          />
                           <Text
-                            style={{
-                              fontSize: 12,
-                              color: themeColors.textSecondary,
-                            }}
+                            style={[
+                              styles.quickFieldBtnText,
+                              { color: '#fff', fontWeight: '800' },
+                            ]}
                           >
-                            {selectedGasto.proyecto_rel.cliente_nombre || ''}
-                            {selectedGasto.proyecto_rel.sucursal_nombre
-                              ? ` • Sucursal: ${selectedGasto.proyecto_rel.sucursal_nombre}`
-                              : ''}
+                            {proyName ? 'Cambiar' : 'Asignar'}
                           </Text>
-                        ) : null}
-
-                        {(selectedGasto.tipo_servicio_proyecto ||
-                          selectedGasto.detalle_servicio_proyecto) ? (
-                          <Text
-                            style={{
-                              fontSize: 11,
-                              color: themeColors.textSecondary,
-                              marginTop: 2,
-                            }}
-                          >
-                            Ref. texto empleado:{' '}
-                            {selectedGasto.tipo_servicio_proyecto
-                              ? `[${selectedGasto.tipo_servicio_proyecto}] `
-                              : ''}
-                            {selectedGasto.detalle_servicio_proyecto || ''}
-                          </Text>
-                        ) : null}
+                        </TouchableOpacity>
                       </View>
 
-                      <TouchableOpacity
-                        onPress={() => handleOpenAssignProyecto(selectedGasto)}
-                        style={[
-                          styles.quickFieldBtn,
-                          {
-                            backgroundColor: themeColors.primary,
-                            borderColor: themeColors.primary,
-                            paddingVertical: 7,
-                            paddingHorizontal: 11,
-                          },
-                        ]}
-                      >
-                        <Ionicons
-                          name="folder-open-outline"
-                          size={14}
-                          color="#fff"
-                        />
-                        <Text
-                          style={[
-                            styles.quickFieldBtnText,
-                            { color: '#fff', fontWeight: '800' },
-                          ]}
+                      {!proyName && !isOperativo && !!proySugerido && (
+                        <View
+                          style={{
+                            marginTop: 10,
+                            padding: 10,
+                            backgroundColor: themeColors.backgroundElement,
+                            borderRadius: BorderRadius.small,
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                          }}
                         >
-                          {proyName ? 'Cambiar' : 'Asignar'}
-                        </Text>
-                      </TouchableOpacity>
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>
+                            📝 Proyecto a agregar indicado por el empleado:
+                          </Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.primary, marginTop: 2, marginBottom: 6 }}>
+                            {proySugerido}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => handleQuickCreateProyectoAndAssign(proySugerido)}
+                            disabled={isSavingQuickProy}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6,
+                              backgroundColor: themeColors.primary,
+                              paddingVertical: 8,
+                              paddingHorizontal: 12,
+                              borderRadius: BorderRadius.small,
+                            }}
+                          >
+                            {isSavingQuickProy ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <>
+                                <Ionicons name="flash-outline" size={16} color="#fff" />
+                                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>
+                                  ⚡ Crear y Asignar &quot;{proySugerido}&quot;
+                                </Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   );
                 })()}

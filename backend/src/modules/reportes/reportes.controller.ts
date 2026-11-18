@@ -231,6 +231,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
         viewConditions.push(`g.proyecto_id IS NULL`);
         if (tab === 'historial') {
           viewConditions.push(`NOT ${OPERATIVO_SQL}`);
+          viewConditions.push(`(g.tipo_gasto IS NULL OR g.status NOT IN ('PENDING', 'ACTION_REQUIRED'))`);
         }
       }
 
@@ -885,7 +886,7 @@ export const assignGastoProyecto = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { proyecto_id, tipo_gasto, actor_id } = req.body;
 
-    const gastoRes = await pool.query('SELECT id, proyecto_id, tipo_gasto FROM gastos WHERE id = $1', [id]);
+    const gastoRes = await pool.query('SELECT id, proyecto_id, tipo_gasto, justificacion, detalle_servicio_proyecto FROM gastos WHERE id = $1', [id]);
     const gasto = gastoRes.rows[0];
     if (!gasto) {
       return res.status(404).json({ error: 'Gasto no encontrado' });
@@ -917,9 +918,15 @@ export const assignGastoProyecto = async (req: Request, res: Response) => {
       if (!newTipoGasto) newTipoGasto = 'PROYECTO';
     }
 
+    const cleanedJust =
+      newProyectoId || newTipoGasto === 'OPERATIVO'
+        ? String(gasto.justificacion || '').replace(/\[Proyecto a agregar:\s*[^\]]+\]\s*\n*/gi, '').trim()
+        : gasto.justificacion;
+    const updatedDetalle = proyectoInfo?.nombre || gasto.detalle_servicio_proyecto || null;
+
     await pool.query(
-      'UPDATE gastos SET proyecto_id = $1, tipo_gasto = $2 WHERE id = $3',
-      [newProyectoId, newTipoGasto, id]
+      'UPDATE gastos SET proyecto_id = $1, tipo_gasto = $2, justificacion = $3, detalle_servicio_proyecto = $4 WHERE id = $5',
+      [newProyectoId, newTipoGasto, cleanedJust, updatedDetalle, id]
     );
 
     try {

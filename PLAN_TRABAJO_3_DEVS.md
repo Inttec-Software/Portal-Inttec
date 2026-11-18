@@ -93,6 +93,7 @@ Las 3 piezas deben respetar **exactamente** estos nombres de tablas, columnas, r
   - Además de lo actual (`categorias, subcategorias, clientes, usuarios, sucursales, proveedores, vehiculos`), agrega `proyectos` (lista de proyectos con `status = 'ACTIVO'`).
 - `POST /api/reportes/gastos` y `PUT /api/reportes/gastos/:id`
   - Aceptan en cada payload los campos nuevos: `proyecto_id`, `tipo_gasto`, `subtipo_traslado`, `fecha_hospedaje_inicio`, `fecha_hospedaje_fin`.
+  - **Importante (Sugerencia de Proyecto):** Permitir que `tipo_gasto = 'PROYECTO'` venga con `proyecto_id = null` cuando el empleado usó **"Proyecto a agregar"** (`[Proyecto a agregar: Nombre]` en `justificacion` y en `detalle_servicio_proyecto`), para que Admin lo dé de alta o vincule al revisar.
   - Si es hospedaje con fechas, Dev 1 calcula y guarda/recalcula `gastos_hospedaje_dias` automáticamente.
 - `PUT /api/reportes/gastos/:id/assign-proyecto`
   - Body: `{ proyecto_id: string | null, tipo_gasto: 'PROYECTO' | 'OPERATIVO' }`
@@ -136,7 +137,7 @@ Eres la puerta de entrada de los datos. Construyes la nueva experiencia de **1 s
 ### Qué debes hacer
 1. **Rediseñar el formulario (`GastoFormView.tsx` + `useGastoForm.ts`):**
    - Sustituir el flujo genérico de 3 pasos (`Paso1Comprobantes`, `Paso2Detalles`, `Paso3Categorizacion`) por **una sola pantalla progresiva** que funcione tanto en `mode="create"` como en `mode="edit"` y para ambos roles (`empleado` y `admin`, porque `(admin)/formulario.tsx`, `(admin)/editar-gasto.tsx`, `(empleado)/formulario.tsx` y `(empleado)/editar-gasto.tsx` todos renderizan `GastoFormView`).
-   - **Sección 1 — Destino del gasto:** Elegir **Proyecto** vs **Operativo / General**. Si elige Proyecto, mostrar selector/buscador de proyectos activos (cargados desde `formCatalogs.proyectos`).
+   - **Sección 1 — Destino del gasto:** Elegir **Proyecto** vs **Operativo / General**. Si elige Proyecto, mostrar selector/buscador de proyectos activos (cargados desde `formCatalogs.proyectos`) con opción **"Dejar en blanco (No encuentro mi proyecto)"** que despliega el campo obligatorio **`Proyecto a agregar *`** (`[Proyecto a agregar: ...]`), bajo la misma lógica que `Proveedor a agregar`.
    - **Sección 2 — Categoría:**
      - Si es Proyecto: **Alimentos**, **Hospedaje**, **Material**, **Equipo**, **Transporte** (subdividido en **Combustible** o **Traslados** → *Casetas, Estacionamientos, Multas, Uber, Vuelos, Otro*).
      - Si es Operativo: categorías operativas/oficina/mantenimiento vehicular.
@@ -179,6 +180,10 @@ Eres la torre de control de Administración. Construyes las "cajitas" de proyect
    - **Pestaña 4 — "Histórico / Sin proyecto":** Los gastos existentes con `proyecto_id = NULL`. Cada fila/tarjeta debe tener un botón rápido **"Asignar a proyecto"** (modal selector de proyecto) que llame a `PUT /api/reportes/gastos/:id/assign-proyecto` para que las chicas puedan ir migrando gastos recientes poco a poco.
 3. **Actualizar `AdminGastoReviewModal.tsx`:**
    - Mostrar el proyecto actual del gasto y permitir **cambiarlo/asignarlo antes de aprobar** (usando `/assign-proyecto` o `updateGasto`) por si el empleado se equivocó de proyecto.
+   - **Sugerencia de Proyecto (`[Proyecto a agregar: ...]`):** Igual que hoy existe para `[Proveedor a agregar: ...]`, extraer `proyectoSugerido` en `parseJustificacion` (`useAdminGastos.ts`) con `/\[Proyecto a agregar:\s*([^\]]+)\]/i`. Si el gasto tiene `tipo_gasto === 'PROYECTO'` y `!proyecto_id`, mostrar banner amarillo **"Proyecto Pendiente de Dar de Alta"** con dos botones:
+     1. **`⚡ Crear y Asignar "<proyectoSugerido>"`** (llama a `POST /api/proyectos` usando el nombre sugerido + `cliente_id` + `sucursal_id` del gasto y luego `PUT /api/reportes/gastos/:id/assign-proyecto`).
+     2. **`Asignar`** (abre selector de proyectos activos por si ya existía con otro nombre).
+   - En la **Pestaña 4 ("Histórico / Sin proyecto")**, filtrar únicamente los gastos históricos (`proyecto_id IS NULL AND tipo_gasto IS NULL`), mientras que los nuevos con `tipo_gasto = 'PROYECTO'` y `proyecto_id = NULL` se atienden en la bandeja **"Por revisar"**.
    - En gastos de **Hospedaje**, mostrar el rango de fechas y su desglose diario dentro del modal (la aprobación sigue siendo **1 sola vez** por todo el gasto).
    - **Cuidar lo existente:** Mantener funcionando intacto `SatFacturaLinker.tsx` (conciliación SAT / propinas / facturas compartidas), `AdminLinkSaleModal.tsx` y los reportes/exportaciones existentes.
 
