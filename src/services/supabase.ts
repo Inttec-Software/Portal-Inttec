@@ -550,19 +550,15 @@ export const AsistenciaService = {
 
   /**
    * Obtiene la fecha de la jornada laboral en formato YYYY-MM-DD en la zona horaria del empleado.
-   * La jornada laboral se reinicia a las 6:00 AM locales de cada día:
-   * - A partir de las 06:00:00 AM: Jornada del día actual (siempre pide entrada).
-   * - Antes de las 06:00:00 AM (00:00 - 05:59): Jornada del día anterior (permite checar salida de turnos que terminan de madrugada).
+   * La hora límite para checar salida del día es las 11:59 PM (23:59:59).
+   * Si el empleado no checa salida antes de las 11:59 PM, al cambiar de día (00:00) el turno anterior
+   * se considera olvido de checada y se auto-cierra a las 6:00 PM (18:00:00).
    */
   getFechaJornada(date: Date = new Date(), timeZone?: string): string {
     const z = this.getZonedParts(date, timeZone);
-    const localD = new Date(Date.UTC(z.year, z.month - 1, z.day));
-    if (z.hour < 6) {
-      localD.setUTCDate(localD.getUTCDate() - 1);
-    }
-    const y = localD.getUTCFullYear();
-    const m = String(localD.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(localD.getUTCDate()).padStart(2, '0');
+    const y = z.year;
+    const m = String(z.month).padStart(2, '0');
+    const d = String(z.day).padStart(2, '0');
     return `${y}-${m}-${d}`;
   },
 

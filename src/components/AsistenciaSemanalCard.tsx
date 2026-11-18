@@ -6,12 +6,14 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Platform,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Asistencia } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import EditarTurnoModal from '@/components/EditarTurnoModal';
@@ -104,6 +106,38 @@ export default function AsistenciaSemanalCard({
   // Estado del modal de registro de nuevo turno (ADMIN / DEV)
   const [registrarModalVisible, setRegistrarModalVisible] = useState(false);
   const [fechaParaNuevoTurno, setFechaParaNuevoTurno] = useState<string>('');
+  const [togglingComidaFecha, setTogglingComidaFecha] = useState<string | null>(null);
+
+  const handleToggleComidaDia = async (fecha: string, sinComida: boolean) => {
+    if (!effectiveEmpleadoId || togglingComidaFecha) return;
+    try {
+      setTogglingComidaFecha(fecha);
+      const headers = await getApiHeaders();
+      const response = await fetch(`${getApiUrl()}/api/asistencias/admin/toggle-comida`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          empleado_id: effectiveEmpleadoId,
+          fecha,
+          sin_comida: sinComida,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'No se pudo actualizar el descuento de comida');
+      }
+      onRefresh?.();
+    } catch (error: any) {
+      const msg = error?.message || 'No se pudo actualizar el descuento de comida';
+      if (Platform.OS === 'web') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Error', msg);
+      }
+    } finally {
+      setTogglingComidaFecha(null);
+    }
+  };
 
   // Estados de días expandidos (por defecto expandir días que tengan turnos)
   const [expandedDays, setExpandedDays] = useState<{ [dateStr: string]: boolean }>({});
@@ -477,21 +511,75 @@ export default function AsistenciaSemanalCard({
                 </View>
 
                 <View style={styles.dayInfoRight}>
-                  {dia.comidaDescontada && (
-                    <View
-                      style={[
-                        styles.comidaBadge,
-                        {
-                          backgroundColor: themeColors.accent + '15',
-                          borderColor: themeColors.accent + '35',
-                        },
-                      ]}
-                    >
-                      <Ionicons name="restaurant-outline" size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
-                      <Text style={[styles.comidaBadgeText, { color: themeColors.accent }]}>
-                        -1h comida
-                      </Text>
-                    </View>
+                  {canEditTurnos && effectiveEmpleadoId ? (
+                    dia.comidaDescontada ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.comidaBadge,
+                          {
+                            backgroundColor: themeColors.accent + '15',
+                            borderColor: themeColors.accent + '45',
+                          },
+                        ]}
+                        onPress={(e) => {
+                          (e as any)?.stopPropagation?.();
+                          handleToggleComidaDia(dia.dateStr, true);
+                        }}
+                        disabled={togglingComidaFecha === dia.dateStr}
+                        activeOpacity={0.7}
+                      >
+                        {togglingComidaFecha === dia.dateStr ? (
+                          <ActivityIndicator size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
+                        ) : (
+                          <Ionicons name="restaurant-outline" size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
+                        )}
+                        <Text style={[styles.comidaBadgeText, { color: themeColors.accent }]}>
+                          -1h comida ✕
+                        </Text>
+                      </TouchableOpacity>
+                    ) : dia.sinComidaManual ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.comidaBadge,
+                          {
+                            backgroundColor: '#10b98118',
+                            borderColor: '#10b98150',
+                          },
+                        ]}
+                        onPress={(e) => {
+                          (e as any)?.stopPropagation?.();
+                          handleToggleComidaDia(dia.dateStr, false);
+                        }}
+                        disabled={togglingComidaFecha === dia.dateStr}
+                        activeOpacity={0.7}
+                      >
+                        {togglingComidaFecha === dia.dateStr ? (
+                          <ActivityIndicator size={10} color="#10b981" style={{ marginRight: 3 }} />
+                        ) : (
+                          <Ionicons name="refresh-outline" size={10} color="#10b981" style={{ marginRight: 3 }} />
+                        )}
+                        <Text style={[styles.comidaBadgeText, { color: '#10b981' }]}>
+                          Sin -1h comida ↺
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null
+                  ) : (
+                    dia.comidaDescontada && (
+                      <View
+                        style={[
+                          styles.comidaBadge,
+                          {
+                            backgroundColor: themeColors.accent + '15',
+                            borderColor: themeColors.accent + '35',
+                          },
+                        ]}
+                      >
+                        <Ionicons name="restaurant-outline" size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
+                        <Text style={[styles.comidaBadgeText, { color: themeColors.accent }]}>
+                          -1h comida
+                        </Text>
+                      </View>
+                    )
                   )}
 
                   {canViewOvertime && dia.minutosExtra > 0 && (

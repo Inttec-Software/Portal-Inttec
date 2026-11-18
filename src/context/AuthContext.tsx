@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AuthService, Usuario, CompanyService, EnvService } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
+import { ModuleCache } from '@/services/moduleCache';
+import { invalidateHeaderCache } from '@/services/apiHelper';
 import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PushNotificationService } from '@/services/pushNotifications';
@@ -65,6 +67,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       await CompanyService.setActiveCompany(newCompany);
+      invalidateHeaderCache();
+      ModuleCache.invalidate();
       setCompanyState(newCompany);
       
       let currentUser = await AuthService.getCurrentUser();
@@ -72,7 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Siempre actualizamos el usuario desde el backend al cambiar de empresa
       // para garantizar que el rol y otros datos estén sincronizados.
       if (currentEmail) {
-        const allUsers = await CatalogService.getUsuarios();
+        const allUsers = await CatalogService.getUsuarios().catch(() => []);
         const dbUser = allUsers.find((u: Usuario) => u.email?.trim().toLowerCase() === currentEmail.trim().toLowerCase());
 
         if (dbUser) {
@@ -90,10 +94,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await AsyncStorage.setItem(`logged_user_${newCompany}`, JSON.stringify(dbUser));
           
           currentUser = dbUser as Usuario;
-        } else {
-          await AsyncStorage.removeItem(`logged_user_${newCompany}`);
-          await AsyncStorage.removeItem(`jwt_token_${newCompany}`);
-          currentUser = null;
+        } else if (user) {
+          // Si el usuario aún no existe en la tabla usuarios de la otra empresa, conservar la sesión activa
+          await AsyncStorage.setItem(`logged_user_${newCompany}`, JSON.stringify(user));
+          currentUser = user;
         }
       }
 

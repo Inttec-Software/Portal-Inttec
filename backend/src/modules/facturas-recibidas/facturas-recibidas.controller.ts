@@ -13,7 +13,7 @@ export const getFacturasRecibidas = async (req: Request, res: Response) => {
 
     try {
       const { rows } = await pool.query(
-        `SELECT id, uuid, rfc_emisor, nombre_emisor, rfc_receptor, rfc_pac, fecha_emision, subtotal, descuento, iva, retencion_isr, retencion_iva, total, moneda, tipo_comprobante, estado_sat, xml_url, pdf_url, created_at
+        `SELECT *
          FROM facturas_recibidas
          ORDER BY fecha_emision DESC
          LIMIT 1000`
