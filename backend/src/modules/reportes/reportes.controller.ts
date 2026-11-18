@@ -21,7 +21,17 @@ export const reconcilePendingInvoicesForPool = async (pool: any): Promise<number
   try {
 
 
-    // 1. Limpiar sugerencias obsoletas (gastos ya facturados, ya no pendientes de factura, o facturas canceladas/ocupadas)
+    // 0. Restaurar gastos aprobados que en versiones anteriores se habían regresado a PENDING por factura detectada
+    // para que permanezcan en APPROVED ("Pendientes de entrega") y no regresen a "Gastos pendientes"
+    await pool.query(`
+      UPDATE gastos
+      SET status = 'APPROVED',
+          devuelto_por_factura = FALSE
+      WHERE status = 'PENDING'
+        AND COALESCE(devuelto_por_factura, FALSE) = TRUE
+    `);
+
+    // 1. Limpiar sugerencias obsoletas (gastos ya facturados, ya no pendientes de factura, facturas canceladas/ocupadas o fuera de ventana [-15, +25] días)
     await pool.query(`
       UPDATE gastos g
       SET factura_sugerida_id = NULL,
@@ -35,6 +45,9 @@ export const reconcilePendingInvoicesForPool = async (pool: any): Promise<number
             SELECT 1 FROM facturas_recibidas f
             WHERE f.id = g.factura_sugerida_id
               AND COALESCE(f.estado_sat, 'VIGENTE') != 'CANCELADO'
+              AND f.fecha_emision IS NOT NULL
+              AND f.fecha_emision::date BETWEEN (COALESCE(g.fecha_comprobante, g.created_at::date) - INTERVAL '15 days')
+                                          AND (COALESCE(g.fecha_comprobante, g.created_at::date) + INTERVAL '25 days')
           )
           OR EXISTS (
             SELECT 1 FROM gastos g2
@@ -46,7 +59,8 @@ export const reconcilePendingInvoicesForPool = async (pool: any): Promise<number
 
     // 2. Buscar gastos con conciliacion_activa = TRUE y factura pendiente que aún no tengan factura vinculada ni sugerida
     const { rows: candidatos } = await pool.query(`
-      SELECT g.id, g.monto, g.status, g.devuelto_por_factura, g.facturas_descartadas_ids
+      SELECT g.id, g.monto, g.status, g.devuelto_por_factura, g.facturas_descartadas_ids,
+             COALESCE(g.fecha_comprobante, g.created_at::date) AS fecha_referencia
       FROM gastos g
       WHERE COALESCE(g.conciliacion_activa, FALSE) = TRUE
         AND g.facturado IS NOT TRUE
@@ -67,47 +81,38 @@ export const reconcilePendingInvoicesForPool = async (pool: any): Promise<number
         ? gasto.facturas_descartadas_ids.map(String)
         : [];
 
-      // Buscar en TODAS las facturas recibidas vigentes (sin restricción de fecha de factura)
+      // Buscar facturas recibidas vigentes dentro de la ventana [-15 días, +25 días] respecto a fecha_referencia
       const { rows: facturasMatch } = await pool.query(
         `
         SELECT f.id, f.uuid, f.nombre_emisor, f.rfc_emisor, f.total, f.fecha_emision
         FROM facturas_recibidas f
         WHERE COALESCE(f.estado_sat, 'VIGENTE') != 'CANCELADO'
           AND ABS(COALESCE(f.total, 0) - $1) < 0.009
+          AND f.fecha_emision IS NOT NULL
+          AND f.fecha_emision::date BETWEEN ($4::date - INTERVAL '15 days') AND ($4::date + INTERVAL '25 days')
           AND NOT (f.id::text = ANY($2::text[]))
           AND NOT EXISTS (
             SELECT 1 FROM gastos g2
             WHERE g2.id != $3
               AND (g2.factura_recibida_id = f.id OR g2.factura_sugerida_id = f.id)
           )
-        ORDER BY f.fecha_emision DESC NULLS LAST, f.created_at DESC NULLS LAST
+        ORDER BY ABS(f.fecha_emision::date - $4::date) ASC, f.fecha_emision DESC NULLS LAST, f.created_at DESC NULLS LAST
         LIMIT 1
         `,
-        [monto, descartadas, gasto.id]
+        [monto, descartadas, gasto.id, gasto.fecha_referencia]
       );
 
       if (facturasMatch.length > 0) {
         const factura = facturasMatch[0];
-        if (gasto.status === 'APPROVED') {
-          // Pasar de Historial (APPROVED) a Pendientes (PENDING) marcando devuelto_por_factura = TRUE
-          // Se preserva intacto venta_id, approved_at, estado_reembolso, etc.
-          await pool.query(
-            `UPDATE gastos
-             SET status = 'PENDING',
-                 devuelto_por_factura = TRUE,
-                 factura_sugerida_id = $1
-             WHERE id = $2`,
-            [factura.id, gasto.id]
-          );
-        } else {
-          // Ya está en PENDING (gasto recién agregado): solo asociar factura_sugerida_id para mostrar aviso y atajo
-          await pool.query(
-            `UPDATE gastos
-             SET factura_sugerida_id = $1
-             WHERE id = $2`,
-            [factura.id, gasto.id]
-          );
-        }
+        // No regresar gastos APPROVED a PENDING: conservar su status actual (APPROVED o PENDING)
+        // y únicamente asociar factura_sugerida_id para que aparezca el atajo en "Pendientes de entrega"
+        await pool.query(
+          `UPDATE gastos
+           SET factura_sugerida_id = $1,
+               devuelto_por_factura = FALSE
+           WHERE id = $2`,
+          [factura.id, gasto.id]
+        );
         matchedCount++;
       }
     }
@@ -867,6 +872,16 @@ export const updateGasto = async (req: Request, res: Response) => {
       await recalculateVentaTotalsInternal(pool, oldGasto.venta_id);
     }
 
+    // Disparar conciliación inmediata si el gasto quedó con factura pendiente
+    const isNowPendiente =
+      payload.facturado !== true &&
+      (
+        String(payload.motivo_sin_factura ?? oldGasto.motivo_sin_factura ?? '').toUpperCase().includes('PENDIENTE')
+      );
+    if (isNowPendiente) {
+      await reconcilePendingInvoicesForPool(pool);
+    }
+
     return res.json({ success: true });
   } catch (error: any) {
     if (inTx) {
@@ -1320,6 +1335,14 @@ export const createGastos = async (req: Request, res: Response) => {
 
       await client.query('COMMIT');
       inTx = false;
+
+      // Caso 2: Si el gasto recién creado viene con factura pendiente y ya existe una factura recibida dentro de [-15, +25] días, relacionarla al instante
+      const hasPendingInvoice = insertedGastos.some(
+        (g: any) => g.facturado !== true && String(g.motivo_sin_factura || '').toUpperCase().includes('PENDIENTE')
+      );
+      if (hasPendingInvoice) {
+        await reconcilePendingInvoicesForPool(pool);
+      }
 
       if (createNotifications && insertedGastos.length > 0) {
         try {

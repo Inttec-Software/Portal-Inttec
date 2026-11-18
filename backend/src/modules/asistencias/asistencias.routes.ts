@@ -8,6 +8,7 @@ import {
   editarHorasAsistencia,
   eliminarAsistencia,
   registrarTurnoManual,
+  toggleComidaAsistencia,
 } from './asistencias.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -37,5 +38,6 @@ router.get('/historial/:empleado_id', getHistorial);
 router.put('/admin/editar-horas/:id', editarHorasAsistencia);
 router.delete('/admin/eliminar/:id', eliminarAsistencia);
 router.post('/admin/registrar-turno', registrarTurnoManual);
+router.put('/admin/toggle-comida', toggleComidaAsistencia);
 
 export default router;

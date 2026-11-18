@@ -3197,54 +3197,6 @@ export default function FacturacionScreen() {
           </View>
         )}
 
-        {/* Selector de Empresa Emisora ERP */}
-        <View style={{
-          flexDirection: 'row',
-          backgroundColor: themeColors.background,
-          borderRadius: 20,
-          padding: 2,
-          borderWidth: 1,
-          borderColor: themeColors.border,
-          marginRight: 8,
-        }}>
-          <TouchableOpacity
-            onPress={() => currentCompany !== 'inttec' && changeCompany && changeCompany('inttec')}
-            style={{
-              paddingHorizontal: 12,
-              paddingVertical: 5,
-              borderRadius: 16,
-              backgroundColor: currentCompany === 'inttec' ? '#0284c7' : 'transparent',
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{
-              fontSize: 11,
-              fontWeight: '700',
-              color: currentCompany === 'inttec' ? '#ffffff' : themeColors.textSecondary,
-            }}>
-              INTTEC
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => currentCompany !== 'daravisa' && changeCompany && changeCompany('daravisa')}
-            style={{
-              paddingHorizontal: 12,
-              paddingVertical: 5,
-              borderRadius: 16,
-              backgroundColor: currentCompany === 'daravisa' ? '#059669' : 'transparent',
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{
-              fontSize: 11,
-              fontWeight: '700',
-              color: currentCompany === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
-            }}>
-              DARAVISA
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Botón de Acción Principal */}
         {activeTab === 'historial' ? (
           <TouchableOpacity
@@ -3860,37 +3812,6 @@ export default function FacturacionScreen() {
                 <Text style={[styles.screenTitle, { color: themeColors.text }]} numberOfLines={1}>Módulo de Facturación CFDI 4.0</Text>
                 <Text style={{ fontSize: 11, color: themeColors.textSecondary }} numberOfLines={2}>Emisión, timbrado oficial ante el SAT y gestión de comprobantes</Text>
               </View>
-            </View>
-            <View style={{
-              flexDirection: 'row',
-              backgroundColor: themeColors.background,
-              borderRadius: 16,
-              padding: 2,
-              borderWidth: 1,
-              borderColor: themeColors.border,
-            }}>
-              <TouchableOpacity
-                onPress={() => currentCompany !== 'inttec' && changeCompany && changeCompany('inttec')}
-                style={{
-                  paddingHorizontal: 8,
-                  paddingVertical: 4,
-                  borderRadius: 14,
-                  backgroundColor: currentCompany === 'inttec' ? '#0284c7' : 'transparent',
-                }}
-              >
-                <Text style={{ fontSize: 10, fontWeight: '700', color: currentCompany === 'inttec' ? '#fff' : themeColors.textSecondary }}>INTTEC</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => currentCompany !== 'daravisa' && changeCompany && changeCompany('daravisa')}
-                style={{
-                  paddingHorizontal: 8,
-                  paddingVertical: 4,
-                  borderRadius: 14,
-                  backgroundColor: currentCompany === 'daravisa' ? '#059669' : 'transparent',
-                }}
-              >
-                <Text style={{ fontSize: 10, fontWeight: '700', color: currentCompany === 'daravisa' ? '#fff' : themeColors.textSecondary }}>DARAVISA</Text>
-              </TouchableOpacity>
             </View>
           </View>
 

@@ -223,7 +223,10 @@ export function extractTimezoneFromAddress(address?: string | null): string | nu
  */
 export function cleanAddressForDisplay(address?: string | null): string {
   if (!address) return '';
-  return address.replace(/\s*\[tz:[^\]]+\]\s*/g, '').trim();
+  return address
+    .replace(/\s*\[tz:[^\]]+\]\s*/g, ' ')
+    .replace(/\s*\[SIN_COMIDA\]\s*/g, ' ')
+    .trim();
 }
 
 /**

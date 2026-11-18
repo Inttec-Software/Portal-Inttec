@@ -24,7 +24,18 @@ export const getAsistenciaHoy = async (req: Request, res: Response) => {
 
     if (!fecha) return res.status(400).json({ error: 'Fecha es requerida' });
 
-    // 1. Primero buscar si hay algún turno ABIERTO hoy (tiene entrada pero no salida)
+    // Si ya pasaron las 11:59 PM de días anteriores y quedaron turnos sin hora_salida, auto-cerrarlos a las 18:00:00
+    try {
+      const poolInttec = getDbPool('inttec', env);
+      const poolDaravisa = getDbPool('daravisa', env);
+      const autoCloseSql = `UPDATE asistencias SET hora_salida = '18:00:00', descripcion = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)', direccion_salida = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`;
+      await Promise.allSettled([
+        poolInttec.query(autoCloseSql, [empleado_id, fecha]),
+        poolDaravisa.query(autoCloseSql, [empleado_id, fecha]),
+      ]);
+    } catch (_) { }
+
+    // 1. Primero buscar si hay algún turno ABIERTO hoy (tiene entrada pero no salida; válido hasta las 11:59 PM)
     const openShiftResult = await pool.query(
       `SELECT * FROM asistencias WHERE empleado_id = $1 AND fecha = $2 AND hora_salida IS NULL ORDER BY creado_en DESC LIMIT 1`,
       [empleado_id, fecha]
@@ -56,10 +67,10 @@ export const registrarEntrada = async (req: Request, res: Response) => {
     const poolInttec = getDbPool('inttec', env);
     const poolDaravisa = getDbPool('daravisa', env);
 
-    // Auto-cierre de turnos anteriores abiertos (olvidos de checada): fijar salida a las 18:00:00
+    // Auto-cierre de turnos anteriores abiertos (olvidos de checada tras pasar las 11:59 PM): fijar salida a las 18:00:00
     if (payload.empleado_id && payload.fecha) {
       try {
-        const updateQuery = `UPDATE asistencias SET hora_salida = '18:00:00', descripcion = 'Cierre automático 6:00 PM (olvido de checada)', direccion_salida = 'Cierre automático 6:00 PM (olvido de checada)' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`;
+        const updateQuery = `UPDATE asistencias SET hora_salida = '18:00:00', descripcion = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)', direccion_salida = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`;
         await Promise.allSettled([
           poolInttec.query(updateQuery, [payload.empleado_id, payload.fecha]),
           poolDaravisa.query(updateQuery, [payload.empleado_id, payload.fecha]),
@@ -170,6 +181,16 @@ export const getHistorial = async (req: Request, res: Response) => {
     const pool = getDbPool(company, env);
     const { empleado_id } = req.params;
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+
+    // Auto-cerrar a las 18:00:00 cualquier turno de días anteriores (pasadas las 11:59 PM de su fecha) que haya quedado sin salida
+    try {
+      const baseTz = process.env.APP_TIMEZONE || 'America/Mexico_City';
+      const todayLocal = new Date().toLocaleDateString('en-CA', { timeZone: baseTz });
+      await pool.query(
+        `UPDATE asistencias SET hora_salida = '18:00:00', descripcion = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)', direccion_salida = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`,
+        [empleado_id, todayLocal]
+      );
+    } catch (_) { }
 
     let query = `SELECT * FROM asistencias WHERE empleado_id = $1`;
     const params: any[] = [empleado_id];
@@ -376,13 +397,8 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
       }
 
       if (/^\d{4}-\d{2}-\d{2}$/.test(datePart) && /^\d{2}:\d{2}:\d{2}$/.test(timePart)) {
-        const hours = parseInt(timePart.slice(0, 2), 10);
+        // Hora límite para checar salida del mismo día: 11:59 PM (23:59:59)
         fechaJornada = datePart;
-        if (hours < 6) {
-          const [y, m, d] = datePart.split('-').map(Number);
-          const prevDay = new Date(Date.UTC(y, m - 1, d - 1));
-          fechaJornada = `${prevDay.getUTCFullYear()}-${String(prevDay.getUTCMonth() + 1).padStart(2, '0')}-${String(prevDay.getUTCDate()).padStart(2, '0')}`;
-        }
         horaLocal = timePart;
       } else {
         const now = new Date();
@@ -911,6 +927,71 @@ export const registrarTurnoManual = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[REGISTRAR TURNO MANUAL ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const toggleComidaAsistencia = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+
+    const editorRole = (req.user?.rol || req.user?.role || '').toUpperCase();
+    if (editorRole !== 'ADMIN' && editorRole !== 'DEV') {
+      return res.status(403).json({ error: 'Solo administradores o devs pueden modificar el descuento de comida.' });
+    }
+
+    const { empleado_id, fecha, sin_comida } = req.body || {};
+    if (!empleado_id || !fecha || typeof sin_comida !== 'boolean') {
+      return res.status(400).json({ error: 'Se requieren empleado_id, fecha y sin_comida (boolean).' });
+    }
+
+    const { env } = tenant;
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
+
+    const sql = sin_comida
+      ? `UPDATE asistencias
+         SET direccion_entrada = CONCAT_WS(' ', NULLIF(TRIM(REGEXP_REPLACE(COALESCE(direccion_entrada, ''), '\\s*\\[SIN_COMIDA\\]\\s*', ' ', 'g')), ''), '[SIN_COMIDA]')
+         WHERE empleado_id = $1 AND fecha = $2`
+      : `UPDATE asistencias
+         SET direccion_entrada = NULLIF(TRIM(REGEXP_REPLACE(COALESCE(direccion_entrada, ''), '\\s*\\[SIN_COMIDA\\]\\s*', ' ', 'g')), '')
+         WHERE empleado_id = $1 AND fecha = $2`;
+
+    const results = await Promise.allSettled([
+      poolInttec.query(sql, [empleado_id, fecha]),
+      poolDaravisa.query(sql, [empleado_id, fecha]),
+    ]);
+
+    const errors: any[] = [];
+    let updatedCount = 0;
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        errors.push(r.reason);
+      } else if (r.status === 'fulfilled') {
+        updatedCount += (r.value as any).rowCount || 0;
+      }
+    }
+
+    if (updatedCount === 0 && errors.length > 0) {
+      throw new Error(errors[0]?.message || 'Error al actualizar el descuento de comida en la base de datos');
+    }
+
+    if (updatedCount === 0) {
+      return res.status(404).json({ error: 'No se encontraron registros de asistencia para ese empleado y fecha.' });
+    }
+
+    return res.json({
+      success: true,
+      empleado_id,
+      fecha,
+      sin_comida,
+      message: sin_comida
+        ? 'Descuento de hora de comida eliminado para este día.'
+        : 'Descuento de hora de comida restaurado para este día.',
+    });
+  } catch (error: any) {
+    console.error('[TOGGLE COMIDA ERROR]:', error);
     return res.status(500).json({ error: error.message });
   }
 };

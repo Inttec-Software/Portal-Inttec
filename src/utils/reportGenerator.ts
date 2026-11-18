@@ -8,6 +8,7 @@ import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../serv
 import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
 import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay, isAutoCerradoAsistencia } from './asistenciaUtils';
+import { cleanAddressForDisplay } from './timezoneUtils';
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
 // Esto evita ~959 KB en el bundle principal de la app
@@ -27,6 +28,11 @@ const getCompanyBranding = async () => {
       addressLine2: '31110 Chihuahua, CHH',
       phone: '6142477119',
       email: 'admin@daravisa.com',
+      bankName: 'BBVA MXN',
+      bankAccount: '0117288123',
+      bankClabe: '012150001172881230',
+      bankAccountHolder: 'Daravisa Soluciones y Tecnología SA de CV',
+      bankSummaryHtml: 'BBVA MXN<br>Daravisa Soluciones y Tecnología SA de CV<br>Cuenta: 0117288123<br>Clabe: 012150001172881230',
       logoStyle: 'max-height: 85px; max-width: 360px; width: auto; height: auto; object-fit: contain; object-position: left center; margin-top: 20px; z-index: 10; position: relative;',
     };
   }
@@ -43,6 +49,11 @@ const getCompanyBranding = async () => {
     addressLine2: '31107 Chihuahua, CHH',
     phone: '6142477119',
     email: 'rfernandez@inttec.net',
+    bankName: 'BBVA',
+    bankAccount: '0193092593',
+    bankClabe: '012150001930925930',
+    bankAccountHolder: 'Rafael Alonso Fernandez Tinajero',
+    bankSummaryHtml: 'BBVA: 012150001930925930<br>Banorte: 1222453474',
     logoStyle: 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;',
   };
 };
@@ -976,9 +987,11 @@ export const ReportGenerator = {
       const isAuto = isAutoCerradoAsistencia(a);
       const fecha = a.fecha || '';
       const horaEntrada = a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : '--:--';
-      const dirEntrada = a.direccion_entrada || 'N/A';
+      const dirEntrada = cleanAddressForDisplay(a.direccion_entrada) || 'N/A';
       const horaSalida = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : '--:--');
-      const dirSalida = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || 'N/A');
+      const dirSalida = isAuto
+        ? (cleanAddressForDisplay(a.direccion_salida) || 'Cierre automático 6:00 PM (olvido de checada)')
+        : (cleanAddressForDisplay(a.direccion_salida) || 'N/A');
 
       tableRows += `
         <tr>
@@ -3702,8 +3715,10 @@ export const ReportGenerator = {
                 'Desconocido';
               const isAuto = isAutoCerradoAsistencia(a);
               const horaSalidaVal = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : 'Sin registro');
-              const dirSalidaVal = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || '');
-              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : 'Sin registro', a.direccion_entrada || '', horaSalidaVal, dirSalidaVal ];
+              const dirSalidaVal = isAuto
+                ? (cleanAddressForDisplay(a.direccion_salida) || 'Cierre automático 6:00 PM (olvido de checada)')
+                : cleanAddressForDisplay(a.direccion_salida);
+              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : 'Sin registro', cleanAddressForDisplay(a.direccion_entrada), horaSalidaVal, dirSalidaVal ];
             });
             await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
     },
@@ -4573,10 +4588,10 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
             MAIL: ${branding.email}
           </div>
           <div style="width: 45%;">
-            <strong>CUENTA BANCARIA BBVA</strong><br>
-            NO. CUENTA: 0193092593<br>
-            CLABE: 012150001930925930<br>
-            CUENTAHABIENTE: Rafael Alonso Fernandez Tinajero
+            <strong>CUENTA BANCARIA ${branding.bankName}</strong><br>
+            NO. CUENTA: ${branding.bankAccount}<br>
+            CLABE: ${branding.bankClabe}<br>
+            CUENTAHABIENTE: ${branding.bankAccountHolder}
           </div>
           <div style="width: 15%; text-align: right; color: #666; display: flex; align-items: flex-end; justify-content: flex-end;">
             Página 1 / 1
@@ -5465,10 +5480,9 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
               ${branding.addressLine1}, Chihuahua, Chih., CP: ${branding.cp} | TEL: ${branding.phone}<br>
               MAIL: ${branding.email}
             </div>
-            <div style="width: 25%; text-align: center;">
+            <div style="width: 28%; text-align: center;">
               <strong>DATOS BANCARIOS</strong><br>
-              BBVA: 012150001930925930<br>
-              Banorte: 1222453474
+              ${branding.bankSummaryHtml}
             </div>
             <div style="width: 30%; text-align: right;">
               Este documento es una representación impresa de un CFDI (Versión 4.0)<br>

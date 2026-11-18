@@ -235,10 +235,18 @@ export default function AdminAsistencia() {
         startStr,
         endStr
       );
-      setAsistenciasEmpleado((hist || []).map((a: Asistencia) => ({
+      const normalizedHist = (hist || []).map((a: Asistencia) => ({
         ...a,
         fecha: cleanFecha(a.fecha),
-      })));
+      }));
+      setAsistenciasEmpleado(normalizedHist);
+      setAllAsistenciasSemana((prev) => [
+        ...prev.filter((a) => {
+          const f = cleanFecha(a.fecha);
+          return !(a.empleado_id === empleadoId && f >= startStr && f <= endStr);
+        }),
+        ...normalizedHist,
+      ]);
     } catch (err: any) {
       console.error('[Admin Asistencia] Error cargando asistencias del empleado:', err);
       // Fallback a filtrar del conjunto general
