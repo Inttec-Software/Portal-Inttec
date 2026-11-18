@@ -1,5 +1,11 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
+import {
+  GASTO_RELATIONS_SELECT_SQL,
+  formatGasto,
+  sanitizeGastoWritePayload,
+  syncHospedajeDias,
+} from './gastoHelpers';
 
 
 
@@ -110,68 +116,6 @@ export const reconcilePendingInvoicesForPool = async (pool: any): Promise<number
   }
 };
 
-const FACTURA_REL_SUBQUERIES_SQL = `
-  (SELECT row_to_json(fs_obj) FROM (
-    SELECT f.id, f.uuid, f.rfc_emisor, f.nombre_emisor, f.rfc_receptor, f.fecha_emision,
-           f.subtotal, f.descuento, f.iva, f.retencion_isr, f.retencion_iva, f.total,
-           f.moneda, f.tipo_comprobante, f.estado_sat, f.xml_url, f.pdf_url, f.conceptos_json
-    FROM facturas_recibidas f WHERE f.id = g.factura_sugerida_id
-  ) fs_obj) as factura_sugerida_rel,
-  (SELECT row_to_json(fr_obj) FROM (
-    SELECT f.id, f.uuid, f.rfc_emisor, f.nombre_emisor, f.rfc_receptor, f.fecha_emision,
-           f.subtotal, f.descuento, f.iva, f.retencion_isr, f.retencion_iva, f.total,
-           f.moneda, f.tipo_comprobante, f.estado_sat, f.xml_url, f.pdf_url, f.conceptos_json,
-           (
-             SELECT COALESCE(SUM(COALESCE(g2.monto, 0) - COALESCE(g2.monto_propina, 0)), 0)
-             FROM gastos g2
-             WHERE g2.factura_recibida_id = f.id
-           ) as total_consumido,
-           (
-             SELECT COALESCE(COUNT(g2.id), 0)
-             FROM gastos g2
-             WHERE g2.factura_recibida_id = f.id
-           ) as total_gastos_vinculados
-    FROM facturas_recibidas f WHERE f.id = g.factura_recibida_id
-  ) fr_obj) as factura_recibida_rel
-`;
-
-const formatGasto = (g: any) => {
-  let cat = 'Sin clasificar';
-  let subcat = 'Sin clasificar';
-  let prov = '';
-  let cli = '';
-  let suc = '';
-  
-  let catRel = null;
-
-  if (g.subcategoria_rel) {
-    subcat = g.subcategoria_rel.nombre;
-    if (g.subcategoria_rel.categorias) {
-      cat = g.subcategoria_rel.categorias.nombre;
-      catRel = g.subcategoria_rel.categorias;
-    }
-  }
-  if (g.proveedor_rel) prov = g.proveedor_rel.nombre;
-  if (g.cliente_rel) cli = g.cliente_rel.nombre;
-  if (g.sucursal_rel) suc = g.sucursal_rel.nombre;
-
-  return {
-    ...g,
-    monto_propina: Number(g.monto_propina || 0),
-    es_factura_compartida: Boolean(g.es_factura_compartida),
-    cat, subcat, prov, cli, suc, // Props legadas
-    categoria_nombre: cat,
-    subcategoria_nombre: subcat,
-    proveedor_nombre: prov,
-    cliente_nombre: cli,
-    sucursal_nombre: suc,
-    categoria_rel: catRel,
-    venta_rel: g.venta_rel || null,
-    factura_sugerida_rel: g.factura_sugerida_rel || null,
-    factura_recibida_rel: g.factura_recibida_rel || null,
-  };
-};
-
 export const getAdminReportes = async (req: Request, res: Response) => {
   try {
     const tenant = (req as any).tenant;
@@ -186,9 +130,16 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     const limit = Math.max(1, Math.min(200, parseInt(req.query.limit as string, 10) || 25));
     const offset = (page - 1) * limit;
 
-    const tab = req.query.tab as string; // 'pendientes' | 'historial' | 'todos'
+    const tab = req.query.tab as string; // 'pendientes' | 'por_revisar' | 'operativos' | 'historial' | 'todos'
     const facturaFilter = req.query.facturaFilter as string; // 'TODOS' | 'FACTURADOS' | 'PENDIENTE_ENTREGA' | 'NO_FACTURADOS'
     const pendingFilter = req.query.pendingFilter as string; // 'TODOS' | 'NUEVOS' | 'FACTURA_DETECTADA'
+    const tipoGastoFilter = String(req.query.tipo_gasto || '').trim().toUpperCase();
+    const proyectoIdFilter = String(req.query.proyecto_id || '').trim();
+    const sinProyectoFilter = req.query.sin_proyecto === 'true' || req.query.sin_proyecto === '1';
+    const includeActionRequired =
+      req.query.includeActionRequired === 'true' ||
+      req.query.includeActionRequired === '1' ||
+      tab === 'por_revisar';
     const search = (req.query.search as string || '').trim();
     const startDate = (req.query.startDate as string || '').trim();
     const endDate = (req.query.endDate as string || '').trim();
@@ -235,6 +186,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
           g.empleado_nombre ILIKE $${pIdx} OR
           g.detalle_servicio_proyecto ILIKE $${pIdx} OR
           g.motivo_sin_factura ILIKE $${pIdx} OR
+          EXISTS (SELECT 1 FROM proyectos pr WHERE pr.id = g.proyecto_id AND pr.nombre ILIKE $${pIdx}) OR
           EXISTS (SELECT 1 FROM proveedores p WHERE p.id = g.proveedor_id AND (p.nombre ILIKE $${pIdx} OR p.rfc ILIKE $${pIdx})) OR
           EXISTS (SELECT 1 FROM clientes cl WHERE cl.id = g.cliente_id AND cl.nombre ILIKE $${pIdx}) OR
           EXISTS (SELECT 1 FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id AND sc.nombre ILIKE $${pIdx}) OR
@@ -260,20 +212,29 @@ export const getAdminReportes = async (req: Request, res: Response) => {
 
       const baseWhereSql = baseConditions.length > 0 ? `WHERE ${baseConditions.join(' AND ')}` : '';
 
-      // 2. Condiciones específicas para la vista activa (tab y facturación)
+      const OPERATIVO_SQL = `(COALESCE(g.tipo_gasto, '') = 'OPERATIVO' OR (g.tipo_gasto IS NULL AND g.proyecto_id IS NULL AND LOWER(COALESCE(g.tipo_servicio_proyecto, '')) = 'operativo'))`;
+
+      // 2. Condiciones específicas para la vista activa (pestaña, alcance de proyecto/operativo y facturación)
       const viewConditions = [...baseConditions];
       const viewParams = [...baseParams];
 
-      if (tab === 'pendientes') {
-        viewConditions.push(`g.status = 'PENDING'`);
-        if (pendingFilter === 'FACTURA_DETECTADA') {
-          viewConditions.push(`(COALESCE(g.devuelto_por_factura, FALSE) = TRUE OR g.factura_sugerida_id IS NOT NULL)`);
-        } else if (pendingFilter === 'NUEVOS') {
-          viewConditions.push(`(COALESCE(g.devuelto_por_factura, FALSE) = FALSE AND g.factura_sugerida_id IS NULL)`);
+      if (tipoGastoFilter === 'PROYECTO') {
+        viewConditions.push(`g.tipo_gasto = 'PROYECTO'`);
+      } else if (tipoGastoFilter === 'OPERATIVO' || tab === 'operativos') {
+        viewConditions.push(OPERATIVO_SQL);
+      }
+
+      if (proyectoIdFilter) {
+        viewParams.push(proyectoIdFilter);
+        viewConditions.push(`g.proyecto_id = $${viewParams.length}`);
+      } else if (sinProyectoFilter) {
+        viewConditions.push(`g.proyecto_id IS NULL`);
+        if (tab === 'historial') {
+          viewConditions.push(`NOT ${OPERATIVO_SQL}`);
         }
-      } else if (tab === 'historial') {
-        viewConditions.push(`g.status IN ('APPROVED', 'REJECTED', 'ACTION_REQUIRED')`);
-        
+      }
+
+      const appendFacturaFilter = () => {
         if (facturaFilter === 'FACTURADOS') {
           viewConditions.push(`g.facturado = true`);
         } else if (facturaFilter === 'PENDIENTE_ENTREGA') {
@@ -281,17 +242,38 @@ export const getAdminReportes = async (req: Request, res: Response) => {
         } else if (facturaFilter === 'NO_FACTURADOS') {
           viewConditions.push(`(g.facturado IS NOT TRUE AND (g.motivo_sin_factura IS NULL OR UPPER(COALESCE(g.motivo_sin_factura, '')) NOT LIKE '%PENDIENTE%'))`);
         }
+      };
+
+      if (tab === 'pendientes' || tab === 'por_revisar') {
+        viewConditions.push(
+          tab === 'por_revisar'
+            ? `g.status IN ('PENDING', 'ACTION_REQUIRED')`
+            : `g.status = 'PENDING'`
+        );
+        if (pendingFilter === 'FACTURA_DETECTADA') {
+          viewConditions.push(`(COALESCE(g.devuelto_por_factura, FALSE) = TRUE OR g.factura_sugerida_id IS NOT NULL)`);
+        } else if (pendingFilter === 'NUEVOS') {
+          viewConditions.push(`(COALESCE(g.devuelto_por_factura, FALSE) = FALSE AND g.factura_sugerida_id IS NULL)`);
+        }
+      } else if (tab === 'operativos') {
+        appendFacturaFilter();
+      } else if (tab === 'historial') {
+        viewConditions.push(`g.status IN ('APPROVED', 'REJECTED', 'ACTION_REQUIRED')`);
+        appendFacturaFilter();
       }
 
       const viewWhereSql = viewConditions.length > 0 ? `WHERE ${viewConditions.join(' AND ')}` : '';
+      const pendingStatusFilterSql = includeActionRequired
+        ? `g.status IN ('PENDING', 'ACTION_REQUIRED')`
+        : `g.status = 'PENDING'`;
 
       // 3. Ejecutar consultas en paralelo
       const queryPromises: Promise<any>[] = [
         // Totales globales según filtros base
         pool.query(`
           SELECT 
-            COUNT(*) FILTER (WHERE g.status = 'PENDING') AS count_pendientes,
-            COALESCE(SUM(g.monto) FILTER (WHERE g.status = 'PENDING'), 0) AS total_pendientes,
+            COUNT(*) FILTER (WHERE ${pendingStatusFilterSql}) AS count_pendientes,
+            COALESCE(SUM(g.monto) FILTER (WHERE ${pendingStatusFilterSql}), 0) AS total_pendientes,
             COUNT(*) FILTER (WHERE g.status = 'APPROVED') AS count_aprobados,
             COALESCE(SUM(g.monto) FILTER (WHERE g.status = 'APPROVED'), 0) AS total_aprobados,
             COUNT(*) FILTER (WHERE g.status = 'PENDING' AND COALESCE(g.devuelto_por_factura, FALSE) = TRUE) AS count_devueltos_factura,
@@ -306,16 +288,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
         // Gastos paginados
         pool.query(`
           SELECT g.*,
-            (SELECT row_to_json(s_obj) FROM (
-              SELECT s.id, s.nombre, s.categoria_id,
-                     (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
-              FROM subcategorias s WHERE s.id = g.subcategoria_id
-            ) s_obj) as subcategoria_rel,
-            (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
-            (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-            (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
-            (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel,
-            ${FACTURA_REL_SUBQUERIES_SQL}
+            ${GASTO_RELATIONS_SELECT_SQL}
           FROM gastos g
           ${viewWhereSql}
           ORDER BY COALESCE(g.devuelto_por_factura, FALSE) DESC, (g.factura_sugerida_id IS NOT NULL) DESC, g.created_at DESC
@@ -384,16 +357,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
     const [gastosRes, usersRes, vehiculosRes, gasolinaRes, provRes] = await Promise.all([
       pool.query(`
         SELECT g.*,
-          (SELECT row_to_json(s_obj) FROM (
-            SELECT s.id, s.nombre, s.categoria_id,
-                   (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
-            FROM subcategorias s WHERE s.id = g.subcategoria_id
-          ) s_obj) as subcategoria_rel,
-          (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
-          (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
-          (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel,
-          ${FACTURA_REL_SUBQUERIES_SQL}
+          ${GASTO_RELATIONS_SELECT_SQL}
         FROM gastos g
         ORDER BY g.created_at DESC
         ${limitSql}
@@ -445,15 +409,7 @@ export const getEmpleadoGastos = async (req: Request, res: Response) => {
 
     const gastosRes = await pool.query(`
         SELECT g.*,
-          (SELECT row_to_json(s_obj) FROM (
-            SELECT s.id, s.nombre, s.categoria_id,
-                   (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
-            FROM subcategorias s WHERE s.id = g.subcategoria_id
-          ) s_obj) as subcategoria_rel,
-          (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
-          (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
-          ${FACTURA_REL_SUBQUERIES_SQL}
+          ${GASTO_RELATIONS_SELECT_SQL}
         FROM gastos g
         WHERE g.empleado_id = $1
         ORDER BY g.created_at DESC
@@ -490,16 +446,7 @@ export const getGastoById = async (req: Request, res: Response) => {
 
     const gastosRes = await pool.query(`
         SELECT g.*,
-          (SELECT row_to_json(s_obj) FROM (
-            SELECT s.id, s.nombre, s.categoria_id,
-                   (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
-            FROM subcategorias s WHERE s.id = g.subcategoria_id
-          ) s_obj) as subcategoria_rel,
-          (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
-          (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
-          (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel,
-          ${FACTURA_REL_SUBQUERIES_SQL}
+          ${GASTO_RELATIONS_SELECT_SQL}
         FROM gastos g
         WHERE g.id = $1
     `, [id]);
@@ -532,7 +479,7 @@ export const updateGastoStatus = async (req: Request, res: Response) => {
     const oldGasto = oldGastoRes.rows[0];
 
     if (payload && Object.keys(payload).length > 0) {
-      const finalPayload: any = { ...payload };
+      const finalPayload: any = sanitizeGastoWritePayload(payload);
 
       // Regla de negocio: NUNCA desvincular venta_id al devolver a PENDING o ACTION_REQUIRED
       // (a menos que sea REJECTED o se pida explícitamente force_unlink_venta)
@@ -766,15 +713,7 @@ export const getExportData = async (req: Request, res: Response) => {
     } else if (type === 'gastos') {
       let query = `
         SELECT g.*,
-          (SELECT row_to_json(s_obj) FROM (
-            SELECT s.id, s.nombre, s.categoria_id,
-                   (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
-            FROM subcategorias s WHERE s.id = g.subcategoria_id
-          ) s_obj) as subcategoria_rel,
-          (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
-          (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-          (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
-          ${FACTURA_REL_SUBQUERIES_SQL}
+          ${GASTO_RELATIONS_SELECT_SQL}
         FROM gastos g
       `;
       const params: any[] = [];
@@ -803,18 +742,19 @@ export const getExportData = async (req: Request, res: Response) => {
 };
 
 export const updateGasto = async (req: Request, res: Response) => {
+  const tenant = (req as any).tenant;
+  if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+  const { company, env } = tenant;
+  const pool = getDbPool(company, env);
+
+  const client = await pool.connect();
+  let inTx = false;
+
   try {
-    const tenant = (req as any).tenant;
-    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const { company, env } = tenant;
-    const pool = getDbPool(company, env);
-
-
-
     const { id } = req.params;
     const { updatePayload, gasolinaPayload, ...restPayload } = req.body;
-    
-    const payload: any = { ...(updatePayload || restPayload) };
+
+    const payload: any = sanitizeGastoWritePayload(updatePayload || restPayload);
 
     if (payload.estado_reembolso !== undefined) {
       const userRole = req.user?.rol || req.user?.role;
@@ -823,12 +763,17 @@ export const updateGasto = async (req: Request, res: Response) => {
       }
     }
 
-    // Get old gasto to see if it's linked to a sale or has a suggested invoice
-    const oldGastoRes = await pool.query(
-      'SELECT venta_id, factura_sugerida_id, devuelto_por_factura, facturado, motivo_sin_factura FROM gastos WHERE id = $1',
+    // Get old gasto to see if it's linked to a sale, has a suggested invoice, or has hospedaje dates
+    const oldGastoRes = await client.query(
+      `SELECT venta_id, factura_sugerida_id, devuelto_por_factura, facturado, motivo_sin_factura,
+              monto, fecha_hospedaje_inicio, fecha_hospedaje_fin
+       FROM gastos WHERE id = $1`,
       [id]
     );
     const oldGasto = oldGastoRes.rows[0];
+    if (!oldGasto) {
+      return res.status(404).json({ error: 'Gasto no encontrado' });
+    }
 
     // Si el gasto se marca con factura pendiente a partir de ahora, activar conciliación
     if (
@@ -847,12 +792,42 @@ export const updateGasto = async (req: Request, res: Response) => {
       payload.factura_sugerida_id = null;
     }
 
+    await client.query('BEGIN');
+    inTx = true;
+
     if (payload && Object.keys(payload).length > 0) {
       const keys = Object.keys(payload);
       const values = Object.values(payload);
       const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
-      
-      await pool.query(`UPDATE gastos SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, id]);
+
+      await client.query(`UPDATE gastos SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, id]);
+    }
+
+    // Recalcular desglose de hospedaje si cambiaron las fechas o el monto de un gasto de hospedaje
+    const touchesHospedaje =
+      payload.fecha_hospedaje_inicio !== undefined ||
+      payload.fecha_hospedaje_fin !== undefined ||
+      (payload.monto !== undefined && oldGasto.fecha_hospedaje_inicio && oldGasto.fecha_hospedaje_fin);
+
+    if (touchesHospedaje) {
+      const effectiveInicio =
+        payload.fecha_hospedaje_inicio !== undefined
+          ? payload.fecha_hospedaje_inicio
+          : oldGasto.fecha_hospedaje_inicio;
+      const effectiveFin =
+        payload.fecha_hospedaje_fin !== undefined
+          ? payload.fecha_hospedaje_fin
+          : oldGasto.fecha_hospedaje_fin;
+      const effectiveMonto =
+        payload.monto !== undefined ? Number(payload.monto) : Number(oldGasto.monto || 0);
+
+      if ((effectiveInicio && !effectiveFin) || (!effectiveInicio && effectiveFin)) {
+        await client.query('ROLLBACK');
+        inTx = false;
+        return res.status(400).json({ error: 'Para hospedaje debes enviar tanto fecha_hospedaje_inicio como fecha_hospedaje_fin.' });
+      }
+
+      await syncHospedajeDias(client, id as string, effectiveInicio, effectiveFin, effectiveMonto);
     }
 
     if (gasolinaPayload) {
@@ -861,18 +836,21 @@ export const updateGasto = async (req: Request, res: Response) => {
         const gasValues = Object.values(gasolinaPayload.data);
         gasKeys.push('gasto_id');
         gasValues.push(id);
-        
+
         const placeholders = gasKeys.map((_, i) => `$${i + 1}`).join(', ');
         const updates = gasKeys.map((k) => `${k} = EXCLUDED.${k}`).join(', ');
-        
-        await pool.query(
+
+        await client.query(
           `INSERT INTO registro_gasolina (${gasKeys.join(', ')}) VALUES (${placeholders}) ON CONFLICT (gasto_id) DO UPDATE SET ${updates}`,
           gasValues
         );
       } else if (gasolinaPayload.action === 'delete') {
-        await pool.query('DELETE FROM registro_gasolina WHERE gasto_id = $1', [id]);
+        await client.query('DELETE FROM registro_gasolina WHERE gasto_id = $1', [id]);
       }
     }
+
+    await client.query('COMMIT');
+    inTx = false;
 
     if (payload.venta_id !== undefined && payload.venta_id !== oldGasto?.venta_id) {
       if (oldGasto && oldGasto.venta_id) {
@@ -885,9 +863,92 @@ export const updateGasto = async (req: Request, res: Response) => {
       await recalculateVentaTotalsInternal(pool, oldGasto.venta_id);
     }
 
-
-
     return res.json({ success: true });
+  } catch (error: any) {
+    if (inTx) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
+    const isValidationError = error.message?.includes('Fecha') || error.message?.includes('hospedaje');
+    return res.status(isValidationError ? 400 : 500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+};
+
+export const assignGastoProyecto = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const pool = getDbPool(company, env);
+
+    const { id } = req.params;
+    const { proyecto_id, tipo_gasto, actor_id } = req.body;
+
+    const gastoRes = await pool.query('SELECT id, proyecto_id, tipo_gasto FROM gastos WHERE id = $1', [id]);
+    const gasto = gastoRes.rows[0];
+    if (!gasto) {
+      return res.status(404).json({ error: 'Gasto no encontrado' });
+    }
+
+    const newProyectoId =
+      proyecto_id && typeof proyecto_id === 'string' && proyecto_id.trim()
+        ? proyecto_id.trim()
+        : null;
+
+    let newTipoGasto: 'PROYECTO' | 'OPERATIVO' | null = null;
+    if (tipo_gasto !== undefined && tipo_gasto !== null && String(tipo_gasto).trim() !== '') {
+      const normalizedTipo = String(tipo_gasto).trim().toUpperCase();
+      if (normalizedTipo !== 'PROYECTO' && normalizedTipo !== 'OPERATIVO') {
+        return res.status(400).json({ error: 'tipo_gasto inválido. Use PROYECTO u OPERATIVO' });
+      }
+      newTipoGasto = normalizedTipo;
+    } else if (newProyectoId) {
+      newTipoGasto = 'PROYECTO';
+    }
+
+    let proyectoInfo: any = null;
+    if (newProyectoId) {
+      const prRes = await pool.query('SELECT id, nombre FROM proyectos WHERE id = $1', [newProyectoId]);
+      if (prRes.rows.length === 0) {
+        return res.status(404).json({ error: 'El proyecto seleccionado no existe' });
+      }
+      proyectoInfo = prRes.rows[0];
+      if (!newTipoGasto) newTipoGasto = 'PROYECTO';
+    }
+
+    await pool.query(
+      'UPDATE gastos SET proyecto_id = $1, tipo_gasto = $2 WHERE id = $3',
+      [newProyectoId, newTipoGasto, id]
+    );
+
+    try {
+      const actor = req.user?.id || actor_id || null;
+      const details = newProyectoId
+        ? `Gasto asignado al proyecto "${proyectoInfo?.nombre || newProyectoId}".`
+        : newTipoGasto === 'OPERATIVO'
+          ? 'Gasto clasificado como Operativo / General (sin proyecto).'
+          : 'Gasto desasignado de proyecto.';
+      await pool.query(
+        'INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)',
+        ['UPDATE', actor, id, details]
+      );
+    } catch (auditErr: any) {
+      console.warn('[assignGastoProyecto] Error en audit log:', auditErr.message);
+    }
+
+    const updatedRes = await pool.query(
+      `SELECT g.*,
+        ${GASTO_RELATIONS_SELECT_SQL}
+       FROM gastos g
+       WHERE g.id = $1`,
+      [id]
+    );
+
+    return res.json({
+      success: true,
+      gasto: updatedRes.rows[0] ? formatGasto(updatedRes.rows[0]) : null,
+    });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -1097,7 +1158,7 @@ export const getFormCatalogs = async (req: Request, res: Response) => {
     const { company, env } = tenant;
     const pool = getDbPool(company, env);
 
-    const [catRes, subRes, cliRes, usersRes, sucRes, provRes, vehRes] = await Promise.all([
+    const [catRes, subRes, cliRes, usersRes, sucRes, provRes, vehRes, proyectosRes] = await Promise.all([
       pool.query('SELECT * FROM categorias ORDER BY nombre'),
       pool.query('SELECT * FROM subcategorias ORDER BY nombre'),
       pool.query('SELECT * FROM clientes ORDER BY nombre'),
@@ -1105,6 +1166,14 @@ export const getFormCatalogs = async (req: Request, res: Response) => {
       pool.query('SELECT * FROM sucursales_cliente ORDER BY nombre'),
       pool.query('SELECT * FROM proveedores ORDER BY nombre'),
       pool.query('SELECT * FROM vehiculos WHERE activo = true ORDER BY marca ASC'),
+      pool.query(`
+        SELECT pr.id, pr.nombre, pr.cliente_id, pr.sucursal_id, pr.venta_id, pr.status, pr.notas, pr.created_at,
+               (SELECT cl.nombre FROM clientes cl WHERE cl.id = pr.cliente_id) AS cliente_nombre,
+               (SELECT sc.nombre FROM sucursales_cliente sc WHERE sc.id = pr.sucursal_id) AS sucursal_nombre
+        FROM proyectos pr
+        WHERE pr.status = 'ACTIVO'
+        ORDER BY pr.created_at DESC, pr.nombre ASC
+      `),
     ]);
 
     return res.json({
@@ -1115,6 +1184,7 @@ export const getFormCatalogs = async (req: Request, res: Response) => {
       sucursales: sucRes.rows || [],
       proveedores: provRes.rows || [],
       vehiculos: vehRes.rows || [],
+      proyectos: proyectosRes.rows || [],
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -1122,14 +1192,15 @@ export const getFormCatalogs = async (req: Request, res: Response) => {
 };
 
 export const createGastos = async (req: Request, res: Response) => {
+  const tenant = (req as any).tenant;
+  if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+  const { company, env } = tenant;
+  const pool = getDbPool(company, env);
+
+  const client = await pool.connect();
+  let inTx = false;
+
   try {
-    const tenant = (req as any).tenant;
-    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
-    const { company, env } = tenant;
-    const pool = getDbPool(company, env);
-
-
-
     const { payloadsToInsert, gasolinaPayload, createNotifications, employeeName, totalGasto, categoriaNombre, ...singleGastoBody } = req.body;
 
     // Soportar tanto arreglo payloadsToInsert (formulario) como objeto directo (sync offline)
@@ -1137,38 +1208,70 @@ export const createGastos = async (req: Request, res: Response) => {
       ? payloadsToInsert
       : (singleGastoBody && singleGastoBody.monto !== undefined ? [singleGastoBody] : []);
 
+    await client.query('BEGIN');
+    inTx = true;
+
     const insertedGastos = [];
     if (listToInsert.length > 0) {
       for (const rawPayload of listToInsert) {
+        const cleanPayload = sanitizeGastoWritePayload(rawPayload);
+        if (cleanPayload.proyecto_id && !cleanPayload.tipo_gasto) {
+          cleanPayload.tipo_gasto = 'PROYECTO';
+        }
+        if (
+          (cleanPayload.fecha_hospedaje_inicio && !cleanPayload.fecha_hospedaje_fin) ||
+          (!cleanPayload.fecha_hospedaje_inicio && cleanPayload.fecha_hospedaje_fin)
+        ) {
+          await client.query('ROLLBACK');
+          inTx = false;
+          return res.status(400).json({ error: 'Para hospedaje debes enviar tanto fecha_hospedaje_inicio como fecha_hospedaje_fin.' });
+        }
+
         const payload: any = {
-          ...rawPayload,
+          ...cleanPayload,
           // Regla de corte: Todo gasto creado a partir de ahora tiene conciliacion_activa = true
           conciliacion_activa: true,
         };
         const keys = Object.keys(payload);
         const values = Object.values(payload);
         const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
-        const res = await pool.query(
+        const insertRes = await client.query(
           `INSERT INTO gastos (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
           values
         );
-        insertedGastos.push(res.rows[0]);
+        const insertedRow = insertRes.rows[0];
+
+        let hospedajeDias: any[] = [];
+        if (insertedRow.fecha_hospedaje_inicio && insertedRow.fecha_hospedaje_fin) {
+          hospedajeDias = await syncHospedajeDias(
+            client,
+            insertedRow.id,
+            insertedRow.fecha_hospedaje_inicio,
+            insertedRow.fecha_hospedaje_fin,
+            Number(insertedRow.monto || 0)
+          );
+        }
+
+        insertedGastos.push({
+          ...insertedRow,
+          hospedaje_dias: hospedajeDias,
+        });
       }
     }
 
     if (gasolinaPayload && insertedGastos.length > 0) {
-      gasolinaPayload.gasto_id = insertedGastos[0].id;
-      const gasKeys = Object.keys(gasolinaPayload);
-      const gasValues = Object.values(gasolinaPayload);
+      const gasData = { ...gasolinaPayload, gasto_id: insertedGastos[0].id };
+      const gasKeys = Object.keys(gasData);
+      const gasValues = Object.values(gasData);
       const placeholders = gasKeys.map((_, i) => `$${i + 1}`).join(', ');
-      await pool.query(
+      await client.query(
         `INSERT INTO registro_gasolina (${gasKeys.join(', ')}) VALUES (${placeholders})`,
         gasValues
       );
     }
 
-    // Ejecutar conciliación inmediatamente para que si ya existe una factura recibida con ese monto, se vincule como sugerencia
-
+    await client.query('COMMIT');
+    inTx = false;
 
     if (createNotifications && insertedGastos.length > 0) {
       try {
@@ -1195,7 +1298,13 @@ export const createGastos = async (req: Request, res: Response) => {
 
     return res.json({ success: true, insertedGastos });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message });
+    if (inTx) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
+    const isValidationError = error.message?.includes('Fecha') || error.message?.includes('hospedaje');
+    return res.status(isValidationError ? 400 : 500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 };
 
@@ -1384,16 +1493,7 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
 
     const updatedRes = await pool.query(`
       SELECT g.*,
-        (SELECT row_to_json(s_obj) FROM (
-          SELECT s.id, s.nombre, s.categoria_id,
-                 (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
-          FROM subcategorias s WHERE s.id = g.subcategoria_id
-        ) s_obj) as subcategoria_rel,
-        (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
-        (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-        (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
-        (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel,
-        ${FACTURA_REL_SUBQUERIES_SQL}
+        ${GASTO_RELATIONS_SELECT_SQL}
       FROM gastos g
       WHERE g.id = $1
     `, [id]);
@@ -1474,16 +1574,7 @@ export const detachSatFacturaFromGasto = async (req: Request, res: Response) => 
 
     const updatedRes = await pool.query(`
       SELECT g.*,
-        (SELECT row_to_json(s_obj) FROM (
-          SELECT s.id, s.nombre, s.categoria_id,
-                 (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
-          FROM subcategorias s WHERE s.id = g.subcategoria_id
-        ) s_obj) as subcategoria_rel,
-        (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
-        (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-        (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
-        (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel,
-        ${FACTURA_REL_SUBQUERIES_SQL}
+        ${GASTO_RELATIONS_SELECT_SQL}
       FROM gastos g
       WHERE g.id = $1
     `, [id]);
@@ -1554,16 +1645,7 @@ export const dismissSatFacturaFromGasto = async (req: Request, res: Response) =>
 
     const updatedRes = await pool.query(`
       SELECT g.*,
-        (SELECT row_to_json(s_obj) FROM (
-          SELECT s.id, s.nombre, s.categoria_id,
-                 (SELECT row_to_json(c_obj) FROM (SELECT c.id, c.nombre FROM categorias c WHERE c.id = s.categoria_id) c_obj) as categorias
-          FROM subcategorias s WHERE s.id = g.subcategoria_id
-        ) s_obj) as subcategoria_rel,
-        (SELECT row_to_json(p_obj) FROM (SELECT p.id, p.nombre FROM proveedores p WHERE p.id = g.proveedor_id) p_obj) as proveedor_rel,
-        (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
-        (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
-        (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel,
-        ${FACTURA_REL_SUBQUERIES_SQL}
+        ${GASTO_RELATIONS_SELECT_SQL}
       FROM gastos g
       WHERE g.id = $1
     `, [id]);

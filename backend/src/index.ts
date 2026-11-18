@@ -26,6 +26,7 @@ import devolucionesRoutes from './modules/devoluciones/devoluciones.routes';
 import documentosRoutes from './modules/documentos/documentos.routes';
 import satRoutes from './modules/sat/sat.routes';
 import herramientasRoutes from './modules/herramientas/herramientas.routes';
+import proyectosRoutes from './modules/proyectos/proyectos.routes';
 import queryRoutes from './modules/query/query.routes';
 
 import helmet from 'helmet';
@@ -164,6 +165,7 @@ app.use('/api/devoluciones', devolucionesRoutes);
 app.use('/api/documentos', documentosRoutes);
 app.use('/api/sat', satRoutes);
 app.use('/api/herramientas', herramientasRoutes);
+app.use('/api/proyectos', proyectosRoutes);
 app.use('/api/query', queryRoutes);
 
 // Ruta de prueba para verificar conexión a la base de datos PostgreSQL pura
