@@ -38,6 +38,17 @@ import { PushNotificationService } from '@/services/pushNotifications';
 import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { exportFacturaCfdiToPdf } from '@/utils/cfdiPdfGenerator';
 import { PartidaEditable } from '../types';
+import {
+  Proyecto,
+  ProyectoResumen,
+  ProyectoDetailResponse,
+  ProyectoStatus,
+  TipoGasto,
+  getProyectoNombreFromGasto,
+} from '@/features/proyectos/types';
+import { proyectosApi } from '@/features/proyectos/api/proyectosApi';
+
+export type AdminGastosTab = 'pendientes' | 'proyectos' | 'operativos' | 'historial';
 
 export const TIPOS_PROYECTO = ['Servicio', 'Proyecto', 'Venta', 'Operativo'];
 
@@ -63,9 +74,28 @@ export function useAdminGastos() {
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [personal, setPersonal] = useState<Usuario[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'pendientes' | 'historial'>('pendientes');
+  const [activeTab, setActiveTab] = useState<AdminGastosTab>('pendientes');
   const [facturaFilter, setFacturaFilter] = useState<'TODOS' | 'FACTURADOS' | 'PENDIENTE_ENTREGA' | 'NO_FACTURADOS'>('TODOS');
   const [pendingFilter, setPendingFilter] = useState<'TODOS' | 'NUEVOS' | 'FACTURA_DETECTADA'>('TODOS');
+
+  // === Proyectos ===
+  const [proyectos, setProyectos] = useState<ProyectoResumen[]>([]);
+  const [isLoadingProyectos, setIsLoadingProyectos] = useState(false);
+  const [proyectoStatusFilter, setProyectoStatusFilter] = useState<'ACTIVO' | 'CERRADO' | 'ALL'>('ACTIVO');
+  const [proyectoSearchQuery, setProyectoSearchQuery] = useState('');
+  const [selectedProyectoId, setSelectedProyectoId] = useState<string | null>(null);
+  const [selectedProyectoDetail, setSelectedProyectoDetail] = useState<ProyectoDetailResponse | null>(null);
+  const [isLoadingProyectoDetail, setIsLoadingProyectoDetail] = useState(false);
+
+  // Modal Crear / Editar Proyecto
+  const [proyectoFormModalVisible, setProyectoFormModalVisible] = useState(false);
+  const [editingProyecto, setEditingProyecto] = useState<Proyecto | null>(null);
+  const [isSavingProyecto, setIsSavingProyecto] = useState(false);
+
+  // Modal Asignar Gasto a Proyecto (Históricos o Correcciones en Revisión)
+  const [assignProyectoModalVisible, setAssignProyectoModalVisible] = useState(false);
+  const [gastoToAssignProyecto, setGastoToAssignProyecto] = useState<Gasto | null>(null);
+  const [isAssigningProyecto, setIsAssigningProyecto] = useState(false);
 
   // Paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -348,19 +378,168 @@ export function useAdminGastos() {
     }
   };
 
+  const loadProyectos = useCallback(async (silent = false) => {
+    if (!silent) setIsLoadingProyectos(true);
+    try {
+      const list = await proyectosApi.fetchProyectos('ALL');
+      setProyectos(list);
+    } catch (err) {
+      logger.error('Error loading proyectos:', err);
+    } finally {
+      if (!silent) setIsLoadingProyectos(false);
+    }
+  }, []);
+
+  const loadProyectoDetail = useCallback(async (proyId: string, silent = false) => {
+    if (!proyId) return;
+    if (!silent) setIsLoadingProyectoDetail(true);
+    try {
+      const detail = await proyectosApi.fetchProyectoDetail(proyId);
+      setSelectedProyectoDetail(detail);
+    } catch (err: any) {
+      logger.error('Error loading proyecto detail:', err);
+      if (!silent) {
+        showAlert('Error', err.message || 'No se pudo cargar el detalle del proyecto.');
+      }
+    } finally {
+      if (!silent) setIsLoadingProyectoDetail(false);
+    }
+  }, []);
+
+  const handleOpenNewProyecto = useCallback(() => {
+    setEditingProyecto(null);
+    setProyectoFormModalVisible(true);
+  }, []);
+
+  const handleOpenEditProyecto = useCallback((proy: Proyecto) => {
+    setEditingProyecto(proy);
+    setProyectoFormModalVisible(true);
+  }, []);
+
+  const handleSaveProyecto = async (payload: {
+    nombre: string;
+    cliente_id: string | null;
+    sucursal_id: string | null;
+    status: ProyectoStatus;
+    notas: string | null;
+  }) => {
+    if (!payload.nombre.trim()) {
+      showAlert('Validación', 'Por favor ingresa el nombre del proyecto.');
+      return;
+    }
+
+    setIsSavingProyecto(true);
+    try {
+      if (editingProyecto) {
+        await proyectosApi.updateProyecto(editingProyecto.id, payload);
+        showAlert('Éxito', 'Proyecto actualizado correctamente.');
+      } else {
+        await proyectosApi.createProyecto({
+          ...payload,
+          created_by: adminUser?.id || null,
+        });
+        showAlert('Éxito', `Proyecto "${payload.nombre}" creado correctamente.`);
+      }
+
+      setProyectoFormModalVisible(false);
+      setEditingProyecto(null);
+      await loadProyectos(true);
+      if (selectedProyectoId && editingProyecto && selectedProyectoId === editingProyecto.id) {
+        await loadProyectoDetail(selectedProyectoId, true);
+      }
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo guardar el proyecto.');
+    } finally {
+      setIsSavingProyecto(false);
+    }
+  };
+
+  const handleToggleProyectoStatus = async (proy: Proyecto) => {
+    const nextStatus: ProyectoStatus = proy.status === 'ACTIVO' ? 'CERRADO' : 'ACTIVO';
+    const doToggle = async () => {
+      try {
+        await proyectosApi.updateProyecto(proy.id, { status: nextStatus });
+        await loadProyectos(true);
+        if (selectedProyectoId === proy.id) {
+          await loadProyectoDetail(proy.id, true);
+        }
+        showAlert('Proyecto Actualizado', `El proyecto "${proy.nombre}" ahora está ${nextStatus}.`);
+      } catch (err: any) {
+        showAlert('Error', err.message || 'No se pudo cambiar el estado del proyecto.');
+      }
+    };
+
+    const msg =
+      nextStatus === 'CERRADO'
+        ? `¿Deseas cerrar el proyecto "${proy.nombre}"? Ya no aparecerá como activo para nuevos gastos de empleados.`
+        : `¿Deseas reabrir el proyecto "${proy.nombre}" para recibir nuevos gastos?`;
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) {
+        await doToggle();
+      }
+    } else {
+      Alert.alert(
+        nextStatus === 'CERRADO' ? 'Cerrar Proyecto' : 'Reabrir Proyecto',
+        msg,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Confirmar', onPress: doToggle },
+        ]
+      );
+    }
+  };
+
+  const handleSelectProyecto = useCallback(
+    (proyId: string) => {
+      setSelectedProyectoId(proyId);
+      loadProyectoDetail(proyId);
+    },
+    [loadProyectoDetail]
+  );
+
+  const handleCloseProyectoDetail = useCallback(() => {
+    setSelectedProyectoId(null);
+    setSelectedProyectoDetail(null);
+  }, []);
+
+  const handleOpenAssignProyecto = useCallback(
+    (gasto: Gasto) => {
+      setGastoToAssignProyecto(gasto);
+      setAssignProyectoModalVisible(true);
+      if (proyectos.length === 0) {
+        loadProyectos(true);
+      }
+    },
+    [proyectos.length, loadProyectos]
+  );
+
   const refreshData = useCallback(async (silent = false) => {
     // Solo mostrar spinner central si no hay datos previos cargados
-    if (!silent && gastos.length === 0) {
+    if (!silent && gastos.length === 0 && activeTab !== 'proyectos') {
       setIsLoading(true);
     }
     try {
       const headers = await getApiHeaders();
       const apiUrl = getApiUrl();
       const skipCat = catalogsLoadedRef.current;
+
+      // Mapear pestaña al endpoint de reportes manteniendo compatibilidad total con backend
+      const backendTabParam =
+        activeTab === 'pendientes'
+          ? 'por_revisar'
+          : activeTab === 'operativos'
+          ? 'operativos'
+          : 'historial';
+
+      const effectiveLimit =
+        activeTab === 'operativos' ? '200' : String(pageSize);
+
       const queryParams = new URLSearchParams({
         page: String(currentPage),
-        limit: String(pageSize),
-        tab: activeTab,
+        limit: effectiveLimit,
+        tab: backendTabParam,
+        includeActionRequired: 'true',
         facturaFilter,
         pendingFilter,
         search: debouncedSearchQuery,
@@ -368,12 +547,21 @@ export function useAdminGastos() {
         endDate: endDateFilter || '',
         skipCatalogs: skipCat ? 'true' : 'false',
       });
+
+      if (activeTab === 'operativos') {
+        queryParams.set('tipo_gasto', 'OPERATIVO');
+      } else if (activeTab === 'historial') {
+        queryParams.set('sin_proyecto', 'true');
+      }
+
       const fetchUrl = `${apiUrl}/api/reportes/admin/all?${queryParams.toString()}`;
 
-      // Ejecutar la petición principal y catálogos en paralelo
+      // Ejecutar la petición principal, proyectos y catálogos en paralelo
       const [res, catRes] = await Promise.all([
         fetch(fetchUrl, { headers }),
         !skipCat ? fetch(`${apiUrl}/api/reportes/form-catalogs`, { headers }).catch(() => null) : Promise.resolve(null),
+        loadProyectos(silent || activeTab !== 'proyectos'),
+        selectedProyectoId ? loadProyectoDetail(selectedProyectoId, true) : Promise.resolve(),
       ]);
 
       if (res.status === 401) {
@@ -427,7 +615,70 @@ export function useAdminGastos() {
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }, [currentPage, pageSize, activeTab, facturaFilter, pendingFilter, debouncedSearchQuery, startDateFilter, endDateFilter, gastos.length]);
+  }, [currentPage, pageSize, activeTab, facturaFilter, pendingFilter, debouncedSearchQuery, startDateFilter, endDateFilter, gastos.length, loadProyectos, loadProyectoDetail, selectedProyectoId]);
+
+  const handleConfirmAssignProyecto = async (payload: {
+    proyecto_id: string | null;
+    tipo_gasto: TipoGasto;
+  }) => {
+    if (!gastoToAssignProyecto) return;
+    setIsAssigningProyecto(true);
+    try {
+      await proyectosApi.assignProyectoToGasto(gastoToAssignProyecto.id, payload);
+
+      const matchedProy = payload.proyecto_id
+        ? proyectos.find((p) => p.id === payload.proyecto_id)
+        : null;
+
+      const updatedFields: Partial<Gasto> = {
+        proyecto_id: payload.proyecto_id,
+        tipo_gasto: payload.tipo_gasto,
+        proyecto_rel: matchedProy
+          ? {
+              id: matchedProy.id,
+              nombre: matchedProy.nombre,
+              cliente_nombre: matchedProy.cliente_nombre,
+              sucursal_nombre: matchedProy.sucursal_nombre,
+              status: matchedProy.status,
+            }
+          : null,
+      };
+
+      setGastos((prev) =>
+        prev.map((g) =>
+          g.id === gastoToAssignProyecto.id ? { ...g, ...updatedFields } : g
+        )
+      );
+
+      if (selectedGasto && selectedGasto.id === gastoToAssignProyecto.id) {
+        setSelectedGasto((prev) =>
+          prev ? { ...prev, ...updatedFields } : null
+        );
+      }
+
+      setAssignProyectoModalVisible(false);
+      setGastoToAssignProyecto(null);
+
+      await Promise.all([
+        loadProyectos(true),
+        selectedProyectoId
+          ? loadProyectoDetail(selectedProyectoId, true)
+          : Promise.resolve(),
+        refreshData(true),
+      ]);
+
+      showAlert(
+        'Éxito',
+        payload.tipo_gasto === 'OPERATIVO'
+          ? 'El gasto ha sido clasificado como Gasto Operativo / General.'
+          : `El gasto ha sido asignado al proyecto "${matchedProy?.nombre || 'seleccionado'}".`
+      );
+    } catch (err: any) {
+      showAlert('Error', err.message || 'No se pudo asignar el proyecto al gasto.');
+    } finally {
+      setIsAssigningProyecto(false);
+    }
+  };
 
   // Debounce de búsqueda para consulta al servidor
   useEffect(() => {
@@ -470,9 +721,12 @@ export function useAdminGastos() {
 
   // Manejar navegación directa a un gasto específico o búsqueda desde Ventas u otros módulos
   useEffect(() => {
-    const targetTab: 'pendientes' | 'historial' =
-      params.tab === 'pendientes' || params.tab === 'historial'
-        ? (params.tab as 'pendientes' | 'historial')
+    const targetTab: AdminGastosTab =
+      params.tab === 'pendientes' ||
+      params.tab === 'proyectos' ||
+      params.tab === 'operativos' ||
+      params.tab === 'historial'
+        ? (params.tab as AdminGastosTab)
         : 'historial';
 
     if (params.search && typeof params.search === 'string') {
@@ -575,15 +829,22 @@ export function useAdminGastos() {
   };
 
   const parseJustificacion = (just: string | null | undefined) => {
-    if (!just) return { alerta: null, proveedorSugerido: null, justificacion: '' };
+    if (!just) return { alerta: null, proveedorSugerido: null, proyectoSugerido: null, justificacion: '' };
     let remaining = just;
     let alerta: string | null = null;
     let proveedorSugerido: string | null = null;
+    let proyectoSugerido: string | null = null;
 
     const alertaMatch = remaining.match(/^\[ALERTA IA:\s*([\s\S]*?)\]\s*\n\s*/);
     if (alertaMatch) {
       alerta = alertaMatch[1];
       remaining = remaining.replace(alertaMatch[0], '');
+    }
+
+    const proyMatch = remaining.match(/\[Proyecto a agregar:\s*([^\]]+)\]\s*\n?/i);
+    if (proyMatch) {
+      proyectoSugerido = proyMatch[1].trim();
+      remaining = remaining.replace(proyMatch[0], '');
     }
 
     const provMatch = remaining.match(/\[Proveedor a agregar:\s*([^\]]+)\]\s*\n?/);
@@ -592,7 +853,70 @@ export function useAdminGastos() {
       remaining = remaining.replace(provMatch[0], '');
     }
 
-    return { alerta, proveedorSugerido, justificacion: remaining.trim() };
+    return { alerta, proveedorSugerido, proyectoSugerido, justificacion: remaining.trim() };
+  };
+
+  const [isSavingQuickProy, setIsSavingQuickProy] = useState(false);
+
+  const handleQuickCreateProyectoAndAssign = async (nombreToCreate: string) => {
+    if (!selectedGasto) return;
+    const cleanName = (nombreToCreate || '').trim();
+    if (!cleanName) {
+      showAlert('Validación', 'El nombre del proyecto a crear está vacío.');
+      return;
+    }
+
+    setIsSavingQuickProy(true);
+    try {
+      let targetProyecto: any = proyectos.find(
+        (p) => p.nombre && p.nombre.trim().toLowerCase() === cleanName.toLowerCase()
+      );
+
+      if (!targetProyecto) {
+        targetProyecto = await proyectosApi.createProyecto({
+          nombre: cleanName,
+          cliente_id: selectedGasto.cliente_id || null,
+          sucursal_id: selectedGasto.sucursal_id || null,
+          created_by: adminUser?.id || null,
+        });
+      }
+
+      await proyectosApi.assignProyectoToGasto(selectedGasto.id, {
+        proyecto_id: targetProyecto.id,
+        tipo_gasto: 'PROYECTO',
+      });
+
+      const cleanedJust = String(selectedGasto.justificacion || '')
+        .replace(/\[Proyecto a agregar:\s*[^\]]+\]\s*\n*/gi, '')
+        .trim();
+
+      const updatedFields: Partial<Gasto> = {
+        proyecto_id: targetProyecto.id,
+        tipo_gasto: 'PROYECTO',
+        detalle_servicio_proyecto: targetProyecto.nombre,
+        justificacion: cleanedJust,
+        proyecto_rel: {
+          id: targetProyecto.id,
+          nombre: targetProyecto.nombre,
+          cliente_nombre: GastoHelper.getCliente(selectedGasto) || null,
+          sucursal_nombre: GastoHelper.getSucursal(selectedGasto) || null,
+          status: 'ACTIVO',
+        },
+      };
+
+      setGastos((prev) =>
+        prev.map((g) => (g.id === selectedGasto.id ? { ...g, ...updatedFields } : g))
+      );
+      setSelectedGasto((prev) => (prev ? { ...prev, ...updatedFields } : null));
+
+      await Promise.all([loadProyectos(true), refreshData(true)]);
+      showAlert('Éxito', `Proyecto "${targetProyecto.nombre}" creado y vinculado al gasto.`);
+    } catch (err: any) {
+      logger.error('Error al crear proyecto rápido:', err);
+      showAlert('Error', err.message || 'No se pudo crear y asignar el proyecto.');
+    } finally {
+      setIsSavingQuickProy(false);
+    }
   };
 
   // Acciones de Revisión de Gastos
@@ -604,6 +928,19 @@ export function useAdminGastos() {
       showAlert(
         'Indicar Proveedor',
         'No se puede aprobar este gasto porque el proveedor se encuentra en blanco.\n\nPor favor, edita el gasto y asigna un proveedor antes de aprobarlo.'
+      );
+      return;
+    }
+
+    const parsedCheck = parseJustificacion(selectedGasto.justificacion);
+    if (
+      status === 'APPROVED' &&
+      !selectedGasto.proyecto_id &&
+      (selectedGasto.tipo_gasto === 'PROYECTO' || !!parsedCheck.proyectoSugerido)
+    ) {
+      showAlert(
+        'Indicar Proyecto',
+        'No se puede aprobar este gasto porque tiene un proyecto pendiente de asignar.\n\nPor favor, crea o asigna el proyecto antes de aprobarlo.'
       );
       return;
     }
@@ -2424,6 +2761,8 @@ export function useAdminGastos() {
         const amountQuery = normalizeAmountQuery(searchQuery);
         const amountValue = Number(g.monto) || 0;
 
+        const proyectoStr = (getProyectoNombreFromGasto(g, proyectos) || '').toLowerCase();
+
         const matchesText = matchesIdOrUuid ||
           empName.includes(query) ||
           clientName.includes(query) ||
@@ -2432,7 +2771,8 @@ export function useAdminGastos() {
           subCatName.includes(query) ||
           provName.includes(query) ||
           detailStr.includes(query) ||
-          emisorStr.includes(query);
+          emisorStr.includes(query) ||
+          proyectoStr.includes(query);
 
         const digitsQuery = query.replace(/[$,.\s]/g, '');
         const isQueryNumeric = digitsQuery.length > 0 && /^\d+$/.test(digitsQuery);
@@ -2462,30 +2802,86 @@ export function useAdminGastos() {
 
       return true;
     });
-  }, [gastos, searchQuery, startDateFilter, endDateFilter]);
+  }, [gastos, searchQuery, startDateFilter, endDateFilter, proyectos]);
 
-  const pendingGastos = (activeTab === 'pendientes' ? gastos : filteredGastos.filter((g) => g.status === 'PENDING')).filter((g) => {
+  const matchesFacturaFilter = useCallback(
+    (g: Gasto) => {
+      if (facturaFilter === 'FACTURADOS') return g.facturado === true;
+      if (facturaFilter === 'PENDIENTE_ENTREGA') {
+        return (
+          !g.facturado &&
+          !!g.motivo_sin_factura &&
+          g.motivo_sin_factura.toUpperCase().includes('PENDIENTE')
+        );
+      }
+      if (facturaFilter === 'NO_FACTURADOS') {
+        return (
+          !g.facturado &&
+          (!g.motivo_sin_factura ||
+            !g.motivo_sin_factura.toUpperCase().includes('PENDIENTE'))
+        );
+      }
+      return true;
+    },
+    [facturaFilter]
+  );
+
+  // Pestaña 1 — "Por revisar" (PENDING y ACTION_REQUIRED de proyectos y operativos)
+  const pendingGastos = (
+    activeTab === 'pendientes'
+      ? gastos.filter(
+          (g) => g.status === 'PENDING' || g.status === 'ACTION_REQUIRED'
+        )
+      : filteredGastos.filter(
+          (g) => g.status === 'PENDING' || g.status === 'ACTION_REQUIRED'
+        )
+  ).filter((g) => {
     if (pendingFilter === 'FACTURA_DETECTADA') {
-      return Boolean(g.devuelto_por_factura || g.factura_sugerida_id || g.factura_sugerida_rel);
+      return Boolean(
+        g.devuelto_por_factura || g.factura_sugerida_id || g.factura_sugerida_rel
+      );
     }
     if (pendingFilter === 'NUEVOS') {
-      return !g.devuelto_por_factura && !g.factura_sugerida_id && !g.factura_sugerida_rel;
+      return (
+        !g.devuelto_por_factura &&
+        !g.factura_sugerida_id &&
+        !g.factura_sugerida_rel
+      );
     }
     return true;
   });
-  const historyGastos = activeTab === 'historial' ? gastos : filteredGastos.filter((g) => {
-    const isHistoryStatus = g.status === 'APPROVED' || g.status === 'REJECTED' || g.status === 'ACTION_REQUIRED';
-    if (!isHistoryStatus) return false;
 
-    if (facturaFilter === 'FACTURADOS') return g.facturado === true;
-    if (facturaFilter === 'PENDIENTE_ENTREGA') {
-      return !g.facturado && !!g.motivo_sin_factura && g.motivo_sin_factura.toUpperCase().includes('PENDIENTE');
-    }
-    if (facturaFilter === 'NO_FACTURADOS') {
-      return !g.facturado && (!g.motivo_sin_factura || !g.motivo_sin_factura.toUpperCase().includes('PENDIENTE'));
-    }
-    return true;
-  });
+  // Pestaña 3 — "Operativos" (tipo_gasto = 'OPERATIVO' o histórico marcado como Operativo)
+  const operativosGastos = useMemo(() => {
+    const source = activeTab === 'operativos' ? gastos : filteredGastos;
+    return source.filter((g) => {
+      const isOp =
+        g.tipo_gasto === 'OPERATIVO' ||
+        (!g.proyecto_id &&
+          (g.tipo_servicio_proyecto || '').toLowerCase() === 'operativo');
+      if (!isOp) return false;
+      return matchesFacturaFilter(g);
+    });
+  }, [activeTab, gastos, filteredGastos, matchesFacturaFilter]);
+
+  // Pestaña 4 — "Histórico / Sin proyecto" (gastos con proyecto_id = NULL y no operativos)
+  const historyGastos = useMemo(() => {
+    const source = activeTab === 'historial' ? gastos : filteredGastos;
+    return source.filter((g) => {
+      if (g.proyecto_id || g.proyecto_rel?.id) return false;
+      const isOp =
+        g.tipo_gasto === 'OPERATIVO' ||
+        (!g.proyecto_id &&
+          (g.tipo_servicio_proyecto || '').toLowerCase() === 'operativo');
+      if (isOp) return false;
+      const isHistoryStatus =
+        g.status === 'APPROVED' ||
+        g.status === 'REJECTED' ||
+        g.status === 'ACTION_REQUIRED';
+      if (!isHistoryStatus && activeTab !== 'historial') return false;
+      return matchesFacturaFilter(g);
+    });
+  }, [activeTab, gastos, filteredGastos, matchesFacturaFilter]);
 
   const totalPendientes = backendTotals ? backendTotals.totalPendientes : pendingGastos.reduce((sum, g) => sum + Number(g.monto), 0);
   const totalAprobados = backendTotals ? backendTotals.totalAprobados : filteredGastos.filter((g) => g.status === 'APPROVED').reduce((sum, g) => sum + Number(g.monto), 0);
@@ -2586,6 +2982,8 @@ export function useAdminGastos() {
     quickEditProvSearch,
     setQuickEditProvSearch,
     isSavingQuickProv,
+    isSavingQuickProy,
+    handleQuickCreateProyectoAndAssign,
     showNewProvInQuickModal,
     setShowNewProvInQuickModal,
     newQuickProvName,
@@ -2723,9 +3121,39 @@ export function useAdminGastos() {
     filteredSalesForLinking,
     filteredClientsForQuickSale,
     pendingGastos,
+    operativosGastos,
     historyGastos,
     totalPendientes,
     totalAprobados,
+    proyectos,
+    isLoadingProyectos,
+    proyectoStatusFilter,
+    setProyectoStatusFilter,
+    proyectoSearchQuery,
+    setProyectoSearchQuery,
+    selectedProyectoId,
+    selectedProyectoDetail,
+    isLoadingProyectoDetail,
+    proyectoFormModalVisible,
+    setProyectoFormModalVisible,
+    editingProyecto,
+    setEditingProyecto,
+    isSavingProyecto,
+    assignProyectoModalVisible,
+    setAssignProyectoModalVisible,
+    gastoToAssignProyecto,
+    setGastoToAssignProyecto,
+    isAssigningProyecto,
+    loadProyectos,
+    loadProyectoDetail,
+    handleOpenNewProyecto,
+    handleOpenEditProyecto,
+    handleSaveProyecto,
+    handleToggleProyectoStatus,
+    handleSelectProyecto,
+    handleCloseProyectoDetail,
+    handleOpenAssignProyecto,
+    handleConfirmAssignProyecto,
     handleOpenProfile,
     handleSaveProfile,
     refreshData,
