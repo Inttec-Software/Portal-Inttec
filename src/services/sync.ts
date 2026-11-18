@@ -40,6 +40,11 @@ export interface OfflineGastoItem {
   motivo_sin_factura?: string | null;
   tipo_servicio_proyecto?: string | null;
   detalle_servicio_proyecto?: string | null;
+  proyecto_id?: string | null;
+  tipo_gasto?: 'PROYECTO' | 'OPERATIVO' | null;
+  subtipo_traslado?: 'CASETAS' | 'ESTACIONAMIENTOS' | 'MULTAS' | 'UBER' | 'VUELOS' | 'OTRO' | null;
+  fecha_hospedaje_inicio?: string | null;
+  fecha_hospedaje_fin?: string | null;
   vehiculo_id?: string | null;
   kilometraje_actual?: number | null;
   litros?: number | null;
@@ -279,10 +284,20 @@ export const SyncService = {
                 motivo_sin_factura: item.motivo_sin_factura || null,
                 tipo_servicio_proyecto: item.tipo_servicio_proyecto || null,
                 detalle_servicio_proyecto: item.detalle_servicio_proyecto || null,
+                proyecto_id: item.proyecto_id || null,
+                tipo_gasto: item.tipo_gasto || null,
+                subtipo_traslado: item.subtipo_traslado || null,
+                fecha_hospedaje_inicio: item.fecha_hospedaje_inicio || null,
+                fecha_hospedaje_fin: item.fecha_hospedaje_fin || null,
                 created_at: item.created_at,
               };
               
-          const insertedData = await apiClient.post('/api/reportes/gastos', gastoData).then(r => [r]);
+          const apiRes = await apiClient.post('/api/reportes/gastos', gastoData);
+          const insertedData = Array.isArray(apiRes?.insertedGastos)
+            ? apiRes.insertedGastos
+            : Array.isArray(apiRes)
+              ? apiRes
+              : (apiRes?.id ? [apiRes] : []);
 
           // 3. Si es combustible y se insertó con éxito, insertar el registro de gasolina
           if (insertedData && insertedData.length > 0 && item.vehiculo_id) {

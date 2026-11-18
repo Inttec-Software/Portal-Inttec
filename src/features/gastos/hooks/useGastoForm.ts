@@ -1645,7 +1645,9 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
             }
           ];
 
-          const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
+          const esGasolina =
+            (tipoGasto === 'PROYECTO' && bloqueProyecto === 'TRANSPORTE' && subtipoTransporte === 'COMBUSTIBLE') ||
+            isCombustibleExpense(selectedCategoria, selectedSubcategoria);
           let gasolinaPayload = null;
 
           if (esGasolina) {
@@ -1686,7 +1688,9 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
             ? ticketFiles.filter(f => !!f.base64).map(f => ({ base64: f.base64!, ext: f.ext }))
             : (imageBase64 ? [{ base64: imageBase64, ext: imageExt }] : []);
 
-          const esGasolina = isCombustibleExpense(selectedCategoria, selectedSubcategoria);
+          const esGasolina =
+            (tipoGasto === 'PROYECTO' && bloqueProyecto === 'TRANSPORTE' && subtipoTransporte === 'COMBUSTIBLE') ||
+            isCombustibleExpense(selectedCategoria, selectedSubcategoria);
           if (isSplit) {
             for (let i = 0; i < splits.length; i++) {
               const s = splits[i];

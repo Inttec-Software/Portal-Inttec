@@ -55,7 +55,7 @@ const SUBTIPOS_TRASLADO: {
   icon: keyof typeof Ionicons.glyphMap;
 }[] = [
   { id: 'CASETAS', label: 'Casetas', icon: 'trail-sign-outline' },
-  { id: 'ESTACIONAMIENTOS', label: 'Estacionamientos', icon: 'P' as any },
+  { id: 'ESTACIONAMIENTOS', label: 'Estacionamientos', icon: 'ticket-outline' },
   { id: 'MULTAS', label: 'Multas', icon: 'document-text-outline' },
   { id: 'UBER', label: 'Uber / Taxis', icon: 'car-outline' },
   { id: 'VUELOS', label: 'Vuelos', icon: 'airplane-outline' },
