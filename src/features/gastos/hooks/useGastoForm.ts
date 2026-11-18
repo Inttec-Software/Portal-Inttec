@@ -253,11 +253,105 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
   const [showHospedajeFinPicker, setShowHospedajeFinPicker] = useState(false);
   const [isHistoricoSinProyecto, setIsHistoricoSinProyecto] = useState(false);
   const [hospedajeRecienteAviso, setHospedajeRecienteAviso] = useState<string | null>(null);
+  const [mostrarSugerenciaProyecto, setMostrarSugerenciaProyecto] = useState(false);
+
+  const normMatch = (val?: string | null): string =>
+    String(val || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
 
   const selectedProyectoObj = useMemo(
     () => proyectos.find((p) => String(p.id) === String(selectedProyectoId)) || null,
     [proyectos, selectedProyectoId]
   );
+
+  const selectedClienteObj = useMemo(
+    () =>
+      clientes.find(
+        (c) =>
+          normMatch(c.nombre) === normMatch(selectedCliente) ||
+          String(c.id) === String(selectedCliente)
+      ) || null,
+    [clientes, selectedCliente]
+  );
+
+  const sucursalesDelCliente = useMemo(
+    () =>
+      selectedClienteObj
+        ? sucursalesCliente.filter((s) => String(s.cliente_id) === String(selectedClienteObj.id))
+        : [],
+    [sucursalesCliente, selectedClienteObj]
+  );
+
+  const selectedSucursalObj = useMemo(
+    () =>
+      sucursalesDelCliente.find(
+        (s) =>
+          normMatch(s.nombre) === normMatch(sucursal) ||
+          String(s.id) === String(sucursal)
+      ) || null,
+    [sucursalesDelCliente, sucursal]
+  );
+
+  const hasSucursalParaProyecto = useMemo(
+    () =>
+      Boolean(
+        selectedCliente.trim() &&
+          (sucursal.trim() || (role === 'empleado' && comentarioSucursal.trim()))
+      ),
+    [selectedCliente, sucursal, comentarioSucursal, role]
+  );
+
+  const proyectosDisponibles = useMemo(() => {
+    if (!selectedCliente.trim() || !hasSucursalParaProyecto) return [];
+
+    const clienteIdTarget = selectedClienteObj?.id ? String(selectedClienteObj.id) : null;
+    const clienteNombreTarget = normMatch(selectedClienteObj?.nombre || selectedCliente);
+    const sucursalIdTarget = selectedSucursalObj?.id ? String(selectedSucursalObj.id) : null;
+    const sucursalNombreTarget = normMatch(selectedSucursalObj?.nombre || sucursal);
+    const usandoSucursalNueva = !sucursal.trim() && Boolean(comentarioSucursal.trim());
+
+    return proyectos.filter((p) => {
+      // Siempre conservar visible el proyecto ya asignado en modo edición si coincide o si vino legado
+      if (mode === 'edit' && selectedProyectoId && String(p.id) === String(selectedProyectoId)) {
+        const matchEditCli =
+          (clienteIdTarget && p.cliente_id && String(p.cliente_id) === clienteIdTarget) ||
+          (!p.cliente_id && !p.cliente_nombre) ||
+          normMatch(p.cliente_nombre) === clienteNombreTarget;
+        if (matchEditCli) return true;
+      }
+
+      const matchCliente = clienteIdTarget
+        ? (p.cliente_id ? String(p.cliente_id) === clienteIdTarget : normMatch(p.cliente_nombre) === clienteNombreTarget)
+        : normMatch(p.cliente_nombre) === clienteNombreTarget;
+
+      if (!matchCliente) return false;
+
+      if (usandoSucursalNueva) {
+        return !p.sucursal_id && !p.sucursal_nombre;
+      }
+
+      if (sucursalIdTarget && p.sucursal_id) {
+        return String(p.sucursal_id) === sucursalIdTarget;
+      }
+      if (p.sucursal_nombre && sucursalNombreTarget) {
+        return normMatch(p.sucursal_nombre) === sucursalNombreTarget;
+      }
+      return !p.sucursal_id && !p.sucursal_nombre;
+    });
+  }, [
+    proyectos,
+    selectedCliente,
+    selectedClienteObj,
+    hasSucursalParaProyecto,
+    sucursal,
+    selectedSucursalObj,
+    comentarioSucursal,
+    mode,
+    selectedProyectoId,
+  ]);
 
   const findCatName = (cats: CatalogoItem[], keywords: string[]): string => {
     const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -300,16 +394,44 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
     }
   };
 
-  const handleSelectProyecto = async (proj: ProyectoCatalogoItem | null) => {
+  const handleSelectClienteProyecto = (cli: CatalogoItem) => {
+    setSelectedCliente(cli.nombre);
+    const cliSucs = sucursalesCliente.filter((s) => String(s.cliente_id) === String(cli.id));
+    setSucursal(cliSucs.length === 1 ? cliSucs[0].nombre : '');
+    setComentarioSucursal('');
+    setSelectedProyectoId(null);
+    setComentarioProyecto('');
+    setMostrarSugerenciaProyecto(false);
+    setHospedajeRecienteAviso(null);
+    setShowProyectoDropdown(false);
+    setClienteSearch('');
+    setShowCliDropdown(false);
+  };
+
+  const handleSelectSucursalProyecto = (sucNombre: string) => {
+    setSucursal(sucNombre);
+    setComentarioSucursal('');
+    setSelectedProyectoId(null);
+    setComentarioProyecto('');
+    setMostrarSugerenciaProyecto(false);
+    setHospedajeRecienteAviso(null);
+    setShowProyectoDropdown(false);
+    setSucursalSearch('');
+    setShowSucursalDropdown(false);
+  };
+
+  const handleSelectProyecto = async (proj: ProyectoCatalogoItem | null, enableSuggestion = false) => {
     setShowProyectoDropdown(false);
     setProyectoSearch('');
     if (!proj) {
       setSelectedProyectoId(null);
       setHospedajeRecienteAviso(null);
+      setMostrarSugerenciaProyecto(enableSuggestion);
       return;
     }
     setSelectedProyectoId(proj.id);
     setComentarioProyecto('');
+    setMostrarSugerenciaProyecto(false);
     setTipoGasto('PROYECTO');
     setIsHistoricoSinProyecto(false);
     setTipoServicioProyecto('Proyecto');
@@ -654,11 +776,17 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
             setTipoServicioProyecto(data.tipo_servicio_proyecto as any || null);
             setDetalleServicioProyecto(data.detalle_servicio_proyecto || '');
 
-            const resolvedCliente = GastoHelper.getCliente(data);
+            const resolvedCliente = GastoHelper.getCliente(data) || (data as any).proyecto_rel?.cliente_nombre || '';
             setSelectedCliente(resolvedCliente);
 
-            const resolvedSucursal = GastoHelper.getSucursal(data);
+            const resolvedSucursal = GastoHelper.getSucursal(data) || (data as any).proyecto_rel?.sucursal_nombre || '';
             setSucursal(resolvedSucursal);
+            if (!resolvedSucursal && data.justificacion) {
+              const sucMatch = data.justificacion.match(/\[Sucursal a agregar:\s*([^\]]+)\]/i);
+              if (sucMatch) {
+                setComentarioSucursal(sucMatch[1].trim());
+              }
+            }
 
             setMetodoPago(data.metodo_pago as any || 'efectivo');
             setTipoTarjeta(data.tipo_tarjeta as any || null);
@@ -687,6 +815,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
             if (rawData.proyecto_id) {
               setSelectedProyectoId(String(rawData.proyecto_id));
               setComentarioProyecto('');
+              setMostrarSugerenciaProyecto(false);
               setTipoGasto('PROYECTO');
               setIsHistoricoSinProyecto(false);
               if (rawData.proyecto_rel && ! (catalogs?.proyectos || []).some((p: any) => String(p.id) === String(rawData.proyecto_id))) {
@@ -694,7 +823,9 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
                   {
                     id: String(rawData.proyecto_id),
                     nombre: rawData.proyecto_rel.nombre || rawData.detalle_servicio_proyecto || 'Proyecto asignado',
+                    cliente_id: rawData.proyecto_rel.cliente_id || rawData.cliente_id || null,
                     cliente_nombre: rawData.proyecto_rel.cliente_nombre || resolvedCliente || null,
+                    sucursal_id: rawData.proyecto_rel.sucursal_id || rawData.sucursal_id || null,
                     sucursal_nombre: rawData.proyecto_rel.sucursal_nombre || resolvedSucursal || null,
                     status: rawData.proyecto_rel.status || 'ACTIVO',
                   },
@@ -704,22 +835,26 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
             } else if (projSugMatch) {
               setSelectedProyectoId(null);
               setComentarioProyecto(projSugMatch[1].trim());
+              setMostrarSugerenciaProyecto(true);
               setTipoGasto('PROYECTO');
               setIsHistoricoSinProyecto(false);
             } else if (rawData.tipo_gasto === 'OPERATIVO' || data.tipo_servicio_proyecto === 'Operativo') {
               setSelectedProyectoId(null);
               setComentarioProyecto('');
+              setMostrarSugerenciaProyecto(false);
               setTipoGasto('OPERATIVO');
               setIsHistoricoSinProyecto(false);
             } else if (rawData.tipo_gasto === 'PROYECTO') {
               setSelectedProyectoId(null);
               setComentarioProyecto(data.detalle_servicio_proyecto || '');
+              setMostrarSugerenciaProyecto(Boolean(data.detalle_servicio_proyecto));
               setTipoGasto('PROYECTO');
               setIsHistoricoSinProyecto(false);
             } else {
               // Gasto histórico sin proyecto_id
               setSelectedProyectoId(null);
               setComentarioProyecto('');
+              setMostrarSugerenciaProyecto(false);
               setTipoGasto('PROYECTO');
               setIsHistoricoSinProyecto(true);
             }
@@ -1127,6 +1262,12 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
       const newCli = await CatalogService.crearCliente({ nombre: nombre.trim() });
       setClientes(prev => [...prev, newCli].sort((a, b) => a.nombre.localeCompare(b.nombre)));
       setSelectedCliente(newCli.nombre);
+      setSucursal('');
+      setComentarioSucursal('');
+      setSelectedProyectoId(null);
+      setComentarioProyecto('');
+      setMostrarSugerenciaProyecto(false);
+      setHospedajeRecienteAviso(null);
       setClienteSearch('');
       setShowCliDropdown(false);
     } catch (err: any) {
@@ -1149,6 +1290,11 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
       });
       setSucursalesCliente(prev => [...prev, newSuc].sort((a, b) => a.nombre.localeCompare(b.nombre)));
       setSucursal(newSuc.nombre);
+      setComentarioSucursal('');
+      setSelectedProyectoId(null);
+      setComentarioProyecto('');
+      setMostrarSugerenciaProyecto(false);
+      setHospedajeRecienteAviso(null);
       setSucursalSearch('');
       setShowSucursalDropdown(false);
       showAlert('Éxito', `Sucursal "${newSuc.nombre}" agregada y vinculada a ${currentCliente.nombre}.`);
@@ -1299,15 +1445,32 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         return;
       }
 
-      // 8. Validar Destino (Proyecto vs Operativo) y Categoría
-      if (tipoGasto === 'PROYECTO' && !selectedProyectoId && !comentarioProyecto.trim() && !isSplit) {
-        showAlert(
-          'Validación',
-          role === 'admin'
-            ? 'Por favor selecciona el Proyecto activo o escribe el nombre en "Proyecto a agregar" para registrarlo.'
-            : 'Por favor selecciona el Proyecto activo o indica en "Proyecto a agregar" el nombre del proyecto para que Administración pueda darlo de alta.'
-        );
-        return;
+      // 8. Validar Destino (Cliente -> Sucursal -> Proyecto) y Categoría
+      if (tipoGasto === 'PROYECTO' && !isSplit) {
+        if (!selectedCliente || !selectedCliente.trim()) {
+          showAlert('Validación', 'Por favor selecciona primero el Cliente al que va dirigido el gasto.');
+          return;
+        }
+        if (role === 'admin') {
+          if (!sucursal || !sucursal.trim()) {
+            showAlert('Validación', 'Por favor selecciona la Sucursal del cliente.');
+            return;
+          }
+        } else {
+          if (!sucursal.trim() && !comentarioSucursal.trim()) {
+            showAlert('Validación', 'Por favor selecciona la Sucursal del cliente o indica una en "Sucursal a agregar".');
+            return;
+          }
+        }
+        if (!selectedProyectoId && !comentarioProyecto.trim()) {
+          showAlert(
+            'Validación',
+            role === 'admin'
+              ? 'Por favor selecciona el Proyecto activo o escribe el nombre en "Proyecto a agregar" para registrarlo.'
+              : 'Por favor selecciona un Proyecto disponible o indica el nombre en "Proyecto a agregar" para sugerirlo a Administración.'
+          );
+          return;
+        }
       }
 
       if (tipoGasto === 'PROYECTO' && !bloqueProyecto && (!selectedCategoria || !selectedSubcategoria)) {
@@ -1797,12 +1960,22 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         }
       }
 
-      if (tipoGasto === 'PROYECTO' && !selectedProyectoId && !comentarioProyecto.trim() && !isHistoricoSinProyecto) {
-        showAlert(
-          'Validación',
-          'Por favor selecciona un proyecto activo, escribe uno en "Proyecto a agregar", o marca el gasto como Operativo.'
-        );
-        return;
+      if (tipoGasto === 'PROYECTO' && !isHistoricoSinProyecto) {
+        if (!selectedCliente || !selectedCliente.trim()) {
+          showAlert('Validación', 'Por favor selecciona el Cliente relacionado al proyecto.');
+          return;
+        }
+        if (role === 'admin' ? !sucursal.trim() : (!sucursal.trim() && !comentarioSucursal.trim())) {
+          showAlert('Validación', 'Por favor selecciona la Sucursal del cliente.');
+          return;
+        }
+        if (!selectedProyectoId && !comentarioProyecto.trim()) {
+          showAlert(
+            'Validación',
+            'Por favor selecciona un proyecto activo, escribe uno en "Proyecto a agregar", o marca el gasto como Operativo.'
+          );
+          return;
+        }
       }
 
       const esGasolinaEdit =
@@ -2136,7 +2309,14 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
     setIsHistoricoSinProyecto,
     hospedajeRecienteAviso,
     hospedajePreview,
+    proyectosDisponibles,
+    hasSucursalParaProyecto,
+    sucursalesDelCliente,
+    mostrarSugerenciaProyecto,
+    setMostrarSugerenciaProyecto,
     handleSelectTipoGasto,
+    handleSelectClienteProyecto,
+    handleSelectSucursalProyecto,
     handleSelectProyecto,
     handleSelectBloqueProyecto,
     handleSelectSubtipoTransporte,

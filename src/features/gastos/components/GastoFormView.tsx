@@ -96,7 +96,14 @@ export default function GastoFormView({ role, mode, gastoId }: GastoFormViewProp
     isHistoricoSinProyecto,
     hospedajeRecienteAviso,
     hospedajePreview,
+    proyectosDisponibles,
+    hasSucursalParaProyecto,
+    sucursalesDelCliente,
+    mostrarSugerenciaProyecto,
+    setMostrarSugerenciaProyecto,
     handleSelectTipoGasto,
+    handleSelectClienteProyecto,
+    handleSelectSucursalProyecto,
     handleSelectProyecto,
     handleSelectBloqueProyecto,
     handleSelectSubtipoTransporte,
@@ -388,372 +395,489 @@ export default function GastoFormView({ role, mode, gastoId }: GastoFormViewProp
                 </TouchableOpacity>
               </View>
 
-              {/* Selector de Proyecto Activo */}
+              {/* Flujo guiado para Proyecto: 1) Cliente -> 2) Sucursal -> 3) Proyecto disponible o sugerencia */}
               {tipoGasto === 'PROYECTO' && (
-                <View style={{ marginTop: Spacing.two, zIndex: 1200 }}>
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 8,
-                      backgroundColor: themeColors.primary + '15',
-                      paddingVertical: 8,
-                      paddingHorizontal: 12,
-                      borderRadius: BorderRadius.medium,
-                      borderWidth: 1,
-                      borderColor: themeColors.primary + '30',
-                      marginBottom: Spacing.one,
-                    }}
-                  >
-                    <Ionicons name="information-circle-outline" size={18} color={themeColors.primary} />
-                    <Text style={{ fontSize: 12, color: themeColors.text, fontWeight: '500', flex: 1 }}>
-                      Si no se encuentra tu proyecto en la lista, déjalo en blanco e indícalo abajo
+                <View style={{ marginTop: Spacing.two, gap: Spacing.two, zIndex: 1200 }}>
+                  {/* 1.1 Cliente al que va dirigido */}
+                  <View style={[styles.customDropdownContainer, { zIndex: 1300 }]}>
+                    <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>
+                      1. Cliente al que va dirigido *
                     </Text>
-                  </View>
-
-                  <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>
-                    Proyecto Activo
-                  </Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.dropdownTrigger,
-                      {
-                        backgroundColor: themeColors.background,
-                        borderColor: selectedProyectoObj ? themeColors.primary : themeColors.border,
-                      },
-                    ]}
-                    onPress={() => {
-                      Keyboard.dismiss();
-                      setShowProyectoDropdown(!showProyectoDropdown);
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                      <Ionicons
-                        name="folder-open"
-                        size={18}
-                        color={selectedProyectoObj ? themeColors.primary : themeColors.textSecondary}
-                      />
-                      <Text
-                        numberOfLines={1}
-                        style={{
-                          flex: 1,
-                          fontSize: 14,
-                          fontWeight: selectedProyectoObj ? '700' : '400',
-                          color: selectedProyectoObj ? themeColors.text : themeColors.textSecondary,
-                        }}
-                      >
-                        {selectedProyectoObj
-                          ? selectedProyectoObj.nombre
-                          : 'Seleccionar proyecto (o dejar en blanco)...'}
-                      </Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      {!!selectedProyectoObj && (
-                        <TouchableOpacity
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            handleSelectProyecto(null);
-                          }}
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        >
-                          <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
-                        </TouchableOpacity>
-                      )}
-                      <Ionicons name={showProyectoDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-                    </View>
-                  </TouchableOpacity>
-
-                  {selectedProyectoObj && (
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        flexWrap: 'wrap',
-                        gap: 8,
-                        marginTop: 8,
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        borderRadius: BorderRadius.small,
-                        backgroundColor: themeColors.primary + '10',
+                    <TouchableOpacity
+                      style={[
+                        styles.dropdownTrigger,
+                        {
+                          backgroundColor: themeColors.background,
+                          borderColor: selectedCliente ? themeColors.primary : themeColors.border,
+                        },
+                      ]}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setShowSucursalDropdown(false);
+                        setShowProyectoDropdown(false);
+                        setShowCliDropdown(!showCliDropdown);
                       }}
                     >
-                      {!!(selectedProyectoObj.cliente_nombre || selectedCliente) && (
-                        <Text style={{ fontSize: 12, color: themeColors.text, fontWeight: '600' }}>
-                          👤 Cliente: {selectedProyectoObj.cliente_nombre || selectedCliente}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                        <Ionicons
+                          name="person-outline"
+                          size={18}
+                          color={selectedCliente ? themeColors.primary : themeColors.textSecondary}
+                        />
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            flex: 1,
+                            fontSize: 14,
+                            fontWeight: selectedCliente ? '700' : '400',
+                            color: selectedCliente ? themeColors.text : themeColors.textSecondary,
+                          }}
+                        >
+                          {selectedCliente || 'Selecciona primero el cliente...'}
                         </Text>
+                      </View>
+                      <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                    </TouchableOpacity>
+
+                    {showCliDropdown && (
+                      <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1350 }}>
+                        <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                          <CustomInput
+                            placeholder="Buscar cliente..."
+                            value={clienteSearch}
+                            onChangeText={setClienteSearch}
+                            iconName="search-outline"
+                            style={{ margin: Spacing.one, height: 40 }}
+                          />
+                          <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                            {(role === 'admin' || mode === 'edit') &&
+                              clienteSearch.trim().length > 0 &&
+                              !clientes.some((c) => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
+                                <TouchableOpacity
+                                  style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
+                                  onPress={() => handleAddNewCliente(clienteSearch)}
+                                >
+                                  <Ionicons name="add-circle-outline" size={20} color={themeColors.accent} />
+                                  <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>
+                                    {`➕ Agregar "${clienteSearch.trim()}"`}
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            {clientes
+                              .filter((cli) => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
+                              .map((cli) => (
+                                <TouchableOpacity
+                                  key={cli.id}
+                                  style={[
+                                    styles.dropdownItem,
+                                    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+                                  ]}
+                                  onPress={() => handleSelectClienteProyecto(cli)}
+                                >
+                                  <Text style={{ color: themeColors.text, fontWeight: '600', fontSize: 14, flex: 1 }}>
+                                    {cli.nombre}
+                                  </Text>
+                                  {selectedCliente.trim().toLowerCase() === cli.nombre.trim().toLowerCase() && (
+                                    <Ionicons name="checkmark-circle" size={18} color={themeColors.primary} />
+                                  )}
+                                </TouchableOpacity>
+                              ))}
+                          </ScrollView>
+                        </View>
+                      </Pressable>
+                    )}
+                  </View>
+
+                  {/* 1.2 Sucursal del Cliente */}
+                  {!!selectedCliente && (
+                    <View style={[styles.customDropdownContainer, { zIndex: 1200 }]}>
+                      <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>
+                        2. Sucursal / Ubicación *
+                      </Text>
+                      <TouchableOpacity
+                        style={[
+                          styles.dropdownTrigger,
+                          {
+                            backgroundColor: themeColors.background,
+                            borderColor: sucursal ? themeColors.primary : themeColors.border,
+                          },
+                        ]}
+                        onPress={() => {
+                          Keyboard.dismiss();
+                          setShowCliDropdown(false);
+                          setShowProyectoDropdown(false);
+                          setShowSucursalDropdown(!showSucursalDropdown);
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                          <Ionicons
+                            name="location-outline"
+                            size={18}
+                            color={sucursal ? themeColors.primary : themeColors.textSecondary}
+                          />
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              flex: 1,
+                              fontSize: 14,
+                              fontWeight: sucursal ? '700' : '400',
+                              color: sucursal ? themeColors.text : themeColors.textSecondary,
+                            }}
+                          >
+                            {sucursal || 'Selecciona una sucursal...'}
+                          </Text>
+                        </View>
+                        <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                      </TouchableOpacity>
+
+                      {showSucursalDropdown && (
+                        <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1250 }}>
+                          <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
+                            <CustomInput
+                              placeholder="Buscar sucursal..."
+                              value={sucursalSearch}
+                              onChangeText={setSucursalSearch}
+                              iconName="search-outline"
+                              style={{ margin: Spacing.one, height: 40 }}
+                            />
+                            <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 180, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                              {(() => {
+                                const currentCliente = clientes.find(
+                                  (c) => c.nombre?.trim().toLowerCase() === selectedCliente?.trim().toLowerCase() || c.id === selectedCliente
+                                );
+                                const filteredSucs = sucursalesDelCliente.filter((s) =>
+                                  s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())
+                                );
+                                return (
+                                  <>
+                                    {role === 'empleado' && (
+                                      <TouchableOpacity
+                                        style={[
+                                          styles.dropdownItem,
+                                          { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, borderBottomWidth: 1, borderBottomColor: themeColors.border },
+                                        ]}
+                                        onPress={() => {
+                                          handleSelectSucursalProyecto('');
+                                        }}
+                                      >
+                                        <Ionicons name="remove-circle-outline" size={18} color={themeColors.textSecondary} />
+                                        <Text style={{ color: themeColors.textSecondary, fontStyle: 'italic', fontSize: 13 }}>
+                                          No aparece la sucursal (escribir abajo)
+                                        </Text>
+                                      </TouchableOpacity>
+                                    )}
+                                    {(role === 'admin' || mode === 'edit') &&
+                                      sucursalSearch.trim().length > 0 &&
+                                      currentCliente &&
+                                      !filteredSucs.some((s) => s.nombre.trim().toLowerCase() === sucursalSearch.trim().toLowerCase()) && (
+                                        <TouchableOpacity
+                                          style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15' }]}
+                                          onPress={() => handleAddNewSucursal(sucursalSearch)}
+                                        >
+                                          <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
+                                            {`➕ Agregar "${sucursalSearch.trim().toUpperCase()}"`}
+                                          </Text>
+                                        </TouchableOpacity>
+                                      )}
+                                    {filteredSucs.map((suc) => (
+                                      <TouchableOpacity
+                                        key={suc.id}
+                                        style={[
+                                          styles.dropdownItem,
+                                          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+                                        ]}
+                                        onPress={() => handleSelectSucursalProyecto(suc.nombre)}
+                                      >
+                                        <Text style={{ color: themeColors.text, fontSize: 14, fontWeight: '500', flex: 1 }}>
+                                          {suc.nombre}
+                                        </Text>
+                                        {sucursal.trim().toLowerCase() === suc.nombre.trim().toLowerCase() && (
+                                          <Ionicons name="checkmark-circle" size={18} color={themeColors.primary} />
+                                        )}
+                                      </TouchableOpacity>
+                                    ))}
+                                    {filteredSucs.length === 0 && (
+                                      <View style={{ padding: Spacing.two, alignItems: 'center' }}>
+                                        <Text style={{ color: themeColors.textSecondary, fontSize: 12, textAlign: 'center' }}>
+                                          No hay sucursales registradas para este cliente.
+                                        </Text>
+                                      </View>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </ScrollView>
+                          </View>
+                        </Pressable>
                       )}
-                      {!!(selectedProyectoObj.sucursal_nombre || sucursal) && (
-                        <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '600' }}>
-                          📍 Sucursal: {selectedProyectoObj.sucursal_nombre || sucursal}
-                        </Text>
+
+                      {role === 'empleado' && !sucursal && (
+                        <View style={{ marginTop: Spacing.one }}>
+                          <CustomInput
+                            label="Sucursal a agregar (si no aparece en la lista)"
+                            placeholder="Escribe el nombre de la sucursal..."
+                            value={comentarioSucursal}
+                            onChangeText={(txt) => {
+                              setComentarioSucursal(txt);
+                              if (selectedProyectoId) {
+                                handleSelectProyecto(null);
+                              }
+                            }}
+                            iconName="business-outline"
+                          />
+                        </View>
                       )}
                     </View>
                   )}
 
-                  {showProyectoDropdown && (
-                    <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1300, marginTop: 4 }}>
-                      <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                        <CustomInput
-                          placeholder="Buscar proyecto por nombre, cliente o sucursal..."
-                          value={proyectoSearch}
-                          onChangeText={setProyectoSearch}
-                          iconName="search-outline"
-                          style={{ margin: Spacing.one, height: 40 }}
-                        />
-                        <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 220, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                          {/* Opción Dejar en Blanco (igual que Proveedor) */}
-                          <TouchableOpacity
-                            style={[
-                              styles.dropdownItem,
-                              {
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: Spacing.one,
-                                borderBottomWidth: 1,
-                                borderBottomColor: themeColors.border,
-                              },
-                            ]}
-                            onPress={() => handleSelectProyecto(null)}
-                          >
-                            <Ionicons name="remove-circle-outline" size={20} color={themeColors.textSecondary} />
-                            <Text style={{ color: themeColors.textSecondary, fontStyle: 'italic', fontSize: 13 }}>
-                              Dejar en blanco (No encuentro mi proyecto / Proyecto nuevo)
-                            </Text>
-                          </TouchableOpacity>
+                  {/* 1.3 Proyectos disponibles para ese Cliente + Sucursal (o sugerencia directa si no hay) */}
+                  {hasSucursalParaProyecto && (
+                    <View style={{ zIndex: 1100 }}>
+                      <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>
+                        3. Proyecto *
+                      </Text>
 
-                          {/* Atajo rápido si escribió un nombre que no existe en la lista */}
-                          {proyectoSearch.trim().length > 0 &&
-                            !proyectos.some((p) => (p.nombre || '').toLowerCase() === proyectoSearch.trim().toLowerCase()) && (
-                              <TouchableOpacity
-                                style={[
-                                  styles.dropdownItem,
-                                  {
-                                    backgroundColor: themeColors.primary + '15',
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    gap: Spacing.one,
-                                    borderBottomWidth: 1,
-                                    borderBottomColor: themeColors.border,
-                                  },
-                                ]}
-                                onPress={() => {
-                                  const textoBuscado = proyectoSearch.trim();
-                                  handleSelectProyecto(null);
-                                  setComentarioProyecto(textoBuscado);
-                                }}
-                              >
-                                <Ionicons name="add-circle-outline" size={20} color={themeColors.primary} />
-                                <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 13 }}>
-                                  {`➕ Sugerir "${proyectoSearch.trim()}" en Proyecto a agregar`}
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-
-                          {proyectos
-                            .filter((p) => {
-                              const q = proyectoSearch.trim().toLowerCase();
-                              if (!q) return true;
-                              return (
-                                (p.nombre || '').toLowerCase().includes(q) ||
-                                (p.cliente_nombre || '').toLowerCase().includes(q) ||
-                                (p.sucursal_nombre || '').toLowerCase().includes(q)
-                              );
-                            })
-                            .map((proj, idx, arr) => (
-                              <TouchableOpacity
-                                key={proj.id}
-                                style={[
-                                  styles.dropdownItem,
-                                  idx === arr.length - 1 && { borderBottomWidth: 0 },
-                                  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-                                ]}
-                                onPress={() => handleSelectProyecto(proj)}
-                              >
-                                <View style={{ flex: 1 }}>
-                                  <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 14 }}>
-                                    {proj.nombre}
-                                  </Text>
-                                  <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2 }}>
-                                    {[proj.cliente_nombre, proj.sucursal_nombre].filter(Boolean).join(' • ') || 'Proyecto Activo'}
-                                  </Text>
-                                </View>
-                                {String(selectedProyectoId) === String(proj.id) && (
-                                  <Ionicons name="checkmark-circle" size={20} color={themeColors.primary} />
-                                )}
-                              </TouchableOpacity>
-                            ))}
-
-                          {proyectos.length === 0 && (
-                            <View style={{ padding: Spacing.two, alignItems: 'center' }}>
-                              <Text style={{ color: themeColors.textSecondary, fontSize: 12, textAlign: 'center' }}>
-                                No se encontraron proyectos activos. Puedes dejarlo en blanco e indicarlo abajo.
-                              </Text>
-                            </View>
-                          )}
-                        </ScrollView>
-                      </View>
-                    </Pressable>
-                  )}
-
-                  {/* Campo obligatorio "Proyecto a agregar *" cuando se deja en blanco (misma lógica que Proveedor) */}
-                  {!selectedProyectoId && (
-                    <View style={{ marginTop: Spacing.two, gap: Spacing.two }}>
-                      <View>
-                        <CustomInput
-                          label="Proyecto a agregar *"
-                          placeholder="Escribe el nombre del proyecto u obra que no encontraste..."
-                          value={comentarioProyecto}
-                          onChangeText={setComentarioProyecto}
-                          iconName="create-outline"
-                        />
-                        <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontStyle: 'italic', marginTop: -8, paddingLeft: 4 }}>
-                          {role === 'admin'
-                            ? 'Indica el nombre del proyecto para darlo de alta en el catálogo y vincular este gasto.'
-                            : 'Indica el nombre del proyecto para que el administrador lo dé de alta y pueda aprobar tu gasto.'}
-                        </Text>
-                      </View>
-
-                      <View style={styles.customDropdownContainer}>
-                        <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Cliente Relacionado *</Text>
-                        <TouchableOpacity
-                          style={[styles.dropdownTrigger, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
-                          onPress={() => {
-                            Keyboard.dismiss();
-                            setShowCliDropdown(!showCliDropdown);
-                          }}
-                        >
-                          <Text style={{ color: selectedCliente ? themeColors.text : themeColors.textSecondary }}>
-                            {selectedCliente || 'Selecciona un cliente'}
-                          </Text>
-                          <Ionicons name={showCliDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
-                        </TouchableOpacity>
-                        {showCliDropdown && (
-                          <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
-                            <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                              <CustomInput
-                                placeholder="Buscar cliente..."
-                                value={clienteSearch}
-                                onChangeText={setClienteSearch}
-                                iconName="search-outline"
-                                style={{ margin: Spacing.one, height: 40 }}
-                              />
-                              <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                                {(role === 'admin' || mode === 'edit') &&
-                                  clienteSearch.trim().length > 0 &&
-                                  !clientes.some((c) => c.nombre && c.nombre.toLowerCase() === clienteSearch.trim().toLowerCase()) && (
-                                    <TouchableOpacity
-                                      style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15', flexDirection: 'row', alignItems: 'center', gap: Spacing.one }]}
-                                      onPress={() => handleAddNewCliente(clienteSearch)}
-                                    >
-                                      <Ionicons name="add-circle-outline" size={20} color={themeColors.accent} />
-                                      <Text style={{ color: themeColors.accent, fontWeight: '600', fontSize: 13 }}>
-                                        {`➕ Agregar "${clienteSearch.trim()}"`}
-                                      </Text>
-                                    </TouchableOpacity>
-                                  )}
-                                {clientes
-                                  .filter((cli) => cli.nombre && cli.nombre.toLowerCase().includes(clienteSearch.toLowerCase()))
-                                  .map((cli) => (
-                                    <TouchableOpacity
-                                      key={cli.id}
-                                      style={styles.dropdownItem}
-                                      onPress={() => {
-                                        setSelectedCliente(cli.nombre);
-                                        const cliSucs = sucursalesCliente.filter((s) => s.cliente_id === cli.id);
-                                        setSucursal(cliSucs.length === 1 ? cliSucs[0].nombre : '');
-                                        setClienteSearch('');
-                                        setShowCliDropdown(false);
-                                      }}
-                                    >
-                                      <Text style={{ color: themeColors.text, fontWeight: '500', fontSize: 14 }}>{cli.nombre}</Text>
-                                    </TouchableOpacity>
-                                  ))}
-                              </ScrollView>
-                            </View>
-                          </Pressable>
-                        )}
-                      </View>
-
-                      {!!selectedCliente && (
-                        <View style={styles.customDropdownContainer}>
-                          <Text style={[styles.dropdownLabel, { color: themeColors.text }]}>Sucursal del Cliente *</Text>
-                          <TouchableOpacity
-                            style={[styles.dropdownTrigger, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}
-                            onPress={() => {
-                              Keyboard.dismiss();
-                              setShowSucursalDropdown(!showSucursalDropdown);
+                      {proyectosDisponibles.length > 0 ? (
+                        <>
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 8,
+                              backgroundColor: themeColors.primary + '15',
+                              paddingVertical: 8,
+                              paddingHorizontal: 12,
+                              borderRadius: BorderRadius.medium,
+                              borderWidth: 1,
+                              borderColor: themeColors.primary + '30',
+                              marginBottom: Spacing.one,
                             }}
                           >
-                            <Text style={{ color: sucursal ? themeColors.text : themeColors.textSecondary }}>
-                              {sucursal || 'Selecciona una sucursal'}
+                            <Ionicons name="checkmark-circle-outline" size={18} color={themeColors.primary} />
+                            <Text style={{ fontSize: 12, color: themeColors.text, fontWeight: '600', flex: 1 }}>
+                              {proyectosDisponibles.length === 1
+                                ? `Hay 1 proyecto activo para ${selectedCliente}${sucursal ? ` • ${sucursal}` : ''}.`
+                                : `Hay ${proyectosDisponibles.length} proyectos activos para ${selectedCliente}${sucursal ? ` • ${sucursal}` : ''}.`}
                             </Text>
-                            <Ionicons name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                          </View>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.dropdownTrigger,
+                              {
+                                backgroundColor: themeColors.background,
+                                borderColor: selectedProyectoObj ? themeColors.primary : themeColors.border,
+                              },
+                            ]}
+                            onPress={() => {
+                              Keyboard.dismiss();
+                              setShowCliDropdown(false);
+                              setShowSucursalDropdown(false);
+                              setShowProyectoDropdown(!showProyectoDropdown);
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                              <Ionicons
+                                name="folder-open"
+                                size={18}
+                                color={selectedProyectoObj ? themeColors.primary : themeColors.textSecondary}
+                              />
+                              <Text
+                                numberOfLines={1}
+                                style={{
+                                  flex: 1,
+                                  fontSize: 14,
+                                  fontWeight: selectedProyectoObj ? '700' : '400',
+                                  color: selectedProyectoObj ? themeColors.text : themeColors.textSecondary,
+                                }}
+                              >
+                                {selectedProyectoObj
+                                  ? selectedProyectoObj.nombre
+                                  : mostrarSugerenciaProyecto
+                                  ? 'Sugerir proyecto nuevo (escrito abajo)'
+                                  : 'Seleccionar proyecto disponible...'}
+                              </Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              {!!selectedProyectoObj && (
+                                <TouchableOpacity
+                                  onPress={(e) => {
+                                    e.stopPropagation();
+                                    handleSelectProyecto(null, false);
+                                  }}
+                                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                >
+                                  <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
+                                </TouchableOpacity>
+                              )}
+                              <Ionicons name={showProyectoDropdown ? 'chevron-up' : 'chevron-down'} size={18} color={themeColors.text} />
+                            </View>
                           </TouchableOpacity>
-                          {showSucursalDropdown && (
-                            <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1000 }}>
+
+                          {selectedProyectoObj && (
+                            <View
+                              style={{
+                                flexDirection: 'row',
+                                flexWrap: 'wrap',
+                                gap: 8,
+                                marginTop: 8,
+                                paddingHorizontal: 10,
+                                paddingVertical: 6,
+                                borderRadius: BorderRadius.small,
+                                backgroundColor: themeColors.primary + '10',
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, color: themeColors.text, fontWeight: '600' }}>
+                                👤 Cliente: {selectedProyectoObj.cliente_nombre || selectedCliente}
+                              </Text>
+                              {!!(selectedProyectoObj.sucursal_nombre || sucursal) && (
+                                <Text style={{ fontSize: 12, color: themeColors.textSecondary, fontWeight: '600' }}>
+                                  📍 Sucursal: {selectedProyectoObj.sucursal_nombre || sucursal}
+                                </Text>
+                              )}
+                            </View>
+                          )}
+
+                          {showProyectoDropdown && (
+                            <Pressable onPress={(e) => e.stopPropagation()} style={{ width: '100%', zIndex: 1150, marginTop: 4 }}>
                               <View style={[styles.dropdownList, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                                <CustomInput
-                                  placeholder="Buscar sucursal..."
-                                  value={sucursalSearch}
-                                  onChangeText={setSucursalSearch}
-                                  iconName="search-outline"
-                                  style={{ margin: Spacing.one, height: 40 }}
-                                />
-                                <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 180, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
-                                  {(() => {
-                                    const currentCliente = clientes.find(
-                                      (c) => c.nombre?.trim().toLowerCase() === selectedCliente?.trim().toLowerCase() || c.id === selectedCliente
-                                    );
-                                    const filteredSucs = currentCliente
-                                      ? sucursalesCliente.filter(
-                                          (s) => s.cliente_id === currentCliente.id && s.nombre.toLowerCase().includes(sucursalSearch.toLowerCase())
-                                        )
-                                      : [];
-                                    return (
-                                      <>
-                                        {(role === 'admin' || mode === 'edit') &&
-                                          sucursalSearch.trim().length > 0 &&
-                                          currentCliente &&
-                                          !filteredSucs.some((s) => s.nombre.trim().toLowerCase() === sucursalSearch.trim().toLowerCase()) && (
-                                            <TouchableOpacity
-                                              style={[styles.dropdownItem, { backgroundColor: themeColors.accent + '15' }]}
-                                              onPress={() => handleAddNewSucursal(sucursalSearch)}
-                                            >
-                                              <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 13 }}>
-                                                {`➕ Agregar "${sucursalSearch.trim().toUpperCase()}"`}
-                                              </Text>
-                                            </TouchableOpacity>
-                                          )}
-                                        {filteredSucs.map((suc) => (
-                                          <TouchableOpacity
-                                            key={suc.id}
-                                            style={styles.dropdownItem}
-                                            onPress={() => {
-                                              setSucursal(suc.nombre);
-                                              setSucursalSearch('');
-                                              setShowSucursalDropdown(false);
-                                            }}
-                                          >
-                                            <Text style={{ color: themeColors.text, fontSize: 14 }}>{suc.nombre}</Text>
-                                          </TouchableOpacity>
-                                        ))}
-                                      </>
-                                    );
-                                  })()}
+                                {proyectosDisponibles.length > 4 && (
+                                  <CustomInput
+                                    placeholder="Filtrar proyecto..."
+                                    value={proyectoSearch}
+                                    onChangeText={setProyectoSearch}
+                                    iconName="search-outline"
+                                    style={{ margin: Spacing.one, height: 40 }}
+                                  />
+                                )}
+                                <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 220, paddingHorizontal: Spacing.half }} keyboardShouldPersistTaps="handled">
+                                  {proyectosDisponibles
+                                    .filter((p) => {
+                                      const q = proyectoSearch.trim().toLowerCase();
+                                      if (!q) return true;
+                                      return (p.nombre || '').toLowerCase().includes(q);
+                                    })
+                                    .map((proj) => (
+                                      <TouchableOpacity
+                                        key={proj.id}
+                                        style={[
+                                          styles.dropdownItem,
+                                          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+                                        ]}
+                                        onPress={() => handleSelectProyecto(proj)}
+                                      >
+                                        <View style={{ flex: 1 }}>
+                                          <Text style={{ color: themeColors.text, fontWeight: '700', fontSize: 14 }}>
+                                            {proj.nombre}
+                                          </Text>
+                                          <Text style={{ color: themeColors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                                            {[proj.cliente_nombre, proj.sucursal_nombre].filter(Boolean).join(' • ') || 'Proyecto Activo'}
+                                          </Text>
+                                        </View>
+                                        {String(selectedProyectoId) === String(proj.id) && (
+                                          <Ionicons name="checkmark-circle" size={20} color={themeColors.primary} />
+                                        )}
+                                      </TouchableOpacity>
+                                    ))}
+
+                                  {proyectoSearch.trim().length > 0 &&
+                                    !proyectosDisponibles.some((p) => (p.nombre || '').toLowerCase() === proyectoSearch.trim().toLowerCase()) && (
+                                      <TouchableOpacity
+                                        style={[
+                                          styles.dropdownItem,
+                                          {
+                                            backgroundColor: themeColors.primary + '15',
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            gap: Spacing.one,
+                                          },
+                                        ]}
+                                        onPress={() => {
+                                          const textoBuscado = proyectoSearch.trim();
+                                          handleSelectProyecto(null, true);
+                                          setComentarioProyecto(textoBuscado);
+                                        }}
+                                      >
+                                        <Ionicons name="add-circle-outline" size={20} color={themeColors.primary} />
+                                        <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 13 }}>
+                                          {`➕ Sugerir "${proyectoSearch.trim()}" en Proyecto a agregar`}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    )}
+
+                                  {/* Opción de sugerir otro proyecto si ninguno de los de esa sucursal es el suyo */}
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.dropdownItem,
+                                      {
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        gap: Spacing.one,
+                                        borderBottomWidth: 0,
+                                      },
+                                    ]}
+                                    onPress={() => handleSelectProyecto(null, true)}
+                                  >
+                                    <Ionicons name="create-outline" size={20} color={themeColors.warning} />
+                                    <Text style={{ color: themeColors.warning, fontWeight: '700', fontSize: 13 }}>
+                                      No es ninguno de estos (Sugerir nuevo proyecto)
+                                    </Text>
+                                  </TouchableOpacity>
                                 </ScrollView>
                               </View>
                             </Pressable>
                           )}
-                          {role === 'empleado' && !sucursal && (
-                            <View style={{ marginTop: Spacing.one }}>
+
+                          {!selectedProyectoId && (mostrarSugerenciaProyecto || comentarioProyecto.trim().length > 0) && (
+                            <View style={{ marginTop: Spacing.two }}>
                               <CustomInput
-                                label="Sucursal a agregar (si no aparece en la lista)"
-                                placeholder="Escribe el nombre de la sucursal..."
-                                value={comentarioSucursal}
-                                onChangeText={setComentarioSucursal}
-                                iconName="business-outline"
+                                label="Proyecto a agregar *"
+                                placeholder="Escribe el nombre del proyecto u obra nuevo..."
+                                value={comentarioProyecto}
+                                onChangeText={setComentarioProyecto}
+                                iconName="create-outline"
                               />
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontStyle: 'italic', marginTop: -8, paddingLeft: 4 }}>
+                                {role === 'admin'
+                                  ? 'Indica el nombre del proyecto para darlo de alta en el catálogo y vincular este gasto.'
+                                  : 'Indica el nombre del proyecto para que el administrador lo dé de alta y pueda aprobar tu gasto.'}
+                              </Text>
                             </View>
                           )}
+                        </>
+                      ) : (
+                        <View style={{ gap: Spacing.one }}>
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 8,
+                              backgroundColor: themeColors.warning + '15',
+                              paddingVertical: 10,
+                              paddingHorizontal: 12,
+                              borderRadius: BorderRadius.medium,
+                              borderWidth: 1,
+                              borderColor: themeColors.warning + '40',
+                            }}
+                          >
+                            <Ionicons name="alert-circle-outline" size={20} color={themeColors.warning} />
+                            <Text style={{ fontSize: 12, color: themeColors.text, fontWeight: '600', flex: 1 }}>
+                              No hay proyectos activos para {selectedCliente} ({sucursal || comentarioSucursal}). Escribe un nombre abajo para sugerirlo a Administración.
+                            </Text>
+                          </View>
+
+                          <CustomInput
+                            label="Proyecto a agregar *"
+                            placeholder="Ej. Instalación cámaras sucursal centro..."
+                            value={comentarioProyecto}
+                            onChangeText={setComentarioProyecto}
+                            iconName="create-outline"
+                          />
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 11, fontStyle: 'italic', marginTop: -8, paddingLeft: 4 }}>
+                            {role === 'admin'
+                              ? 'Administración podrá crear y asignar este proyecto con un clic al revisar el gasto.'
+                              : 'Se enviará esta sugerencia a Administración para dar de alta el proyecto con este cliente y sucursal.'}
+                          </Text>
                         </View>
                       )}
                     </View>
