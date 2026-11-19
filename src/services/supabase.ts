@@ -4,6 +4,7 @@ import { getApiHeaders, getApiUrl, invalidateHeaderCache } from './apiHelper';
 import { apiClient } from './apiClient';
 import { Platform } from 'react-native';
 import { COMPANY_BASE_TIMEZONE, detectUserTimezone, embedTimezoneInAddress } from '@/utils/timezoneUtils';
+import { isTokenExpired } from '@/utils/jwtUtils';
 
 // Permitir Storage en dispositivos nativos (iOS/Android) o en el navegador (Web)
 const isBrowser = Platform.OS !== 'web' || (typeof window !== 'undefined' && typeof window.document !== 'undefined');
@@ -399,8 +400,17 @@ export interface ProveedorItem {
   created_at?: string;
 }
 
+export class SessionExpiredError extends Error {
+  constructor(message = 'Tu sesión expiró. Por seguridad, inicia sesión nuevamente.') {
+    super(message);
+    this.name = 'SessionExpiredError';
+  }
+}
+
+let refreshInFlight: Promise<{ usuario: Usuario; token: string } | null> | null = null;
+
 /**
- * Servicio de AutenticaciÃ³n
+ * Servicio de Autenticación
  */
 export const AuthService = {
   async login(email: string, password: string): Promise<Usuario> {
@@ -426,7 +436,7 @@ export const AuthService = {
           if (errData && errData.message) errorMsg = errData.message;
         } catch (_) {
           const text = await response.text().catch(() => '');
-          if (text) errorMsg = `Servidor respondiÃ³ con cÃ³digo ${response.status}`;
+          if (text) errorMsg = `Servidor respondió con código ${response.status}`;
         }
         throw new Error(errorMsg);
       }
@@ -442,7 +452,7 @@ export const AuthService = {
 
       return data.usuario as Usuario;
     } catch (error: any) {
-      throw new Error(`Error de conexiÃ³n: ${error.message}`);
+      throw new Error(`Error de conexión: ${error.message}`);
     }
   },
 
@@ -456,11 +466,27 @@ export const AuthService = {
     }
   },
 
+  async hasStoredUser(): Promise<boolean> {
+    if (!isBrowser) return false;
+    const company = CompanyService.getActiveCompany();
+    const userStr = await AsyncStorage.getItem(`logged_user_${company}`);
+    return Boolean(userStr);
+  },
+
   async getCurrentUser(): Promise<Usuario | null> {
     if (isBrowser) {
       const company = CompanyService.getActiveCompany();
-      const userStr = await AsyncStorage.getItem(`logged_user_${company}`);
+      const [userStr, token] = await Promise.all([
+        AsyncStorage.getItem(`logged_user_${company}`),
+        AsyncStorage.getItem(`jwt_token_${company}`)
+      ]);
       if (!userStr) return null;
+
+      if (!token || isTokenExpired(token)) {
+        await this.logout();
+        return null;
+      }
+
       try {
         return JSON.parse(userStr) as Usuario;
       } catch {
@@ -476,6 +502,67 @@ export const AuthService = {
       return await AsyncStorage.getItem(`jwt_token_${company}`);
     }
     return null;
+  },
+
+  async refreshToken(): Promise<{ usuario: Usuario; token: string } | null> {
+    if (!isBrowser) return null;
+    if (refreshInFlight) return refreshInFlight;
+
+    refreshInFlight = (async () => {
+      const company = CompanyService.getActiveCompany();
+      const env = EnvService.getActiveEnv();
+      const apiUrl = getApiUrl();
+      const currentToken = await AsyncStorage.getItem(`jwt_token_${company}`);
+
+      if (!currentToken || isTokenExpired(currentToken)) {
+        throw new SessionExpiredError();
+      }
+
+      try {
+        const response = await fetch(`${apiUrl}/api/auth/refresh`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentToken}`,
+            'x-company': company,
+            'x-env': env
+          }
+        });
+
+        if (response.status === 401) {
+          throw new SessionExpiredError();
+        }
+
+        if (!response.ok) {
+          logger.warn(`[AuthService] No se pudo renovar el token (${response.status})`);
+          return null;
+        }
+
+        const data = await response.json();
+        if (!data?.token || !data?.usuario) {
+          return null;
+        }
+
+        await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(data.usuario));
+        await AsyncStorage.setItem(`jwt_token_${company}`, data.token);
+        invalidateHeaderCache();
+
+        return { usuario: data.usuario as Usuario, token: data.token as string };
+      } catch (error: any) {
+        if (error instanceof SessionExpiredError) {
+          throw error;
+        }
+        // Error de red/offline: conservamos la sesión mientras el token siga vigente localmente
+        logger.warn('[AuthService] Error de red al intentar renovar el token:', error?.message);
+        return null;
+      }
+    })();
+
+    try {
+      return await refreshInFlight;
+    } finally {
+      refreshInFlight = null;
+    }
   }
 };
 
