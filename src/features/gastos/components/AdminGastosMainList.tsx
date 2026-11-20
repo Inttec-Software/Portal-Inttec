@@ -79,6 +79,9 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
     handleSelectProyecto,
     handleCloseProyectoDetail,
     handleOpenAssignProyecto,
+    handleExportProyectoPDF,
+    handleExportProyectoXLSX,
+    isExportingProyecto,
     setSelectedGasto,
     setReviewModalVisible,
     handleToggleCompany,
@@ -642,6 +645,9 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
             setReviewModalVisible(true);
           }}
           onOpenAssignProyecto={handleOpenAssignProyecto}
+          onExportProyectoPDF={handleExportProyectoPDF}
+          onExportProyectoXLSX={handleExportProyectoXLSX}
+          isExportingProyecto={isExportingProyecto}
           headerComponent={selectedProyectoId ? undefined : renderScreenHeader()}
         />
       </View>

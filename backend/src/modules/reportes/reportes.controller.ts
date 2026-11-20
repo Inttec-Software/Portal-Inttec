@@ -3,6 +3,7 @@ import { getDbPool } from '../../config/database';
 import { KeyedMutex } from '../../utils/mutex';
 import {
   GASTO_RELATIONS_SELECT_SQL,
+  OPERATIVO_GASTO_SQL,
   formatGasto,
   sanitizeGastoWritePayload,
   syncHospedajeDias,
@@ -220,7 +221,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
 
       const baseWhereSql = baseConditions.length > 0 ? `WHERE ${baseConditions.join(' AND ')}` : '';
 
-      const OPERATIVO_SQL = `(COALESCE(g.tipo_gasto, '') = 'OPERATIVO' OR (g.tipo_gasto IS NULL AND g.proyecto_id IS NULL AND LOWER(COALESCE(g.tipo_servicio_proyecto, '')) = 'operativo'))`;
+      const OPERATIVO_SQL = OPERATIVO_GASTO_SQL;
 
       // 2. Condiciones específicas para la vista activa (pestaña, alcance de proyecto/operativo y facturación)
       const viewConditions = [...baseConditions];
@@ -720,6 +721,10 @@ export const getExportData = async (req: Request, res: Response) => {
       
       return res.json(mappedData);
     } else if (type === 'gastos') {
+      const scope = String(req.query.scope || 'ALL').trim().toUpperCase();
+      const proyectoId = String(req.query.proyecto_id || '').trim();
+      const includeRejected = req.query.includeRejected !== 'false' && req.query.includeRejected !== '0';
+
       let query = `
         SELECT g.*,
           ${GASTO_RELATIONS_SELECT_SQL}
@@ -728,17 +733,30 @@ export const getExportData = async (req: Request, res: Response) => {
       const params: any[] = [];
       const conditions: string[] = [];
       if (startDate) {
-        params.push(`${startDate}T00:00:00`);
-        conditions.push(`g.created_at >= $${params.length}`);
+        params.push(startDate);
+        conditions.push(`COALESCE(g.fecha_comprobante::text, substring(g.created_at::text, 1, 10)) >= $${params.length}`);
       }
       if (endDate) {
-        params.push(`${endDate}T23:59:59.999Z`);
-        conditions.push(`g.created_at <= $${params.length}`);
+        params.push(endDate);
+        conditions.push(`COALESCE(g.fecha_comprobante::text, substring(g.created_at::text, 1, 10)) <= $${params.length}`);
+      }
+      if (!includeRejected) {
+        conditions.push(`COALESCE(g.status, '') != 'REJECTED'`);
+      }
+      if (scope === 'PROYECTO' && proyectoId) {
+        params.push(proyectoId);
+        conditions.push(`g.proyecto_id = $${params.length}`);
+      } else if (scope === 'PROYECTOS') {
+        conditions.push(`(g.proyecto_id IS NOT NULL OR COALESCE(g.tipo_gasto, '') = 'PROYECTO')`);
+      } else if (scope === 'OPERATIVOS') {
+        conditions.push(OPERATIVO_GASTO_SQL);
+      } else if (scope === 'HISTORICO') {
+        conditions.push(`g.proyecto_id IS NULL AND NOT ${OPERATIVO_GASTO_SQL}`);
       }
       if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');
       }
-      query += ' ORDER BY g.created_at DESC';
+      query += ' ORDER BY COALESCE(g.fecha_comprobante::text, substring(g.created_at::text, 1, 10)) DESC, g.created_at DESC';
       
       const { rows } = await pool.query(query, params);
       return res.json((rows || []).map(formatGasto));

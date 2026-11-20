@@ -17,6 +17,7 @@ import {
   Pressable,
   Keyboard,
   KeyboardAvoidingView,
+  Switch,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,6 +27,12 @@ import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Gasto, GastoHelper, GastoService, AuthService, Usuario, Asistencia, AsistenciaService, Venta, recalculateVentaTotals, Vehiculo, RegistroGasolina, VehiculoService, ProveedorItem, sortUsuariosByRoleAndName, supabase, inttecClient, daravisaClient } from '@/services/supabase';
 import { CatalogService } from '@/services/catalogService';
 import { ReportGenerator } from '@/utils/reportGenerator';
+import {
+  ProyectoDetailResponse,
+  ProyectoResumen,
+  computeProyectoResumenFromGastos,
+} from '@/features/proyectos/types';
+import { proyectosApi } from '@/features/proyectos/api/proyectosApi';
 import ExpenseCard from '@/components/ExpenseCard';
 import { ReportesTableSkeleton, ReportesCardsListSkeleton } from '@/components/skeleton';
 import CustomButton from '@/components/CustomButton';
@@ -107,6 +114,19 @@ export default function ReportesScreen() {
   // Modales de Acceso Rápido (Botones Extra)
   const [personalModalVisible, setPersonalModalVisible] = useState(false);
   const [reportsModalVisible, setReportsModalVisible] = useState(false);
+  const [proyectosList, setProyectosList] = useState<ProyectoResumen[]>([]);
+  const [exportScope, setExportScope] = useState<'ALL' | 'PROYECTOS' | 'PROYECTO' | 'OPERATIVOS' | 'HISTORICO'>('ALL');
+  const [exportProyectoId, setExportProyectoId] = useState<string>('');
+  const [exportProyectoSearch, setExportProyectoSearch] = useState<string>('');
+  const [exportProyectoStatusFilter, setExportProyectoStatusFilter] = useState<'ALL' | 'ACTIVO' | 'CERRADO'>('ALL');
+  const [showExportProyectoDropdown, setShowExportProyectoDropdown] = useState<boolean>(false);
+  const [exportIncludeRejected, setExportIncludeRejected] = useState<boolean>(false);
+  const [isExportingGastos, setIsExportingGastos] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!adminUser) return;
+    proyectosApi.fetchProyectos('ALL').then(setProyectosList).catch(() => {});
+  }, [adminUser, company, env]);
 
   // Modal de Detalle/Revisión de Gasto
   const [selectedGasto, setSelectedGasto] = useState<Gasto | null>(null);
@@ -1539,24 +1559,94 @@ export default function ReportesScreen() {
     });
   }, [gastos, startDateFilter, endDateFilter]);
 
-  // Exportar reportes con rango de fechas
-  const handleExportPDF = async () => {
+  // Exportar reportes con rango de fechas y alcance
+  const runExportGastos = async (format: 'pdf' | 'xlsx') => {
+    if (exportScope === 'PROYECTO' && !exportProyectoId) {
+      showAlert('Selección requerida', 'Por favor selecciona el proyecto que deseas exportar.');
+      return;
+    }
+
+    setIsExportingGastos(true);
     try {
+      const headers = await getApiHeaders();
       const periodo = getPeriodoLabel();
-      await ReportGenerator.exportToPDF(filteredGastosByDate, `Historial General de Gastos`, periodo);
+      const suffix = getFilePeriodoSuffix();
+
+      if (exportScope === 'PROYECTO') {
+        const hasDates = Boolean(startDateFilter || endDateFilter);
+        let detailToExport: ProyectoDetailResponse;
+        if (!hasDates) {
+          detailToExport = await proyectosApi.fetchProyectoDetail(exportProyectoId);
+        } else {
+          const qs = new URLSearchParams({
+            scope: 'PROYECTO',
+            proyecto_id: exportProyectoId,
+            includeRejected: exportIncludeRejected ? 'true' : 'false',
+            startDate: startDateFilter || '',
+            endDate: endDateFilter || '',
+          });
+          const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/gastos?${qs.toString()}`, { headers });
+          if (!res.ok) throw new Error('Error al obtener gastos del proyecto');
+          const filteredRows: Gasto[] = await res.json();
+          const proyObj = proyectosList.find((p) => p.id === exportProyectoId);
+          if (!proyObj) throw new Error('Proyecto no encontrado');
+          const resumen = computeProyectoResumenFromGastos(proyObj, filteredRows);
+          detailToExport = {
+            proyecto: proyObj,
+            resumen: {
+              total_general: resumen.total_general,
+              totales_por_categoria: resumen.totales_por_categoria,
+              pendientes_count: resumen.pendientes_count,
+            },
+            gastos: filteredRows,
+          };
+        }
+
+        if (format === 'pdf') {
+          await ReportGenerator.exportProyectoToPDF(detailToExport, { includeRejected: exportIncludeRejected });
+        } else {
+          await ReportGenerator.exportProyectoToXLSX(detailToExport, { includeRejected: exportIncludeRejected });
+        }
+        return;
+      }
+
+      const qs = new URLSearchParams({
+        scope: exportScope,
+        includeRejected: exportIncludeRejected ? 'true' : 'false',
+        startDate: startDateFilter || '',
+        endDate: endDateFilter || '',
+      });
+      const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/gastos?${qs.toString()}`, { headers });
+      const exportGastos: Gasto[] = res.ok ? await res.json() : filteredGastosByDate;
+
+      const scopeTitles: Record<'ALL' | 'PROYECTOS' | 'OPERATIVOS' | 'HISTORICO', string> = {
+        ALL: 'Historial General de Gastos',
+        PROYECTOS: 'Reporte de Gastos por Proyecto',
+        OPERATIVOS: 'Reporte de Gastos Operativos',
+        HISTORICO: 'Reporte Histórico / Sin Proyecto',
+      };
+
+      if (format === 'pdf') {
+        await ReportGenerator.exportToPDF(exportGastos, scopeTitles[exportScope], periodo, {
+          includeRejected: exportIncludeRejected,
+        });
+      } else {
+        const companySlug = company === 'daravisa' ? 'daravisa' : 'inttec';
+        await ReportGenerator.exportToXLSX(
+          exportGastos,
+          `gastos_${exportScope.toLowerCase()}_${companySlug}_${suffix}.xlsx`,
+          { includeRejected: exportIncludeRejected }
+        );
+      }
     } catch (err: any) {
-      Alert.alert('Error PDF', err.message);
+      Alert.alert(format === 'pdf' ? 'Error PDF' : 'Error Excel', err.message || 'No se pudo generar el reporte.');
+    } finally {
+      setIsExportingGastos(false);
     }
   };
 
-  const handleExportCSV = async () => {
-    try {
-      const suffix = getFilePeriodoSuffix();
-      await ReportGenerator.exportToXLSX(filteredGastosByDate, `historial_gastos_${company === 'daravisa' ? 'daravisa' : 'inttec'}_${suffix}.xlsx`);
-    } catch (err: any) {
-      Alert.alert('Error Excel', err.message);
-    }
-  };
+  const handleExportPDF = () => runExportGastos('pdf');
+  const handleExportCSV = () => runExportGastos('xlsx');
 
   const handleExportAsistenciasPDF = async () => {
     setIsFetchingAsistencias(true);
@@ -3124,13 +3214,275 @@ export default function ReportesScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Gastos</Text>
                 <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                  Gastos registrados en: <Text style={{ color: themeColors.accent, fontWeight: '700' }}>{getPeriodoLabel()}</Text> ({filteredGastosByDate.length} registros)
+                  Excel multi-hoja y PDF en: <Text style={{ color: themeColors.accent, fontWeight: '700' }}>{getPeriodoLabel()}</Text>
                 </Text>
               </View>
             </View>
+
+            {/* Chips de alcance */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+              {(
+                [
+                  { key: 'ALL', label: 'Todos' },
+                  { key: 'PROYECTOS', label: 'Proyectos' },
+                  { key: 'PROYECTO', label: 'Un Proyecto' },
+                  { key: 'OPERATIVOS', label: 'Operativos' },
+                  { key: 'HISTORICO', label: 'Histórico' },
+                ] as const
+              ).map((item) => {
+                const active = exportScope === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    onPress={() => setExportScope(item.key)}
+                    style={{
+                      paddingVertical: 5,
+                      paddingHorizontal: 10,
+                      borderRadius: BorderRadius.pill,
+                      borderWidth: 1,
+                      borderColor: active ? themeColors.primary : themeColors.border,
+                      backgroundColor: active ? themeColors.primary + '18' : themeColors.background,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: active ? '700' : '500',
+                        color: active ? themeColors.primary : themeColors.textSecondary,
+                      }}
+                    >
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {exportScope === 'PROYECTO' && (() => {
+              const selectedProy = proyectosList.find((p) => p.id === exportProyectoId) || null;
+              const q = exportProyectoSearch.trim().toLowerCase();
+              const filteredProys = proyectosList.filter((p) => {
+                if (exportProyectoStatusFilter !== 'ALL' && p.status !== exportProyectoStatusFilter) {
+                  return false;
+                }
+                if (!q) return true;
+                const haystack = `${p.nombre || ''} ${p.cliente_nombre || ''} ${p.sucursal_nombre || ''} ${p.notas || ''}`.toLowerCase();
+                return haystack.includes(q);
+              });
+
+              return (
+                <View style={{ marginTop: 4, gap: 6 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>
+                    Selecciona el proyecto (genera hojas por categoría en Excel):
+                  </Text>
+
+                  <TouchableOpacity
+                    onPress={() => setShowExportProyectoDropdown((prev) => !prev)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingVertical: 9,
+                      paddingHorizontal: 12,
+                      borderRadius: BorderRadius.medium,
+                      borderWidth: 1,
+                      borderColor: selectedProy ? themeColors.primary : themeColors.border,
+                      backgroundColor: themeColors.background,
+                      gap: 8,
+                    }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      {selectedProy ? (
+                        <>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                              {selectedProy.nombre}
+                            </Text>
+                            <View
+                              style={{
+                                paddingHorizontal: 6,
+                                paddingVertical: 1,
+                                borderRadius: BorderRadius.small,
+                                backgroundColor: selectedProy.status === 'ACTIVO' ? '#10b98120' : '#64748b25',
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 9,
+                                  fontWeight: '800',
+                                  color: selectedProy.status === 'ACTIVO' ? '#059669' : '#64748b',
+                                }}
+                              >
+                                {selectedProy.status}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                            {[selectedProy.cliente_nombre, selectedProy.sucursal_nombre].filter(Boolean).join(' • ') || 'Sin cliente / sucursal'}
+                            {` • Total: $${Number(selectedProy.total_general || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={{ fontSize: 13, color: themeColors.textSecondary }}>
+                          Selecciona un proyecto activo o cerrado...
+                        </Text>
+                      )}
+                    </View>
+                    <Ionicons
+                      name={showExportProyectoDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={themeColors.textSecondary}
+                    />
+                  </TouchableOpacity>
+
+                  {showExportProyectoDropdown && (
+                    <View
+                      style={{
+                        borderRadius: BorderRadius.medium,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        backgroundColor: themeColors.background,
+                        padding: Spacing.one,
+                        gap: 6,
+                      }}
+                    >
+                      <CustomInput
+                        placeholder="Buscar por nombre, cliente o sucursal..."
+                        value={exportProyectoSearch}
+                        onChangeText={setExportProyectoSearch}
+                        iconName="search-outline"
+                        style={{ height: 38, marginBottom: 0 }}
+                      />
+
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        {(
+                          [
+                            { key: 'ALL', label: `Todos (${proyectosList.length})` },
+                            { key: 'ACTIVO', label: 'Activos' },
+                            { key: 'CERRADO', label: 'Cerrados' },
+                          ] as const
+                        ).map((st) => {
+                          const isSt = exportProyectoStatusFilter === st.key;
+                          return (
+                            <TouchableOpacity
+                              key={st.key}
+                              onPress={() => setExportProyectoStatusFilter(st.key)}
+                              style={{
+                                paddingVertical: 4,
+                                paddingHorizontal: 8,
+                                borderRadius: BorderRadius.pill,
+                                borderWidth: 1,
+                                borderColor: isSt ? themeColors.accent : themeColors.border,
+                                backgroundColor: isSt ? themeColors.accent + '18' : 'transparent',
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: isSt ? '700' : '500',
+                                  color: isSt ? themeColors.accent : themeColors.textSecondary,
+                                }}
+                              >
+                                {st.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+
+                      <ScrollView
+                        nestedScrollEnabled={true}
+                        style={{ maxHeight: 240 }}
+                        keyboardShouldPersistTaps="handled"
+                      >
+                        {filteredProys.map((p, idx) => {
+                          const selected = exportProyectoId === p.id;
+                          const isActivo = p.status === 'ACTIVO';
+                          return (
+                            <TouchableOpacity
+                              key={p.id}
+                              onPress={() => {
+                                setExportProyectoId(p.id);
+                                setShowExportProyectoDropdown(false);
+                              }}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                paddingVertical: 9,
+                                paddingHorizontal: 10,
+                                borderBottomWidth: idx === filteredProys.length - 1 ? 0 : 1,
+                                borderBottomColor: themeColors.border,
+                                backgroundColor: selected ? themeColors.primary + '12' : 'transparent',
+                                borderRadius: BorderRadius.small,
+                                gap: 8,
+                              }}
+                            >
+                              <View style={{ flex: 1, gap: 2 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}>
+                                    {p.nombre}
+                                  </Text>
+                                  <View
+                                    style={{
+                                      paddingHorizontal: 6,
+                                      paddingVertical: 1,
+                                      borderRadius: BorderRadius.small,
+                                      backgroundColor: isActivo ? '#10b98120' : '#64748b25',
+                                    }}
+                                  >
+                                    <Text
+                                      style={{
+                                        fontSize: 9,
+                                        fontWeight: '800',
+                                        color: isActivo ? '#059669' : '#64748b',
+                                      }}
+                                    >
+                                      {p.status}
+                                    </Text>
+                                  </View>
+                                </View>
+                                <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                                  {[p.cliente_nombre, p.sucursal_nombre].filter(Boolean).join(' • ') || 'Sin cliente / sucursal'}
+                                </Text>
+                                <Text style={{ fontSize: 10, color: themeColors.textSecondary }}>
+                                  {`Total: $${Number(p.total_general || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                  {p.notas ? ` • ${p.notas}` : ''}
+                                </Text>
+                              </View>
+                              {selected && (
+                                <Ionicons name="checkmark-circle" size={18} color={themeColors.primary} />
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                        {filteredProys.length === 0 && (
+                          <Text style={{ fontSize: 11, color: themeColors.textSecondary, fontStyle: 'italic', textAlign: 'center', paddingVertical: 12 }}>
+                            No se encontraron proyectos con ese filtro.
+                          </Text>
+                        )}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+              );
+            })()}
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+              <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                Incluir gastos rechazados (solo detalle)
+              </Text>
+              <Switch
+                value={exportIncludeRejected}
+                onValueChange={setExportIncludeRejected}
+                trackColor={{ false: themeColors.border, true: themeColors.primary + '80' }}
+                thumbColor={exportIncludeRejected ? themeColors.primary : '#f4f3f4'}
+              />
+            </View>
+
             <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-              <CustomButton title="PDF" onPress={handleExportPDF} style={{ flex: 1, height: 36 }} />
-              <CustomButton title="Excel" onPress={handleExportCSV} variant="success" style={{ flex: 1, height: 36 }} />
+              <CustomButton title="PDF" onPress={handleExportPDF} style={{ flex: 1, height: 36 }} loading={isExportingGastos} />
+              <CustomButton title="Excel" onPress={handleExportCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isExportingGastos} />
             </View>
           </View>
 

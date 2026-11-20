@@ -38,6 +38,9 @@ interface ProyectoDetailViewProps {
   onToggleProyectoStatus: (proyecto: Proyecto) => void;
   onSelectGastoForReview: (gasto: Gasto) => void;
   onOpenAssignProyecto: (gasto: Gasto) => void;
+  onExportProyectoPDF?: () => void;
+  onExportProyectoXLSX?: () => void;
+  isExportingProyecto?: boolean;
 }
 
 const CATEGORIA_BLOCKS: {
@@ -99,6 +102,9 @@ export function ProyectoDetailView({
   onToggleProyectoStatus,
   onSelectGastoForReview,
   onOpenAssignProyecto,
+  onExportProyectoPDF,
+  onExportProyectoXLSX,
+  isExportingProyecto = false,
 }: ProyectoDetailViewProps) {
   const [selectedCategory, setSelectedCategory] = useState<
     ProyectoCategoriaKey | 'ALL'
@@ -276,7 +282,63 @@ export function ProyectoDetailView({
           </Text>
         </TouchableOpacity>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          {!!onExportProyectoPDF && (
+            <TouchableOpacity
+              onPress={onExportProyectoPDF}
+              disabled={isExportingProyecto}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                paddingVertical: 8,
+                paddingHorizontal: 11,
+                borderRadius: BorderRadius.medium,
+                backgroundColor: '#ef444415',
+                borderWidth: 1,
+                borderColor: '#ef444450',
+                opacity: isExportingProyecto ? 0.6 : 1,
+              }}
+            >
+              {isExportingProyecto ? (
+                <ActivityIndicator size="small" color="#dc2626" />
+              ) : (
+                <Ionicons name="document-text-outline" size={16} color="#dc2626" />
+              )}
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#dc2626' }}>
+                PDF
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {!!onExportProyectoXLSX && (
+            <TouchableOpacity
+              onPress={onExportProyectoXLSX}
+              disabled={isExportingProyecto}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                paddingVertical: 8,
+                paddingHorizontal: 11,
+                borderRadius: BorderRadius.medium,
+                backgroundColor: '#10b98115',
+                borderWidth: 1,
+                borderColor: '#10b98150',
+                opacity: isExportingProyecto ? 0.6 : 1,
+              }}
+            >
+              {isExportingProyecto ? (
+                <ActivityIndicator size="small" color="#059669" />
+              ) : (
+                <Ionicons name="grid-outline" size={16} color="#059669" />
+              )}
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#059669' }}>
+                Excel
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             onPress={() => onEditProyecto(proyecto)}
             style={{
