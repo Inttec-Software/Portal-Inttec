@@ -235,6 +235,68 @@ export function getOrComputeHospedajeDias(gasto: Gasto): GastoHospedajeDia[] {
   return result;
 }
 
+export type HospedajeTimelineEntry<T extends { fecha: string }> =
+  | { kind: 'night'; fecha: string; data: T }
+  | {
+      kind: 'gap';
+      fechaInicio: string;
+      fechaFin: string;
+      diasFaltantes: number;
+    };
+
+const parseIsoDayUtcNumber = (iso: string): number | null => {
+  const clean = (iso || '').split('T')[0]?.trim();
+  const parts = clean.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null;
+  const [y, m, d] = parts;
+  return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+};
+
+const utcDayNumberToIso = (dayNum: number): string => {
+  return new Date(dayNum * 86400000).toISOString().slice(0, 10);
+};
+
+/**
+ * Construye una línea de tiempo cronológica de noches de hospedaje intercalando
+ * los huecos (días sin registro entre la primera y última noche).
+ * Si faltan 2 o más días consecutivos, se agrupan en un solo elemento de rango.
+ */
+export function buildHospedajeTimelineWithGaps<T extends { fecha: string }>(
+  entries: T[]
+): HospedajeTimelineEntry<T>[] {
+  if (entries.length === 0) return [];
+  const sorted = [...entries].sort((a, b) =>
+    String(a.fecha).localeCompare(String(b.fecha))
+  );
+
+  const timeline: HospedajeTimelineEntry<T>[] = [];
+  let prevDayNum: number | null = null;
+
+  for (const item of sorted) {
+    const cleanFecha = (item.fecha || '').split('T')[0]?.trim() || item.fecha;
+    const curDayNum = parseIsoDayUtcNumber(cleanFecha);
+
+    if (prevDayNum !== null && curDayNum !== null) {
+      const diff = curDayNum - prevDayNum;
+      if (diff > 1) {
+        timeline.push({
+          kind: 'gap',
+          fechaInicio: utcDayNumberToIso(prevDayNum + 1),
+          fechaFin: utcDayNumberToIso(curDayNum - 1),
+          diasFaltantes: diff - 1,
+        });
+      }
+    }
+
+    timeline.push({ kind: 'night', fecha: cleanFecha, data: item });
+    if (curDayNum !== null && (prevDayNum === null || curDayNum > prevDayNum)) {
+      prevDayNum = curDayNum;
+    }
+  }
+
+  return timeline;
+}
+
 export function computeProyectoResumenFromGastos(
   proyecto: Proyecto,
   gastos: Gasto[]

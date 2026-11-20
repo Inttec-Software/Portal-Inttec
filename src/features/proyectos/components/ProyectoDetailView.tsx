@@ -17,6 +17,7 @@ import {
   SUBTIPOS_TRASLADO_LABELS,
   classifyProjectGastoBlock,
   getOrComputeHospedajeDias,
+  buildHospedajeTimelineWithGaps,
 } from '../types';
 
 interface ProyectoDetailViewProps {
@@ -115,6 +116,14 @@ export function ProyectoDetailView({
   const [statusFilter, setStatusFilter] = useState<
     'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'
   >('ALL');
+  const [collapsedDays, setCollapsedDays] = useState<Record<string, boolean>>({});
+
+  const toggleDayCollapse = (dayKey: string) => {
+    setCollapsedDays((prev) => ({
+      ...prev,
+      [dayKey]: !prev[dayKey],
+    }));
+  };
 
   // Estadísticas y conteos por bloque (excluyendo REJECTED para montos)
   const blockCounts = useMemo(() => {
@@ -198,6 +207,27 @@ export function ProyectoDetailView({
     return dayEntries.sort((a, b) => a.fecha.localeCompare(b.fecha));
   }, [gastos]);
 
+  const hospedajeTimeline = useMemo(
+    () => buildHospedajeTimelineWithGaps(hospedajeCalendarDays),
+    [hospedajeCalendarDays]
+  );
+
+  const hospedajeGaps = useMemo(
+    () =>
+      hospedajeTimeline.filter(
+        (
+          item
+        ): item is Extract<typeof item, { kind: 'gap' }> =>
+          item.kind === 'gap'
+      ),
+    [hospedajeTimeline]
+  );
+
+  const totalHospedajeGapDays = useMemo(
+    () => hospedajeGaps.reduce((sum, g) => sum + g.diasFaltantes, 0),
+    [hospedajeGaps]
+  );
+
   // Gastos filtrados según el bloque y subfiltro seleccionado
   const filteredGastos = useMemo(() => {
     return gastos.filter((g) => {
@@ -235,6 +265,56 @@ export function ProyectoDetailView({
       return true;
     });
   }, [gastos, selectedCategory, transporteSubFilter, statusFilter]);
+
+  // Agrupación cronológica por día para mostrar desglose diario en cualquier categoría
+  const groupedByDay = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        dayKey: string;
+        items: Gasto[];
+        validSubtotal: number;
+        rejectedCount: number;
+      }
+    >();
+    for (const g of filteredGastos) {
+      const dayKey =
+        (g.fecha_comprobante || g.created_at || '').split('T')[0] ||
+        'SIN_FECHA';
+      let entry = map.get(dayKey);
+      if (!entry) {
+        entry = { dayKey, items: [], validSubtotal: 0, rejectedCount: 0 };
+        map.set(dayKey, entry);
+      }
+      entry.items.push(g);
+      if (g.status === 'REJECTED') {
+        entry.rejectedCount += 1;
+      } else {
+        entry.validSubtotal += Number(g.monto || 0);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.dayKey === 'SIN_FECHA') return 1;
+      if (b.dayKey === 'SIN_FECHA') return -1;
+      return b.dayKey.localeCompare(a.dayKey);
+    });
+  }, [filteredGastos]);
+
+  const allDaysCollapsed =
+    groupedByDay.length > 0 &&
+    groupedByDay.every((grp) => Boolean(collapsedDays[grp.dayKey]));
+
+  const toggleAllDaysCollapse = () => {
+    if (allDaysCollapsed) {
+      setCollapsedDays({});
+    } else {
+      const next: Record<string, boolean> = {};
+      for (const grp of groupedByDay) {
+        next[grp.dayKey] = true;
+      }
+      setCollapsedDays(next);
+    }
+  };
 
   return (
     <ScrollView
@@ -1119,87 +1199,227 @@ export function ProyectoDetailView({
               Aún no hay días de hospedaje desglosados en este proyecto.
             </Text>
           ) : (
-            <View
-              style={{
-                flexDirection: 'row',
-                flexWrap: 'wrap',
-                gap: 8,
-              }}
-            >
-              {hospedajeCalendarDays.map((dia, idx) => (
-                <TouchableOpacity
-                  key={`${dia.gasto.id}_${dia.fecha}_${idx}`}
-                  onPress={() => onSelectGastoForReview(dia.gasto)}
+            <View style={{ gap: Spacing.two }}>
+              {hospedajeGaps.length > 0 && (
+                <View
                   style={{
-                    backgroundColor: themeColors.background,
-                    borderWidth: 1,
-                    borderColor: themeColors.border,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    paddingVertical: 10,
+                    paddingHorizontal: 12,
                     borderRadius: BorderRadius.medium,
-                    paddingVertical: 8,
-                    paddingHorizontal: 10,
-                    minWidth: 145,
-                    flexGrow: 1,
-                    flexBasis: isDesktop ? '18%' : '45%',
-                    gap: 2,
+                    backgroundColor: (themeColors.danger || '#dc2626') + '18',
+                    borderWidth: 1.5,
+                    borderColor: themeColors.danger || '#dc2626',
                   }}
                 >
                   <View
                     style={{
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
+                      width: 28,
+                      height: 28,
+                      borderRadius: 14,
+                      backgroundColor: themeColors.danger || '#dc2626',
                       alignItems: 'center',
+                      justifyContent: 'center',
                     }}
                   >
+                    <Ionicons name="alert-outline" size={16} color="#ffffff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
                     <Text
                       style={{
                         fontSize: 12,
-                        fontWeight: '800',
-                        color: '#4f46e5',
+                        fontWeight: '900',
+                        color: themeColors.danger || '#dc2626',
                       }}
                     >
-                      📅 {formatFriendlyDate(dia.fecha)}
+                      {totalHospedajeGapDays}{' '}
+                      {totalHospedajeGapDays === 1
+                        ? 'noche sin registro de hospedaje'
+                        : 'noches sin registro de hospedaje'}{' '}
+                      entre estancias
                     </Text>
-                    <View
+                    <Text
                       style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: 4,
-                        backgroundColor:
-                          dia.gasto.status === 'APPROVED'
-                            ? themeColors.success
-                            : themeColors.warning,
+                        fontSize: 11,
+                        fontWeight: '600',
+                        color: themeColors.text,
+                        marginTop: 2,
                       }}
-                    />
+                    >
+                      {hospedajeGaps
+                        .map((g) =>
+                          g.diasFaltantes === 1
+                            ? formatFriendlyDate(g.fechaInicio)
+                            : `${formatFriendlyDate(g.fechaInicio)} al ${formatFriendlyDate(g.fechaFin)} (${g.diasFaltantes} n.)`
+                        )
+                        .join(' • ')}
+                    </Text>
                   </View>
-                  <Text
-                    style={{
-                      fontSize: 14,
-                      fontWeight: '900',
-                      color: themeColors.text,
-                    }}
-                  >
-                    {formatCurrency(dia.monto_diario)}
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      color: themeColors.textSecondary,
-                    }}
-                    numberOfLines={1}
-                  >
-                    🏨 {dia.hotel}
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      color: themeColors.textSecondary,
-                    }}
-                    numberOfLines={1}
-                  >
-                    👤 {dia.empleado}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                </View>
+              )}
+
+              <View
+                style={{
+                  flexDirection: 'row',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                }}
+              >
+                {hospedajeTimeline.map((item, idx) => {
+                  if (item.kind === 'gap') {
+                    const isSingle = item.diasFaltantes === 1;
+                    const gapAccent = themeColors.danger || '#dc2626';
+                    return (
+                      <View
+                        key={`gap_${item.fechaInicio}_${item.fechaFin}_${idx}`}
+                        style={{
+                          backgroundColor: themeColors.background,
+                          borderWidth: 2,
+                          borderStyle: 'dashed',
+                          borderColor: gapAccent,
+                          borderRadius: BorderRadius.medium,
+                          paddingVertical: 8,
+                          paddingHorizontal: 10,
+                          minWidth: 145,
+                          flexGrow: 1,
+                          flexBasis: isDesktop ? '18%' : '45%',
+                          gap: 4,
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            alignSelf: 'flex-start',
+                            gap: 4,
+                            backgroundColor: gapAccent,
+                            paddingHorizontal: 7,
+                            paddingVertical: 2,
+                            borderRadius: BorderRadius.small,
+                          }}
+                        >
+                          <Ionicons
+                            name="alert-circle"
+                            size={12}
+                            color="#ffffff"
+                          />
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: '900',
+                              color: '#ffffff',
+                              textTransform: 'uppercase',
+                            }}
+                          >
+                            {isSingle
+                              ? 'Sin hospedaje'
+                              : `Hueco • ${item.diasFaltantes} noches`}
+                          </Text>
+                        </View>
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontWeight: '900',
+                            color: themeColors.text,
+                          }}
+                        >
+                          {isSingle
+                            ? `📅 ${formatFriendlyDate(item.fechaInicio)}`
+                            : `📅 ${formatFriendlyDate(item.fechaInicio)} – ${formatFriendlyDate(item.fechaFin)}`}
+                        </Text>
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: '600',
+                            color: themeColors.textSecondary,
+                          }}
+                        >
+                          Falta registro de hotel
+                        </Text>
+                      </View>
+                    );
+                  }
+
+                  const dia = item.data;
+                  return (
+                    <TouchableOpacity
+                      key={`${dia.gasto.id}_${dia.fecha}_${idx}`}
+                      onPress={() => onSelectGastoForReview(dia.gasto)}
+                      style={{
+                        backgroundColor: themeColors.background,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        borderRadius: BorderRadius.medium,
+                        paddingVertical: 8,
+                        paddingHorizontal: 10,
+                        minWidth: 145,
+                        flexGrow: 1,
+                        flexBasis: isDesktop ? '18%' : '45%',
+                        gap: 2,
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontWeight: '800',
+                            color: '#4f46e5',
+                          }}
+                        >
+                          📅 {formatFriendlyDate(dia.fecha)}
+                        </Text>
+                        <View
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: 4,
+                            backgroundColor:
+                              dia.gasto.status === 'APPROVED'
+                                ? themeColors.success
+                                : themeColors.warning,
+                          }}
+                        />
+                      </View>
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          fontWeight: '900',
+                          color: themeColors.text,
+                        }}
+                      >
+                        {formatCurrency(dia.monto_diario)}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          color: themeColors.textSecondary,
+                        }}
+                        numberOfLines={1}
+                      >
+                        🏨 {dia.hotel}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          color: themeColors.textSecondary,
+                        }}
+                        numberOfLines={1}
+                      >
+                        👤 {dia.empleado}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           )}
         </View>
@@ -1315,8 +1535,168 @@ export function ProyectoDetailView({
             </Text>
           </View>
         ) : (
-          <View style={{ gap: 8 }}>
-            {filteredGastos.map((item) => {
+          <View style={{ gap: 10 }}>
+            {groupedByDay.length > 1 && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingHorizontal: 2,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: '700',
+                    color: themeColors.textSecondary,
+                  }}
+                >
+                  Desglose por día ({groupedByDay.length}{' '}
+                  {groupedByDay.length === 1 ? 'día' : 'días'})
+                </Text>
+                <TouchableOpacity
+                  onPress={toggleAllDaysCollapse}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingVertical: 4,
+                    paddingHorizontal: 8,
+                    borderRadius: BorderRadius.small,
+                    backgroundColor: themeColors.background,
+                    borderWidth: 1,
+                    borderColor: themeColors.border,
+                  }}
+                >
+                  <Ionicons
+                    name={allDaysCollapsed ? 'expand-outline' : 'contract-outline'}
+                    size={12}
+                    color={themeColors.textSecondary}
+                  />
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: '700',
+                      color: themeColors.textSecondary,
+                    }}
+                  >
+                    {allDaysCollapsed ? 'Expandir todos' : 'Colapsar todos'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {groupedByDay.map((group) => {
+              const isCollapsed = Boolean(collapsedDays[group.dayKey]);
+              const dayLabel =
+                group.dayKey === 'SIN_FECHA'
+                  ? 'Sin fecha registrada'
+                  : formatFriendlyDate(group.dayKey);
+
+              return (
+                <View key={group.dayKey} style={{ gap: 8 }}>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => toggleDayCollapse(group.dayKey)}
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      paddingVertical: 8,
+                      paddingHorizontal: 12,
+                      borderRadius: BorderRadius.medium,
+                      backgroundColor: themeColors.background,
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                        flex: 1,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <Ionicons
+                        name={isCollapsed ? 'chevron-forward' : 'chevron-down'}
+                        size={16}
+                        color={themeColors.primary}
+                      />
+                      <Ionicons
+                        name="calendar-outline"
+                        size={14}
+                        color={themeColors.primary}
+                      />
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontWeight: '800',
+                          color: themeColors.text,
+                        }}
+                      >
+                        {dayLabel}
+                      </Text>
+                      <View
+                        style={{
+                          backgroundColor: themeColors.primary + '18',
+                          paddingHorizontal: 7,
+                          paddingVertical: 2,
+                          borderRadius: BorderRadius.pill,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: '800',
+                            color: themeColors.primary,
+                          }}
+                        >
+                          {group.items.length}{' '}
+                          {group.items.length === 1 ? 'gasto' : 'gastos'}
+                        </Text>
+                      </View>
+                      {group.rejectedCount > 0 && (
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: '700',
+                            color: themeColors.error || '#ef4444',
+                          }}
+                        >
+                          ({group.rejectedCount} rech.)
+                        </Text>
+                      )}
+                    </View>
+
+                    <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
+                      <Text
+                        style={{
+                          fontSize: 9,
+                          fontWeight: '700',
+                          color: themeColors.textSecondary,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        Subtotal día
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          fontWeight: '900',
+                          color: themeColors.text,
+                        }}
+                      >
+                        {formatCurrency(group.validSubtotal)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {!isCollapsed && (
+                    <View style={{ gap: 8 }}>
+                      {group.items.map((item) => {
               const { block, subblock } = classifyProjectGastoBlock(item);
               const blkMeta = CATEGORIA_BLOCKS.find((b) => b.key === block);
               const provName = GastoHelper.getProveedor(item);
@@ -1690,6 +2070,11 @@ export function ProyectoDetailView({
                     </View>
                   </View>
                 </TouchableOpacity>
+              );
+                      })}
+                    </View>
+                  )}
+                </View>
               );
             })}
           </View>

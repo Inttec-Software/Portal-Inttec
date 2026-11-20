@@ -15,6 +15,7 @@ import {
   SubtipoTraslado,
   classifyProjectGastoBlock,
   getOrComputeHospedajeDias,
+  buildHospedajeTimelineWithGaps,
   getProyectoNombreFromGasto,
   isGastoHospedaje,
 } from '@/features/proyectos/types';
@@ -222,6 +223,40 @@ const buildSatFieldsForGasto = (g: Gasto) => {
     estadoReembolso,
     metodoPagoLabel: g.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : g.metodo_pago,
   };
+};
+
+const getGastoReportDayKey = (g: Gasto): string => {
+  const raw = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
+  return raw.trim() || 'Sin fecha';
+};
+
+const compareReportDayKeysAsc = (a: string, b: string): number => {
+  if (a === 'Sin fecha' && b === 'Sin fecha') return 0;
+  if (a === 'Sin fecha') return 1;
+  if (b === 'Sin fecha') return -1;
+  return a.localeCompare(b);
+};
+
+const groupGastosByDayAsc = (items: Gasto[]) => {
+  const map = new Map<
+    string,
+    { fecha: string; items: Gasto[]; validSubtotal: number; rejectedCount: number }
+  >();
+  for (const g of items) {
+    const fecha = getGastoReportDayKey(g);
+    let entry = map.get(fecha);
+    if (!entry) {
+      entry = { fecha, items: [], validSubtotal: 0, rejectedCount: 0 };
+      map.set(fecha, entry);
+    }
+    entry.items.push(g);
+    if (g.status === 'REJECTED') {
+      entry.rejectedCount += 1;
+    } else {
+      entry.validSubtotal += Number(g.monto || 0);
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => compareReportDayKeysAsc(a.fecha, b.fecha));
 };
 
 export interface ExportGastosOptions {
@@ -983,43 +1018,59 @@ export const ReportGenerator = {
     const renderBlockSection = (block: { key: ProyectoCategoriaKey; title: string; color: string }) => {
       const items = grouped[block.key];
       const blockTotal = resumen.totales_por_categoria[block.key] || 0;
+      const dayGroups = groupGastosByDayAsc(items);
       const rowsHtml =
         items.length === 0
           ? `<tr><td colspan="7" style="text-align:center; color:#94a3b8; font-style:italic;">Sin gastos registrados en esta categoría</td></tr>`
-          : items
-              .map((g) => {
-                const meta = getGastoDestinoReportMeta(g);
-                const sat = buildSatFieldsForGasto(g);
-                const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
-                const prov = GastoHelper.getProveedor(g) || 'Sin proveedor';
-                const subcat = GastoHelper.getSubcategoria(g) || '';
-                const extraInfo =
-                  block.key === 'transporte'
-                    ? `${meta.subblock === 'combustible' ? 'Combustible' : 'Traslado'}${meta.subtipoTrasladoLabel ? ` (${meta.subtipoTrasladoLabel})` : ''}`
-                    : block.key === 'hospedaje' && meta.hospInicio && meta.hospFin
-                    ? `${meta.hospInicio} al ${meta.hospFin} (${meta.nochesCount} n.)`
-                    : subcat;
-
-                let statusBg = '#f59e0b';
-                if (g.status === 'APPROVED') statusBg = '#10b981';
-                if (g.status === 'REJECTED') statusBg = '#ef4444';
-                if (g.status === 'ACTION_REQUIRED') statusBg = '#3b82f6';
-
-                const strike = g.status === 'REJECTED' ? 'text-decoration: line-through; color: #94a3b8;' : '';
-                return `
-                  <tr>
-                    <td>${escapeHtml(fecha)}</td>
-                    <td>${escapeHtml(g.empleado_nombre || 'Desconocido')}</td>
-                    <td>
-                      <div style="font-weight: 600;">${escapeHtml(prov)}</div>
-                      <small style="color:#64748b;">${escapeHtml(extraInfo)}</small>
+          : dayGroups
+              .map((group) => {
+                const dayHeaderHtml = `
+                  <tr style="background:#f1f5f9;">
+                    <td colspan="5" style="font-weight:800; color:#0f172a; font-size:9.5px; padding:5px 6px; border-top:1px solid #cbd5e1;">
+                      📅 ${escapeHtml(group.fecha)} &nbsp;•&nbsp; ${group.items.length} ${group.items.length === 1 ? 'gasto' : 'gastos'}${group.rejectedCount > 0 ? ` (${group.rejectedCount} rech.)` : ''}
                     </td>
-                    <td style="font-size: 9px;">${escapeHtml(sat.commentText) || '—'}</td>
-                    <td style="font-size: 9px;">${escapeHtml(sat.comprobacionSat)}</td>
-                    <td><span style="background:${statusBg}; color:#fff; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:700;">${escapeHtml(g.status)}</span></td>
-                    <td style="text-align:right; font-weight:700; ${strike}">${formatMXNCurrency(Number(g.monto || 0))}</td>
+                    <td colspan="2" style="text-align:right; font-weight:800; color:${block.color}; font-size:9.5px; padding:5px 6px; border-top:1px solid #cbd5e1;">
+                      Subtotal del día: ${formatMXNCurrency(group.validSubtotal)}
+                    </td>
                   </tr>
                 `;
+                const dayItemRowsHtml = group.items
+                  .map((g) => {
+                    const meta = getGastoDestinoReportMeta(g);
+                    const sat = buildSatFieldsForGasto(g);
+                    const fecha = getGastoReportDayKey(g);
+                    const prov = GastoHelper.getProveedor(g) || 'Sin proveedor';
+                    const subcat = GastoHelper.getSubcategoria(g) || '';
+                    const extraInfo =
+                      block.key === 'transporte'
+                        ? `${meta.subblock === 'combustible' ? 'Combustible' : 'Traslado'}${meta.subtipoTrasladoLabel ? ` (${meta.subtipoTrasladoLabel})` : ''}`
+                        : block.key === 'hospedaje' && meta.hospInicio && meta.hospFin
+                        ? `${meta.hospInicio} al ${meta.hospFin} (${meta.nochesCount} n.)`
+                        : subcat;
+
+                    let statusBg = '#f59e0b';
+                    if (g.status === 'APPROVED') statusBg = '#10b981';
+                    if (g.status === 'REJECTED') statusBg = '#ef4444';
+                    if (g.status === 'ACTION_REQUIRED') statusBg = '#3b82f6';
+
+                    const strike = g.status === 'REJECTED' ? 'text-decoration: line-through; color: #94a3b8;' : '';
+                    return `
+                      <tr>
+                        <td>${escapeHtml(fecha)}</td>
+                        <td>${escapeHtml(g.empleado_nombre || 'Desconocido')}</td>
+                        <td>
+                          <div style="font-weight: 600;">${escapeHtml(prov)}</div>
+                          <small style="color:#64748b;">${escapeHtml(extraInfo)}</small>
+                        </td>
+                        <td style="font-size: 9px;">${escapeHtml(sat.commentText) || '—'}</td>
+                        <td style="font-size: 9px;">${escapeHtml(sat.comprobacionSat)}</td>
+                        <td><span style="background:${statusBg}; color:#fff; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:700;">${escapeHtml(g.status)}</span></td>
+                        <td style="text-align:right; font-weight:700; ${strike}">${formatMXNCurrency(Number(g.monto || 0))}</td>
+                      </tr>
+                    `;
+                  })
+                  .join('');
+                return dayHeaderHtml + dayItemRowsHtml;
               })
               .join('');
 
@@ -1030,12 +1081,27 @@ export const ReportGenerator = {
              </span>`
           : '';
 
+      const hospedajeTimeline = buildHospedajeTimelineWithGaps(hospedajeDiasRows);
+      const hospedajeGapNights = hospedajeTimeline.reduce(
+        (sum, item) => (item.kind === 'gap' ? sum + item.diasFaltantes : sum),
+        0
+      );
+
       const hospedajeDiarioHtml =
         block.key === 'hospedaje' && hospedajeDiasRows.length > 0
           ? `
             <div style="margin-top: 8px; padding: 8px 10px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px;">
-              <div style="font-size: 10px; font-weight: 800; color: #4338ca; margin-bottom: 6px; text-transform: uppercase;">
-                Desglose diario de Hospedaje (${hospedajeDiasRows.length} noches)
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                <div style="font-size: 10px; font-weight: 800; color: #4338ca; text-transform: uppercase;">
+                  Desglose diario de Hospedaje (${hospedajeDiasRows.length} noches)
+                </div>
+                ${
+                  hospedajeGapNights > 0
+                    ? `<div style="font-size: 9px; font-weight: 800; color: #991b1b; background: #fee2e2; border: 1px solid #dc2626; padding: 2px 7px; border-radius: 4px;">
+                         ⚠️ ${hospedajeGapNights} ${hospedajeGapNights === 1 ? 'noche' : 'noches'} sin registro entre estancias
+                       </div>`
+                    : ''
+                }
               </div>
               <table style="margin-top: 0; font-size: 10px;">
                 <thead>
@@ -1047,17 +1113,32 @@ export const ReportGenerator = {
                   </tr>
                 </thead>
                 <tbody>
-                  ${hospedajeDiasRows
-                    .map(
-                      (d) => `
-                    <tr>
-                      <td style="padding:4px 6px;">${escapeHtml(d.fecha)}</td>
-                      <td style="padding:4px 6px;">${escapeHtml(d.hotel)}</td>
-                      <td style="padding:4px 6px;">${escapeHtml(d.empleado)}</td>
-                      <td style="padding:4px 6px; text-align:right; font-weight:700;">${formatMXNCurrency(d.monto)}</td>
-                    </tr>
-                  `
-                    )
+                  ${hospedajeTimeline
+                    .map((item) => {
+                      if (item.kind === 'gap') {
+                        const gapLabel =
+                          item.diasFaltantes === 1
+                            ? item.fechaInicio
+                            : `${item.fechaInicio} al ${item.fechaFin} (${item.diasFaltantes} n.)`;
+                        return `
+                          <tr style="background:#fee2e2;">
+                            <td style="padding:4px 6px; font-weight:800; color:#7f1d1d;">⚠️ ${escapeHtml(gapLabel)}</td>
+                            <td style="padding:4px 6px; font-weight:800; color:#dc2626;">SIN REGISTRO DE HOSPEDAJE</td>
+                            <td style="padding:4px 6px; color:#7f1d1d;">${item.diasFaltantes} ${item.diasFaltantes === 1 ? 'noche faltante' : 'noches faltantes'}</td>
+                            <td style="padding:4px 6px; text-align:right; font-weight:700; color:#7f1d1d;">$0.00</td>
+                          </tr>
+                        `;
+                      }
+                      const d = item.data;
+                      return `
+                        <tr>
+                          <td style="padding:4px 6px;">${escapeHtml(d.fecha)}</td>
+                          <td style="padding:4px 6px;">${escapeHtml(d.hotel)}</td>
+                          <td style="padding:4px 6px;">${escapeHtml(d.empleado)}</td>
+                          <td style="padding:4px 6px; text-align:right; font-weight:700;">${formatMXNCurrency(d.monto)}</td>
+                        </tr>
+                      `;
+                    })
                     .join('')}
                 </tbody>
               </table>
@@ -4258,10 +4339,129 @@ export const ReportGenerator = {
         const { block } = classifyProjectGastoBlock(g);
         grouped[block].push(g);
       }
+      (Object.keys(grouped) as ProyectoCategoriaKey[]).forEach((k) => {
+        grouped[k].sort((a, b) =>
+          compareReportDayKeysAsc(getGastoReportDayKey(a), getGastoReportDayKey(b))
+        );
+      });
 
       const round2 = (n: number) => Math.round(n * 100) / 100;
       const sumValid = (items: Gasto[]) =>
         round2(items.filter((g) => g.status !== 'REJECTED').reduce((s, g) => s + Number(g.monto || 0), 0));
+
+      // Matriz de Resumen por Día (todas las categorías, excluyendo rechazados)
+      type DailyBucket = {
+        alimentos: number;
+        hospedaje: number;
+        material: number;
+        equipo: number;
+        combustible: number;
+        traslados: number;
+        count: number;
+      };
+      const dailyMap = new Map<string, DailyBucket>();
+      const ensureDay = (fecha: string): DailyBucket => {
+        let bucket = dailyMap.get(fecha);
+        if (!bucket) {
+          bucket = {
+            alimentos: 0,
+            hospedaje: 0,
+            material: 0,
+            equipo: 0,
+            combustible: 0,
+            traslados: 0,
+            count: 0,
+          };
+          dailyMap.set(fecha, bucket);
+        }
+        return bucket;
+      };
+      for (const g of gastosVisibles) {
+        if (g.status === 'REJECTED') continue;
+        const { block, subblock } = classifyProjectGastoBlock(g);
+        if (block === 'hospedaje') {
+          const dias = getOrComputeHospedajeDias(g);
+          for (const d of dias) {
+            const b = ensureDay(d.fecha || getGastoReportDayKey(g));
+            b.hospedaje += Number(d.monto_diario || 0);
+            b.count += 1;
+          }
+          continue;
+        }
+        const b = ensureDay(getGastoReportDayKey(g));
+        const monto = Number(g.monto || 0);
+        b.count += 1;
+        if (block === 'alimentos') b.alimentos += monto;
+        else if (block === 'material') b.material += monto;
+        else if (block === 'equipo') b.equipo += monto;
+        else if (block === 'transporte') {
+          if (subblock === 'combustible') b.combustible += monto;
+          else b.traslados += monto;
+        }
+      }
+
+      const resumenDiaHeaders = [
+        'Fecha',
+        'Alimentos',
+        'Hospedaje (Diario)',
+        'Material',
+        'Equipo',
+        'Combustible',
+        'Traslados',
+        'Total Transporte',
+        'Total del Día',
+        'Registros / Noches',
+      ];
+      const sortedDays = Array.from(dailyMap.entries()).sort((a, b) =>
+        compareReportDayKeysAsc(a[0], b[0])
+      );
+      let gAlim = 0;
+      let gHosp = 0;
+      let gMat = 0;
+      let gEq = 0;
+      let gComb = 0;
+      let gTras = 0;
+      let gCount = 0;
+      const resumenDiaRows: any[][] = sortedDays.map(([fecha, b]) => {
+        gAlim += b.alimentos;
+        gHosp += b.hospedaje;
+        gMat += b.material;
+        gEq += b.equipo;
+        gComb += b.combustible;
+        gTras += b.traslados;
+        gCount += b.count;
+        const transp = b.combustible + b.traslados;
+        const dayTotal = b.alimentos + b.hospedaje + b.material + b.equipo + transp;
+        return [
+          fecha,
+          round2(b.alimentos),
+          round2(b.hospedaje),
+          round2(b.material),
+          round2(b.equipo),
+          round2(b.combustible),
+          round2(b.traslados),
+          round2(transp),
+          round2(dayTotal),
+          b.count,
+        ];
+      });
+      if (resumenDiaRows.length === 0) {
+        resumenDiaRows.push(['Sin gastos válidos registrados', 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      } else {
+        const gTransp = gComb + gTras;
+        resumenDiaRows.push([
+          'GRAN TOTAL',
+          round2(gAlim),
+          round2(gHosp),
+          round2(gMat),
+          round2(gEq),
+          round2(gComb),
+          round2(gTras),
+          round2(gTransp),
+          round2(gAlim + gHosp + gMat + gEq + gTransp),
+          gCount,
+        ]);
+      }
 
       // Hoja 1: Resumen
       const resumenHeaders = ['Concepto / Categoría', 'Valor / Detalle', 'Registros Válidos', 'Total (MXN)'];
@@ -4317,7 +4517,7 @@ export const ReportGenerator = {
         'ID', 'Fecha Comprobante', 'Empleado', 'Hotel / Proveedor', 'Entrada', 'Salida', 'Noches',
         'Costo/Noche Prom.', 'Monto Total', 'Método Pago', 'UUID CFDI', 'Estado Factura', 'Status', 'Comentarios',
       ];
-      const hospDiarioRows: any[][] = [];
+      const hospDiarioEntries: { fecha: string; row: any[] }[] = [];
       const hospRows: any[][] = grouped.hospedaje.map((g) => {
         const meta = getGastoDestinoReportMeta(g);
         const sat = buildSatFieldsForGasto(g);
@@ -4327,16 +4527,19 @@ export const ReportGenerator = {
 
         if (g.status !== 'REJECTED') {
           meta.hospDias.forEach((d) => {
-            hospDiarioRows.push([
-              g.id,
-              d.fecha,
-              hotelName,
-              g.empleado_nombre || '',
-              meta.hospInicio,
-              meta.hospFin,
-              Number(d.monto_diario || 0),
-              g.status,
-            ]);
+            hospDiarioEntries.push({
+              fecha: d.fecha,
+              row: [
+                g.id,
+                d.fecha,
+                hotelName,
+                g.empleado_nombre || '',
+                meta.hospInicio,
+                meta.hospFin,
+                Number(d.monto_diario || 0),
+                g.status,
+              ],
+            });
           });
         }
 
@@ -4362,12 +4565,35 @@ export const ReportGenerator = {
       }
       hospRows.push(['TOTAL HOSPEDAJE', '', '', '', '', '', grouped.hospedaje.filter((g) => g.status !== 'REJECTED').reduce((s, g) => s + getOrComputeHospedajeDias(g).length, 0), '', sumValid(grouped.hospedaje), '', '', '', '', '']);
 
-      hospDiarioRows.sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+      const hospTimeline = buildHospedajeTimelineWithGaps(hospDiarioEntries);
+      const hospDiarioRows: any[][] = hospTimeline.map((item) => {
+        if (item.kind === 'gap') {
+          const gapFecha =
+            item.diasFaltantes === 1
+              ? item.fechaInicio
+              : `${item.fechaInicio} al ${item.fechaFin}`;
+          return [
+            'HUECO',
+            gapFecha,
+            '⚠️ SIN REGISTRO DE HOSPEDAJE',
+            `${item.diasFaltantes} ${item.diasFaltantes === 1 ? 'noche faltante' : 'noches faltantes'}`,
+            '',
+            '',
+            0,
+            'SIN REGISTRO',
+          ];
+        }
+        return item.data.row;
+      });
       const hospDiarioHeaders = ['Gasto ID', 'Fecha Noche', 'Hotel / Proveedor', 'Empleado', 'Check-in', 'Check-out', 'Monto Diario', 'Status Gasto'];
-      if (hospDiarioRows.length === 0) {
+      if (hospDiarioEntries.length === 0) {
         hospDiarioRows.push(['Sin noches registradas en Hospedaje', '', '', '', '', '', 0, '']);
       } else {
-        hospDiarioRows.push(['TOTAL NOCHES', `${hospDiarioRows.length} noche(s)`, '', '', '', '', round2(hospDiarioRows.reduce((s, r) => s + Number(r[6] || 0), 0)), '']);
+        const totalNochesValidas = hospDiarioEntries.length;
+        const totalMontoNoches = round2(
+          hospDiarioEntries.reduce((s, e) => s + Number(e.row[6] || 0), 0)
+        );
+        hospDiarioRows.push(['TOTAL NOCHES', `${totalNochesValidas} noche(s)`, '', '', '', '', totalMontoNoches, '']);
       }
 
       // Helper para hojas uniformes de Material y Equipo
@@ -4449,6 +4675,7 @@ export const ReportGenerator = {
       await ReportGenerator._exportSheetsToXLSX(
         [
           { name: 'Resumen', headers: resumenHeaders, rows: resumenRows },
+          { name: 'Resumen por Día', headers: resumenDiaHeaders, rows: resumenDiaRows },
           { name: 'Alimentos', headers: alimentosHeaders, rows: alimentosRows },
           { name: 'Hospedaje', headers: hospHeaders, rows: hospRows },
           { name: 'Hospedaje Diario', headers: hospDiarioHeaders, rows: hospDiarioRows },
