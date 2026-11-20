@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
-import { AuthService, Usuario, Asistencia, AsistenciaService, supabase, inttecClient, daravisaClient } from '@/services/supabase';
+import { AuthService, Usuario, Asistencia, AsistenciaService, Vehiculo, VehiculoService, supabase, inttecClient, daravisaClient } from '@/services/supabase';
 import CustomButton from '@/components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -37,6 +37,12 @@ export default function EmpleadoAsistencia() {
 
   const [user, setUser] = useState<Usuario | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [vehiculosActivos, setVehiculosActivos] = useState<Vehiculo[]>([]);
+  const vehiculosFlotaConGps = useMemo(() => {
+    return vehiculosActivos.filter((v) => v.gps_imei && String(v.gps_imei).trim().length > 0);
+  }, [vehiculosActivos]);
+  const [selectedVehiculoId, setSelectedVehiculoId] = useState<string | null>(null);
+  const [transporteSeleccionado, setTransporteSeleccionado] = useState<'OFICINA' | string | null>(null);
 
   // --- Auto-Checador ---
   const [checadorInstructionVisible, setChecadorInstructionVisible] = useState(false);
@@ -161,8 +167,39 @@ export default function EmpleadoAsistencia() {
     }
     setIsLoadingChecador(true);
     try {
-      const registro = await AsistenciaService.getRegistroHoy(user.id);
+      const [registro, vehs] = await Promise.all([
+        AsistenciaService.getRegistroHoy(user.id),
+        VehiculoService.getVehiculos(true).catch(() => [] as Vehiculo[]),
+      ]);
       setRegistroHoy(registro);
+      setVehiculosActivos(vehs);
+
+      const isSalida = !!(registro?.hora_entrada && !registro?.hora_salida);
+      if (isSalida) {
+        if (registro?.vehiculo_id) {
+          setSelectedVehiculoId(registro.vehiculo_id);
+          setTransporteSeleccionado(registro.vehiculo_id);
+        } else {
+          setSelectedVehiculoId(null);
+          setTransporteSeleccionado('OFICINA');
+        }
+      } else {
+        if (vehs.length > 0 && user.id) {
+          const preasignado = vehs.find(
+            (v) => Array.isArray(v.conductores_hoy_ids) && v.conductores_hoy_ids.includes(user.id)
+          );
+          if (preasignado) {
+            setSelectedVehiculoId(preasignado.id);
+            setTransporteSeleccionado(preasignado.id);
+          } else {
+            setSelectedVehiculoId(null);
+            setTransporteSeleccionado(null);
+          }
+        } else {
+          setSelectedVehiculoId(null);
+          setTransporteSeleccionado(null);
+        }
+      }
       // Flujo continuo: entrada -> salida -> entrada -> salida (sin bloqueo de Turno Completo)
       setChecadorInstructionVisible(true);
     } catch (err: any) {
@@ -323,7 +360,9 @@ export default function EmpleadoAsistencia() {
           fotoUrl,
           lat,
           lng,
-          addressToSave
+          addressToSave,
+          undefined,
+          selectedVehiculoId
         );
         setChecadorResultMsg('Entrada registrada en Inttec y Daravisa');
       } else {
@@ -530,19 +569,103 @@ export default function EmpleadoAsistencia() {
                   Se tomará una selfie con la cámara frontal para registrar tu asistencia. También se capturará tu ubicación como verificación.
                 </Text>
 
+                {!(registroHoy?.hora_entrada && !registroHoy?.hora_salida) && (
+                  <View style={{ width: '100%', marginTop: Spacing.two }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                        🚐 ¿Cómo llegaste hoy? <Text style={{ color: themeColors.danger }}>*</Text>
+                      </Text>
+                      {transporteSeleccionado === null && (
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.danger }}>
+                          Obligatorio
+                        </Text>
+                      )}
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 2 }}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setTransporteSeleccionado('OFICINA');
+                            setSelectedVehiculoId(null);
+                          }}
+                          style={{
+                            paddingHorizontal: 12,
+                            paddingVertical: 8,
+                            borderRadius: 10,
+                            borderWidth: 1.5,
+                            borderColor: transporteSeleccionado === 'OFICINA' ? themeColors.accent : themeColors.border,
+                            backgroundColor: transporteSeleccionado === 'OFICINA' ? themeColors.accent + '18' : themeColors.backgroundElement,
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: transporteSeleccionado === 'OFICINA' ? themeColors.accent : themeColors.textSecondary }}>
+                            🏢 Oficina / Auto propio
+                          </Text>
+                        </TouchableOpacity>
+                        {vehiculosFlotaConGps.map((veh: Vehiculo) => {
+                          const isSelected = transporteSeleccionado === veh.id;
+                          return (
+                            <TouchableOpacity
+                              key={veh.id}
+                              onPress={() => {
+                                setTransporteSeleccionado(veh.id);
+                                setSelectedVehiculoId(veh.id);
+                              }}
+                              style={{
+                                paddingHorizontal: 12,
+                                paddingVertical: 8,
+                                borderRadius: 10,
+                                borderWidth: 1.5,
+                                borderColor: isSelected ? themeColors.accent : themeColors.border,
+                                backgroundColor: isSelected ? themeColors.accent + '18' : themeColors.backgroundElement,
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: isSelected ? themeColors.accent : themeColors.text }}>
+                                🚐 {veh.marca} {veh.modelo} ({veh.placas})
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
+                  </View>
+                )}
+
                 {registroHoy?.hora_entrada && !registroHoy?.hora_salida && (
                   <View style={[styles.checadorStatusCard, { backgroundColor: themeColors.warning + '15', borderColor: themeColors.warning }]}>
                     <Ionicons name="time" size={20} color={themeColors.warning} />
-                    <Text style={[styles.checadorStatusText, { color: themeColors.warning, marginLeft: 8 }]}>
-                      Entrada registrada a las {formatHoraDisplay(registroHoy.hora_entrada)}
-                    </Text>
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={[styles.checadorStatusText, { color: themeColors.warning }]}>
+                        Entrada registrada a las {formatHoraDisplay(registroHoy.hora_entrada)}
+                      </Text>
+                      {registroHoy.vehiculo_placas && (
+                        <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 2 }}>
+                          Camioneta del turno: <Text style={{ fontWeight: '700', color: themeColors.text }}>{registroHoy.vehiculo_placas}</Text>
+                        </Text>
+                      )}
+                    </View>
                   </View>
                 )}
 
                 <CustomButton
-                  title={registroHoy?.hora_entrada && !registroHoy?.hora_salida ? 'Registrar Salida' : 'Registrar Entrada'}
+                  title={
+                    registroHoy?.hora_entrada && !registroHoy?.hora_salida
+                      ? 'Tomar Foto y Registrar Salida'
+                      : transporteSeleccionado === null
+                        ? '⚠️ Selecciona tu transporte para continuar'
+                        : 'Tomar Foto y Registrar Entrada'
+                  }
                   onPress={handleStartCamera}
-                  variant={registroHoy?.hora_entrada && !registroHoy?.hora_salida ? 'primary' : 'success'}
+                  disabled={
+                    !(registroHoy?.hora_entrada && !registroHoy?.hora_salida) &&
+                    transporteSeleccionado === null
+                  }
+                  variant={
+                    registroHoy?.hora_entrada && !registroHoy?.hora_salida
+                      ? 'primary'
+                      : transporteSeleccionado === null
+                        ? 'secondary'
+                        : 'success'
+                  }
                   style={{ width: '100%', marginTop: Spacing.three }}
                   icon={<Ionicons name="camera-outline" size={20} color="#fff" style={{ marginRight: 8 }} />}
                 />

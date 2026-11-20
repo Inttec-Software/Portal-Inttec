@@ -49,6 +49,11 @@ export interface TurnoAsistencia {
   timezoneBadge?: TimezoneBadgeInfo | null;
   minutosBrutos?: number;
   comidaDescontada?: boolean;
+  raw_item?: Asistencia;
+  vehiculo_id?: string | null;
+  vehiculo_placas?: string | null;
+  gps_vehiculo_alerta?: string | null;
+  gps_salida_vehiculo_alerta?: string | null;
 }
 
 export interface DiaAsistencia {
@@ -682,6 +687,11 @@ export function processAsistenciasSemana(
         timezone: t.tz,
         timezoneBadge: t.badge,
         comidaDescontada: descuentoEsteTurno > 0,
+        raw_item: t.item,
+        vehiculo_id: t.item.vehiculo_id,
+        vehiculo_placas: t.item.vehiculo_placas,
+        gps_vehiculo_alerta: t.item.gps_vehiculo_alerta,
+        gps_salida_vehiculo_alerta: t.item.gps_salida_vehiculo_alerta,
       };
     });
 
@@ -909,6 +919,11 @@ export function processAsistenciasPeriodo(
         timezone: t.tz,
         timezoneBadge: t.badge,
         comidaDescontada: descuentoEsteTurno > 0,
+        raw_item: t.item,
+        vehiculo_id: t.item.vehiculo_id,
+        vehiculo_placas: t.item.vehiculo_placas,
+        gps_vehiculo_alerta: t.item.gps_vehiculo_alerta,
+        gps_salida_vehiculo_alerta: t.item.gps_salida_vehiculo_alerta,
       };
     });
 

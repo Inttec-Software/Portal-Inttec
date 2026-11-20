@@ -19,6 +19,7 @@ import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import EditarTurnoModal from '@/components/EditarTurnoModal';
 import RegistrarTurnoModal from '@/components/RegistrarTurnoModal';
 import AsignarAusenciaModal from '@/components/AsignarAusenciaModal';
+import CorroborarAsistenciaGpsModal from '@/components/CorroborarAsistenciaGpsModal';
 import {
   WeekRange,
   TurnoAsistencia,
@@ -142,6 +143,21 @@ export default function AsistenciaSemanalCard({
       setTogglingComidaFecha(null);
     }
   };
+
+  // Estado del modal de corroboración con Flota GPS
+  const [corroborarModalVisible, setCorroborarModalVisible] = useState(false);
+  const [corroborarData, setCorroborarData] = useState<{
+    fecha: string;
+    hora: string;
+    tipo: 'Entrada' | 'Salida';
+    empleadoNombre: string;
+    empleadoLat?: number | null;
+    empleadoLng?: number | null;
+    empleadoDireccion?: string | null;
+    vehiculoId?: string | null;
+    vehiculoPlacas?: string | null;
+    gpsVehiculoAlerta?: string | null;
+  } | null>(null);
 
   // Estados de días expandidos (por defecto expandir días que tengan turnos)
   const [expandedDays, setExpandedDays] = useState<{ [dateStr: string]: boolean }>({});
@@ -924,13 +940,67 @@ export default function AsistenciaSemanalCard({
 
                               {turno.direccion_entrada ? (
                                 <Text
-                                  style={[styles.turnoAddressText, { color: themeColors.textSecondary }]}
+                                  style={[
+                                    styles.turnoAddressText,
+                                    {
+                                      color: turno.direccion_entrada.toLowerCase().includes('minmoe')
+                                        ? '#15803d'
+                                        : themeColors.textSecondary,
+                                      fontWeight: turno.direccion_entrada.toLowerCase().includes('minmoe')
+                                        ? '700'
+                                        : 'normal',
+                                    },
+                                  ]}
                                   numberOfLines={2}
                                 >
-                                  📍 {turno.direccion_entrada}
+                                  {turno.direccion_entrada.toLowerCase().includes('minmoe')
+                                    ? '🏢 Checador Físico de Oficina'
+                                    : `📍 ${turno.direccion_entrada}`}
                                 </Text>
                               ) : null}
                             </View>
+
+                            {/* Botón Corroborar con Flota GPS Entrada */}
+                            <TouchableOpacity
+                              style={[styles.corroborarBtn, { backgroundColor: '#3b82f612', borderColor: '#3b82f635' }]}
+                              onPress={() => {
+                                setCorroborarData({
+                                  fecha: dia.dateStr,
+                                  hora: turno.hora_entrada,
+                                  tipo: 'Entrada',
+                                  empleadoNombre,
+                                  empleadoLat: turno.latitud_entrada,
+                                  empleadoLng: turno.longitud_entrada,
+                                  empleadoDireccion: turno.direccion_entrada,
+                                  vehiculoId: turno.vehiculo_id,
+                                  vehiculoPlacas: turno.vehiculo_placas,
+                                  gpsVehiculoAlerta: turno.gps_vehiculo_alerta,
+                                });
+                                setCorroborarModalVisible(true);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons name="navigate-circle-outline" size={12} color="#2563eb" style={{ marginRight: 3 }} />
+                              <Text style={[styles.corroborarBtnText, { color: '#2563eb' }]}>
+                                🛰️ Corroborar con Flota GPS
+                              </Text>
+                            </TouchableOpacity>
+
+                            {turno.vehiculo_placas && (
+                              <View style={{ marginTop: 4, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: themeColors.backgroundElement, borderWidth: 1, borderColor: themeColors.border, alignSelf: 'flex-start' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: themeColors.text }}>
+                                  🚐 {turno.vehiculo_placas}
+                                </Text>
+                              </View>
+                            )}
+
+                            {turno.gps_vehiculo_alerta && (
+                              <View style={{ marginTop: 4, padding: 4, borderRadius: 4, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fca5a5' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#b91c1c' }}>
+                                  {turno.gps_vehiculo_alerta}
+                                </Text>
+                              </View>
+                            )}
                           </View>
 
                           <View style={[styles.turnoColDivider, { backgroundColor: themeColors.border }]} />
@@ -1015,13 +1085,61 @@ export default function AsistenciaSemanalCard({
 
                               {turno.direccion_salida && !turno.autoCerrado ? (
                                 <Text
-                                  style={[styles.turnoAddressText, { color: themeColors.textSecondary }]}
+                                  style={[
+                                    styles.turnoAddressText,
+                                    {
+                                      color: turno.direccion_salida.toLowerCase().includes('minmoe')
+                                        ? '#15803d'
+                                        : themeColors.textSecondary,
+                                      fontWeight: turno.direccion_salida.toLowerCase().includes('minmoe')
+                                        ? '700'
+                                        : 'normal',
+                                    },
+                                  ]}
                                   numberOfLines={2}
                                 >
-                                  📍 {turno.direccion_salida}
+                                  {turno.direccion_salida.toLowerCase().includes('minmoe')
+                                    ? '🏢 Checador Físico de Oficina'
+                                    : `📍 ${turno.direccion_salida}`}
                                 </Text>
                               ) : null}
                             </View>
+
+                            {/* Botón Corroborar con Flota GPS Salida */}
+                            {turno.hora_salida && !turno.autoCerrado && (
+                              <TouchableOpacity
+                                style={[styles.corroborarBtn, { backgroundColor: '#3b82f612', borderColor: '#3b82f635', marginTop: 4 }]}
+                                onPress={() => {
+                                  setCorroborarData({
+                                    fecha: dia.dateStr,
+                                    hora: turno.hora_salida || '18:00:00',
+                                    tipo: 'Salida',
+                                    empleadoNombre,
+                                    empleadoLat: turno.latitud_salida,
+                                    empleadoLng: turno.longitud_salida,
+                                    empleadoDireccion: turno.direccion_salida,
+                                    vehiculoId: turno.vehiculo_id,
+                                    vehiculoPlacas: turno.vehiculo_placas,
+                                    gpsVehiculoAlerta: turno.gps_salida_vehiculo_alerta,
+                                  });
+                                  setCorroborarModalVisible(true);
+                                }}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons name="navigate-circle-outline" size={12} color="#2563eb" style={{ marginRight: 3 }} />
+                                <Text style={[styles.corroborarBtnText, { color: '#2563eb' }]}>
+                                  🛰️ Corroborar con Flota GPS
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+
+                            {turno.gps_salida_vehiculo_alerta && (
+                              <View style={{ marginTop: 4, padding: 4, borderRadius: 4, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fca5a5' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#b91c1c' }}>
+                                  {turno.gps_salida_vehiculo_alerta}
+                                </Text>
+                              </View>
+                            )}
                           </View>
                         </View>
                       </View>
@@ -1081,6 +1199,27 @@ export default function AsistenciaSemanalCard({
             loadAusenciasLocal();
             onRefresh?.();
           }}
+        />
+      )}
+
+      {/* Modal de Corroboración con Flota GPS */}
+      {corroborarData && (
+        <CorroborarAsistenciaGpsModal
+          visible={corroborarModalVisible}
+          onClose={() => {
+            setCorroborarModalVisible(false);
+            setCorroborarData(null);
+          }}
+          fecha={corroborarData.fecha}
+          hora={corroborarData.hora}
+          tipo={corroborarData.tipo}
+          empleadoNombre={corroborarData.empleadoNombre}
+          empleadoLat={corroborarData.empleadoLat}
+          empleadoLng={corroborarData.empleadoLng}
+          empleadoDireccion={corroborarData.empleadoDireccion}
+          vehiculoId={corroborarData.vehiculoId}
+          vehiculoPlacas={corroborarData.vehiculoPlacas}
+          gpsVehiculoAlerta={corroborarData.gpsVehiculoAlerta}
         />
       )}
     </View>
@@ -1573,5 +1712,19 @@ const styles = StyleSheet.create({
   addAnotherTurnoText: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  corroborarBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginTop: 6,
+    alignSelf: 'flex-start',
+  },
+  corroborarBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

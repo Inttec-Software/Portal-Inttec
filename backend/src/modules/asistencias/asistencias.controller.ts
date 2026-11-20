@@ -1,5 +1,14 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
+import {
+  ensureGpsSchema,
+  fetchEpcomGpsDevices,
+  buildSimulatedTelemetryForVehicles,
+  calculateDistanceMeters,
+  matchVehicleToGpsDevice,
+  fetchFleetSnapshotAtTime,
+  EpcomGpsDevice,
+} from '../../services/epcomGpsService';
 
 let hikvisionHeartbeatCounter = 0;
 
@@ -62,10 +71,101 @@ export const registrarEntrada = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { env } = tenant;
-    const payload = req.body;
+    await ensureGpsSchema(env);
+    const payload = { ...req.body };
 
     const poolInttec = getDbPool('inttec', env);
     const poolDaravisa = getDbPool('daravisa', env);
+
+    // Cruce automático con el GPS de la camioneta (Ruptela / EPCOM GPS)
+    try {
+      const vehRes = await poolInttec.query('SELECT * FROM vehiculos WHERE activo = true');
+      const vehiculos = vehRes.rows || [];
+      let vehiculoAsignado: any = null;
+
+      if (payload.vehiculo_id) {
+        vehiculoAsignado = vehiculos.find((v: any) => v.id === payload.vehiculo_id);
+        // Si el empleado seleccionó esta camioneta hoy, agregarlo a conductores_hoy_ids
+        if (vehiculoAsignado && payload.empleado_id) {
+          const todayStr = payload.fecha || new Date().toISOString().split('T')[0];
+          const currentConductores: string[] = Array.isArray(vehiculoAsignado.conductores_hoy_ids)
+            ? vehiculoAsignado.conductores_hoy_ids
+            : [];
+          const nextConductores = Array.from(new Set([...currentConductores, payload.empleado_id]));
+          await Promise.allSettled([
+            poolInttec.query(
+              'UPDATE vehiculos SET conductores_hoy_ids = $1::jsonb, conductores_hoy_fecha = $2 WHERE id = $3',
+              [JSON.stringify(nextConductores), todayStr, vehiculoAsignado.id]
+            ),
+            poolDaravisa.query(
+              'UPDATE vehiculos SET conductores_hoy_ids = $1::jsonb, conductores_hoy_fecha = $2 WHERE id = $3',
+              [JSON.stringify(nextConductores), todayStr, vehiculoAsignado.id]
+            ),
+          ]);
+        }
+      } else if (payload.empleado_id) {
+        // Buscar si las administradoras o un compañero ya lo asignó hoy a una camioneta
+        vehiculoAsignado = vehiculos.find(
+          (v: any) =>
+            Array.isArray(v.conductores_hoy_ids) &&
+            v.conductores_hoy_ids.includes(payload.empleado_id)
+        );
+      }
+
+      if (vehiculoAsignado) {
+        payload.vehiculo_id = vehiculoAsignado.id;
+        payload.vehiculo_placas = `${vehiculoAsignado.marca} ${vehiculoAsignado.modelo} (${vehiculoAsignado.placas})`;
+
+        // Solo auditar telemetría GPS si el vehículo tiene un rastreador GPS configurado
+        if (vehiculoAsignado.gps_imei && String(vehiculoAsignado.gps_imei).trim().length > 0) {
+          const gpsData = await fetchEpcomGpsDevices(env);
+          let matchedGps: EpcomGpsDevice | undefined;
+
+          if (gpsData.devices.length > 0) {
+            matchedGps = matchVehicleToGpsDevice(vehiculoAsignado, gpsData.devices);
+          } else if (gpsData.source === 'SIMULACION_DEMO') {
+            const simMap = buildSimulatedTelemetryForVehicles(vehiculos);
+            matchedGps = simMap.get(vehiculoAsignado.id);
+          }
+
+          if (matchedGps && matchedGps.lat && matchedGps.lng) {
+            payload.gps_vehiculo_lat = matchedGps.lat;
+            payload.gps_vehiculo_lng = matchedGps.lng;
+            payload.gps_vehiculo_velocidad = matchedGps.speed;
+            payload.gps_vehiculo_ignicion = matchedGps.ignition;
+            payload.gps_vehiculo_direccion = matchedGps.address || `${matchedGps.lat.toFixed(5)}, ${matchedGps.lng.toFixed(5)}`;
+
+            const empLat = Number(payload.latitud_entrada || 0);
+            const empLng = Number(payload.longitud_entrada || 0);
+
+            const alertas: string[] = [];
+            if (!empLat && !empLng) {
+              alertas.push(
+                `⚠️ Ubicación del celular APAGADA. La camioneta ${vehiculoAsignado.placas} estaba en ${payload.gps_vehiculo_direccion} (${matchedGps.speed} km/h)`
+              );
+            } else {
+              const distM = calculateDistanceMeters(empLat, empLng, matchedGps.lat, matchedGps.lng);
+              payload.gps_vehiculo_distancia_m = distM;
+              if (distM > 350) {
+                alertas.push(
+                  `📍 Empleado a ${(distM / 1000).toFixed(2)} km de la camioneta ${vehiculoAsignado.placas}`
+                );
+              }
+            }
+
+            if (matchedGps.speed > 10) {
+              alertas.push(`🚨 Camioneta en movimiento (${matchedGps.speed} km/h) al checar asistencia`);
+            }
+
+            if (alertas.length > 0) {
+              payload.gps_vehiculo_alerta = alertas.join(' • ');
+            }
+          }
+        }
+      }
+    } catch (gpsCheckErr: any) {
+      console.warn('[Asistencia GPS Check] Error verificando GPS vehicular:', gpsCheckErr.message);
+    }
 
     // Auto-cierre de turnos anteriores abiertos (olvidos de checada tras pasar las 11:59 PM): fijar salida a las 18:00:00
     if (payload.empleado_id && payload.fecha) {
@@ -118,10 +218,83 @@ export const registrarSalida = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { env } = tenant;
+    await ensureGpsSchema(env);
     const { id, empleado_id, fecha, ...payload } = req.body;
 
     const poolInttec = getDbPool('inttec', env);
     const poolDaravisa = getDbPool('daravisa', env);
+
+    // Verificación GPS vehicular para Salida
+    try {
+      let existingVehiculoId = payload.vehiculo_id;
+      if (!existingVehiculoId) {
+        let lookupQuery = '';
+        let lookupParams: any[] = [];
+        if (id) {
+          lookupQuery = 'SELECT vehiculo_id, vehiculo_placas FROM asistencias WHERE id = $1 LIMIT 1';
+          lookupParams = [id];
+        } else if (empleado_id && fecha) {
+          lookupQuery =
+            'SELECT vehiculo_id, vehiculo_placas FROM asistencias WHERE empleado_id = $1 AND fecha = $2 AND hora_salida IS NULL LIMIT 1';
+          lookupParams = [empleado_id, fecha];
+        }
+        if (lookupQuery) {
+          const checkRes = await poolInttec.query(lookupQuery, lookupParams);
+          if (checkRes.rows.length > 0 && checkRes.rows[0].vehiculo_id) {
+            existingVehiculoId = checkRes.rows[0].vehiculo_id;
+          }
+        }
+      }
+
+      if (existingVehiculoId) {
+        const vehRes = await poolInttec.query('SELECT * FROM vehiculos WHERE id = $1', [existingVehiculoId]);
+        const vehiculo = vehRes.rows[0];
+        if (vehiculo && vehiculo.gps_imei && String(vehiculo.gps_imei).trim().length > 0) {
+          const gpsData = await fetchEpcomGpsDevices(env);
+          let matchedGps: EpcomGpsDevice | undefined;
+          if (gpsData.devices.length > 0) {
+            matchedGps = matchVehicleToGpsDevice(vehiculo, gpsData.devices);
+          } else if (gpsData.source === 'SIMULACION_DEMO') {
+            const simMap = buildSimulatedTelemetryForVehicles([vehiculo]);
+            matchedGps = simMap.get(vehiculo.id);
+          }
+
+          if (matchedGps && matchedGps.lat && matchedGps.lng) {
+            payload.gps_salida_vehiculo_lat = matchedGps.lat;
+            payload.gps_salida_vehiculo_lng = matchedGps.lng;
+            payload.gps_salida_vehiculo_velocidad = matchedGps.speed;
+
+            const empLat = Number(payload.latitud_salida || 0);
+            const empLng = Number(payload.longitud_salida || 0);
+            const alertasSalida: string[] = [];
+
+            if (!empLat && !empLng) {
+              alertasSalida.push(
+                `⚠️ [Salida] Celular sin GPS. Camioneta en ${matchedGps.address || `${matchedGps.lat.toFixed(5)}, ${matchedGps.lng.toFixed(5)}`} (${matchedGps.speed} km/h)`
+              );
+            } else {
+              const distM = calculateDistanceMeters(empLat, empLng, matchedGps.lat, matchedGps.lng);
+              payload.gps_salida_vehiculo_distancia_m = distM;
+              if (distM > 350) {
+                alertasSalida.push(
+                  `📍 [Salida] Empleado a ${(distM / 1000).toFixed(2)} km de la camioneta ${vehiculo.placas}`
+                );
+              }
+            }
+
+            if (matchedGps.speed > 10) {
+              alertasSalida.push(`🚨 [Salida] Camioneta en movimiento (${matchedGps.speed} km/h) al checar salida`);
+            }
+
+            if (alertasSalida.length > 0) {
+              payload.gps_salida_vehiculo_alerta = alertasSalida.join(' • ');
+            }
+          }
+        }
+      }
+    } catch (gpsSalidaErr: any) {
+      console.warn('[Asistencia Salida GPS Check] Error:', gpsSalidaErr.message);
+    }
 
     const keys = Object.keys(payload);
     const values = Object.values(payload);
@@ -1218,5 +1391,54 @@ export const eliminarAusencia = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[ELIMINAR AUSENCIA ERROR]:', error);
     return res.status(500).json({ error: error.message });
+  }
+};
+
+export const corroborarAsistenciaConFlota = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { env } = tenant;
+
+    const {
+      fecha,
+      hora,
+      empleado_lat,
+      empleado_lng,
+      empleado_nombre,
+      empleado_direccion,
+      tipo_checada,
+      vehiculo_id,
+    } = req.query as {
+      fecha?: string;
+      hora?: string;
+      empleado_lat?: string;
+      empleado_lng?: string;
+      empleado_nombre?: string;
+      empleado_direccion?: string;
+      tipo_checada?: string;
+      vehiculo_id?: string;
+    };
+
+    if (!fecha || !hora) {
+      return res.status(400).json({ error: 'Parámetros fecha y hora son obligatorios' });
+    }
+
+    const snapshot = await fetchFleetSnapshotAtTime({
+      fecha,
+      hora,
+      empleadoLat: empleado_lat ? parseFloat(empleado_lat) : null,
+      empleadoLng: empleado_lng ? parseFloat(empleado_lng) : null,
+      empleadoNombre: empleado_nombre || null,
+      empleadoDireccion: empleado_direccion || null,
+      tipoChecada: tipo_checada === 'Salida' ? 'Salida' : 'Entrada',
+      vehiculoAsignadoId: vehiculo_id || null,
+      env,
+    });
+
+    return res.json(snapshot);
+  } catch (error: any) {
+    console.error('[Corroborar Asistencia Flota] Error:', error);
+    return res.status(500).json({ error: error.message || 'Error al corroborar flota' });
   }
 };

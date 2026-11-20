@@ -35,6 +35,7 @@ import ImageViewerModal from '@/components/ImageViewerModal';
 import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import CustomButton from '@/components/CustomButton';
 import EditarHorarioModal from '@/components/EditarHorarioModal';
+import CorroborarAsistenciaGpsModal from '@/components/CorroborarAsistenciaGpsModal';
 import {
   getWeekRange,
   getPreviousWeekMonday,
@@ -98,6 +99,21 @@ export default function AdminAsistencia() {
   // Visor de foto y mapa
   const [viewerVisible, setViewerVisible] = useState(false);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
+
+  // Estado del modal de corroboración GPS con la flota
+  const [corroborarModalVisible, setCorroborarModalVisible] = useState(false);
+  const [corroborarData, setCorroborarData] = useState<{
+    fecha: string;
+    hora: string;
+    tipo: 'Entrada' | 'Salida';
+    empleadoNombre: string;
+    empleadoLat?: number | null;
+    empleadoLng?: number | null;
+    empleadoDireccion?: string | null;
+    vehiculoId?: string | null;
+    vehiculoPlacas?: string | null;
+    gpsVehiculoAlerta?: string | null;
+  } | null>(null);
   const [selectedAsistenciaInfo, setSelectedAsistenciaInfo] = useState<{
     fecha: string;
     hora: string;
@@ -384,6 +400,15 @@ export default function AdminAsistencia() {
       let direccionDia: string | null = null;
       let fotoEntradaDia: string | null = null;
       let timezoneBadge: TimezoneBadgeInfo | null = null;
+      let vehiculoPlacasHoy: string | null = null;
+      let vehiculoIdHoy: string | null = null;
+      let latitudHoy: number | null = null;
+      let longitudHoy: number | null = null;
+      let gpsVehiculoAlertaHoy: string | null = null;
+      let gpsVehiculoDireccionHoy: string | null = null;
+      let gpsVehiculoLatHoy: number | null = null;
+      let gpsVehiculoLngHoy: number | null = null;
+      let gpsVehiculoVelocidadHoy: number | null = null;
 
       if (asistenciasTargetDia.length > 0) {
         const sorted = [...asistenciasTargetDia].sort((a, b) =>
@@ -392,6 +417,15 @@ export default function AdminAsistencia() {
         const lastReg = sorted[0];
         const tz = extractTimezoneFromRecord(lastReg);
         timezoneBadge = getTimezoneBadgeInfo(tz);
+        vehiculoPlacasHoy = lastReg.vehiculo_placas || null;
+        vehiculoIdHoy = lastReg.vehiculo_id || null;
+        latitudHoy = lastReg.latitud_entrada ?? null;
+        longitudHoy = lastReg.longitud_entrada ?? null;
+        gpsVehiculoAlertaHoy = lastReg.gps_vehiculo_alerta || null;
+        gpsVehiculoDireccionHoy = lastReg.gps_vehiculo_direccion || null;
+        gpsVehiculoLatHoy = lastReg.gps_vehiculo_lat ?? null;
+        gpsVehiculoLngHoy = lastReg.gps_vehiculo_lng ?? null;
+        gpsVehiculoVelocidadHoy = lastReg.gps_vehiculo_velocidad ?? null;
 
         const esDiaPasado = targetFecha < fechaHoyJornada;
         const autoCerrado = isAutoCerradoAsistencia({
@@ -437,6 +471,15 @@ export default function AdminAsistencia() {
         direccionHoy: direccionDia ? cleanAddressForDisplay(direccionDia) : null,
         fotoEntradaHoy: fotoEntradaDia,
         timezoneBadge,
+        vehiculoPlacasHoy,
+        vehiculoIdHoy,
+        latitudHoy,
+        longitudHoy,
+        gpsVehiculoAlertaHoy,
+        gpsVehiculoDireccionHoy,
+        gpsVehiculoLatHoy,
+        gpsVehiculoLngHoy,
+        gpsVehiculoVelocidadHoy,
         isViewingToday,
         targetFecha,
         totalMinutosSemana: periodoProcesado.totalMinutosSemana,
@@ -1528,10 +1571,154 @@ export default function AdminAsistencia() {
 
                     {emp.direccionHoy && (
                       <View style={styles.direccionRow}>
-                        <Ionicons name="location-outline" size={13} color={themeColors.textSecondary} />
-                        <Text style={[styles.direccionText, { color: themeColors.textSecondary }]} numberOfLines={1}>
-                          {emp.direccionHoy}
+                        <Ionicons
+                          name={
+                            emp.direccionHoy.toLowerCase().includes('minmoe') ||
+                            emp.direccionHoy.toLowerCase().includes('oficina')
+                              ? 'business-outline'
+                              : 'location-outline'
+                          }
+                          size={13}
+                          color={
+                            emp.direccionHoy.toLowerCase().includes('minmoe') ||
+                            emp.direccionHoy.toLowerCase().includes('oficina')
+                              ? '#16a34a'
+                              : themeColors.textSecondary
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.direccionText,
+                            {
+                              color:
+                                emp.direccionHoy.toLowerCase().includes('minmoe') ||
+                                emp.direccionHoy.toLowerCase().includes('oficina')
+                                  ? '#15803d'
+                                  : themeColors.textSecondary,
+                              fontWeight:
+                                emp.direccionHoy.toLowerCase().includes('minmoe') ||
+                                emp.direccionHoy.toLowerCase().includes('oficina')
+                                  ? '700'
+                                  : 'normal',
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {emp.direccionHoy.toLowerCase().includes('minmoe')
+                            ? '🏢 Checador Físico de Oficina'
+                            : emp.direccionHoy}
                         </Text>
+                      </View>
+                    )}
+
+                    {/* Información del GPS de la Camioneta (Ruptela / EPCOM GPS) */}
+                    {(emp.vehiculoPlacasHoy || emp.gpsVehiculoAlertaHoy) && (
+                      <View
+                        style={{
+                          marginTop: 6,
+                          padding: 8,
+                          borderRadius: 8,
+                          backgroundColor: emp.gpsVehiculoAlertaHoy ? '#fef2f2' : themeColors.background,
+                          borderWidth: 1,
+                          borderColor: emp.gpsVehiculoAlertaHoy ? '#fca5a5' : themeColors.border,
+                          gap: 4,
+                        }}
+                      >
+                        {emp.vehiculoPlacasHoy && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                              <Ionicons
+                                name="car-sport"
+                                size={14}
+                                color={emp.gpsVehiculoAlertaHoy ? '#dc2626' : themeColors.accent}
+                              />
+                              <Text
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: '700',
+                                  color: emp.gpsVehiculoAlertaHoy ? '#991b1b' : themeColors.text,
+                                }}
+                              >
+                                Camioneta: {emp.vehiculoPlacasHoy}
+                                {emp.gpsVehiculoVelocidadHoy !== null && emp.gpsVehiculoVelocidadHoy !== undefined
+                                  ? ` (${emp.gpsVehiculoVelocidadHoy} km/h)`
+                                  : ''}
+                              </Text>
+                            </View>
+                            {emp.gpsVehiculoLatHoy && emp.gpsVehiculoLngHoy ? (
+                              <TouchableOpacity
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  const url = `https://www.google.com/maps/search/?api=1&query=${emp.gpsVehiculoLatHoy},${emp.gpsVehiculoLngHoy}`;
+                                  if (Platform.OS === 'web') window.open(url, '_blank');
+                                }}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 3,
+                                  backgroundColor: emp.gpsVehiculoAlertaHoy ? '#dc2626' : themeColors.accent,
+                                  paddingHorizontal: 7,
+                                  paddingVertical: 3,
+                                  borderRadius: 6,
+                                }}
+                              >
+                                <Ionicons name="navigate" size={11} color="#fff" />
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#fff' }}>
+                                  Ver GPS Camioneta
+                                </Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        )}
+                        {emp.gpsVehiculoAlertaHoy ? (
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#dc2626' }}>
+                            {emp.gpsVehiculoAlertaHoy}
+                          </Text>
+                        ) : emp.gpsVehiculoDireccionHoy ? (
+                          <Text style={{ fontSize: 11, color: themeColors.textSecondary }} numberOfLines={1}>
+                            🛰️ GPS Camioneta al checar: {emp.gpsVehiculoDireccionHoy}
+                          </Text>
+                        ) : null}
+                      </View>
+                    )}
+
+                    {/* Botón Corroborar con Flota GPS del día */}
+                    {emp.estadoDia !== 'SIN_REGISTRO' && emp.ultimaEntrada && (
+                      <View style={{ marginTop: 6, flexDirection: 'row', alignItems: 'center' }}>
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            setCorroborarData({
+                              fecha: emp.targetFecha,
+                              hora: emp.ultimaEntrada || '08:00:00',
+                              tipo: 'Entrada',
+                              empleadoNombre: emp.nombre,
+                              empleadoLat: emp.latitudHoy,
+                              empleadoLng: emp.longitudHoy,
+                              empleadoDireccion: emp.direccionHoy,
+                              vehiculoId: emp.vehiculoIdHoy,
+                              vehiculoPlacas: emp.vehiculoPlacasHoy,
+                              gpsVehiculoAlerta: emp.gpsVehiculoAlertaHoy,
+                            });
+                            setCorroborarModalVisible(true);
+                          }}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 4,
+                            backgroundColor: '#3b82f615',
+                            borderColor: '#3b82f640',
+                            borderWidth: 1,
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            borderRadius: 6,
+                          }}
+                        >
+                          <Ionicons name="navigate-circle-outline" size={13} color="#2563eb" />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>
+                            🛰️ Corroborar con Flota GPS
+                          </Text>
+                        </TouchableOpacity>
                       </View>
                     )}
                   </View>
@@ -1679,6 +1866,27 @@ export default function AdminAsistencia() {
 
       {/* Modales de checador del admin */}
       {renderModalesChecadorAdmin()}
+
+      {/* Modal de Corroboración con Flota GPS */}
+      {corroborarData && (
+        <CorroborarAsistenciaGpsModal
+          visible={corroborarModalVisible}
+          onClose={() => {
+            setCorroborarModalVisible(false);
+            setCorroborarData(null);
+          }}
+          fecha={corroborarData.fecha}
+          hora={corroborarData.hora}
+          tipo={corroborarData.tipo}
+          empleadoNombre={corroborarData.empleadoNombre}
+          empleadoLat={corroborarData.empleadoLat}
+          empleadoLng={corroborarData.empleadoLng}
+          empleadoDireccion={corroborarData.empleadoDireccion}
+          vehiculoId={corroborarData.vehiculoId}
+          vehiculoPlacas={corroborarData.vehiculoPlacas}
+          gpsVehiculoAlerta={corroborarData.gpsVehiculoAlerta}
+        />
+      )}
     </View>
   );
 

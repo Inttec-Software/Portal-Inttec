@@ -12,6 +12,7 @@ import {
   getAusencias,
   asignarAusencias,
   eliminarAusencia,
+  corroborarAsistenciaConFlota,
 } from './asistencias.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -33,6 +34,7 @@ router.use(verifyToken);
 router.use(tenantMiddleware);
 
 router.get('/hoy/:empleado_id', getAsistenciaHoy);
+router.get('/corroborar-gps', corroborarAsistenciaConFlota);
 router.post('/entrada', registrarEntrada);
 router.put('/salida', registrarSalida);
 router.get('/historial/:empleado_id', getHistorial);

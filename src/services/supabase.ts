@@ -600,6 +600,68 @@ export interface Asistencia {
   descripcion?: string | null;
   autoCerrado?: boolean;
   creado_en?: string;
+  // Verificación cruzada GPS Vehicular (Ruptela / EPCOM GPS)
+  vehiculo_id?: string | null;
+  vehiculo_placas?: string | null;
+  gps_vehiculo_lat?: number | null;
+  gps_vehiculo_lng?: number | null;
+  gps_vehiculo_velocidad?: number | null;
+  gps_vehiculo_ignicion?: boolean | null;
+  gps_vehiculo_direccion?: string | null;
+  gps_vehiculo_distancia_m?: number | null;
+  gps_vehiculo_alerta?: string | null;
+  gps_salida_vehiculo_lat?: number | null;
+  gps_salida_vehiculo_lng?: number | null;
+  gps_salida_vehiculo_velocidad?: number | null;
+  gps_salida_vehiculo_distancia_m?: number | null;
+  gps_salida_vehiculo_alerta?: string | null;
+}
+
+export interface FleetGpsSnapshotItem {
+  vehiculo_id: string;
+  marca: string;
+  modelo: string;
+  placas: string;
+  gps_imei?: string | null;
+  gps_nombre?: string | null;
+  lat: number | null;
+  lng: number | null;
+  velocidad: number;
+  ignicion: boolean;
+  bateria_v?: number | null;
+  direccion?: string | null;
+  hora_reporte?: string | null;
+  timestamp?: number | null;
+  diferencia_minutos?: number | null;
+  distancia_empleado_m?: number | null;
+  es_vehiculo_asignado: boolean;
+  estado_verificacion: 'EN_MOVIMIENTO' | 'CERCA_EMPLEADO' | 'LEJOS_EMPLEADO' | 'ESTACIONADA' | 'SIN_SENAL';
+  badge_color: 'verde' | 'azul' | 'rojo' | 'gris';
+  motivo_estado: string;
+}
+
+export interface CorroboracionFlotaResponse {
+  fecha: string;
+  hora_objetivo: string;
+  target_timestamp: number;
+  empleado_nombre?: string | null;
+  tipo_checada?: 'Entrada' | 'Salida';
+  empleado_lat?: number | null;
+  empleado_lng?: number | null;
+  empleado_direccion?: string | null;
+  empleado_gps_activo: boolean;
+  empleado_en_oficina?: boolean;
+  vehiculo_asignado_id?: string | null;
+  vehiculo_asignado_placas?: string | null;
+  unidades: FleetGpsSnapshotItem[];
+  resumen: {
+    total_unidades: number;
+    en_movimiento: number;
+    estacionadas: number;
+    cerca_empleado: number;
+    sin_senal: number;
+    alerta_principal?: string | null;
+  };
 }
 
 export type TipoAusencia = 'VACACIONES' | 'PERMISO_SIN_GOCE';
@@ -696,7 +758,8 @@ export const AsistenciaService = {
     latitud: number,
     longitud: number,
     direccion: string,
-    timeZone?: string
+    timeZone?: string,
+    vehiculoId?: string | null
   ): Promise<Asistencia> {
     const resolvedTz = timeZone || detectUserTimezone(latitud, longitud, direccion);
     const ahora = new Date();
@@ -716,6 +779,7 @@ export const AsistenciaService = {
         latitud_entrada: latitud,
         longitud_entrada: longitud,
         direccion_entrada: direccionConTz,
+        vehiculo_id: vehiculoId || undefined,
       })
     });
     if (!res.ok) throw new Error('Error al registrar entrada');
@@ -993,6 +1057,43 @@ export const AsistenciaService = {
     }
     return data;
   },
+
+  /**
+   * Corrobora una checada de asistencia (Entrada o Salida) consultando la foto retroactiva
+   * de las 5 unidades GPS en el minuto exacto del evento.
+   */
+  async corroborarConFlotaGps(params: {
+    fecha: string;
+    hora: string;
+    empleadoLat?: number | null;
+    empleadoLng?: number | null;
+    empleadoNombre?: string | null;
+    empleadoDireccion?: string | null;
+    tipoChecada?: 'Entrada' | 'Salida';
+    vehiculoId?: string | null;
+  }): Promise<CorroboracionFlotaResponse> {
+    const headers = await getApiHeaders();
+    const qs = new URLSearchParams();
+    qs.append('fecha', params.fecha);
+    qs.append('hora', params.hora);
+    if (params.empleadoLat !== undefined && params.empleadoLat !== null) {
+      qs.append('empleado_lat', String(params.empleadoLat));
+    }
+    if (params.empleadoLng !== undefined && params.empleadoLng !== null) {
+      qs.append('empleado_lng', String(params.empleadoLng));
+    }
+    if (params.empleadoNombre) qs.append('empleado_nombre', params.empleadoNombre);
+    if (params.empleadoDireccion) qs.append('empleado_direccion', params.empleadoDireccion);
+    if (params.tipoChecada) qs.append('tipo_checada', params.tipoChecada);
+    if (params.vehiculoId) qs.append('vehiculo_id', params.vehiculoId);
+
+    const res = await fetch(`${getApiUrl()}/api/asistencias/corroborar-gps?${qs.toString()}`, { headers });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || err.error || 'Error al corroborar asistencia con flota GPS');
+    }
+    return res.json();
+  },
 };
 
 export interface Venta {
@@ -1101,6 +1202,96 @@ export interface Vehiculo {
   numero_economico?: string | null;
   activo: boolean;
   created_at?: string;
+  // Telemetría GPS Ruptela / EPCOM GPS
+  gps_imei?: string | null;
+  gps_nombre_epcom?: string | null;
+  gps_lat?: number | null;
+  gps_lng?: number | null;
+  gps_velocidad?: number | null;
+  gps_rumbo?: number | null;
+  gps_ignicion?: boolean | null;
+  gps_bateria_v?: number | null;
+  gps_direccion?: string | null;
+  gps_ultima_actualizacion?: string | null;
+  gps_online?: boolean;
+  gps_modelo_hardware?: string;
+  conductores_hoy_ids?: string[];
+  conductores_hoy?: { id: string; nombre: string; email?: string }[];
+}
+
+export interface GpsRoutePoint {
+  lat: number;
+  lng: number;
+  speed: number;
+  angle: number;
+  ignition: boolean;
+  timestamp: number;
+  hora: string;
+}
+
+export interface GpsRouteStop {
+  id: string;
+  letra: string;
+  tipo: 'INICIO' | 'PARADA' | 'ACTUAL';
+  lat: number;
+  lng: number;
+  direccion: string;
+  hora_llegada: string;
+  hora_salida: string;
+  duracion_minutos: number;
+}
+
+export interface GpsRouteTrip {
+  id: string;
+  numero: number;
+  tramo_label: string;
+  desde_letra: string;
+  hasta_letra: string;
+  color: string;
+  origen_direccion: string;
+  destino_direccion: string;
+  hora_inicio: string;
+  hora_fin: string;
+  duracion_minutos: number;
+  distancia_km: number;
+  velocidad_max_kmh: number;
+  points: GpsRoutePoint[];
+}
+
+export interface GpsRouteHistoryResponse {
+  vehiculo: {
+    id: string;
+    marca: string;
+    modelo: string;
+    anio: number;
+    placas: string;
+  };
+  imei: string;
+  unit_name: string;
+  fecha: string;
+  distancia_total_km: number;
+  velocidad_max_kmh: number;
+  total_puntos: number;
+  points: GpsRoutePoint[];
+  stops: GpsRouteStop[];
+  trips: GpsRouteTrip[];
+}
+
+export interface FlotaGpsLiveResponse {
+  source: 'EPCOM_LIVE' | 'WEBHOOK' | 'SIMULACION_DEMO';
+  configured: boolean;
+  apiUrl: string;
+  error?: string | null;
+  vehiculos: Vehiculo[];
+  dispositivos_epcom_disponibles: {
+    imei: string;
+    name: string;
+    plate_number?: string;
+    lat: number;
+    lng: number;
+    speed: number;
+    ignition: boolean;
+  }[];
 }
 
 export interface RegistroGasolina {
@@ -1189,6 +1380,67 @@ export const VehiculoService = {
       body: JSON.stringify(registro)
     });
     if (!res.ok) throw new Error('Error al crear registro de gasolina');
+    return res.json();
+  },
+
+  async getFlotaGpsLive(force = false): Promise<FlotaGpsLiveResponse> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/gps/live?force=${force}`, { headers });
+    if (!res.ok) throw new Error('Error al obtener telemetría GPS de la flota');
+    return res.json();
+  },
+
+  async asignarConductoresDia(
+    vehiculoId: string,
+    empleadosIds: string[],
+    gpsImei?: string | null
+  ): Promise<{ success: boolean; vehiculo: Vehiculo }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${vehiculoId}/asignar-dia`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        empleados_ids: empleadosIds,
+        ...(gpsImei !== undefined ? { gps_imei: gpsImei } : {}),
+      }),
+    });
+    if (!res.ok) throw new Error('Error al asignar conductores del día');
+    return res.json();
+  },
+
+  async getGpsConfig(): Promise<{ apiUrl: string; configured: boolean; maskedKey: string }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/gps/config`, { headers });
+    if (!res.ok) throw new Error('Error al consultar configuración de EPCOM GPS');
+    return res.json();
+  },
+
+  async saveGpsConfig(apiUrl: string, apiKey: string): Promise<{
+    success: boolean;
+    configured: boolean;
+    apiUrl: string;
+    source: string;
+    devicesFound: number;
+    error?: string | null;
+  }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/gps/config`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ apiUrl, apiKey }),
+    });
+    if (!res.ok) throw new Error('Error al guardar configuración de EPCOM GPS');
+    return res.json();
+  },
+
+  async getHistorialRutaVehiculo(vehiculoId: string, fecha?: string): Promise<GpsRouteHistoryResponse> {
+    const headers = await getApiHeaders();
+    const qs = fecha ? `?fecha=${encodeURIComponent(fecha)}` : '';
+    const res = await fetch(`${getApiUrl()}/api/vehiculos/${vehiculoId}/gps/historial${qs}`, { headers });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.error || 'Error al obtener el historial de ruta del vehículo');
+    }
     return res.json();
   },
 };

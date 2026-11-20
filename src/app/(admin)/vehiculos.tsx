@@ -22,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
 import ImageViewerModal from '@/components/ImageViewerModal';
+import FlotaMapaLive from '@/components/FlotaMapaLive';
 
 export default function AdminVehiculosScreen() {
   const router = useRouter();
@@ -48,6 +49,7 @@ export default function AdminVehiculosScreen() {
   const [newVehiculoAnio, setNewVehiculoAnio] = useState('');
   const [newVehiculoPlacas, setNewVehiculoPlacas] = useState('');
   const [newVehiculoNumEcon, setNewVehiculoNumEcon] = useState('');
+  const [newVehiculoGpsImei, setNewVehiculoGpsImei] = useState('');
   
   const [vehiculoModalVisible, setVehiculoModalVisible] = useState(false);
   const [editingVehiculo, setEditingVehiculo] = useState<Vehiculo | null>(null);
@@ -101,6 +103,7 @@ export default function AdminVehiculosScreen() {
         anio: anioNum,
         placas: newVehiculoPlacas.trim().toUpperCase(),
         numero_economico: newVehiculoNumEcon.trim() || null,
+        gps_imei: newVehiculoGpsImei.trim() || null,
         activo: editingVehiculo ? editingVehiculo.activo : true,
       };
 
@@ -117,6 +120,7 @@ export default function AdminVehiculosScreen() {
       setNewVehiculoAnio('');
       setNewVehiculoPlacas('');
       setNewVehiculoNumEcon('');
+      setNewVehiculoGpsImei('');
       setEditingVehiculo(null);
       setVehiculoModalVisible(false);
       await refreshData();
@@ -134,6 +138,7 @@ export default function AdminVehiculosScreen() {
     setNewVehiculoAnio(String(veh.anio));
     setNewVehiculoPlacas(veh.placas);
     setNewVehiculoNumEcon(veh.numero_economico || '');
+    setNewVehiculoGpsImei(veh.gps_imei || '');
     setVehiculoModalVisible(true);
   };
 
@@ -231,6 +236,12 @@ export default function AdminVehiculosScreen() {
                 value={newVehiculoNumEcon}
                 onChangeText={setNewVehiculoNumEcon}
               />
+              <CustomInput
+                label="IMEI GPS Ruptela / EPCOM (Opcional)"
+                placeholder="Ej. 352625110001234"
+                value={newVehiculoGpsImei}
+                onChangeText={setNewVehiculoGpsImei}
+              />
 
               <View style={{ marginTop: Spacing.two, flexDirection: 'row', gap: 10 }}>
                 <View style={{ flex: 1 }}>
@@ -256,6 +267,9 @@ export default function AdminVehiculosScreen() {
           ) : (
             /* VISTAS DE LISTADO Y BITÁCORA */
             <>
+              {/* Sección: Rastreo GPS en Vivo (Ruptela ECO5 Lite + EPCOM GPS) */}
+              <FlotaMapaLive onVehiculoUpdated={() => refreshData(true)} />
+
               {/* Sección: Parque Vehicular */}
               <View style={{
                 marginHorizontal: Spacing.two,
