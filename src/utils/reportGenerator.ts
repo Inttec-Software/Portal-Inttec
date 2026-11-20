@@ -4,11 +4,35 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import { Platform, Alert } from 'react-native';
-import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
+import { Gasto, GastoHelper, Asistencia, AsistenciaService, AusenciaAsistencia, Usuario, CompanyService } from '../services/supabase';
 import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
-import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay, isAutoCerradoAsistencia } from './asistenciaUtils';
+import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay, isAutoCerradoAsistencia, getAusenciaLabel } from './asistenciaUtils';
 import { cleanAddressForDisplay } from './timezoneUtils';
+
+const fetchAusenciasPorEmpleadoSafe = async (
+  startDate: string,
+  endDate: string,
+  empleadoId?: string
+): Promise<Map<string, AusenciaAsistencia[]>> => {
+  const map = new Map<string, AusenciaAsistencia[]>();
+  try {
+    const list = await AsistenciaService.getAusencias({ empleadoId, startDate, endDate });
+    for (const a of list || []) {
+      const arr = map.get(a.empleado_id) || [];
+      arr.push(a);
+      map.set(a.empleado_id, arr);
+    }
+  } catch {
+    // Si no hay conexión o falla, se continúa sin ausencias
+  }
+  return map;
+};
+
+const formatAusenciaReportLabel = (ausencia: AusenciaAsistencia): string => {
+  const base = getAusenciaLabel(ausencia.tipo);
+  return ausencia.motivo ? `${base} (${ausencia.motivo})` : base;
+};
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
 // Esto evita ~959 KB en el bundle principal de la app
@@ -1297,6 +1321,7 @@ export const ReportGenerator = {
   ): Promise<void> {
     const range = getWeekRange(weekMondayInput);
     const branding = await getCompanyBranding();
+    const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.mondayStr, range.sundayStr);
 
     const asistenciasPorEmpleado = new Map<string, Asistencia[]>();
     for (const a of asistencias) {
@@ -1321,8 +1346,9 @@ export const ReportGenerator = {
 
     for (const emp of personalTarget) {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
+      const ausenciasEmp = ausenciasPorEmpleado.get(emp.id) || [];
       const empHoras = emp.horas_semanales ? Number(emp.horas_semanales) : 48;
-      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras);
+      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras, ausenciasEmp);
 
       if (semanaData.turnosTotales > 0) {
         empleadosConRegistro++;
@@ -1333,9 +1359,9 @@ export const ReportGenerator = {
       }
 
       let diasHtml = '';
-      const diasConTurnos = semanaData.dias.filter(d => d.turnos.length > 0);
+      const diasVisibles = semanaData.dias.filter(d => d.turnos.length > 0 || Boolean(d.ausencia));
 
-      if (diasConTurnos.length === 0) {
+      if (diasVisibles.length === 0) {
         diasHtml = `
           <tr>
             <td colspan="5" style="text-align: center; color: #888; font-style: italic; padding: 10px;">
@@ -1344,7 +1370,19 @@ export const ReportGenerator = {
           </tr>
         `;
       } else {
-        for (const dia of diasConTurnos) {
+        for (const dia of diasVisibles) {
+          if (dia.turnos.length === 0 && dia.ausencia) {
+            const colorAus = dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706';
+            diasHtml += `
+              <tr>
+                <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+                <td colspan="4" style="text-align: center; color: ${colorAus}; font-weight: 700;">
+                  ${formatAusenciaReportLabel(dia.ausencia)}
+                </td>
+              </tr>
+            `;
+            continue;
+          }
           for (const turno of dia.turnos) {
             diasHtml += `
               <tr>
@@ -1546,18 +1584,29 @@ export const ReportGenerator = {
   ): Promise<void> {
     const range = getWeekRange(weekMondayInput);
     const branding = await getCompanyBranding();
+    const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.mondayStr, range.sundayStr);
     const targetHoras = empleado.horas_semanales ? Number(empleado.horas_semanales) : 48;
-    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras);
+    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras, ausenciasPorEmpleado.get(empleado.id) || []);
 
     let diasHtml = '';
     for (const dia of semanaData.dias) {
       if (dia.turnos.length === 0) {
-        diasHtml += `
-          <tr>
-            <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
-            <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
-          </tr>
-        `;
+        if (dia.ausencia) {
+          const colorAus = dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706';
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+              <td colspan="4" style="text-align: center; color: ${colorAus}; font-weight: 700;">${formatAusenciaReportLabel(dia.ausencia)}</td>
+            </tr>
+          `;
+        } else {
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+              <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
+            </tr>
+          `;
+        }
       } else {
         dia.turnos.forEach((turno, idx) => {
           diasHtml += `
@@ -1771,10 +1820,12 @@ export const ReportGenerator = {
     let empleadosConRegistro = 0;
 
     let empleadosHtml = '';
+    const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.startStr, range.endStr);
 
     for (const emp of personalTarget) {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-      const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol);
+      const ausenciasEmp = ausenciasPorEmpleado.get(emp.id) || [];
+      const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol, ausenciasEmp);
 
       if (mesData.turnosTotales > 0) {
         empleadosConRegistro++;
@@ -1785,9 +1836,9 @@ export const ReportGenerator = {
       }
 
       let diasHtml = '';
-      const diasConTurnos = mesData.dias.filter(d => d.turnos.length > 0);
+      const diasVisibles = mesData.dias.filter(d => d.turnos.length > 0 || Boolean(d.ausencia));
 
-      if (diasConTurnos.length === 0) {
+      if (diasVisibles.length === 0) {
         diasHtml = `
           <tr>
             <td colspan="5" style="text-align: center; color: #888; font-style: italic; padding: 10px;">
@@ -1796,7 +1847,19 @@ export const ReportGenerator = {
           </tr>
         `;
       } else {
-        for (const dia of diasConTurnos) {
+        for (const dia of diasVisibles) {
+          if (dia.turnos.length === 0 && dia.ausencia) {
+            const colorAus = dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706';
+            diasHtml += `
+              <tr>
+                <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+                <td colspan="4" style="text-align: center; color: ${colorAus}; font-weight: 700;">
+                  ${formatAusenciaReportLabel(dia.ausencia)}
+                </td>
+              </tr>
+            `;
+            continue;
+          }
           for (const turno of dia.turnos) {
             diasHtml += `
               <tr>
@@ -1984,17 +2047,28 @@ export const ReportGenerator = {
   ): Promise<void> {
     const range = getMonthRange(monthDateInput);
     const branding = await getCompanyBranding();
-    const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol);
+    const ausenciasMap = await fetchAusenciasPorEmpleadoSafe(range.startStr, range.endStr, empleado.id);
+    const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol, ausenciasMap.get(empleado.id) || []);
 
     let diasHtml = '';
     for (const dia of mesData.dias) {
       if (dia.turnos.length === 0) {
-        diasHtml += `
-          <tr>
-            <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
-            <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
-          </tr>
-        `;
+        if (dia.ausencia) {
+          const colorAus = dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706';
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+              <td colspan="4" style="text-align: center; color: ${colorAus}; font-weight: 700;">${formatAusenciaReportLabel(dia.ausencia)}</td>
+            </tr>
+          `;
+        } else {
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+              <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
+            </tr>
+          `;
+        }
       } else {
         dia.turnos.forEach((turno, idx) => {
           diasHtml += `
@@ -3766,11 +3840,12 @@ export const ReportGenerator = {
       ];
 
       const rows: any[][] = [];
+      const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.mondayStr, range.sundayStr);
 
       for (const emp of personalTarget) {
         const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
         const empHoras = emp.horas_semanales ? Number(emp.horas_semanales) : 48;
-        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras);
+        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras, ausenciasPorEmpleado.get(emp.id) || []);
 
         let tieneRegistros = false;
         for (const dia of semanaData.dias) {
@@ -3791,6 +3866,21 @@ export const ReportGenerator = {
                 semanaData.totalHorasSemanaStr
               ]);
             }
+          } else if (dia.ausencia) {
+            tieneRegistros = true;
+            rows.push([
+              range.label,
+              emp.nombre,
+              dia.dateStr,
+              dia.dayName,
+              formatAusenciaReportLabel(dia.ausencia),
+              '-',
+              dia.ausencia.motivo || '',
+              '-',
+              '',
+              '0h 0m',
+              semanaData.totalHorasSemanaStr
+            ]);
           }
         }
 
@@ -3826,7 +3916,8 @@ export const ReportGenerator = {
     ): Promise<void> {
       const range = getWeekRange(weekMondayInput);
       const targetHoras = empleado.horas_semanales ? Number(empleado.horas_semanales) : 48;
-      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras);
+      const ausenciasMap = await fetchAusenciasPorEmpleadoSafe(range.mondayStr, range.sundayStr, empleado.id);
+      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras, ausenciasMap.get(empleado.id) || []);
 
       const headers = [
         'Período',
@@ -3867,9 +3958,9 @@ export const ReportGenerator = {
             empleado.nombre,
             dia.dateStr,
             dia.dayName,
+            dia.ausencia ? formatAusenciaReportLabel(dia.ausencia) : '-',
             '-',
-            '-',
-            '',
+            dia.ausencia?.motivo || '',
             '-',
             '',
             '0h 0m',
@@ -3921,10 +4012,11 @@ export const ReportGenerator = {
       ];
 
       const rows: any[][] = [];
+      const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.startStr, range.endStr);
 
       for (const emp of personalTarget) {
         const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-        const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol);
+        const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol, ausenciasPorEmpleado.get(emp.id) || []);
 
         let tieneRegistros = false;
         for (const dia of mesData.dias) {
@@ -3945,6 +4037,21 @@ export const ReportGenerator = {
                 mesData.totalHorasPeriodoStr
               ]);
             }
+          } else if (dia.ausencia) {
+            tieneRegistros = true;
+            rows.push([
+              range.label,
+              emp.nombre,
+              dia.dateStr,
+              dia.dayName,
+              formatAusenciaReportLabel(dia.ausencia),
+              '-',
+              dia.ausencia.motivo || '',
+              '-',
+              '',
+              '0h 0m',
+              mesData.totalHorasPeriodoStr
+            ]);
           }
         }
 
@@ -3979,7 +4086,8 @@ export const ReportGenerator = {
       fileName?: string
     ): Promise<void> {
       const range = getMonthRange(monthDateInput);
-      const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol);
+      const ausenciasMap = await fetchAusenciasPorEmpleadoSafe(range.startStr, range.endStr, empleado.id);
+      const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol, ausenciasMap.get(empleado.id) || []);
 
       const headers = [
         'Período',
@@ -4020,9 +4128,9 @@ export const ReportGenerator = {
             empleado.nombre,
             dia.dateStr,
             dia.dayName,
+            dia.ausencia ? formatAusenciaReportLabel(dia.ausencia) : '-',
             '-',
-            '-',
-            '',
+            dia.ausencia?.motivo || '',
             '-',
             '',
             '0h 0m',

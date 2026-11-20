@@ -93,7 +93,10 @@ const apiLimiter = rateLimit({
   message: { error: 'Demasiadas peticiones desde esta IP. Inténtelo más tarde.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.url.includes('/asistencias/hikvision') || req.originalUrl.includes('/asistencias/hikvision')
+  skip: (req) =>
+    req.method === 'OPTIONS' ||
+    req.url.includes('/asistencias/hikvision') ||
+    req.originalUrl.includes('/asistencias/hikvision')
 });
 app.use('/api/', apiLimiter);
 

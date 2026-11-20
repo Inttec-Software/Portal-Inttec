@@ -309,6 +309,27 @@ GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE pub
 GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.asistencias TO inttec_admin;
 
 
+-- public.asistencias_ausencias definition
+
+CREATE TABLE IF NOT EXISTS public.asistencias_ausencias (
+	id uuid DEFAULT gen_random_uuid() NOT NULL,
+	empleado_id uuid NOT NULL,
+	tipo varchar(30) NOT NULL CHECK (tipo IN ('VACACIONES', 'PERMISO_SIN_GOCE')),
+	fecha date NOT NULL,
+	motivo text NULL,
+	creado_por uuid NULL,
+	creado_en timestamptz DEFAULT now() NULL,
+	CONSTRAINT asistencias_ausencias_pkey PRIMARY KEY (id),
+	CONSTRAINT asistencias_ausencias_empleado_fecha_key UNIQUE (empleado_id, fecha),
+	CONSTRAINT asistencias_ausencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_asistencias_ausencias_empleado_fecha ON public.asistencias_ausencias USING btree (empleado_id, fecha);
+
+ALTER TABLE public.asistencias_ausencias OWNER TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.asistencias_ausencias TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.asistencias_ausencias TO inttec_admin;
+
+
 -- public.auditorias_tarjeta definition
 
 -- Drop table
