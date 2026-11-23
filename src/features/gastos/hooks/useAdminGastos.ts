@@ -44,11 +44,13 @@ import {
   ProyectoDetailResponse,
   ProyectoStatus,
   TipoGasto,
+  computeProyectoResumenFromGastos,
   getProyectoNombreFromGasto,
 } from '@/features/proyectos/types';
 import { proyectosApi } from '@/features/proyectos/api/proyectosApi';
 
 export type AdminGastosTab = 'pendientes' | 'proyectos' | 'operativos' | 'historial';
+export type ExportGastosScope = 'ALL' | 'PROYECTOS' | 'PROYECTO' | 'OPERATIVOS' | 'HISTORICO';
 
 export const TIPOS_PROYECTO = ['Servicio', 'Proyecto', 'Venta', 'Operativo'];
 
@@ -139,6 +141,11 @@ export function useAdminGastos() {
   // Modales de Acceso Rápido (Botones Extra)
   const [personalModalVisible, setPersonalModalVisible] = useState(false);
   const [reportsModalVisible, setReportsModalVisible] = useState(false);
+  const [exportScope, setExportScope] = useState<ExportGastosScope>('ALL');
+  const [exportProyectoId, setExportProyectoId] = useState<string>('');
+  const [exportIncludeRejected, setExportIncludeRejected] = useState<boolean>(false);
+  const [isExportingGastos, setIsExportingGastos] = useState<boolean>(false);
+  const [isExportingProyecto, setIsExportingProyecto] = useState<boolean>(false);
 
   // Modal de Detalle/Revisión de Gasto
   const [selectedGasto, setSelectedGasto] = useState<Gasto | null>(null);
@@ -2544,36 +2551,125 @@ export function useAdminGastos() {
     });
   };
 
-  // Exportar reportes
-  const handleExportPDF = async () => {
+  // Exportar reportes de un proyecto abierto (PDF / Excel multi-hoja por categoría)
+  const handleExportProyectoPDF = async () => {
+    if (!selectedProyectoDetail) return;
+    setIsExportingProyecto(true);
     try {
-      setIsLoading(true);
-      const headers = await getApiHeaders();
-      const exportUrl = `${getApiUrl()}/api/reportes/admin/export/gastos?startDate=${startDateFilter || ''}&endDate=${endDateFilter || ''}`;
-      const res = await fetch(exportUrl, { headers });
-      const exportGastos = res.ok ? await res.json() : gastos;
-      await ReportGenerator.exportToPDF(exportGastos, `Historial General de Gastos`);
+      await ReportGenerator.exportProyectoToPDF(selectedProyectoDetail, { includeRejected: false });
     } catch (err: any) {
-      Alert.alert('Error PDF', err.message);
+      showAlert('Error PDF Proyecto', err.message || 'No se pudo generar el PDF del proyecto.');
     } finally {
-      setIsLoading(false);
+      setIsExportingProyecto(false);
     }
   };
 
-  const handleExportCSV = async () => {
+  const handleExportProyectoXLSX = async () => {
+    if (!selectedProyectoDetail) return;
+    setIsExportingProyecto(true);
     try {
-      setIsLoading(true);
-      const headers = await getApiHeaders();
-      const exportUrl = `${getApiUrl()}/api/reportes/admin/export/gastos?startDate=${startDateFilter || ''}&endDate=${endDateFilter || ''}`;
-      const res = await fetch(exportUrl, { headers });
-      const exportGastos = res.ok ? await res.json() : gastos;
-      await ReportGenerator.exportToXLSX(exportGastos, `historial_gastos_${company === 'daravisa' ? 'daravisa' : 'inttec'}.xlsx`);
+      await ReportGenerator.exportProyectoToXLSX(selectedProyectoDetail, { includeRejected: false });
     } catch (err: any) {
-      Alert.alert('Error Excel', err.message);
+      showAlert('Error Excel Proyecto', err.message || 'No se pudo generar el Excel del proyecto.');
     } finally {
-      setIsLoading(false);
+      setIsExportingProyecto(false);
     }
   };
+
+  // Exportar reportes generales / filtrados desde el modal de Reportes
+  const runExportGastos = async (format: 'pdf' | 'xlsx') => {
+    if (exportScope === 'PROYECTO' && !exportProyectoId) {
+      showAlert('Selección requerida', 'Por favor selecciona el proyecto que deseas exportar.');
+      return;
+    }
+
+    setIsExportingGastos(true);
+    try {
+      const headers = await getApiHeaders();
+
+      if (exportScope === 'PROYECTO') {
+        const hasDates = Boolean(startDateFilter || endDateFilter);
+        let detailToExport: ProyectoDetailResponse;
+        if (!hasDates) {
+          detailToExport = await proyectosApi.fetchProyectoDetail(exportProyectoId);
+        } else {
+          const qs = new URLSearchParams({
+            scope: 'PROYECTO',
+            proyecto_id: exportProyectoId,
+            includeRejected: exportIncludeRejected ? 'true' : 'false',
+            startDate: startDateFilter || '',
+            endDate: endDateFilter || '',
+          });
+          const res = await fetch(`${getApiUrl()}/api/reportes/admin/export/gastos?${qs.toString()}`, { headers });
+          if (!res.ok) throw new Error('Error al obtener gastos del proyecto');
+          const filteredRows: Gasto[] = await res.json();
+          const proyObj = proyectos.find((p) => p.id === exportProyectoId);
+          if (!proyObj) throw new Error('Proyecto no encontrado');
+          const resumen = computeProyectoResumenFromGastos(proyObj, filteredRows);
+          detailToExport = {
+            proyecto: proyObj,
+            resumen: {
+              total_general: resumen.total_general,
+              totales_por_categoria: resumen.totales_por_categoria,
+              pendientes_count: resumen.pendientes_count,
+            },
+            gastos: filteredRows,
+          };
+        }
+
+        if (format === 'pdf') {
+          await ReportGenerator.exportProyectoToPDF(detailToExport, { includeRejected: exportIncludeRejected });
+        } else {
+          await ReportGenerator.exportProyectoToXLSX(detailToExport, { includeRejected: exportIncludeRejected });
+        }
+        return;
+      }
+
+      const qs = new URLSearchParams({
+        scope: exportScope,
+        includeRejected: exportIncludeRejected ? 'true' : 'false',
+        startDate: startDateFilter || '',
+        endDate: endDateFilter || '',
+      });
+      const exportUrl = `${getApiUrl()}/api/reportes/admin/export/gastos?${qs.toString()}`;
+      const res = await fetch(exportUrl, { headers });
+      if (!res.ok) throw new Error('Error al cargar gastos para exportar');
+      const exportGastos: Gasto[] = await res.json();
+
+      const scopeTitles: Record<ExportGastosScope, string> = {
+        ALL: 'Historial General de Gastos',
+        PROYECTOS: 'Reporte de Gastos por Proyecto',
+        PROYECTO: 'Reporte de Proyecto',
+        OPERATIVOS: 'Reporte de Gastos Operativos',
+        HISTORICO: 'Reporte Histórico / Sin Proyecto',
+      };
+      const periodoStr =
+        startDateFilter || endDateFilter
+          ? `${startDateFilter || 'Inicio'} al ${endDateFilter || 'Hoy'}`
+          : undefined;
+
+      if (format === 'pdf') {
+        await ReportGenerator.exportToPDF(exportGastos, scopeTitles[exportScope], periodoStr, {
+          includeRejected: exportIncludeRejected,
+        });
+      } else {
+        const companySlug = company === 'daravisa' ? 'daravisa' : 'inttec';
+        const scopeSlug = exportScope.toLowerCase();
+        await ReportGenerator.exportToXLSX(
+          exportGastos,
+          `gastos_${scopeSlug}_${companySlug}.xlsx`,
+          { includeRejected: exportIncludeRejected }
+        );
+      }
+    } catch (err: any) {
+      showAlert(format === 'pdf' ? 'Error PDF' : 'Error Excel', err.message || 'No se pudo generar el reporte.');
+    } finally {
+      setIsExportingGastos(false);
+    }
+  };
+
+  const handleExportPDF = () => runExportGastos('pdf');
+  const handleExportCSV = () => runExportGastos('xlsx');
 
   const handleExportAsistenciasPDF = async () => {
     setIsFetchingAsistencias(true);
@@ -3204,6 +3300,16 @@ export function useAdminGastos() {
     handleDeleteGasto,
     formatAsistenciaFecha,
     handleOpenMap,
+    exportScope,
+    setExportScope,
+    exportProyectoId,
+    setExportProyectoId,
+    exportIncludeRejected,
+    setExportIncludeRejected,
+    isExportingGastos,
+    isExportingProyecto,
+    handleExportProyectoPDF,
+    handleExportProyectoXLSX,
     handleExportPDF,
     handleExportCSV,
     handleExportAsistenciasPDF,

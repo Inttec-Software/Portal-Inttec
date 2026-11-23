@@ -24,7 +24,18 @@ export const getAsistenciaHoy = async (req: Request, res: Response) => {
 
     if (!fecha) return res.status(400).json({ error: 'Fecha es requerida' });
 
-    // 1. Primero buscar si hay algún turno ABIERTO hoy (tiene entrada pero no salida)
+    // Si ya pasaron las 11:59 PM de días anteriores y quedaron turnos sin hora_salida, auto-cerrarlos a las 18:00:00
+    try {
+      const poolInttec = getDbPool('inttec', env);
+      const poolDaravisa = getDbPool('daravisa', env);
+      const autoCloseSql = `UPDATE asistencias SET hora_salida = '18:00:00', descripcion = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)', direccion_salida = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`;
+      await Promise.allSettled([
+        poolInttec.query(autoCloseSql, [empleado_id, fecha]),
+        poolDaravisa.query(autoCloseSql, [empleado_id, fecha]),
+      ]);
+    } catch (_) { }
+
+    // 1. Primero buscar si hay algún turno ABIERTO hoy (tiene entrada pero no salida; válido hasta las 11:59 PM)
     const openShiftResult = await pool.query(
       `SELECT * FROM asistencias WHERE empleado_id = $1 AND fecha = $2 AND hora_salida IS NULL ORDER BY creado_en DESC LIMIT 1`,
       [empleado_id, fecha]
@@ -56,10 +67,10 @@ export const registrarEntrada = async (req: Request, res: Response) => {
     const poolInttec = getDbPool('inttec', env);
     const poolDaravisa = getDbPool('daravisa', env);
 
-    // Auto-cierre de turnos anteriores abiertos (olvidos de checada): fijar salida a las 18:00:00
+    // Auto-cierre de turnos anteriores abiertos (olvidos de checada tras pasar las 11:59 PM): fijar salida a las 18:00:00
     if (payload.empleado_id && payload.fecha) {
       try {
-        const updateQuery = `UPDATE asistencias SET hora_salida = '18:00:00', descripcion = 'Cierre automático 6:00 PM (olvido de checada)', direccion_salida = 'Cierre automático 6:00 PM (olvido de checada)' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`;
+        const updateQuery = `UPDATE asistencias SET hora_salida = '18:00:00', descripcion = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)', direccion_salida = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`;
         await Promise.allSettled([
           poolInttec.query(updateQuery, [payload.empleado_id, payload.fecha]),
           poolDaravisa.query(updateQuery, [payload.empleado_id, payload.fecha]),
@@ -170,6 +181,16 @@ export const getHistorial = async (req: Request, res: Response) => {
     const pool = getDbPool(company, env);
     const { empleado_id } = req.params;
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+
+    // Auto-cerrar a las 18:00:00 cualquier turno de días anteriores (pasadas las 11:59 PM de su fecha) que haya quedado sin salida
+    try {
+      const baseTz = process.env.APP_TIMEZONE || 'America/Mexico_City';
+      const todayLocal = new Date().toLocaleDateString('en-CA', { timeZone: baseTz });
+      await pool.query(
+        `UPDATE asistencias SET hora_salida = '18:00:00', descripcion = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)', direccion_salida = 'Cierre automático 6:00 PM (olvido de checada - límite 11:59 PM)' WHERE empleado_id = $1 AND fecha < $2 AND hora_salida IS NULL`,
+        [empleado_id, todayLocal]
+      );
+    } catch (_) { }
 
     let query = `SELECT * FROM asistencias WHERE empleado_id = $1`;
     const params: any[] = [empleado_id];
@@ -376,13 +397,8 @@ export const handleHikvisionWebhook = async (req: Request, res: Response) => {
       }
 
       if (/^\d{4}-\d{2}-\d{2}$/.test(datePart) && /^\d{2}:\d{2}:\d{2}$/.test(timePart)) {
-        const hours = parseInt(timePart.slice(0, 2), 10);
+        // Hora límite para checar salida del mismo día: 11:59 PM (23:59:59)
         fechaJornada = datePart;
-        if (hours < 6) {
-          const [y, m, d] = datePart.split('-').map(Number);
-          const prevDay = new Date(Date.UTC(y, m - 1, d - 1));
-          fechaJornada = `${prevDay.getUTCFullYear()}-${String(prevDay.getUTCMonth() + 1).padStart(2, '0')}-${String(prevDay.getUTCDate()).padStart(2, '0')}`;
-        }
         horaLocal = timePart;
       } else {
         const now = new Date();
@@ -911,6 +927,296 @@ export const registrarTurnoManual = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[REGISTRAR TURNO MANUAL ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const toggleComidaAsistencia = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+
+    const editorRole = (req.user?.rol || req.user?.role || '').toUpperCase();
+    if (editorRole !== 'ADMIN' && editorRole !== 'DEV') {
+      return res.status(403).json({ error: 'Solo administradores o devs pueden modificar el descuento de comida.' });
+    }
+
+    const { empleado_id, fecha, sin_comida } = req.body || {};
+    if (!empleado_id || !fecha || typeof sin_comida !== 'boolean') {
+      return res.status(400).json({ error: 'Se requieren empleado_id, fecha y sin_comida (boolean).' });
+    }
+
+    const { env } = tenant;
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
+
+    const sql = sin_comida
+      ? `UPDATE asistencias
+         SET direccion_entrada = CONCAT_WS(' ', NULLIF(TRIM(REGEXP_REPLACE(COALESCE(direccion_entrada, ''), '\\s*\\[SIN_COMIDA\\]\\s*', ' ', 'g')), ''), '[SIN_COMIDA]')
+         WHERE empleado_id = $1 AND fecha = $2`
+      : `UPDATE asistencias
+         SET direccion_entrada = NULLIF(TRIM(REGEXP_REPLACE(COALESCE(direccion_entrada, ''), '\\s*\\[SIN_COMIDA\\]\\s*', ' ', 'g')), '')
+         WHERE empleado_id = $1 AND fecha = $2`;
+
+    const results = await Promise.allSettled([
+      poolInttec.query(sql, [empleado_id, fecha]),
+      poolDaravisa.query(sql, [empleado_id, fecha]),
+    ]);
+
+    const errors: any[] = [];
+    let updatedCount = 0;
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        errors.push(r.reason);
+      } else if (r.status === 'fulfilled') {
+        updatedCount += (r.value as any).rowCount || 0;
+      }
+    }
+
+    if (updatedCount === 0 && errors.length > 0) {
+      throw new Error(errors[0]?.message || 'Error al actualizar el descuento de comida en la base de datos');
+    }
+
+    if (updatedCount === 0) {
+      return res.status(404).json({ error: 'No se encontraron registros de asistencia para ese empleado y fecha.' });
+    }
+
+    return res.json({
+      success: true,
+      empleado_id,
+      fecha,
+      sin_comida,
+      message: sin_comida
+        ? 'Descuento de hora de comida eliminado para este día.'
+        : 'Descuento de hora de comida restaurado para este día.',
+    });
+  } catch (error: any) {
+    console.error('[TOGGLE COMIDA ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export function calcularDiasHabiles(
+  fechaInicio: string,
+  options: { fechaFin?: string; diasHabiles?: number }
+): string[] {
+  const parseYMD = (str: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(str || '').trim());
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+    return dt;
+  };
+  const formatYMD = (dt: Date) => dt.toISOString().slice(0, 10);
+
+  const startDt = parseYMD(fechaInicio);
+  if (!startDt) return [];
+
+  const result: string[] = [];
+
+  if (typeof options.diasHabiles === 'number' && Number.isFinite(options.diasHabiles) && options.diasHabiles > 0) {
+    const target = Math.min(Math.floor(options.diasHabiles), 120);
+    const cur = new Date(startDt.getTime());
+    let guard = 0;
+    while (result.length < target && guard < 365) {
+      const dow = cur.getUTCDay();
+      if (dow !== 0 && dow !== 6) {
+        result.push(formatYMD(cur));
+      }
+      cur.setUTCDate(cur.getUTCDate() + 1);
+      guard++;
+    }
+    return result;
+  }
+
+  if (options.fechaFin) {
+    const endDt = parseYMD(options.fechaFin);
+    if (!endDt || endDt.getTime() < startDt.getTime()) return [];
+    const cur = new Date(startDt.getTime());
+    let guard = 0;
+    while (cur.getTime() <= endDt.getTime() && guard < 365) {
+      const dow = cur.getUTCDay();
+      if (dow !== 0 && dow !== 6) {
+        result.push(formatYMD(cur));
+      }
+      cur.setUTCDate(cur.getUTCDate() + 1);
+      guard++;
+    }
+    return result;
+  }
+
+  return [];
+}
+
+export const getAusencias = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const pool = getDbPool(company, env);
+
+    const { empleado_id, startDate, endDate } = req.query as {
+      empleado_id?: string;
+      startDate?: string;
+      endDate?: string;
+    };
+
+    let query = `SELECT id, empleado_id, tipo, fecha, motivo, creado_por, creado_en FROM public.asistencias_ausencias WHERE 1=1`;
+    const params: any[] = [];
+
+    if (empleado_id) {
+      params.push(empleado_id);
+      query += ` AND empleado_id = $${params.length}`;
+    }
+    if (startDate) {
+      params.push(startDate);
+      query += ` AND fecha >= $${params.length}`;
+    }
+    if (endDate) {
+      params.push(endDate);
+      query += ` AND fecha <= $${params.length}`;
+    }
+
+    query += ` ORDER BY fecha ASC`;
+
+    const result = await pool.query(query, params);
+    const rows = (result.rows || []).map((r: any) => ({
+      ...r,
+      fecha: r.fecha instanceof Date ? r.fecha.toISOString().slice(0, 10) : String(r.fecha).split('T')[0],
+    }));
+    return res.json(rows);
+  } catch (error: any) {
+    console.error('[GET AUSENCIAS ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const asignarAusencias = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+
+    const editorRole = (req.user?.rol || req.user?.role || '').toUpperCase();
+    if (editorRole !== 'ADMIN' && editorRole !== 'DEV') {
+      return res.status(403).json({ error: 'Solo administradores o devs pueden asignar vacaciones o permisos.' });
+    }
+
+    const { empleado_id, tipo, fecha_inicio, fecha_fin, dias_habiles, motivo } = req.body || {};
+    if (!empleado_id || !fecha_inicio || (tipo !== 'VACACIONES' && tipo !== 'PERMISO_SIN_GOCE')) {
+      return res.status(400).json({
+        error: 'Se requieren empleado_id, fecha_inicio y tipo (VACACIONES o PERMISO_SIN_GOCE).',
+      });
+    }
+
+    const dias = calcularDiasHabiles(fecha_inicio, {
+      fechaFin: fecha_fin,
+      diasHabiles: typeof dias_habiles === 'number' ? dias_habiles : (dias_habiles ? Number(dias_habiles) : undefined),
+    });
+
+    if (dias.length === 0) {
+      return res.status(400).json({
+        error: 'El rango seleccionado no contiene días hábiles (lunes a viernes) o las fechas son inválidas.',
+      });
+    }
+
+    const { env } = tenant;
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
+
+    const creadoPor = req.user?.id || null;
+    const cleanMotivo = motivo ? String(motivo).trim() : null;
+
+    const upsertSql = `
+      INSERT INTO public.asistencias_ausencias (empleado_id, tipo, fecha, motivo, creado_por)
+      SELECT $1, $2, d::date, $3, $4
+      FROM unnest($5::text[]) AS d
+      ON CONFLICT (empleado_id, fecha)
+      DO UPDATE SET tipo = EXCLUDED.tipo, motivo = EXCLUDED.motivo, creado_por = EXCLUDED.creado_por
+    `;
+    const params = [empleado_id, tipo, cleanMotivo, creadoPor, dias];
+
+    const results = await Promise.allSettled([
+      poolInttec.query(upsertSql, params),
+      poolDaravisa.query(upsertSql, params),
+    ]);
+
+    const errors: any[] = [];
+    let affected = 0;
+    for (const r of results) {
+      if (r.status === 'rejected') errors.push(r.reason);
+      else affected += (r.value as any).rowCount || 0;
+    }
+
+    if (affected === 0 && errors.length > 0) {
+      throw new Error(errors[0]?.message || 'Error al guardar las ausencias en la base de datos');
+    }
+
+    return res.json({
+      success: true,
+      empleado_id,
+      tipo,
+      dias,
+      count: dias.length,
+      message: `${tipo === 'VACACIONES' ? 'Vacaciones' : 'Permiso sin goce'} asignado(s) para ${dias.length} día(s) hábil(es).`,
+    });
+  } catch (error: any) {
+    console.error('[ASIGNAR AUSENCIAS ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const eliminarAusencia = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+
+    const editorRole = (req.user?.rol || req.user?.role || '').toUpperCase();
+    if (editorRole !== 'ADMIN' && editorRole !== 'DEV') {
+      return res.status(403).json({ error: 'Solo administradores o devs pueden eliminar vacaciones o permisos.' });
+    }
+
+    const id = (req.query.id || req.body?.id) as string | undefined;
+    const empleado_id = (req.query.empleado_id || req.body?.empleado_id) as string | undefined;
+    const fecha = (req.query.fecha || req.body?.fecha) as string | undefined;
+
+    if (!id && (!empleado_id || !fecha)) {
+      return res.status(400).json({ error: 'Se requiere id o (empleado_id y fecha).' });
+    }
+
+    const { env } = tenant;
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
+
+    const sql = id
+      ? `DELETE FROM public.asistencias_ausencias WHERE id = $1`
+      : `DELETE FROM public.asistencias_ausencias WHERE empleado_id = $1 AND fecha = $2`;
+    const params = id ? [id] : [empleado_id, fecha];
+
+    const results = await Promise.allSettled([
+      poolInttec.query(sql, params),
+      poolDaravisa.query(sql, params),
+    ]);
+
+    const errors: any[] = [];
+    let deletedCount = 0;
+    for (const r of results) {
+      if (r.status === 'rejected') errors.push(r.reason);
+      else deletedCount += (r.value as any).rowCount || 0;
+    }
+
+    if (deletedCount === 0 && errors.length > 0) {
+      throw new Error(errors[0]?.message || 'Error al eliminar la ausencia en la base de datos');
+    }
+    if (deletedCount === 0) {
+      return res.status(404).json({ error: 'No se encontró el registro de vacaciones o permiso.' });
+    }
+
+    return res.json({ success: true, message: 'Registro eliminado correctamente.' });
+  } catch (error: any) {
+    console.error('[ELIMINAR AUSENCIA ERROR]:', error);
     return res.status(500).json({ error: error.message });
   }
 };

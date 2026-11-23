@@ -1744,24 +1744,26 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
             }
           } else if (imageUri) {
             if (imageBase64) {
-              try {
-                const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
-                const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
-                const { error: uploadError } = await supabase.storage
-                  .from('tickets')
-                  .upload(fileName, imageBase64, { contentType, upsert: true });
+              const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
+              const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
+              const { error: uploadError } = await supabase.storage
+                .from('tickets')
+                .upload(fileName, imageBase64, { contentType, upsert: true });
 
-                if (!uploadError) {
-                  const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-                  if (urlData?.publicUrl) publicTicketUrls.push(urlData.publicUrl);
-                } else {
-                  publicTicketUrls.push(imageUri);
-                }
-              } catch (stErr) {
-                publicTicketUrls.push(imageUri);
+              if (uploadError) {
+                throw new Error(uploadError.message || 'No se pudo subir la fotografía del ticket al servidor.');
               }
-            } else {
+
+              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+              if (urlData?.publicUrl) {
+                publicTicketUrls.push(urlData.publicUrl);
+              } else {
+                throw new Error('No se pudo obtener la URL pública del ticket subido.');
+              }
+            } else if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
               publicTicketUrls.push(imageUri);
+            } else {
+              throw new Error('No se pudo procesar la fotografía local del ticket. Vuelve a seleccionarla e intenta de nuevo.');
             }
           }
           const publicUrl = publicTicketUrls.join(',') || null;
@@ -2136,8 +2138,10 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
 
             const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
             if (urlData?.publicUrl) publicTicketUrls.push(urlData.publicUrl);
-          } else {
+          } else if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
             publicTicketUrls.push(imageUri);
+          } else {
+            throw new Error('No se pudo procesar la fotografía local del ticket. Vuelve a seleccionarla e intenta de nuevo.');
           }
         }
 

@@ -3,6 +3,21 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { getDbPool } from '../../config/database';
 
+const getJwtSecret = (): string =>
+  process.env.JWT_SECRET || process.env.JWT_SCRET || 'super_secret_jwt_key_cambiar_en_produccion';
+
+const signUserToken = (usuario: { id: string; email: string; rol: string; nombre: string }): string =>
+  jwt.sign(
+    {
+      id: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol,
+      nombre: usuario.nombre
+    },
+    getJwtSecret(),
+    { expiresIn: '7d' }
+  );
+
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body;
@@ -49,18 +64,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const secret = process.env.JWT_SECRET || process.env.JWT_SCRET || 'super_secret_jwt_key_cambiar_en_produccion';
-    
-    const token = jwt.sign(
-      { 
-        id: usuario.id, 
-        email: usuario.email, 
-        rol: usuario.rol, 
-        nombre: usuario.nombre 
-      },
-      secret,
-      { expiresIn: '7d' }
-    );
+    const token = signUserToken(usuario);
 
     res.json({
       usuario,
@@ -69,6 +73,45 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
   } catch (error: any) {
     console.error('[Auth Controller] Excepción:', error);
+    res.status(500).json({ message: 'Error interno del servidor.' });
+  }
+};
+
+export const refresh = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tokenUser = req.user;
+    const userId = tokenUser?.id ? String(tokenUser.id) : null;
+    const userEmail = typeof tokenUser?.email === 'string' ? tokenUser.email.trim().toLowerCase() : null;
+
+    if (!userId && !userEmail) {
+      res.status(401).json({ message: 'Token inválido para renovación.' });
+      return;
+    }
+
+    const { company, env } = (req as any).tenant;
+    const pool = getDbPool(company, env);
+
+    const { rows } = await pool.query(
+      `SELECT id, nombre, email, rol, telefono, created_at
+       FROM usuarios
+       WHERE ($1::text IS NOT NULL AND id::text = $1)
+          OR ($2::text IS NOT NULL AND LOWER(email) = $2)
+       ORDER BY CASE WHEN ($1::text IS NOT NULL AND id::text = $1) THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [userId, userEmail]
+    );
+
+    if (rows.length === 0) {
+      res.status(401).json({ message: 'Usuario no encontrado o sesión inválida.' });
+      return;
+    }
+
+    const usuario = rows[0];
+    const token = signUserToken(usuario);
+
+    res.json({ usuario, token });
+  } catch (error: any) {
+    console.error('[Auth Controller] Error al renovar token:', error);
     res.status(500).json({ message: 'Error interno del servidor.' });
   }
 };

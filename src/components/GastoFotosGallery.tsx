@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,11 +19,22 @@ export default function GastoFotosGallery({
   onPhotoPress,
 }: GastoFotosGalleryProps) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [imageLoadError, setImageLoadError] = useState(false);
 
   // Extract all urls using GastoHelper or fallback
   const urls: string[] = gasto
     ? GastoHelper.getFotoUrls(gasto)
     : (foto_url ? GastoHelper.getFotoUrls({ foto_url } as any) : []);
+
+  const currentUrl = urls[activeIndex] || urls[0] || '';
+  const isLocalDevicePath =
+    currentUrl.startsWith('file://') ||
+    currentUrl.startsWith('content://') ||
+    currentUrl.startsWith('/data/');
+
+  useEffect(() => {
+    setImageLoadError(false);
+  }, [currentUrl]);
 
   if (urls.length === 0) {
     return (
@@ -35,8 +46,6 @@ export default function GastoFotosGallery({
       </View>
     );
   }
-
-  const currentUrl = urls[activeIndex] || urls[0];
 
   const handlePressMain = () => {
     if (onPhotoPress) {
@@ -67,24 +76,36 @@ export default function GastoFotosGallery({
       )}
 
       {/* Main Active Image */}
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={handlePressMain}
-        style={[styles.mainImageContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
-      >
-        <Image
-          source={{ uri: currentUrl }}
-          style={styles.mainImage}
-          contentFit="contain"
-          transition={200}
-        />
-        <View style={styles.zoomOverlay}>
-          <Ionicons name="scan-outline" size={14} color="#ffffff" />
-          <Text style={styles.zoomOverlayText}>
-            {urls.length > 1 ? `Toca para ampliar (${activeIndex + 1}/${urls.length})` : 'Toca para ampliar'}
+      {isLocalDevicePath || imageLoadError ? (
+        <View style={[styles.noImageContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, paddingHorizontal: 16 }]}>
+          <Ionicons name="cloud-offline-outline" size={40} color={themeColors.warning || '#d97706'} />
+          <Text style={[styles.noImageText, { color: themeColors.text, textAlign: 'center', marginTop: 8 }]}>
+            {isLocalDevicePath
+              ? 'La imagen no se subió al servidor (se guardó ruta local del teléfono).'
+              : 'No se pudo cargar la imagen del comprobante.'}
           </Text>
         </View>
-      </TouchableOpacity>
+      ) : (
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={handlePressMain}
+          style={[styles.mainImageContainer, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}
+        >
+          <Image
+            source={{ uri: currentUrl }}
+            style={styles.mainImage}
+            contentFit="contain"
+            transition={200}
+            onError={() => setImageLoadError(true)}
+          />
+          <View style={styles.zoomOverlay}>
+            <Ionicons name="scan-outline" size={14} color="#ffffff" />
+            <Text style={styles.zoomOverlayText}>
+              {urls.length > 1 ? `Toca para ampliar (${activeIndex + 1}/${urls.length})` : 'Toca para ampliar'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      )}
 
       {/* Thumbnails row if multiple images */}
       {urls.length > 1 && (

@@ -18,6 +18,7 @@ import reportesRoutes from './modules/reportes/reportes.routes';
 import asistenciasRoutes from './modules/asistencias/asistencias.routes';
 import ventasRoutes from './modules/ventas/ventas.routes';
 import cotizacionesRoutes from './modules/cotizaciones/cotizaciones.routes';
+import ordenesCompraRoutes from './modules/ordenes-compra/ordenes-compra.routes';
 import auditoriaRoutes from './modules/auditoria/auditoria.routes';
 import chatIaRoutes from './modules/chat-ia/chat.routes';
 import facturasRecibidasRoutes from './modules/facturas-recibidas/facturas-recibidas.routes';
@@ -93,7 +94,10 @@ const apiLimiter = rateLimit({
   message: { error: 'Demasiadas peticiones desde esta IP. Inténtelo más tarde.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.url.includes('/asistencias/hikvision') || req.originalUrl.includes('/asistencias/hikvision')
+  skip: (req) =>
+    req.method === 'OPTIONS' ||
+    req.url.includes('/asistencias/hikvision') ||
+    req.originalUrl.includes('/asistencias/hikvision')
 });
 app.use('/api/', apiLimiter);
 
@@ -157,6 +161,7 @@ app.use('/api/reportes', reportesRoutes);
 app.use('/api/asistencias', asistenciasRoutes);
 app.use('/api/ventas', ventasRoutes);
 app.use('/api/cotizaciones', cotizacionesRoutes);
+app.use('/api/ordenes-compra', ordenesCompraRoutes);
 app.use('/api/auditoria', auditoriaRoutes);
 app.use('/api/chat-ia', chatIaRoutes);
 app.use('/api/facturas-recibidas', facturasRecibidasRoutes);

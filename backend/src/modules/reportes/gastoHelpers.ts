@@ -72,6 +72,8 @@ const NULLABLE_UUID_OR_DATE_FIELDS = new Set([
   'approved_at',
 ]);
 
+export const OPERATIVO_GASTO_SQL = `(COALESCE(g.tipo_gasto, '') = 'OPERATIVO' OR (g.tipo_gasto IS NULL AND g.proyecto_id IS NULL AND LOWER(COALESCE(g.tipo_servicio_proyecto, '')) = 'operativo'))`;
+
 export const FACTURA_REL_SUBQUERIES_SQL = `
   (SELECT row_to_json(fs_obj) FROM (
     SELECT f.id, f.uuid, f.rfc_emisor, f.nombre_emisor, f.rfc_receptor, f.fecha_emision,

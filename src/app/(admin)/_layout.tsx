@@ -11,7 +11,8 @@ import { AuthService } from '@/services/supabase';
 import { HeaderActionProvider, useHeaderAction } from '@/context/HeaderActionContext';
 
 function AdminLayoutContent() {
-  const { user, setUser } = useAuth();
+  const { user, setUser, company, changeCompany } = useAuth();
+  const isDaravisa = company === 'daravisa';
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const pathname = usePathname();
@@ -50,6 +51,8 @@ function AdminLayoutContent() {
     if (!lastPart || lastPart === 'dashboard') return 'Inicio';
     if (lastPart === 'ventas') return 'Ventas';
     if (lastPart === 'cotizaciones') return 'Cotizaciones';
+    if (lastPart === 'ordenes-compra') return 'Órdenes de Compra';
+    if (lastPart === 'nueva-orden-compra') return 'Orden de Compra';
     if (lastPart === 'empleados') return 'Empleados';
     if (lastPart === 'vehiculos') return 'Vehículos';
     if (lastPart === 'inventario') return 'Inventario';
@@ -88,6 +91,7 @@ function AdminLayoutContent() {
     { route: '/(admin)/gastos', icon: 'cash-outline', color: '#feca57', name: 'Gastos' },
     { route: '/(admin)/facturas-recibidas', icon: 'receipt-outline', color: '#2e86de', name: 'Facturas Recibidas' },
     { route: '/(admin)/cotizaciones', icon: 'document-text-outline', color: '#54a0ff', name: 'Cotizaciones' },
+    { route: '/(admin)/ordenes-compra', icon: 'bag-handle-outline', color: '#e67e22', name: 'Órdenes de Compra' },
     { route: '/(admin)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
     { route: '/(admin)/inventario', icon: 'cube-outline', color: '#48dbfb', name: 'Inventario' },
     { route: '/(admin)/empleados', icon: 'people-outline', color: '#1dd1a1', name: 'Empleados' },
@@ -117,6 +121,9 @@ function AdminLayoutContent() {
               if (pathname.includes('nueva-cotizacion')) {
                 if (router.canGoBack()) router.back();
                 else router.replace('/(admin)/cotizaciones');
+              } else if (pathname.includes('nueva-orden-compra')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/ordenes-compra');
               } else if (pathname.includes('editar-gasto') || pathname.includes('formulario')) {
                 if (router.canGoBack()) router.back();
                 else router.replace('/(admin)/gastos');
@@ -164,6 +171,48 @@ function AdminLayoutContent() {
           {/* Botón de acción personalizado por pantalla */}
           {headerRight}
 
+          {/* Etiqueta/Botón visible de empresa activa (Inttec / Daravisa) */}
+          <TouchableOpacity
+            activeOpacity={0.75}
+            onPress={() => changeCompany(isDaravisa ? 'inttec' : 'daravisa')}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 5,
+              paddingHorizontal: 10,
+              paddingVertical: 5,
+              borderRadius: 999,
+              backgroundColor: isDaravisa ? '#0d948818' : '#801c1d18',
+              borderWidth: 1,
+              borderColor: isDaravisa ? '#0d9488' : '#801c1d',
+              marginRight: 6,
+            }}
+          >
+            <View
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 4,
+                backgroundColor: isDaravisa ? '#0d9488' : '#801c1d',
+              }}
+            />
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: '800',
+                letterSpacing: 0.5,
+                color: isDaravisa ? '#0d9488' : '#801c1d',
+              }}
+            >
+              {isDaravisa ? 'DARAVISA' : 'INTTEC'}
+            </Text>
+            <Ionicons
+              name="swap-horizontal-outline"
+              size={13}
+              color={isDaravisa ? '#0d9488' : '#801c1d'}
+            />
+          </TouchableOpacity>
+
           {/* Botón de Menú Desplegable */}
           <TouchableOpacity 
             style={styles.menuButton} 
@@ -175,8 +224,8 @@ function AdminLayoutContent() {
         </View>
       )}
 
-      {/* Contenido Principal */}
-      <View style={{ flex: 1, backgroundColor: themeColors.background, zIndex: 1 }}>
+      {/* Contenido Principal (se remonta al cambiar de empresa para recargar todos los módulos) */}
+      <View key={company} style={{ flex: 1, backgroundColor: themeColors.background, zIndex: 1 }}>
         <Slot />
       </View>
 

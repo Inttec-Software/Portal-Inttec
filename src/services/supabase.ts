@@ -4,6 +4,7 @@ import { getApiHeaders, getApiUrl, invalidateHeaderCache } from './apiHelper';
 import { apiClient } from './apiClient';
 import { Platform } from 'react-native';
 import { COMPANY_BASE_TIMEZONE, detectUserTimezone, embedTimezoneInAddress } from '@/utils/timezoneUtils';
+import { isTokenExpired } from '@/utils/jwtUtils';
 
 // Permitir Storage en dispositivos nativos (iOS/Android) o en el navegador (Web)
 const isBrowser = Platform.OS !== 'web' || (typeof window !== 'undefined' && typeof window.document !== 'undefined');
@@ -17,7 +18,7 @@ export const CompanyService = {
   },
   async setActiveCompany(company: 'inttec' | 'daravisa'): Promise<void> {
     activeCompany = company;
-        invalidateHeaderCache();
+    invalidateHeaderCache();
     if (isBrowser) {
       await AsyncStorage.setItem('active_company', company);
     }
@@ -27,7 +28,7 @@ export const CompanyService = {
       const saved = await AsyncStorage.getItem('active_company');
       if (saved === 'daravisa' || saved === 'inttec') {
         activeCompany = saved;
-                invalidateHeaderCache();
+        invalidateHeaderCache();
       }
     }
     return activeCompany;
@@ -41,7 +42,7 @@ export const EnvService = {
   },
   async setActiveEnv(env: 'cloud' | 'test'): Promise<void> {
     activeEnv = env;
-        invalidateHeaderCache();
+    invalidateHeaderCache();
     if (isBrowser) {
       await AsyncStorage.setItem('active_env', env);
     }
@@ -51,7 +52,7 @@ export const EnvService = {
       const saved = await AsyncStorage.getItem('active_env');
       if (saved === 'cloud' || saved === 'test') {
         activeEnv = saved;
-              }
+      }
     }
     return activeEnv;
   }
@@ -118,9 +119,9 @@ export interface Gasto {
   } | null;
   // Relaciones Joins normalizadas
   categoria_rel?: { id: string; nombre: string } | null;
-  subcategoria_rel?: { 
-    id: string; 
-    nombre: string; 
+  subcategoria_rel?: {
+    id: string;
+    nombre: string;
     categoria_id?: string;
     categoria_rel?: { id: string; nombre: string } | null;
   } | null;
@@ -230,7 +231,7 @@ export const GastoHelper = {
             .filter((u: any) => typeof u === 'string' && u.trim().length > 0 && !u.startsWith('cfdi://'))
             .map((u: string) => u.trim().replace(/^[\["\']+|[\]"\']+$/g, '').trim());
         }
-      } catch {}
+      } catch { }
     }
 
     // Comma-separated o single string, limpiando corchetes y comillas accidentales
@@ -261,7 +262,7 @@ export const GastoHelper = {
         if (Array.isArray(parsed)) {
           return parsed.map((item: any) => typeof item === 'string' ? item : item?.uri || item?.url).filter(Boolean);
         }
-      } catch {}
+      } catch { }
     }
     return trimmed.split(',').map(u => {
       const s = u.trim();
@@ -399,8 +400,17 @@ export interface ProveedorItem {
   created_at?: string;
 }
 
+export class SessionExpiredError extends Error {
+  constructor(message = 'Tu sesión expiró. Por seguridad, inicia sesión nuevamente.') {
+    super(message);
+    this.name = 'SessionExpiredError';
+  }
+}
+
+let refreshInFlight: Promise<{ usuario: Usuario; token: string } | null> | null = null;
+
 /**
- * Servicio de AutenticaciÃ³n
+ * Servicio de Autenticación
  */
 export const AuthService = {
   async login(email: string, password: string): Promise<Usuario> {
@@ -426,7 +436,7 @@ export const AuthService = {
           if (errData && errData.message) errorMsg = errData.message;
         } catch (_) {
           const text = await response.text().catch(() => '');
-          if (text) errorMsg = `Servidor respondiÃ³ con cÃ³digo ${response.status}`;
+          if (text) errorMsg = `Servidor respondió con código ${response.status}`;
         }
         throw new Error(errorMsg);
       }
@@ -442,7 +452,7 @@ export const AuthService = {
 
       return data.usuario as Usuario;
     } catch (error: any) {
-      throw new Error(`Error de conexiÃ³n: ${error.message}`);
+      throw new Error(`Error de conexión: ${error.message}`);
     }
   },
 
@@ -456,11 +466,27 @@ export const AuthService = {
     }
   },
 
+  async hasStoredUser(): Promise<boolean> {
+    if (!isBrowser) return false;
+    const company = CompanyService.getActiveCompany();
+    const userStr = await AsyncStorage.getItem(`logged_user_${company}`);
+    return Boolean(userStr);
+  },
+
   async getCurrentUser(): Promise<Usuario | null> {
     if (isBrowser) {
       const company = CompanyService.getActiveCompany();
-      const userStr = await AsyncStorage.getItem(`logged_user_${company}`);
+      const [userStr, token] = await Promise.all([
+        AsyncStorage.getItem(`logged_user_${company}`),
+        AsyncStorage.getItem(`jwt_token_${company}`)
+      ]);
       if (!userStr) return null;
+
+      if (!token || isTokenExpired(token)) {
+        await this.logout();
+        return null;
+      }
+
       try {
         return JSON.parse(userStr) as Usuario;
       } catch {
@@ -476,6 +502,67 @@ export const AuthService = {
       return await AsyncStorage.getItem(`jwt_token_${company}`);
     }
     return null;
+  },
+
+  async refreshToken(): Promise<{ usuario: Usuario; token: string } | null> {
+    if (!isBrowser) return null;
+    if (refreshInFlight) return refreshInFlight;
+
+    refreshInFlight = (async () => {
+      const company = CompanyService.getActiveCompany();
+      const env = EnvService.getActiveEnv();
+      const apiUrl = getApiUrl();
+      const currentToken = await AsyncStorage.getItem(`jwt_token_${company}`);
+
+      if (!currentToken || isTokenExpired(currentToken)) {
+        throw new SessionExpiredError();
+      }
+
+      try {
+        const response = await fetch(`${apiUrl}/api/auth/refresh`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentToken}`,
+            'x-company': company,
+            'x-env': env
+          }
+        });
+
+        if (response.status === 401) {
+          throw new SessionExpiredError();
+        }
+
+        if (!response.ok) {
+          logger.warn(`[AuthService] No se pudo renovar el token (${response.status})`);
+          return null;
+        }
+
+        const data = await response.json();
+        if (!data?.token || !data?.usuario) {
+          return null;
+        }
+
+        await AsyncStorage.setItem(`logged_user_${company}`, JSON.stringify(data.usuario));
+        await AsyncStorage.setItem(`jwt_token_${company}`, data.token);
+        invalidateHeaderCache();
+
+        return { usuario: data.usuario as Usuario, token: data.token as string };
+      } catch (error: any) {
+        if (error instanceof SessionExpiredError) {
+          throw error;
+        }
+        // Error de red/offline: conservamos la sesión mientras el token siga vigente localmente
+        logger.warn('[AuthService] Error de red al intentar renovar el token:', error?.message);
+        return null;
+      }
+    })();
+
+    try {
+      return await refreshInFlight;
+    } finally {
+      refreshInFlight = null;
+    }
   }
 };
 
@@ -515,6 +602,18 @@ export interface Asistencia {
   creado_en?: string;
 }
 
+export type TipoAusencia = 'VACACIONES' | 'PERMISO_SIN_GOCE';
+
+export interface AusenciaAsistencia {
+  id: string;
+  empleado_id: string;
+  tipo: TipoAusencia;
+  fecha: string; // YYYY-MM-DD
+  motivo?: string | null;
+  creado_por?: string | null;
+  creado_en?: string;
+}
+
 /**
  * Servicio de Asistencias (Auto-Checador)
  */
@@ -550,19 +649,15 @@ export const AsistenciaService = {
 
   /**
    * Obtiene la fecha de la jornada laboral en formato YYYY-MM-DD en la zona horaria del empleado.
-   * La jornada laboral se reinicia a las 6:00 AM locales de cada día:
-   * - A partir de las 06:00:00 AM: Jornada del día actual (siempre pide entrada).
-   * - Antes de las 06:00:00 AM (00:00 - 05:59): Jornada del día anterior (permite checar salida de turnos que terminan de madrugada).
+   * La hora límite para checar salida del día es las 11:59 PM (23:59:59).
+   * Si el empleado no checa salida antes de las 11:59 PM, al cambiar de día (00:00) el turno anterior
+   * se considera olvido de checada y se auto-cierra a las 6:00 PM (18:00:00).
    */
   getFechaJornada(date: Date = new Date(), timeZone?: string): string {
     const z = this.getZonedParts(date, timeZone);
-    const localD = new Date(Date.UTC(z.year, z.month - 1, z.day));
-    if (z.hour < 6) {
-      localD.setUTCDate(localD.getUTCDate() - 1);
-    }
-    const y = localD.getUTCFullYear();
-    const m = String(localD.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(localD.getUTCDate()).padStart(2, '0');
+    const y = z.year;
+    const m = String(z.month).padStart(2, '0');
+    const d = String(z.day).padStart(2, '0');
     return `${y}-${m}-${d}`;
   },
 
@@ -836,6 +931,68 @@ export const AsistenciaService = {
       return { success: true, message: 'Turno registrado correctamente (fallback directo)', data: record };
     }
   },
+
+  async getAusencias(options: {
+    empleadoId?: string;
+    startDate?: string;
+    endDate?: string;
+  } = {}): Promise<AusenciaAsistencia[]> {
+    const headers = await getApiHeaders();
+    const params = new URLSearchParams();
+    if (options.empleadoId) params.append('empleado_id', options.empleadoId);
+    if (options.startDate) params.append('startDate', options.startDate);
+    if (options.endDate) params.append('endDate', options.endDate);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`${getApiUrl()}/api/asistencias/ausencias${qs}`, { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (Array.isArray(data) ? data : []).map((item: AusenciaAsistencia) => ({
+      ...item,
+      fecha: item.fecha ? String(item.fecha).split('T')[0] : item.fecha,
+    }));
+  },
+
+  async asignarAusencias(payload: {
+    empleado_id: string;
+    tipo: TipoAusencia;
+    fecha_inicio: string;
+    fecha_fin?: string;
+    dias_habiles?: number;
+    motivo?: string;
+  }): Promise<{ success: boolean; dias: string[]; count: number; message?: string }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/ausencias`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'No se pudieron guardar las vacaciones o permiso');
+    }
+    return data;
+  },
+
+  async eliminarAusencia(params: {
+    id?: string;
+    empleado_id?: string;
+    fecha?: string;
+  }): Promise<{ success: boolean }> {
+    const headers = await getApiHeaders();
+    const qs = new URLSearchParams();
+    if (params.id) qs.append('id', params.id);
+    if (params.empleado_id) qs.append('empleado_id', params.empleado_id);
+    if (params.fecha) qs.append('fecha', params.fecha);
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/ausencias?${qs.toString()}`, {
+      method: 'DELETE',
+      headers,
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'No se pudo eliminar el registro');
+    }
+    return data;
+  },
 };
 
 export interface Venta {
@@ -1013,12 +1170,12 @@ export const VehiculoService = {
 
   async getRegistrosGasolina(filtros?: { vehiculoId?: string; empleadoId?: string; placas?: string }): Promise<RegistroGasolina[]> {
     const headers = await getApiHeaders();
-    
+
     let url = `${getApiUrl()}/api/vehiculos/gasolina?`;
     if (filtros?.vehiculoId) url += `vehiculoId=${filtros.vehiculoId}&`;
     if (filtros?.empleadoId) url += `empleadoId=${filtros.empleadoId}&`;
     if (filtros?.placas) url += `placas=${filtros.placas}&`;
-    
+
     const res = await fetch(url, { headers });
     if (!res.ok) throw new Error('Error al obtener registros de gasolina');
     return res.json();
@@ -1072,7 +1229,7 @@ export const AuditoriaService = {
 
   async obtenerAuditorias(tarjeta?: string): Promise<AuditoriaTarjeta[]> {
     const headers = await getApiHeaders();
-    const url = tarjeta && tarjeta !== 'TODAS' 
+    const url = tarjeta && tarjeta !== 'TODAS'
       ? `${getApiUrl()}/api/auditoria?tarjeta=${encodeURIComponent(tarjeta)}`
       : `${getApiUrl()}/api/auditoria`;
 
@@ -1691,10 +1848,10 @@ class FrontendQueryBuilder {
   ilike(col: string, val: any) { this.query.conditions.push({ col, op: 'ilike', val }); return this; }
   or(val: string) { this.query.conditions.push({ col: '', op: 'or', val }); return this; }
 
-  order(col: string, opts: { ascending?: boolean } = {}) { 
-    this.query.orderCol = col; 
-    this.query.orderAsc = opts.ascending ?? true; 
-    return this; 
+  order(col: string, opts: { ascending?: boolean } = {}) {
+    this.query.orderCol = col;
+    this.query.orderAsc = opts.ascending ?? true;
+    return this;
   }
   limit(n: number) { this.query.limitCount = n; return this; }
   single() { this.query.isSingle = true; this.query.limitCount = 1; return this; }
@@ -1726,7 +1883,7 @@ class FrontendQueryBuilder {
       } else {
         return { data: json.data, error: null };
       }
-    } catch(e) {
+    } catch (e) {
       return { data: null, error: e };
     }
   }
@@ -1771,14 +1928,14 @@ const createShimClient = (clientType: 'inttec' | 'daravisa' | 'active') => {
               })
             });
             const json = await res.json();
-            if(!res.ok) return { data: null, error: json.error || new Error('Error al subir archivo') };
+            if (!res.ok) return { data: null, error: json.error || new Error('Error al subir archivo') };
             return { data: { path }, error: null };
-          } catch(e) {
+          } catch (e) {
             return { data: null, error: e };
           }
         },
         download: async (path: string) => {
-          const bucketName = 'portal-inttec-storage'; 
+          const bucketName = 'portal-inttec-storage';
           const region = 'us-east-2';
           const company = CompanyService.getActiveCompany();
           const fullPath = path.startsWith('http')
@@ -1792,12 +1949,12 @@ const createShimClient = (clientType: 'inttec' | 'daravisa' | 'active') => {
             if (!res.ok) return { data: null, error: new Error('Not found') };
             const blob = await res.blob();
             return { data: blob, error: null };
-          } catch(e) {
+          } catch (e) {
             return { data: null, error: e };
           }
         },
         getPublicUrl: (path: string) => {
-          const bucketName = 'portal-inttec-storage'; 
+          const bucketName = 'portal-inttec-storage';
           const region = 'us-east-2';
           const company = CompanyService.getActiveCompany();
           if (path.startsWith('http')) return { data: { publicUrl: path } };
@@ -1808,25 +1965,25 @@ const createShimClient = (clientType: 'inttec' | 'daravisa' | 'active') => {
         }
       })
     },
-    auth: { updateUser: async (updates: any) => { return { data: null, error: null }; } }, 
-    functions: { 
-      invoke: async (functionName: string, options?: any) => { 
-        const headers = await getApiHeaders(); 
+    auth: { updateUser: async (updates: any) => { return { data: null, error: null }; } },
+    functions: {
+      invoke: async (functionName: string, options?: any) => {
+        const headers = await getApiHeaders();
         let endpoint = `/api/functions/${functionName}`;
         if (functionName === 'facturar-venta') endpoint = '/api/sat/timbrar-factura';
         if (functionName === 'cancelar-factura') endpoint = '/api/sat/cancelar-factura';
         if (functionName === 'sync-facturas-recibidas') endpoint = '/api/sat/sync-facturas-recibidas';
         if (functionName === 'send-push') endpoint = '/api/notificaciones/send-push';
-        
-        const res = await fetch(`${getApiUrl()}${endpoint}`, { 
-          method: 'POST', 
-          headers: { ...headers, 'Content-Type': 'application/json' }, 
-          body: JSON.stringify(options?.body || {}) 
-        }); 
-        const json = await res.json().catch(() => ({})); 
-        if (!res.ok) return { data: null, error: json.error || new Error('Invoke failed') }; 
-        return { data: json.data || json, error: null }; 
-      } 
+
+        const res = await fetch(`${getApiUrl()}${endpoint}`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(options?.body || {})
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) return { data: null, error: json.error || new Error('Invoke failed') };
+        return { data: json.data || json, error: null };
+      }
     }
   };
 };

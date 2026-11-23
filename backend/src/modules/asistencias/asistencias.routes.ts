@@ -8,6 +8,10 @@ import {
   editarHorasAsistencia,
   eliminarAsistencia,
   registrarTurnoManual,
+  toggleComidaAsistencia,
+  getAusencias,
+  asignarAusencias,
+  eliminarAusencia,
 } from './asistencias.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -32,10 +36,14 @@ router.get('/hoy/:empleado_id', getAsistenciaHoy);
 router.post('/entrada', registrarEntrada);
 router.put('/salida', registrarSalida);
 router.get('/historial/:empleado_id', getHistorial);
+router.get('/ausencias', getAusencias);
 
 // Rutas protegidas para usuarios con rol ADMIN o DEV
 router.put('/admin/editar-horas/:id', editarHorasAsistencia);
 router.delete('/admin/eliminar/:id', eliminarAsistencia);
 router.post('/admin/registrar-turno', registrarTurnoManual);
+router.put('/admin/toggle-comida', toggleComidaAsistencia);
+router.post('/admin/ausencias', asignarAusencias);
+router.delete('/admin/ausencias', eliminarAusencia);
 
 export default router;

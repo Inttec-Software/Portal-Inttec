@@ -4,10 +4,48 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import { Platform, Alert } from 'react-native';
-import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
+import { Gasto, GastoHelper, Asistencia, AsistenciaService, AusenciaAsistencia, Usuario, CompanyService } from '../services/supabase';
 import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
-import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay, isAutoCerradoAsistencia } from './asistenciaUtils';
+import { OrdenCompra } from '@/types/ordenesCompra';
+import { numeroALetras, getMonedaDisplayName } from './numeroALetras';
+import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay, isAutoCerradoAsistencia, getAusenciaLabel } from './asistenciaUtils';
+import {
+  ProyectoCategoriaKey,
+  ProyectoDetailResponse,
+  SUBTIPOS_TRASLADO_LABELS,
+  SubtipoTraslado,
+  classifyProjectGastoBlock,
+  getOrComputeHospedajeDias,
+  buildHospedajeTimelineWithGaps,
+  getProyectoNombreFromGasto,
+  isGastoHospedaje,
+} from '@/features/proyectos/types';
+import { cleanAddressForDisplay } from './timezoneUtils';
+
+const fetchAusenciasPorEmpleadoSafe = async (
+  startDate: string,
+  endDate: string,
+  empleadoId?: string
+): Promise<Map<string, AusenciaAsistencia[]>> => {
+  const map = new Map<string, AusenciaAsistencia[]>();
+  try {
+    const list = await AsistenciaService.getAusencias({ empleadoId, startDate, endDate });
+    for (const a of list || []) {
+      const arr = map.get(a.empleado_id) || [];
+      arr.push(a);
+      map.set(a.empleado_id, arr);
+    }
+  } catch {
+    // Si no hay conexión o falla, se continúa sin ausencias
+  }
+  return map;
+};
+
+const formatAusenciaReportLabel = (ausencia: AusenciaAsistencia): string => {
+  const base = getAusenciaLabel(ausencia.tipo);
+  return ausencia.motivo ? `${base} (${ausencia.motivo})` : base;
+};
 
 // Logos se cargan de forma LAZY solo cuando se genera un PDF
 // Esto evita ~959 KB en el bundle principal de la app
@@ -27,6 +65,11 @@ const getCompanyBranding = async () => {
       addressLine2: '31110 Chihuahua, CHH',
       phone: '6142477119',
       email: 'admin@daravisa.com',
+      bankName: 'BBVA MXN',
+      bankAccount: '0117288123',
+      bankClabe: '012150001172881230',
+      bankAccountHolder: 'Daravisa Soluciones y Tecnología SA de CV',
+      bankSummaryHtml: 'BBVA MXN<br>Daravisa Soluciones y Tecnología SA de CV<br>Cuenta: 0117288123<br>Clabe: 012150001172881230',
       logoStyle: 'max-height: 85px; max-width: 360px; width: auto; height: auto; object-fit: contain; object-position: left center; margin-top: 20px; z-index: 10; position: relative;',
     };
   }
@@ -43,6 +86,11 @@ const getCompanyBranding = async () => {
     addressLine2: '31107 Chihuahua, CHH',
     phone: '6142477119',
     email: 'rfernandez@inttec.net',
+    bankName: 'BBVA',
+    bankAccount: '0193092593',
+    bankClabe: '012150001930925930',
+    bankAccountHolder: 'Rafael Alonso Fernandez Tinajero',
+    bankSummaryHtml: 'BBVA: 012150001930925930<br>Banorte: 1222453474',
     logoStyle: 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;',
   };
 };
@@ -103,6 +151,143 @@ const hasPolicyAlert = (g: Gasto): { alert: boolean; reason: string } => {
   
   return { alert: false, reason: '' };
 };
+
+const escapeHtml = (val?: string | number | null): string => {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+};
+
+const formatMXNCurrency = (val: number): string =>
+  new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(Number(val || 0));
+
+const BLOQUE_LABELS: Record<ProyectoCategoriaKey, string> = {
+  alimentos: 'Alimentos',
+  hospedaje: 'Hospedaje',
+  material: 'Material',
+  equipo: 'Equipo',
+  transporte: 'Transporte',
+};
+
+const getGastoDestinoReportMeta = (g: Gasto) => {
+  const proyectoNombre = getProyectoNombreFromGasto(g);
+  const isOperativo =
+    g.tipo_gasto === 'OPERATIVO' ||
+    (!g.proyecto_id && (g.tipo_servicio_proyecto || '').toLowerCase() === 'operativo');
+
+  const destinoTipo = proyectoNombre
+    ? 'Proyecto'
+    : isOperativo
+    ? 'Operativo'
+    : g.tipo_gasto === 'PROYECTO'
+    ? 'Proyecto (Por asignar)'
+    : 'Histórico / Sin proyecto';
+
+  const { block, subblock } = classifyProjectGastoBlock(g);
+  const subtipoTrasladoLabel = g.subtipo_traslado
+    ? SUBTIPOS_TRASLADO_LABELS[g.subtipo_traslado as SubtipoTraslado] || g.subtipo_traslado
+    : '';
+  const hosp = isGastoHospedaje(g);
+  const hospDias = hosp ? getOrComputeHospedajeDias(g) : [];
+  const hospInicio = g.fecha_hospedaje_inicio ? String(g.fecha_hospedaje_inicio).split('T')[0] : hospDias[0]?.fecha || '';
+  const hospFin = g.fecha_hospedaje_fin ? String(g.fecha_hospedaje_fin).split('T')[0] : hospDias[hospDias.length - 1]?.fecha || '';
+
+  return {
+    destinoTipo,
+    proyectoNombre: proyectoNombre || (isOperativo ? 'Operativo / General' : g.detalle_servicio_proyecto || 'Sin proyecto'),
+    hasProyecto: Boolean(proyectoNombre || g.proyecto_id),
+    isOperativo,
+    block,
+    subblock,
+    bloqueLabel: BLOQUE_LABELS[block],
+    subtipoTrasladoLabel,
+    isHospedaje: hosp,
+    hospDias,
+    hospInicio,
+    hospFin,
+    nochesCount: hospDias.length,
+  };
+};
+
+const buildSatFieldsForGasto = (g: Gasto) => {
+  const uuidCfdi = g.factura_recibida_rel?.uuid || '';
+  const emisorCfdi = g.factura_recibida_rel ? (g.factura_recibida_rel.nombre_emisor || g.factura_recibida_rel.rfc_emisor || '') : '';
+  const totalFacturaSat = g.factura_recibida_rel?.total !== undefined ? Number(g.factura_recibida_rel.total) : '';
+  const montoPropina = Number(g.monto_propina || 0) > 0 ? Number(g.monto_propina) : 0;
+  const esCompartida = g.es_factura_compartida ? 'Sí' : 'No';
+
+  let estadoFactura = 'No Facturado';
+  if (g.facturado === true) estadoFactura = 'Facturado';
+  else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) {
+    estadoFactura = 'Pendiente de Entregar';
+  }
+
+  let comprobacionSat = 'Sin CFDI';
+  if (g.factura_recibida_rel || g.factura_recibida_id) {
+    comprobacionSat = 'Comprobado con CFDI';
+  } else if (g.facturado) {
+    comprobacionSat = 'Factura Adjunta (Pendiente SAT)';
+  } else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) {
+    comprobacionSat = 'Pendiente de Facturar';
+  }
+
+  const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
+  const estadoReembolso = g.estado_reembolso === 'REEMBOLSADO' ? 'Reembolsado' : g.estado_reembolso === 'PENDIENTE_REEMBOLSO' ? 'Pendiente' : 'No';
+
+  return {
+    uuidCfdi,
+    emisorCfdi,
+    totalFacturaSat,
+    montoPropina,
+    esCompartida,
+    estadoFactura,
+    comprobacionSat,
+    commentText,
+    estadoReembolso,
+    metodoPagoLabel: g.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : g.metodo_pago,
+  };
+};
+
+const getGastoReportDayKey = (g: Gasto): string => {
+  const raw = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
+  return raw.trim() || 'Sin fecha';
+};
+
+const compareReportDayKeysAsc = (a: string, b: string): number => {
+  if (a === 'Sin fecha' && b === 'Sin fecha') return 0;
+  if (a === 'Sin fecha') return 1;
+  if (b === 'Sin fecha') return -1;
+  return a.localeCompare(b);
+};
+
+const groupGastosByDayAsc = (items: Gasto[]) => {
+  const map = new Map<
+    string,
+    { fecha: string; items: Gasto[]; validSubtotal: number; rejectedCount: number }
+  >();
+  for (const g of items) {
+    const fecha = getGastoReportDayKey(g);
+    let entry = map.get(fecha);
+    if (!entry) {
+      entry = { fecha, items: [], validSubtotal: 0, rejectedCount: 0 };
+      map.set(fecha, entry);
+    }
+    entry.items.push(g);
+    if (g.status === 'REJECTED') {
+      entry.rejectedCount += 1;
+    } else {
+      entry.validSubtotal += Number(g.monto || 0);
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => compareReportDayKeysAsc(a.fecha, b.fecha));
+};
+
+export interface ExportGastosOptions {
+  includeRejected?: boolean;
+}
 
 export const ReportGenerator = {
   /**
@@ -418,11 +603,30 @@ export const ReportGenerator = {
    * Helper unificado para imprimir en Web o compartir en Móvil
    */
   
-  async _exportArrayToXLSX(sheetName: string, headers: string[], rows: any[][], filename: string): Promise<void> {
+  async _exportSheetsToXLSX(
+    sheets: { name: string; headers: string[]; rows: any[][] }[],
+    filename: string
+  ): Promise<void> {
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    
+    const usedNames = new Set<string>();
+
+    sheets.forEach((sheet, idx) => {
+      const baseClean = String(sheet.name || `Hoja${idx + 1}`)
+        .replace(/[:\\/?*\[\]]/g, '')
+        .trim()
+        .slice(0, 31) || `Hoja${idx + 1}`;
+      let uniqueName = baseClean;
+      let counter = 2;
+      while (usedNames.has(uniqueName)) {
+        const suffix = `_${counter++}`;
+        uniqueName = `${baseClean.slice(0, 31 - suffix.length)}${suffix}`;
+      }
+      usedNames.add(uniqueName);
+
+      const ws = XLSX.utils.aoa_to_sheet([sheet.headers, ...sheet.rows]);
+      XLSX.utils.book_append_sheet(wb, ws, uniqueName);
+    });
+
     if (Platform.OS === 'web') {
       XLSX.writeFile(wb, filename);
     } else {
@@ -430,10 +634,69 @@ export const ReportGenerator = {
       const fileUri = `${cacheDirectory}${filename}`;
       await writeAsStringAsync(fileUri, base64, { encoding: EncodingType.Base64 });
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dialogTitle: `Exportar ${sheetName}` });
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          dialogTitle: `Exportar ${filename}`,
+        });
       } else {
         throw new Error('La función de compartir no está disponible.');
       }
+    }
+  },
+
+  async _exportArrayToXLSX(sheetName: string, headers: string[], rows: any[][], filename: string): Promise<void> {
+    await ReportGenerator._exportSheetsToXLSX([{ name: sheetName, headers, rows }], filename);
+  },
+
+  async _printHtmlToPDF(htmlContent: string, filePrefix: string = 'reporte_gastos'): Promise<void> {
+    try {
+      if (Platform.OS === 'web') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+
+          setTimeout(() => {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+            }, 1000);
+          }, 500);
+        }
+        return;
+      }
+
+      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      const pdfFileName = `${filePrefix}_${Date.now()}.pdf`;
+      const safeUri = `${cacheDirectory}${pdfFileName}`;
+
+      await writeAsStringAsync(safeUri, base64 || '', {
+        encoding: EncodingType.Base64,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(safeUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Exportar Reporte PDF',
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        throw new Error('La función de compartir no está disponible en este dispositivo.');
+      }
+    } catch (error: any) {
+      logger.error('Error generating PDF report:', error);
+      throw new Error(error.message || 'Error al generar el reporte PDF.');
     }
   },
 
@@ -466,24 +729,33 @@ export const ReportGenerator = {
   /**
    * Genera un reporte PDF de los gastos y lo comparte mediante la hoja nativa
    */
-  async exportToPDF(gastos: Gasto[], title: string = 'Reporte de Control de Gastos', periodo?: string): Promise<void> {
-    if (gastos.length === 0) {
-      throw new Error('No hay gastos para exportar.');
+  async exportToPDF(
+    gastos: Gasto[],
+    title: string = 'Reporte de Control de Gastos',
+    periodo?: string,
+    options?: ExportGastosOptions
+  ): Promise<void> {
+    const includeRejected = options?.includeRejected ?? false;
+    const filteredGastos = includeRejected ? gastos : gastos.filter((g) => g.status !== 'REJECTED');
+
+    if (filteredGastos.length === 0) {
+      throw new Error('No hay gastos para exportar con los filtros seleccionados.');
     }
     const branding = await getCompanyBranding();
 
-    const totalMonto = gastos.reduce((sum, g) => sum + Number(g.monto), 0);
-    const approvedCount = gastos.filter((g) => g.status === 'APPROVED').length;
-    const pendingCount = gastos.filter((g) => g.status === 'PENDING').length;
+    const validGastos = filteredGastos.filter((g) => g.status !== 'REJECTED');
+    const totalMonto = validGastos.reduce((sum, g) => sum + Number(g.monto || 0), 0);
+    const approvedCount = filteredGastos.filter((g) => g.status === 'APPROVED').length;
+    const pendingCount = filteredGastos.filter((g) => g.status === 'PENDING' || g.status === 'ACTION_REQUIRED').length;
+    const rejectedCount = filteredGastos.filter((g) => g.status === 'REJECTED').length;
 
     // Generar tabla HTML
     let tableRows = '';
-    gastos.forEach((g) => {
+    filteredGastos.forEach((g) => {
       const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
-      const montoFormatted = new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN',
-      }).format(Number(g.monto));
+      const montoFormatted = formatMXNCurrency(Number(g.monto));
+      const meta = getGastoDestinoReportMeta(g);
+      const sat = buildSatFieldsForGasto(g);
 
       let badgeColor = '#FFC107'; // PENDING -> Yellow
       if (g.status === 'APPROVED') badgeColor = '#4CAF50';
@@ -495,20 +767,36 @@ export const ReportGenerator = {
       const subName = GastoHelper.getSubcategoria(g) || '';
       const sucName = GastoHelper.getSucursal(g) || 'Sin Sucursal';
 
-      const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
-      
+      const extraSubBadges: string[] = [];
+      if (meta.subtipoTrasladoLabel) {
+        extraSubBadges.push(`Traslado: ${escapeHtml(meta.subtipoTrasladoLabel)}`);
+      }
+      if (meta.isHospedaje && meta.hospInicio && meta.hospFin) {
+        extraSubBadges.push(`Hotel: ${meta.hospInicio} al ${meta.hospFin} (${meta.nochesCount} n.)`);
+      }
+
+      const destinoBadgeColor = meta.hasProyecto ? '#0284c7' : meta.isOperativo ? '#6366f1' : '#64748b';
+      const rowStrikeStyle = g.status === 'REJECTED' ? 'text-decoration: line-through; color: #94a3b8;' : '';
+
       tableRows += `
         <tr>
-          <td>${fecha}</td>
-          <td>${g.empleado_nombre || 'Desconocido'}</td>
-          <td>${provName} <br/><small style="color: #666;">${sucName}</small></td>
+          <td>${escapeHtml(fecha)}</td>
+          <td>${escapeHtml(g.empleado_nombre || 'Desconocido')}</td>
           <td>
-            ${catName}${subName ? ` - ${subName}` : ''}
+            <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 8px; font-weight: 700; color: #fff; background-color: ${destinoBadgeColor}; margin-bottom: 2px;">
+              ${escapeHtml(meta.destinoTipo)}
+            </span>
+            <div style="font-weight: 700; font-size: 10px;">${escapeHtml(meta.proyectoNombre)}</div>
+            <small style="color: #666;">${escapeHtml(provName)} • ${escapeHtml(sucName)}</small>
           </td>
-          <td style="font-size: 9px; max-width: 120px; overflow: hidden; text-overflow: ellipsis;" title="${commentText}">${commentText || 'N/A'}</td>
-          <td>${g.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : g.metodo_pago}${g.tipo_tarjeta ? ` (${g.tipo_tarjeta})` : ''}</td>
-          <td><span class="status-badge" style="background-color: ${badgeColor};">${g.status}</span></td>
-          <td style="text-align: right; font-weight: bold;">${montoFormatted}</td>
+          <td>
+            <div style="font-weight: 600;">${escapeHtml(catName)}${subName ? ` - ${escapeHtml(subName)}` : ''}</div>
+            ${extraSubBadges.length > 0 ? `<small style="color: #0284c7; font-weight: 600;">${extraSubBadges.join(' | ')}</small>` : ''}
+          </td>
+          <td style="font-size: 9px; max-width: 130px; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(sat.commentText)}">${escapeHtml(sat.commentText) || 'N/A'}</td>
+          <td>${escapeHtml(sat.metodoPagoLabel)}${g.tipo_tarjeta ? ` (${escapeHtml(g.tipo_tarjeta)})` : ''}</td>
+          <td><span class="status-badge" style="background-color: ${badgeColor};">${escapeHtml(g.status)}</span></td>
+          <td style="text-align: right; font-weight: bold; ${rowStrikeStyle}">${montoFormatted}</td>
         </tr>
       `;
     });
@@ -518,7 +806,7 @@ export const ReportGenerator = {
       <html>
       <head>
         <meta charset="utf-8" />
-        <title>${title}</title>
+        <title>${escapeHtml(title)}</title>
         <style>
           body {
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -538,42 +826,6 @@ export const ReportGenerator = {
               margin: 15mm;
             }
           }
-          .header-container {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 3px solid #0d1b2a;
-            padding-bottom: 15px;
-            margin-bottom: 20px;
-          }
-          .logo-container {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-          }
-          .logo-text {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-          }
-          .logo-brand {
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-weight: 900;
-            font-style: italic;
-            font-size: 38px;
-            color: #0d1b2a;
-            line-height: 1;
-            letter-spacing: 0.5px;
-          }
-          .logo-tagline {
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            font-weight: 700;
-            font-size: 7px;
-            color: #777;
-            letter-spacing: 0.8px;
-            margin-top: 2px;
-            text-transform: uppercase;
-          }
           .logo-img {
             width: 300px;
             height: 100px;
@@ -589,12 +841,6 @@ export const ReportGenerator = {
             color: #777;
             font-size: 12px;
             margin-top: 5px;
-          }
-          .summary-grid {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 25px;
-            gap: 15px;
           }
           .summary-card {
             flex: 1;
@@ -657,9 +903,9 @@ export const ReportGenerator = {
         <table style="width: 100%; border-collapse: collapse; border-bottom: 3px solid #0d1b2a; padding-bottom: 15px; margin-bottom: 20px; border: none;">
           <tr>
             <td style="vertical-align: middle; border: none; padding: 0;">
-              <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${title}</h1>
-              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${periodo}</p>` : ''}
-              <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString()}</p>
+              <h1 class="title" style="margin: 0; font-size: 24px; font-weight: bold; color: #0d1b2a;">${escapeHtml(title)}</h1>
+              ${periodo ? `<p style="margin: 4px 0 0 0; font-size: 13px; font-weight: bold; color: #0284c7;">Período: ${escapeHtml(periodo)}</p>` : ''}
+              <p class="subtitle" style="margin: 5px 0 0 0; font-size: 12px; color: #777;">Generado el: ${new Date().toLocaleString('es-MX')}</p>
             </td>
             <td style="text-align: right; vertical-align: middle; border: none; padding: 0;">
               <table style="display: inline-table; border-collapse: collapse; border: none;">
@@ -677,8 +923,8 @@ export const ReportGenerator = {
           <tr>
             <td style="width: 25%; padding-right: 10px; border: none;">
               <div class="summary-card">
-                <div class="label">Total Gastos</div>
-                <div class="value">${gastos.length}</div>
+                <div class="label">Registros</div>
+                <div class="value">${filteredGastos.length}</div>
               </div>
             </td>
             <td style="width: 25%; padding-left: 5px; padding-right: 5px; border: none;">
@@ -689,17 +935,15 @@ export const ReportGenerator = {
             </td>
             <td style="width: 25%; padding-left: 5px; padding-right: 5px; border: none;">
               <div class="summary-card">
-                <div class="label">Pendientes</div>
+                <div class="label">Por Revisar</div>
                 <div class="value" style="color: #FFC107;">${pendingCount}</div>
               </div>
             </td>
             <td style="width: 25%; padding-left: 10px; border: none;">
               <div class="summary-card">
-                <div class="label">Monto Total</div>
-                <div class="value" style="color: #1b4965;">${new Intl.NumberFormat('es-MX', {
-                  style: 'currency',
-                  currency: 'MXN',
-                }).format(totalMonto)}</div>
+                <div class="label">Monto Válido</div>
+                <div class="value" style="color: #1b4965;">${formatMXNCurrency(totalMonto)}</div>
+                ${rejectedCount > 0 ? `<div style="font-size: 9px; color: #ef4444; margin-top: 2px;">Excluye ${rejectedCount} rechazado(s)</div>` : ''}
               </div>
             </td>
           </tr>
@@ -708,13 +952,13 @@ export const ReportGenerator = {
         <table>
           <thead>
             <tr>
-              <th style="width: 10%">Fecha</th>
-              <th style="width: 15%">Empleado</th>
-              <th style="width: 15%">Proveedor / Sucursal</th>
-              <th style="width: 15%">Categoría</th>
-              <th style="width: 15%">Comentarios</th>
-              <th style="width: 12%">Pago</th>
-              <th style="width: 8%">Estado</th>
+              <th style="width: 9%">Fecha</th>
+              <th style="width: 14%">Empleado</th>
+              <th style="width: 19%">Proyecto / Proveedor</th>
+              <th style="width: 17%">Categoría / Detalle</th>
+              <th style="width: 14%">Comentarios</th>
+              <th style="width: 10%">Pago</th>
+              <th style="width: 7%">Estado</th>
               <th style="width: 10%; text-align: right;">Monto</th>
             </tr>
           </thead>
@@ -730,60 +974,311 @@ export const ReportGenerator = {
       </html>
     `;
 
-    try {
-      if (Platform.OS === 'web') {
-        const iframe = document.createElement('iframe');
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = '0';
-        document.body.appendChild(iframe);
+    await ReportGenerator._printHtmlToPDF(htmlContent, 'reporte_gastos');
+  },
 
-        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-        if (iframeDoc) {
-          iframeDoc.open();
-          iframeDoc.write(htmlContent);
-          iframeDoc.close();
+  /**
+   * Reporte PDF Ejecutivo de un Proyecto ("Cajita") con las 5 categorías y desglose diario de hospedaje
+   */
+  async exportProyectoToPDF(
+    detail: ProyectoDetailResponse,
+    options?: ExportGastosOptions
+  ): Promise<void> {
+    const { proyecto, resumen, gastos } = detail;
+    const includeRejected = options?.includeRejected ?? false;
+    const gastosVisibles = includeRejected ? gastos : gastos.filter((g) => g.status !== 'REJECTED');
 
-          setTimeout(() => {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-            setTimeout(() => {
-              document.body.removeChild(iframe);
-            }, 1000);
-          }, 500);
-        }
-        return;
-      }
+    const branding = await getCompanyBranding();
+    const blocks: { key: ProyectoCategoriaKey; title: string; color: string }[] = [
+      { key: 'alimentos', title: '1. Alimentos', color: '#ea580c' },
+      { key: 'hospedaje', title: '2. Hospedaje', color: '#4f46e5' },
+      { key: 'material', title: '3. Material', color: '#059669' },
+      { key: 'equipo', title: '4. Equipo', color: '#7c3aed' },
+      { key: 'transporte', title: '5. Transporte (Combustible y Traslados)', color: '#0284c7' },
+    ];
 
-      // Generar archivo PDF temporal y obtener su base64 para evitar bloqueos del sistema de archivos en Android
-      const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
-      
-      // Para evitar el error "Not allowed to read file under given URL" y "isn't readable" en Android,
-      // guardamos el PDF a partir de su contenido Base64 directamente en cacheDirectory.
-      const pdfFileName = `reporte_gastos_${Date.now()}.pdf`;
-      const safeUri = `${cacheDirectory}${pdfFileName}`;
-      
-      await writeAsStringAsync(safeUri, base64 || '', {
-        encoding: EncodingType.Base64,
-      });
+    const grouped: Record<ProyectoCategoriaKey, Gasto[]> = {
+      alimentos: [],
+      hospedaje: [],
+      material: [],
+      equipo: [],
+      transporte: [],
+    };
+    let approvedTotal = 0;
+    let pendingTotal = 0;
+    let rejectedCount = 0;
 
-      // Compartir nativamente
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(safeUri, {
-          mimeType: 'application/pdf',
-          dialogTitle: 'Exportar Reporte PDF',
-          UTI: 'com.adobe.pdf',
-        });
+    for (const g of gastos) {
+      const m = Number(g.monto || 0);
+      if (g.status === 'REJECTED') {
+        rejectedCount += 1;
+      } else if (g.status === 'APPROVED') {
+        approvedTotal += m;
       } else {
-        throw new Error('La función de compartir no está disponible en este dispositivo.');
+        pendingTotal += m;
       }
-    } catch (error: any) {
-      logger.error('Error generating PDF report:', error);
-      throw new Error(error.message || 'Error al generar el reporte PDF.');
+      if (includeRejected || g.status !== 'REJECTED') {
+        const { block } = classifyProjectGastoBlock(g);
+        grouped[block].push(g);
+      }
     }
+
+    const hospedajeDiasRows: { fecha: string; hotel: string; empleado: string; monto: number }[] = [];
+    grouped.hospedaje
+      .filter((g) => g.status !== 'REJECTED')
+      .forEach((g) => {
+        const dias = getOrComputeHospedajeDias(g);
+        const hotel = GastoHelper.getProveedor(g) || g.detalle_servicio_proyecto || 'Hotel / Hospedaje';
+        const emp = g.empleado_nombre || 'Empleado';
+        dias.forEach((d) => {
+          hospedajeDiasRows.push({
+            fecha: d.fecha,
+            hotel,
+            empleado: emp,
+            monto: Number(d.monto_diario || 0),
+          });
+        });
+      });
+    hospedajeDiasRows.sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+    const renderBlockSection = (block: { key: ProyectoCategoriaKey; title: string; color: string }) => {
+      const items = grouped[block.key];
+      const blockTotal = resumen.totales_por_categoria[block.key] || 0;
+      const dayGroups = groupGastosByDayAsc(items);
+      const rowsHtml =
+        items.length === 0
+          ? `<tr><td colspan="7" style="text-align:center; color:#94a3b8; font-style:italic;">Sin gastos registrados en esta categoría</td></tr>`
+          : dayGroups
+              .map((group) => {
+                const dayHeaderHtml = `
+                  <tr style="background:#f1f5f9;">
+                    <td colspan="5" style="font-weight:800; color:#0f172a; font-size:9.5px; padding:5px 6px; border-top:1px solid #cbd5e1;">
+                      📅 ${escapeHtml(group.fecha)} &nbsp;•&nbsp; ${group.items.length} ${group.items.length === 1 ? 'gasto' : 'gastos'}${group.rejectedCount > 0 ? ` (${group.rejectedCount} rech.)` : ''}
+                    </td>
+                    <td colspan="2" style="text-align:right; font-weight:800; color:${block.color}; font-size:9.5px; padding:5px 6px; border-top:1px solid #cbd5e1;">
+                      Subtotal del día: ${formatMXNCurrency(group.validSubtotal)}
+                    </td>
+                  </tr>
+                `;
+                const dayItemRowsHtml = group.items
+                  .map((g) => {
+                    const meta = getGastoDestinoReportMeta(g);
+                    const sat = buildSatFieldsForGasto(g);
+                    const fecha = getGastoReportDayKey(g);
+                    const prov = GastoHelper.getProveedor(g) || 'Sin proveedor';
+                    const subcat = GastoHelper.getSubcategoria(g) || '';
+                    const extraInfo =
+                      block.key === 'transporte'
+                        ? `${meta.subblock === 'combustible' ? 'Combustible' : 'Traslado'}${meta.subtipoTrasladoLabel ? ` (${meta.subtipoTrasladoLabel})` : ''}`
+                        : block.key === 'hospedaje' && meta.hospInicio && meta.hospFin
+                        ? `${meta.hospInicio} al ${meta.hospFin} (${meta.nochesCount} n.)`
+                        : subcat;
+
+                    let statusBg = '#f59e0b';
+                    if (g.status === 'APPROVED') statusBg = '#10b981';
+                    if (g.status === 'REJECTED') statusBg = '#ef4444';
+                    if (g.status === 'ACTION_REQUIRED') statusBg = '#3b82f6';
+
+                    const strike = g.status === 'REJECTED' ? 'text-decoration: line-through; color: #94a3b8;' : '';
+                    return `
+                      <tr>
+                        <td>${escapeHtml(fecha)}</td>
+                        <td>${escapeHtml(g.empleado_nombre || 'Desconocido')}</td>
+                        <td>
+                          <div style="font-weight: 600;">${escapeHtml(prov)}</div>
+                          <small style="color:#64748b;">${escapeHtml(extraInfo)}</small>
+                        </td>
+                        <td style="font-size: 9px;">${escapeHtml(sat.commentText) || '—'}</td>
+                        <td style="font-size: 9px;">${escapeHtml(sat.comprobacionSat)}</td>
+                        <td><span style="background:${statusBg}; color:#fff; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:700;">${escapeHtml(g.status)}</span></td>
+                        <td style="text-align:right; font-weight:700; ${strike}">${formatMXNCurrency(Number(g.monto || 0))}</td>
+                      </tr>
+                    `;
+                  })
+                  .join('');
+                return dayHeaderHtml + dayItemRowsHtml;
+              })
+              .join('');
+
+      const transporteSubBanner =
+        block.key === 'transporte'
+          ? `<span style="font-size:11px; font-weight:600; color:#475569; margin-left: 10px;">
+               (Combustible: ${formatMXNCurrency(resumen.totales_por_categoria.combustible)} • Traslados: ${formatMXNCurrency(resumen.totales_por_categoria.traslados)})
+             </span>`
+          : '';
+
+      const hospedajeTimeline = buildHospedajeTimelineWithGaps(hospedajeDiasRows);
+      const hospedajeGapNights = hospedajeTimeline.reduce(
+        (sum, item) => (item.kind === 'gap' ? sum + item.diasFaltantes : sum),
+        0
+      );
+
+      const hospedajeDiarioHtml =
+        block.key === 'hospedaje' && hospedajeDiasRows.length > 0
+          ? `
+            <div style="margin-top: 8px; padding: 8px 10px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                <div style="font-size: 10px; font-weight: 800; color: #4338ca; text-transform: uppercase;">
+                  Desglose diario de Hospedaje (${hospedajeDiasRows.length} noches)
+                </div>
+                ${
+                  hospedajeGapNights > 0
+                    ? `<div style="font-size: 9px; font-weight: 800; color: #991b1b; background: #fee2e2; border: 1px solid #dc2626; padding: 2px 7px; border-radius: 4px;">
+                         ⚠️ ${hospedajeGapNights} ${hospedajeGapNights === 1 ? 'noche' : 'noches'} sin registro entre estancias
+                       </div>`
+                    : ''
+                }
+              </div>
+              <table style="margin-top: 0; font-size: 10px;">
+                <thead>
+                  <tr>
+                    <th style="background:#4338ca; padding:5px 6px;">Fecha Noche</th>
+                    <th style="background:#4338ca; padding:5px 6px;">Hotel / Proveedor</th>
+                    <th style="background:#4338ca; padding:5px 6px;">Empleado</th>
+                    <th style="background:#4338ca; padding:5px 6px; text-align:right;">Monto Diario</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${hospedajeTimeline
+                    .map((item) => {
+                      if (item.kind === 'gap') {
+                        const gapLabel =
+                          item.diasFaltantes === 1
+                            ? item.fechaInicio
+                            : `${item.fechaInicio} al ${item.fechaFin} (${item.diasFaltantes} n.)`;
+                        return `
+                          <tr style="background:#fee2e2;">
+                            <td style="padding:4px 6px; font-weight:800; color:#7f1d1d;">⚠️ ${escapeHtml(gapLabel)}</td>
+                            <td style="padding:4px 6px; font-weight:800; color:#dc2626;">SIN REGISTRO DE HOSPEDAJE</td>
+                            <td style="padding:4px 6px; color:#7f1d1d;">${item.diasFaltantes} ${item.diasFaltantes === 1 ? 'noche faltante' : 'noches faltantes'}</td>
+                            <td style="padding:4px 6px; text-align:right; font-weight:700; color:#7f1d1d;">$0.00</td>
+                          </tr>
+                        `;
+                      }
+                      const d = item.data;
+                      return `
+                        <tr>
+                          <td style="padding:4px 6px;">${escapeHtml(d.fecha)}</td>
+                          <td style="padding:4px 6px;">${escapeHtml(d.hotel)}</td>
+                          <td style="padding:4px 6px;">${escapeHtml(d.empleado)}</td>
+                          <td style="padding:4px 6px; text-align:right; font-weight:700;">${formatMXNCurrency(d.monto)}</td>
+                        </tr>
+                      `;
+                    })
+                    .join('')}
+                </tbody>
+              </table>
+            </div>
+          `
+          : '';
+
+      return `
+        <div style="margin-top: 18px; page-break-inside: avoid;">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-left: 4px solid ${block.color}; padding: 4px 10px; background:#f8fafc; margin-bottom: 6px;">
+            <div>
+              <span style="font-size: 13px; font-weight: 800; color:#0f172a;">${block.title}</span>
+              ${transporteSubBanner}
+            </div>
+            <div style="font-size: 13px; font-weight: 800; color:${block.color};">${formatMXNCurrency(blockTotal)}</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width:10%">Fecha</th>
+                <th style="width:15%">Empleado</th>
+                <th style="width:22%">Proveedor / Detalle</th>
+                <th style="width:21%">Comentarios</th>
+                <th style="width:13%">SAT / Factura</th>
+                <th style="width:8%">Estado</th>
+                <th style="width:11%; text-align:right;">Monto</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+          ${hospedajeDiarioHtml}
+        </div>
+      `;
+    };
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Reporte Proyecto - ${escapeHtml(proyecto.nombre)}</title>
+        <style>
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 22px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          @media print { @page { size: letter; margin: 12mm; } }
+          .logo-img { width: 240px; height: 80px; object-fit: contain; }
+          table { width: 100%; border-collapse: collapse; font-size: 10px; }
+          th { background: #0f172a; color: #fff; text-align: left; padding: 7px 6px; font-weight: 600; }
+          td { padding: 7px 6px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+          .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; background: #f8fafc; }
+          .card-label { font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 700; }
+          .card-val { font-size: 15px; font-weight: 800; color: #0f172a; margin-top: 3px; }
+        </style>
+      </head>
+      <body>
+        <table style="border-bottom: 3px solid #0f172a; margin-bottom: 16px;">
+          <tr>
+            <td style="border:none; padding:0;">
+              <div style="font-size:10px; font-weight:800; color:#0284c7; text-transform:uppercase;">Reporte de Gastos por Proyecto</div>
+              <h1 style="margin:2px 0 4px 0; font-size:22px; color:#0f172a;">${escapeHtml(proyecto.nombre)}</h1>
+              <div style="font-size:11px; color:#475569;">
+                <strong>Cliente:</strong> ${escapeHtml(proyecto.cliente_nombre || 'N/D')} &nbsp;|&nbsp;
+                <strong>Sucursal:</strong> ${escapeHtml(proyecto.sucursal_nombre || 'N/D')} &nbsp;|&nbsp;
+                <strong>Estado:</strong> ${escapeHtml(proyecto.status)}
+              </div>
+              ${proyecto.notas ? `<div style="font-size:10px; color:#64748b; margin-top:4px;">Notas: ${escapeHtml(proyecto.notas)}</div>` : ''}
+              <div style="font-size:10px; color:#94a3b8; margin-top:4px;">Generado el ${new Date().toLocaleString('es-MX')}</div>
+            </td>
+            <td style="border:none; padding:0; text-align:right;">
+              <img class="logo-img" src="${branding.logo}" />
+            </td>
+          </tr>
+        </table>
+
+        <table style="margin-bottom: 14px;">
+          <tr>
+            <td style="border:none; width:34%; padding:0 6px 0 0;">
+              <div class="card" style="background:#eff6ff; border-color:#bfdbfe;">
+                <div class="card-label" style="color:#1d4ed8;">Total Proyecto (Aprob. + Pend.)</div>
+                <div class="card-val" style="font-size:18px; color:#1e3a8a;">${formatMXNCurrency(resumen.total_general)}</div>
+                <div style="font-size:9px; color:#475569; margin-top:2px;">
+                  Aprobado: ${formatMXNCurrency(approvedTotal)} • Pendiente: ${formatMXNCurrency(pendingTotal)}
+                  ${rejectedCount > 0 ? ` • Excluye ${rejectedCount} rechazado(s)` : ''}
+                </div>
+              </div>
+            </td>
+            <td style="border:none; width:13%; padding:0 4px;">
+              <div class="card"><div class="card-label">Alimentos</div><div class="card-val" style="font-size:13px; color:#ea580c;">${formatMXNCurrency(resumen.totales_por_categoria.alimentos)}</div></div>
+            </td>
+            <td style="border:none; width:13%; padding:0 4px;">
+              <div class="card"><div class="card-label">Hospedaje</div><div class="card-val" style="font-size:13px; color:#4f46e5;">${formatMXNCurrency(resumen.totales_por_categoria.hospedaje)}</div></div>
+            </td>
+            <td style="border:none; width:13%; padding:0 4px;">
+              <div class="card"><div class="card-label">Material</div><div class="card-val" style="font-size:13px; color:#059669;">${formatMXNCurrency(resumen.totales_por_categoria.material)}</div></div>
+            </td>
+            <td style="border:none; width:13%; padding:0 4px;">
+              <div class="card"><div class="card-label">Equipo</div><div class="card-val" style="font-size:13px; color:#7c3aed;">${formatMXNCurrency(resumen.totales_por_categoria.equipo)}</div></div>
+            </td>
+            <td style="border:none; width:14%; padding:0 0 0 4px;">
+              <div class="card"><div class="card-label">Transporte</div><div class="card-val" style="font-size:13px; color:#0284c7;">${formatMXNCurrency(resumen.totales_por_categoria.transporte)}</div></div>
+            </td>
+          </tr>
+        </table>
+
+        ${gastosVisibles.length === 0 ? `<div style="padding:20px; text-align:center; color:#64748b; border:1px dashed #cbd5e1; border-radius:8px;">Este proyecto aún no tiene gastos registrados.</div>` : blocks.map(renderBlockSection).join('')}
+
+        <div style="margin-top:28px; text-align:center; font-size:9px; color:#94a3b8; border-top:1px solid #e2e8f0; padding-top:10px;">
+          Documento Confidencial - Reporte por Proyecto - Portal INTTEC
+        </div>
+      </body>
+      </html>
+    `;
+
+    const safeSlug = proyecto.nombre.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 35);
+    await ReportGenerator._printHtmlToPDF(htmlContent, `proyecto_${safeSlug}`);
   },
 
   /**
@@ -976,9 +1471,11 @@ export const ReportGenerator = {
       const isAuto = isAutoCerradoAsistencia(a);
       const fecha = a.fecha || '';
       const horaEntrada = a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : '--:--';
-      const dirEntrada = a.direccion_entrada || 'N/A';
+      const dirEntrada = cleanAddressForDisplay(a.direccion_entrada) || 'N/A';
       const horaSalida = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : '--:--');
-      const dirSalida = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || 'N/A');
+      const dirSalida = isAuto
+        ? (cleanAddressForDisplay(a.direccion_salida) || 'Cierre automático 6:00 PM (olvido de checada)')
+        : (cleanAddressForDisplay(a.direccion_salida) || 'N/A');
 
       tableRows += `
         <tr>
@@ -1284,6 +1781,7 @@ export const ReportGenerator = {
   ): Promise<void> {
     const range = getWeekRange(weekMondayInput);
     const branding = await getCompanyBranding();
+    const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.mondayStr, range.sundayStr);
 
     const asistenciasPorEmpleado = new Map<string, Asistencia[]>();
     for (const a of asistencias) {
@@ -1308,8 +1806,9 @@ export const ReportGenerator = {
 
     for (const emp of personalTarget) {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
+      const ausenciasEmp = ausenciasPorEmpleado.get(emp.id) || [];
       const empHoras = emp.horas_semanales ? Number(emp.horas_semanales) : 48;
-      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras);
+      const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras, ausenciasEmp);
 
       if (semanaData.turnosTotales > 0) {
         empleadosConRegistro++;
@@ -1320,9 +1819,9 @@ export const ReportGenerator = {
       }
 
       let diasHtml = '';
-      const diasConTurnos = semanaData.dias.filter(d => d.turnos.length > 0);
+      const diasVisibles = semanaData.dias.filter(d => d.turnos.length > 0 || Boolean(d.ausencia));
 
-      if (diasConTurnos.length === 0) {
+      if (diasVisibles.length === 0) {
         diasHtml = `
           <tr>
             <td colspan="5" style="text-align: center; color: #888; font-style: italic; padding: 10px;">
@@ -1331,7 +1830,19 @@ export const ReportGenerator = {
           </tr>
         `;
       } else {
-        for (const dia of diasConTurnos) {
+        for (const dia of diasVisibles) {
+          if (dia.turnos.length === 0 && dia.ausencia) {
+            const colorAus = dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706';
+            diasHtml += `
+              <tr>
+                <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+                <td colspan="4" style="text-align: center; color: ${colorAus}; font-weight: 700;">
+                  ${formatAusenciaReportLabel(dia.ausencia)}
+                </td>
+              </tr>
+            `;
+            continue;
+          }
           for (const turno of dia.turnos) {
             diasHtml += `
               <tr>
@@ -1533,18 +2044,29 @@ export const ReportGenerator = {
   ): Promise<void> {
     const range = getWeekRange(weekMondayInput);
     const branding = await getCompanyBranding();
+    const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.mondayStr, range.sundayStr);
     const targetHoras = empleado.horas_semanales ? Number(empleado.horas_semanales) : 48;
-    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras);
+    const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras, ausenciasPorEmpleado.get(empleado.id) || []);
 
     let diasHtml = '';
     for (const dia of semanaData.dias) {
       if (dia.turnos.length === 0) {
-        diasHtml += `
-          <tr>
-            <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
-            <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
-          </tr>
-        `;
+        if (dia.ausencia) {
+          const colorAus = dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706';
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+              <td colspan="4" style="text-align: center; color: ${colorAus}; font-weight: 700;">${formatAusenciaReportLabel(dia.ausencia)}</td>
+            </tr>
+          `;
+        } else {
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+              <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
+            </tr>
+          `;
+        }
       } else {
         dia.turnos.forEach((turno, idx) => {
           diasHtml += `
@@ -1758,10 +2280,12 @@ export const ReportGenerator = {
     let empleadosConRegistro = 0;
 
     let empleadosHtml = '';
+    const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.startStr, range.endStr);
 
     for (const emp of personalTarget) {
       const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-      const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol);
+      const ausenciasEmp = ausenciasPorEmpleado.get(emp.id) || [];
+      const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol, ausenciasEmp);
 
       if (mesData.turnosTotales > 0) {
         empleadosConRegistro++;
@@ -1772,9 +2296,9 @@ export const ReportGenerator = {
       }
 
       let diasHtml = '';
-      const diasConTurnos = mesData.dias.filter(d => d.turnos.length > 0);
+      const diasVisibles = mesData.dias.filter(d => d.turnos.length > 0 || Boolean(d.ausencia));
 
-      if (diasConTurnos.length === 0) {
+      if (diasVisibles.length === 0) {
         diasHtml = `
           <tr>
             <td colspan="5" style="text-align: center; color: #888; font-style: italic; padding: 10px;">
@@ -1783,7 +2307,19 @@ export const ReportGenerator = {
           </tr>
         `;
       } else {
-        for (const dia of diasConTurnos) {
+        for (const dia of diasVisibles) {
+          if (dia.turnos.length === 0 && dia.ausencia) {
+            const colorAus = dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706';
+            diasHtml += `
+              <tr>
+                <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+                <td colspan="4" style="text-align: center; color: ${colorAus}; font-weight: 700;">
+                  ${formatAusenciaReportLabel(dia.ausencia)}
+                </td>
+              </tr>
+            `;
+            continue;
+          }
           for (const turno of dia.turnos) {
             diasHtml += `
               <tr>
@@ -1971,17 +2507,28 @@ export const ReportGenerator = {
   ): Promise<void> {
     const range = getMonthRange(monthDateInput);
     const branding = await getCompanyBranding();
-    const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol);
+    const ausenciasMap = await fetchAusenciasPorEmpleadoSafe(range.startStr, range.endStr, empleado.id);
+    const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol, ausenciasMap.get(empleado.id) || []);
 
     let diasHtml = '';
     for (const dia of mesData.dias) {
       if (dia.turnos.length === 0) {
-        diasHtml += `
-          <tr>
-            <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
-            <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
-          </tr>
-        `;
+        if (dia.ausencia) {
+          const colorAus = dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706';
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+              <td colspan="4" style="text-align: center; color: ${colorAus}; font-weight: 700;">${formatAusenciaReportLabel(dia.ausencia)}</td>
+            </tr>
+          `;
+        } else {
+          diasHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #0d1b2a;">${dia.dayName} ${dia.shortDate}</td>
+              <td colspan="4" style="text-align: center; color: #94a3b8; font-style: italic;">Sin registros</td>
+            </tr>
+          `;
+        }
       } else {
         dia.turnos.forEach((turno, idx) => {
           diasHtml += `
@@ -3583,91 +4130,637 @@ export const ReportGenerator = {
             ]);
             await ReportGenerator._exportArrayToXLSX('Movimientos', headers, rows, filename);
     },
-    async exportToXLSX(gastos: Gasto[], fileName: string = 'reporte_gastos.xlsx'): Promise<void> {
+    async exportToXLSX(
+      gastos: Gasto[],
+      fileName: string = 'reporte_gastos.xlsx',
+      options?: ExportGastosOptions
+    ): Promise<void> {
+      const includeRejected = options?.includeRejected ?? true;
+      const sourceGastos = includeRejected ? gastos : gastos.filter((g) => g.status !== 'REJECTED');
 
-            if (gastos.length === 0) {
-              throw new Error('No hay gastos para exportar.');
-            }
-            const headers = [
-              'ID',
-              'Fecha',
-              'Empleado Nombre',
-              'Monto Gasto',
-              'Monto Propina',
-              'UUID CFDI (SAT)',
-              'Emisor CFDI (SAT)',
-              'Total CFDI (SAT)',
-              'Factura Compartida',
-              'Comprobación SAT',
-              'Categoria',
-              'Subcategoria',
-              'Proveedor',
-              'Cliente',
-              'Servicio/Proyecto',
-              'Detalle',
-              'Sucursal',
-              'Venta Vinculada',
-              'Metodo Pago',
-              'Tipo Tarjeta',
-              'Estado Factura',
-              'Motivo Sin Factura',
-              'Status',
-              'Estado Reembolso',
-              'Comentarios'
-            ];
-            const rows = gastos.map(g => {
-              const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
-              let estadoFactura = 'No Facturado';
-              if (g.facturado === true) estadoFactura = 'Facturado';
-              else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) estadoFactura = 'Pendiente de Entregar';
-              const commentText = g.justificacion ? g.justificacion.replace(/\[[\s\S]*?\]/g, '').trim() : '';
-              const estadoReembolso = g.estado_reembolso === 'REEMBOLSADO' ? 'Reembolsado' : 'No';
-              const ventaVinc = g.venta_id ? `Venta #${String(g.venta_id).slice(0, 8)}` : 'Sin Venta';
+      if (sourceGastos.length === 0) {
+        throw new Error('No hay gastos para exportar.');
+      }
 
-              const uuidCfdi = g.factura_recibida_rel?.uuid || '';
-              const emisorCfdi = g.factura_recibida_rel ? (g.factura_recibida_rel.nombre_emisor || g.factura_recibida_rel.rfc_emisor || '') : '';
-              const totalFacturaSat = g.factura_recibida_rel?.total !== undefined ? Number(g.factura_recibida_rel.total) : '';
-              const montoPropina = Number(g.monto_propina || 0) > 0 ? Number(g.monto_propina) : 0;
-              const esCompartida = g.es_factura_compartida ? 'Sí' : 'No';
+      // 1. Hoja "Resumen por Proyecto" (excluye REJECTED de montos)
+      type BucketAgg = {
+        nombre: string;
+        cliente: string;
+        sucursal: string;
+        estatus: string;
+        alimentos: number;
+        hospedaje: number;
+        material: number;
+        equipo: number;
+        combustible: number;
+        traslados: number;
+        total: number;
+        registros: number;
+      };
+      const proyectoBuckets = new Map<string, BucketAgg>();
+      const crearBucket = (nombre: string, cliente = '', sucursal = '', estatus = ''): BucketAgg => ({
+        nombre,
+        cliente,
+        sucursal,
+        estatus,
+        alimentos: 0,
+        hospedaje: 0,
+        material: 0,
+        equipo: 0,
+        combustible: 0,
+        traslados: 0,
+        total: 0,
+        registros: 0,
+      });
 
-              let comprobacionSat = 'Sin CFDI';
-              if (g.factura_recibida_rel || g.factura_recibida_id) {
-                comprobacionSat = 'Comprobado con CFDI';
-              } else if (g.facturado) {
-                comprobacionSat = 'Factura Adjunta (Pendiente SAT)';
-              } else if (g.motivo_sin_factura === 'PENDIENTE_ENTREGA' || g.motivo_sin_factura?.toLowerCase().includes('pendiente')) {
-                comprobacionSat = 'Pendiente de Facturar';
-              }
+      const operativoBucket = crearBucket('Gastos Operativos / Generales', '-', '-', 'OPERATIVO');
+      const historicoBucket = crearBucket('Histórico / Sin Proyecto', '-', '-', 'SIN_PROYECTO');
+      const porAsignarBucket = crearBucket('Proyectos Sugeridos (Por Asignar)', '-', '-', 'PENDIENTE_ALTA');
 
-              return [
+      for (const g of sourceGastos) {
+        if (g.status === 'REJECTED') continue;
+        const meta = getGastoDestinoReportMeta(g);
+        const monto = Number(g.monto || 0);
+
+        let target: BucketAgg;
+        if (g.proyecto_id || g.proyecto_rel?.id) {
+          const key = String(g.proyecto_id || g.proyecto_rel?.id);
+          let existing = proyectoBuckets.get(key);
+          if (!existing) {
+            existing = crearBucket(
+              meta.proyectoNombre,
+              g.proyecto_rel?.cliente_nombre || GastoHelper.getCliente(g) || '',
+              g.proyecto_rel?.sucursal_nombre || GastoHelper.getSucursal(g) || '',
+              g.proyecto_rel?.status || 'ACTIVO'
+            );
+            proyectoBuckets.set(key, existing);
+          }
+          target = existing;
+        } else if (meta.isOperativo) {
+          target = operativoBucket;
+        } else if (g.tipo_gasto === 'PROYECTO') {
+          target = porAsignarBucket;
+        } else {
+          target = historicoBucket;
+        }
+
+        target.registros += 1;
+        target.total += monto;
+        if (meta.block === 'alimentos') target.alimentos += monto;
+        else if (meta.block === 'hospedaje') target.hospedaje += monto;
+        else if (meta.block === 'material') target.material += monto;
+        else if (meta.block === 'equipo') target.equipo += monto;
+        else if (meta.block === 'transporte') {
+          if (meta.subblock === 'combustible') target.combustible += monto;
+          else target.traslados += monto;
+        }
+      }
+
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      const summaryBuckets = [
+        ...Array.from(proyectoBuckets.values()).sort((a, b) => b.total - a.total),
+        ...(porAsignarBucket.registros > 0 ? [porAsignarBucket] : []),
+        ...(operativoBucket.registros > 0 ? [operativoBucket] : []),
+        ...(historicoBucket.registros > 0 ? [historicoBucket] : []),
+      ];
+
+      const summaryHeaders = [
+        'Proyecto / Destino',
+        'Cliente',
+        'Sucursal',
+        'Estatus',
+        'Alimentos',
+        'Hospedaje',
+        'Material',
+        'Equipo',
+        'Combustible',
+        'Traslados',
+        'Total Transporte',
+        'Total General',
+        'Registros Válidos',
+      ];
+      const summaryRows = summaryBuckets.map((b) => [
+        b.nombre,
+        b.cliente,
+        b.sucursal,
+        b.estatus,
+        round2(b.alimentos),
+        round2(b.hospedaje),
+        round2(b.material),
+        round2(b.equipo),
+        round2(b.combustible),
+        round2(b.traslados),
+        round2(b.combustible + b.traslados),
+        round2(b.total),
+        b.registros,
+      ]);
+
+      const grandTotal = summaryBuckets.reduce((acc, b) => acc + b.total, 0);
+      summaryRows.push([
+        'GRAN TOTAL (SIN RECHAZADOS)',
+        '',
+        '',
+        '',
+        round2(summaryBuckets.reduce((s, b) => s + b.alimentos, 0)),
+        round2(summaryBuckets.reduce((s, b) => s + b.hospedaje, 0)),
+        round2(summaryBuckets.reduce((s, b) => s + b.material, 0)),
+        round2(summaryBuckets.reduce((s, b) => s + b.equipo, 0)),
+        round2(summaryBuckets.reduce((s, b) => s + b.combustible, 0)),
+        round2(summaryBuckets.reduce((s, b) => s + b.traslados, 0)),
+        round2(summaryBuckets.reduce((s, b) => s + b.combustible + b.traslados, 0)),
+        round2(grandTotal),
+        summaryBuckets.reduce((s, b) => s + b.registros, 0),
+      ]);
+
+      // 2. Hoja "Detalle de Gastos"
+      const headers = [
+        'ID',
+        'Fecha',
+        'Empleado Nombre',
+        'Monto Gasto',
+        'Monto Propina',
+        'Destino',
+        'Proyecto',
+        'Bloque Proyecto',
+        'Subtipo Traslado',
+        'Entrada Hotel',
+        'Salida Hotel',
+        'Noches',
+        'UUID CFDI (SAT)',
+        'Emisor CFDI (SAT)',
+        'Total CFDI (SAT)',
+        'Factura Compartida',
+        'Comprobación SAT',
+        'Categoria',
+        'Subcategoria',
+        'Proveedor',
+        'Cliente',
+        'Servicio/Proyecto',
+        'Detalle',
+        'Sucursal',
+        'Venta Vinculada',
+        'Metodo Pago',
+        'Tipo Tarjeta',
+        'Estado Factura',
+        'Motivo Sin Factura',
+        'Status',
+        'Estado Reembolso',
+        'Comentarios',
+      ];
+
+      const hospedajeDiarioRows: any[][] = [];
+
+      const rows = sourceGastos.map((g) => {
+        const fecha = g.fecha_comprobante || g.created_at?.split('T')[0] || '';
+        const ventaVinc = g.venta_id ? `Venta #${String(g.venta_id).slice(0, 8)}` : 'Sin Venta';
+        const meta = getGastoDestinoReportMeta(g);
+        const sat = buildSatFieldsForGasto(g);
+
+        if (meta.isHospedaje && g.status !== 'REJECTED') {
+          const hotelName = GastoHelper.getProveedor(g) || g.detalle_servicio_proyecto || 'Hotel / Hospedaje';
+          meta.hospDias.forEach((d) => {
+            hospedajeDiarioRows.push([
+              meta.proyectoNombre,
+              g.id,
+              d.fecha,
+              hotelName,
+              g.empleado_nombre || '',
+              meta.hospInicio,
+              meta.hospFin,
+              Number(d.monto_diario || 0),
+              g.status,
+            ]);
+          });
+        }
+
+        return [
+          g.id,
+          fecha,
+          g.empleado_nombre,
+          Number(g.monto || 0),
+          sat.montoPropina,
+          meta.destinoTipo,
+          meta.proyectoNombre,
+          meta.bloqueLabel,
+          meta.subtipoTrasladoLabel,
+          meta.hospInicio,
+          meta.hospFin,
+          meta.nochesCount || '',
+          sat.uuidCfdi,
+          sat.emisorCfdi,
+          sat.totalFacturaSat,
+          sat.esCompartida,
+          sat.comprobacionSat,
+          GastoHelper.getCategoria(g),
+          GastoHelper.getSubcategoria(g),
+          GastoHelper.getProveedor(g),
+          GastoHelper.getCliente(g),
+          g.tipo_servicio_proyecto,
+          g.detalle_servicio_proyecto,
+          GastoHelper.getSucursal(g),
+          ventaVinc,
+          sat.metodoPagoLabel,
+          g.tipo_tarjeta,
+          sat.estadoFactura,
+          g.motivo_sin_factura,
+          g.status,
+          sat.estadoReembolso,
+          sat.commentText,
+        ];
+      });
+
+      hospedajeDiarioRows.sort((a, b) => String(a[2]).localeCompare(String(b[2])));
+
+      const hospHeaders = [
+        'Proyecto / Destino',
+        'Gasto ID',
+        'Fecha Noche',
+        'Hotel / Proveedor',
+        'Empleado',
+        'Check-in',
+        'Check-out',
+        'Monto Diario',
+        'Status Gasto',
+      ];
+      if (hospedajeDiarioRows.length === 0) {
+        hospedajeDiarioRows.push(['Sin estancias de hospedaje en este periodo', '', '', '', '', '', '', 0, '']);
+      }
+
+      await ReportGenerator._exportSheetsToXLSX(
+        [
+          { name: 'Resumen por Proyecto', headers: summaryHeaders, rows: summaryRows },
+          { name: 'Detalle de Gastos', headers, rows },
+          { name: 'Hospedaje Diario', headers: hospHeaders, rows: hospedajeDiarioRows },
+        ],
+        fileName
+      );
+    },
+
+    async exportProyectoToXLSX(
+      detail: ProyectoDetailResponse,
+      options?: ExportGastosOptions
+    ): Promise<void> {
+      const { proyecto, resumen, gastos } = detail;
+      const includeRejected = options?.includeRejected ?? false;
+      const gastosVisibles = includeRejected ? gastos : gastos.filter((g) => g.status !== 'REJECTED');
+
+      const grouped: Record<ProyectoCategoriaKey, Gasto[]> = {
+        alimentos: [],
+        hospedaje: [],
+        material: [],
+        equipo: [],
+        transporte: [],
+      };
+      for (const g of gastosVisibles) {
+        const { block } = classifyProjectGastoBlock(g);
+        grouped[block].push(g);
+      }
+      (Object.keys(grouped) as ProyectoCategoriaKey[]).forEach((k) => {
+        grouped[k].sort((a, b) =>
+          compareReportDayKeysAsc(getGastoReportDayKey(a), getGastoReportDayKey(b))
+        );
+      });
+
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      const sumValid = (items: Gasto[]) =>
+        round2(items.filter((g) => g.status !== 'REJECTED').reduce((s, g) => s + Number(g.monto || 0), 0));
+
+      // Matriz de Resumen por Día (todas las categorías, excluyendo rechazados)
+      type DailyBucket = {
+        alimentos: number;
+        hospedaje: number;
+        material: number;
+        equipo: number;
+        combustible: number;
+        traslados: number;
+        count: number;
+      };
+      const dailyMap = new Map<string, DailyBucket>();
+      const ensureDay = (fecha: string): DailyBucket => {
+        let bucket = dailyMap.get(fecha);
+        if (!bucket) {
+          bucket = {
+            alimentos: 0,
+            hospedaje: 0,
+            material: 0,
+            equipo: 0,
+            combustible: 0,
+            traslados: 0,
+            count: 0,
+          };
+          dailyMap.set(fecha, bucket);
+        }
+        return bucket;
+      };
+      for (const g of gastosVisibles) {
+        if (g.status === 'REJECTED') continue;
+        const { block, subblock } = classifyProjectGastoBlock(g);
+        if (block === 'hospedaje') {
+          const dias = getOrComputeHospedajeDias(g);
+          for (const d of dias) {
+            const b = ensureDay(d.fecha || getGastoReportDayKey(g));
+            b.hospedaje += Number(d.monto_diario || 0);
+            b.count += 1;
+          }
+          continue;
+        }
+        const b = ensureDay(getGastoReportDayKey(g));
+        const monto = Number(g.monto || 0);
+        b.count += 1;
+        if (block === 'alimentos') b.alimentos += monto;
+        else if (block === 'material') b.material += monto;
+        else if (block === 'equipo') b.equipo += monto;
+        else if (block === 'transporte') {
+          if (subblock === 'combustible') b.combustible += monto;
+          else b.traslados += monto;
+        }
+      }
+
+      const resumenDiaHeaders = [
+        'Fecha',
+        'Alimentos',
+        'Hospedaje (Diario)',
+        'Material',
+        'Equipo',
+        'Combustible',
+        'Traslados',
+        'Total Transporte',
+        'Total del Día',
+        'Registros / Noches',
+      ];
+      const sortedDays = Array.from(dailyMap.entries()).sort((a, b) =>
+        compareReportDayKeysAsc(a[0], b[0])
+      );
+      let gAlim = 0;
+      let gHosp = 0;
+      let gMat = 0;
+      let gEq = 0;
+      let gComb = 0;
+      let gTras = 0;
+      let gCount = 0;
+      const resumenDiaRows: any[][] = sortedDays.map(([fecha, b]) => {
+        gAlim += b.alimentos;
+        gHosp += b.hospedaje;
+        gMat += b.material;
+        gEq += b.equipo;
+        gComb += b.combustible;
+        gTras += b.traslados;
+        gCount += b.count;
+        const transp = b.combustible + b.traslados;
+        const dayTotal = b.alimentos + b.hospedaje + b.material + b.equipo + transp;
+        return [
+          fecha,
+          round2(b.alimentos),
+          round2(b.hospedaje),
+          round2(b.material),
+          round2(b.equipo),
+          round2(b.combustible),
+          round2(b.traslados),
+          round2(transp),
+          round2(dayTotal),
+          b.count,
+        ];
+      });
+      if (resumenDiaRows.length === 0) {
+        resumenDiaRows.push(['Sin gastos válidos registrados', 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      } else {
+        const gTransp = gComb + gTras;
+        resumenDiaRows.push([
+          'GRAN TOTAL',
+          round2(gAlim),
+          round2(gHosp),
+          round2(gMat),
+          round2(gEq),
+          round2(gComb),
+          round2(gTras),
+          round2(gTransp),
+          round2(gAlim + gHosp + gMat + gEq + gTransp),
+          gCount,
+        ]);
+      }
+
+      // Hoja 1: Resumen
+      const resumenHeaders = ['Concepto / Categoría', 'Valor / Detalle', 'Registros Válidos', 'Total (MXN)'];
+      const validByBlock = (k: ProyectoCategoriaKey) => grouped[k].filter((g) => g.status !== 'REJECTED').length;
+      const resumenRows: any[][] = [
+        ['Proyecto', proyecto.nombre, '', ''],
+        ['Cliente', proyecto.cliente_nombre || 'N/D', '', ''],
+        ['Sucursal', proyecto.sucursal_nombre || 'N/D', '', ''],
+        ['Estatus', proyecto.status, '', ''],
+        ['Notas', proyecto.notas || '—', '', ''],
+        ['Fecha de Reporte', new Date().toLocaleString('es-MX'), '', ''],
+        ['', '', '', ''],
+        ['1. Alimentos', 'Consumos y propinas', validByBlock('alimentos'), round2(resumen.totales_por_categoria.alimentos)],
+        ['2. Hospedaje', 'Estancias por rango de fechas', validByBlock('hospedaje'), round2(resumen.totales_por_categoria.hospedaje)],
+        ['3. Material', 'Material eléctrico, ferretería e insumos', validByBlock('material'), round2(resumen.totales_por_categoria.material)],
+        ['4. Equipo', 'Seguridad, paneles, refrigeración, herramienta', validByBlock('equipo'), round2(resumen.totales_por_categoria.equipo)],
+        ['5. Transporte (Total)', 'Combustible + Traslados', validByBlock('transporte'), round2(resumen.totales_por_categoria.transporte)],
+        ['   • Combustible', 'Gasolina / Diésel', '', round2(resumen.totales_por_categoria.combustible)],
+        ['   • Traslados', 'Casetas, Uber, Vuelos, Estacionamientos, etc.', '', round2(resumen.totales_por_categoria.traslados)],
+        ['TOTAL PROYECTO (SIN RECHAZADOS)', 'Aprobados + Pendientes', gastos.filter((g) => g.status !== 'REJECTED').length, round2(resumen.total_general)],
+      ];
+
+      // Hoja 2: Alimentos
+      const alimentosHeaders = [
+        'ID', 'Fecha', 'Empleado', 'Proveedor', 'Comentarios', 'Propina', 'Monto Total',
+        'Método Pago', 'Tarjeta', 'UUID CFDI', 'Estado Factura', 'Status', 'Reembolso',
+      ];
+      const alimentosRows: any[][] = grouped.alimentos.map((g) => {
+        const sat = buildSatFieldsForGasto(g);
+        return [
+          g.id,
+          g.fecha_comprobante || g.created_at?.split('T')[0] || '',
+          g.empleado_nombre || '',
+          GastoHelper.getProveedor(g),
+          sat.commentText,
+          sat.montoPropina,
+          Number(g.monto || 0),
+          sat.metodoPagoLabel,
+          g.tipo_tarjeta || '',
+          sat.uuidCfdi,
+          sat.estadoFactura,
+          g.status,
+          sat.estadoReembolso,
+        ];
+      });
+      if (alimentosRows.length === 0) {
+        alimentosRows.push(['Sin gastos registrados en Alimentos', '', '', '', '', 0, 0, '', '', '', '', '', '']);
+      }
+      alimentosRows.push(['TOTAL ALIMENTOS', '', '', '', '', round2(grouped.alimentos.filter((g) => g.status !== 'REJECTED').reduce((s, g) => s + Number(g.monto_propina || 0), 0)), sumValid(grouped.alimentos), '', '', '', '', '', '']);
+
+      // Hoja 3: Hospedaje + Hoja 4: Hospedaje Diario
+      const hospHeaders = [
+        'ID', 'Fecha Comprobante', 'Empleado', 'Hotel / Proveedor', 'Entrada', 'Salida', 'Noches',
+        'Costo/Noche Prom.', 'Monto Total', 'Método Pago', 'UUID CFDI', 'Estado Factura', 'Status', 'Comentarios',
+      ];
+      const hospDiarioEntries: { fecha: string; row: any[] }[] = [];
+      const hospRows: any[][] = grouped.hospedaje.map((g) => {
+        const meta = getGastoDestinoReportMeta(g);
+        const sat = buildSatFieldsForGasto(g);
+        const hotelName = GastoHelper.getProveedor(g) || g.detalle_servicio_proyecto || 'Hotel / Hospedaje';
+        const noches = meta.nochesCount || 1;
+        const monto = Number(g.monto || 0);
+
+        if (g.status !== 'REJECTED') {
+          meta.hospDias.forEach((d) => {
+            hospDiarioEntries.push({
+              fecha: d.fecha,
+              row: [
                 g.id,
-                fecha,
-                g.empleado_nombre,
-                g.monto,
-                montoPropina,
-                uuidCfdi,
-                emisorCfdi,
-                totalFacturaSat,
-                esCompartida,
-                comprobacionSat,
-                GastoHelper.getCategoria(g),
-                GastoHelper.getSubcategoria(g),
-                GastoHelper.getProveedor(g),
-                GastoHelper.getCliente(g),
-                g.tipo_servicio_proyecto,
-                g.detalle_servicio_proyecto,
-                GastoHelper.getSucursal(g),
-                ventaVinc,
-                g.metodo_pago === 'monedero_electronico' ? 'Monedero Electrónico' : g.metodo_pago,
-                g.tipo_tarjeta,
-                estadoFactura,
-                g.motivo_sin_factura,
+                d.fecha,
+                hotelName,
+                g.empleado_nombre || '',
+                meta.hospInicio,
+                meta.hospFin,
+                Number(d.monto_diario || 0),
                 g.status,
-                estadoReembolso,
-                commentText
-              ];
+              ],
             });
-            await ReportGenerator._exportArrayToXLSX('Gastos', headers, rows, fileName);
+          });
+        }
+
+        return [
+          g.id,
+          g.fecha_comprobante || g.created_at?.split('T')[0] || '',
+          g.empleado_nombre || '',
+          hotelName,
+          meta.hospInicio,
+          meta.hospFin,
+          meta.nochesCount || '',
+          round2(monto / noches),
+          monto,
+          sat.metodoPagoLabel,
+          sat.uuidCfdi,
+          sat.estadoFactura,
+          g.status,
+          sat.commentText,
+        ];
+      });
+      if (hospRows.length === 0) {
+        hospRows.push(['Sin gastos registrados en Hospedaje', '', '', '', '', '', '', 0, 0, '', '', '', '', '']);
+      }
+      hospRows.push(['TOTAL HOSPEDAJE', '', '', '', '', '', grouped.hospedaje.filter((g) => g.status !== 'REJECTED').reduce((s, g) => s + getOrComputeHospedajeDias(g).length, 0), '', sumValid(grouped.hospedaje), '', '', '', '', '']);
+
+      const hospTimeline = buildHospedajeTimelineWithGaps(hospDiarioEntries);
+      const hospDiarioRows: any[][] = hospTimeline.map((item) => {
+        if (item.kind === 'gap') {
+          const gapFecha =
+            item.diasFaltantes === 1
+              ? item.fechaInicio
+              : `${item.fechaInicio} al ${item.fechaFin}`;
+          return [
+            'HUECO',
+            gapFecha,
+            '⚠️ SIN REGISTRO DE HOSPEDAJE',
+            `${item.diasFaltantes} ${item.diasFaltantes === 1 ? 'noche faltante' : 'noches faltantes'}`,
+            '',
+            '',
+            0,
+            'SIN REGISTRO',
+          ];
+        }
+        return item.data.row;
+      });
+      const hospDiarioHeaders = ['Gasto ID', 'Fecha Noche', 'Hotel / Proveedor', 'Empleado', 'Check-in', 'Check-out', 'Monto Diario', 'Status Gasto'];
+      if (hospDiarioEntries.length === 0) {
+        hospDiarioRows.push(['Sin noches registradas en Hospedaje', '', '', '', '', '', 0, '']);
+      } else {
+        const totalNochesValidas = hospDiarioEntries.length;
+        const totalMontoNoches = round2(
+          hospDiarioEntries.reduce((s, e) => s + Number(e.row[6] || 0), 0)
+        );
+        hospDiarioRows.push(['TOTAL NOCHES', `${totalNochesValidas} noche(s)`, '', '', '', '', totalMontoNoches, '']);
+      }
+
+      // Helper para hojas uniformes de Material y Equipo
+      const buildStandardCategorySheet = (items: Gasto[], totalLabel: string, emptyMsg: string) => {
+        const catHeaders = [
+          'ID', 'Fecha', 'Empleado', 'Subcategoría', 'Proveedor', 'Comentarios',
+          'Monto', 'Método Pago', 'Tarjeta', 'UUID CFDI', 'Estado Factura', 'Status', 'Reembolso',
+        ];
+        const catRows: any[][] = items.map((g) => {
+          const sat = buildSatFieldsForGasto(g);
+          return [
+            g.id,
+            g.fecha_comprobante || g.created_at?.split('T')[0] || '',
+            g.empleado_nombre || '',
+            GastoHelper.getSubcategoria(g),
+            GastoHelper.getProveedor(g),
+            sat.commentText,
+            Number(g.monto || 0),
+            sat.metodoPagoLabel,
+            g.tipo_tarjeta || '',
+            sat.uuidCfdi,
+            sat.estadoFactura,
+            g.status,
+            sat.estadoReembolso,
+          ];
+        });
+        if (catRows.length === 0) {
+          catRows.push([emptyMsg, '', '', '', '', '', 0, '', '', '', '', '', '']);
+        }
+        catRows.push([totalLabel, '', '', '', '', '', sumValid(items), '', '', '', '', '', '']);
+        return { headers: catHeaders, rows: catRows };
+      };
+
+      const materialSheet = buildStandardCategorySheet(grouped.material, 'TOTAL MATERIAL', 'Sin gastos registrados en Material');
+      const equipoSheet = buildStandardCategorySheet(grouped.equipo, 'TOTAL EQUIPO', 'Sin gastos registrados en Equipo');
+
+      // Hoja 7: Transporte (Combustible + Traslados)
+      const transpHeaders = [
+        'ID', 'Fecha', 'Empleado', 'Tipo Transporte', 'Subtipo Traslado', 'Proveedor', 'Comentarios',
+        'Monto', 'Método Pago', 'UUID CFDI', 'Estado Factura', 'Status', 'Reembolso',
+      ];
+      let subComb = 0;
+      let subTras = 0;
+      const transpRows: any[][] = grouped.transporte.map((g) => {
+        const meta = getGastoDestinoReportMeta(g);
+        const sat = buildSatFieldsForGasto(g);
+        const monto = Number(g.monto || 0);
+        const esComb = meta.subblock === 'combustible';
+        if (g.status !== 'REJECTED') {
+          if (esComb) subComb += monto;
+          else subTras += monto;
+        }
+        return [
+          g.id,
+          g.fecha_comprobante || g.created_at?.split('T')[0] || '',
+          g.empleado_nombre || '',
+          esComb ? 'Combustible' : 'Traslados',
+          esComb ? 'Combustible' : (meta.subtipoTrasladoLabel || GastoHelper.getSubcategoria(g) || 'Traslado'),
+          GastoHelper.getProveedor(g),
+          sat.commentText,
+          monto,
+          sat.metodoPagoLabel,
+          sat.uuidCfdi,
+          sat.estadoFactura,
+          g.status,
+          sat.estadoReembolso,
+        ];
+      });
+      if (transpRows.length === 0) {
+        transpRows.push(['Sin gastos registrados en Transporte', '', '', '', '', '', '', 0, '', '', '', '', '']);
+      }
+      transpRows.push(['Subtotal Combustible', '', '', '', '', '', '', round2(subComb), '', '', '', '', '']);
+      transpRows.push(['Subtotal Traslados', '', '', '', '', '', '', round2(subTras), '', '', '', '', '']);
+      transpRows.push(['TOTAL TRANSPORTE', '', '', '', '', '', '', round2(subComb + subTras), '', '', '', '', '']);
+
+      const safeSlug = proyecto.nombre.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 35);
+      const dateStamp = new Date().toISOString().split('T')[0];
+
+      await ReportGenerator._exportSheetsToXLSX(
+        [
+          { name: 'Resumen', headers: resumenHeaders, rows: resumenRows },
+          { name: 'Resumen por Día', headers: resumenDiaHeaders, rows: resumenDiaRows },
+          { name: 'Alimentos', headers: alimentosHeaders, rows: alimentosRows },
+          { name: 'Hospedaje', headers: hospHeaders, rows: hospRows },
+          { name: 'Hospedaje Diario', headers: hospDiarioHeaders, rows: hospDiarioRows },
+          { name: 'Material', headers: materialSheet.headers, rows: materialSheet.rows },
+          { name: 'Equipo', headers: equipoSheet.headers, rows: equipoSheet.rows },
+          { name: 'Transporte', headers: transpHeaders, rows: transpRows },
+        ],
+        `proyecto_${safeSlug}_${dateStamp}.xlsx`
+      );
     },
     async exportGasolinaToXLSX(registros: any[], fileName: string = 'reporte_gasolina.xlsx'): Promise<void> {
 
@@ -3702,8 +4795,10 @@ export const ReportGenerator = {
                 'Desconocido';
               const isAuto = isAutoCerradoAsistencia(a);
               const horaSalidaVal = isAuto ? '18:00 (Auto)' : (a.hora_salida ? formatHoraDisplay(a.hora_salida) : 'Sin registro');
-              const dirSalidaVal = isAuto ? (a.direccion_salida || 'Cierre automático 6:00 PM (olvido de checada)') : (a.direccion_salida || '');
-              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : 'Sin registro', a.direccion_entrada || '', horaSalidaVal, dirSalidaVal ];
+              const dirSalidaVal = isAuto
+                ? (cleanAddressForDisplay(a.direccion_salida) || 'Cierre automático 6:00 PM (olvido de checada)')
+                : cleanAddressForDisplay(a.direccion_salida);
+              return [ a.id, a.fecha, empleadoNombre, a.empresa_origen || 'N/A', a.hora_entrada ? formatHoraDisplay(a.hora_entrada) : 'Sin registro', cleanAddressForDisplay(a.direccion_entrada), horaSalidaVal, dirSalidaVal ];
             });
             await ReportGenerator._exportArrayToXLSX('Asistencias', headers, rows, fileName);
     },
@@ -3751,11 +4846,12 @@ export const ReportGenerator = {
       ];
 
       const rows: any[][] = [];
+      const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.mondayStr, range.sundayStr);
 
       for (const emp of personalTarget) {
         const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
         const empHoras = emp.horas_semanales ? Number(emp.horas_semanales) : 48;
-        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras);
+        const semanaData = processAsistenciasSemana(asistenciasEmp, range.mondayDate, emp.rol, empHoras, ausenciasPorEmpleado.get(emp.id) || []);
 
         let tieneRegistros = false;
         for (const dia of semanaData.dias) {
@@ -3776,6 +4872,21 @@ export const ReportGenerator = {
                 semanaData.totalHorasSemanaStr
               ]);
             }
+          } else if (dia.ausencia) {
+            tieneRegistros = true;
+            rows.push([
+              range.label,
+              emp.nombre,
+              dia.dateStr,
+              dia.dayName,
+              formatAusenciaReportLabel(dia.ausencia),
+              '-',
+              dia.ausencia.motivo || '',
+              '-',
+              '',
+              '0h 0m',
+              semanaData.totalHorasSemanaStr
+            ]);
           }
         }
 
@@ -3811,7 +4922,8 @@ export const ReportGenerator = {
     ): Promise<void> {
       const range = getWeekRange(weekMondayInput);
       const targetHoras = empleado.horas_semanales ? Number(empleado.horas_semanales) : 48;
-      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras);
+      const ausenciasMap = await fetchAusenciasPorEmpleadoSafe(range.mondayStr, range.sundayStr, empleado.id);
+      const semanaData = processAsistenciasSemana(asistencias, range.mondayDate, empleado.rol, targetHoras, ausenciasMap.get(empleado.id) || []);
 
       const headers = [
         'Período',
@@ -3852,9 +4964,9 @@ export const ReportGenerator = {
             empleado.nombre,
             dia.dateStr,
             dia.dayName,
+            dia.ausencia ? formatAusenciaReportLabel(dia.ausencia) : '-',
             '-',
-            '-',
-            '',
+            dia.ausencia?.motivo || '',
             '-',
             '',
             '0h 0m',
@@ -3906,10 +5018,11 @@ export const ReportGenerator = {
       ];
 
       const rows: any[][] = [];
+      const ausenciasPorEmpleado = await fetchAusenciasPorEmpleadoSafe(range.startStr, range.endStr);
 
       for (const emp of personalTarget) {
         const asistenciasEmp = asistenciasPorEmpleado.get(emp.id) || [];
-        const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol);
+        const mesData = processAsistenciasMes(asistenciasEmp, range.startDate, emp.rol, ausenciasPorEmpleado.get(emp.id) || []);
 
         let tieneRegistros = false;
         for (const dia of mesData.dias) {
@@ -3930,6 +5043,21 @@ export const ReportGenerator = {
                 mesData.totalHorasPeriodoStr
               ]);
             }
+          } else if (dia.ausencia) {
+            tieneRegistros = true;
+            rows.push([
+              range.label,
+              emp.nombre,
+              dia.dateStr,
+              dia.dayName,
+              formatAusenciaReportLabel(dia.ausencia),
+              '-',
+              dia.ausencia.motivo || '',
+              '-',
+              '',
+              '0h 0m',
+              mesData.totalHorasPeriodoStr
+            ]);
           }
         }
 
@@ -3964,7 +5092,8 @@ export const ReportGenerator = {
       fileName?: string
     ): Promise<void> {
       const range = getMonthRange(monthDateInput);
-      const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol);
+      const ausenciasMap = await fetchAusenciasPorEmpleadoSafe(range.startStr, range.endStr, empleado.id);
+      const mesData = processAsistenciasMes(asistencias, range.startDate, empleado.rol, ausenciasMap.get(empleado.id) || []);
 
       const headers = [
         'Período',
@@ -4005,9 +5134,9 @@ export const ReportGenerator = {
             empleado.nombre,
             dia.dateStr,
             dia.dayName,
+            dia.ausencia ? formatAusenciaReportLabel(dia.ausencia) : '-',
             '-',
-            '-',
-            '',
+            dia.ausencia?.motivo || '',
             '-',
             '',
             '0h 0m',
@@ -4573,10 +5702,10 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
             MAIL: ${branding.email}
           </div>
           <div style="width: 45%;">
-            <strong>CUENTA BANCARIA BBVA</strong><br>
-            NO. CUENTA: 0193092593<br>
-            CLABE: 012150001930925930<br>
-            CUENTAHABIENTE: Rafael Alonso Fernandez Tinajero
+            <strong>CUENTA BANCARIA ${branding.bankName}</strong><br>
+            NO. CUENTA: ${branding.bankAccount}<br>
+            CLABE: ${branding.bankClabe}<br>
+            CUENTAHABIENTE: ${branding.bankAccountHolder}
           </div>
           <div style="width: 15%; text-align: right; color: #666; display: flex; align-items: flex-end; justify-content: flex-end;">
             Página 1 / 1
@@ -4650,6 +5779,468 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     if (Platform.OS === 'web') {
       window.alert('Error: No se pudo generar el documento PDF corporativo. ' + (error.message || ''));
       Alert.alert('Error', 'No se pudo generar el documento PDF corporativo. ' + (error.message || ''));
+    }
+  }
+}
+
+export async function exportarOrdenCompraOdooPDF(orden: OrdenCompra, action: 'view' | 'download' = 'view') {
+  const branding = await getCompanyBranding();
+  const folioPDF = String(orden.folio || '').trim();
+  const titleStr = 'Orden de Compra';
+  const title = `${titleStr} - ${folioPDF}`;
+
+  const formatMoney = (val: any) => {
+    const num = typeof val === 'number' ? val : parseFloat(val);
+    return (isNaN(num) ? 0 : num).toLocaleString('es-MX', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
+  const escapeHtml = (text: string) => {
+    return (text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  const formatInlineText = (text: any) => {
+    let escaped = escapeHtml(text);
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\*([^*\n]+?)\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\b_([^_]+?)_\b/g, '<em style="color: #333;">$1</em>');
+    return escaped;
+  };
+
+  const renderDescription = (name: string, description: string) => {
+    let html = '';
+
+    if (name && name.trim()) {
+      html += `<div style="font-weight: 700; font-size: 10.5px; color: #111; line-height: 1.35; margin-bottom: 3px;">${escapeHtml(name.trim())}</div>`;
+    }
+
+    if (!description || !description.trim()) {
+      return html || '<span style="color: #999; font-style: italic;">Sin descripción</span>';
+    }
+
+    const trimmedDesc = description.trim();
+    const isHtml = /<[a-z][\s\S]*>/i.test(trimmedDesc);
+    if (isHtml) {
+      const styledHtml = trimmedDesc
+        .replace(/<b\b/gi, '<b style="color: #111; font-weight: bold;"')
+        .replace(/<strong\b/gi, '<strong style="color: #111; font-weight: bold;"')
+        .replace(/<ul\b/gi, '<ul style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<ol\b/gi, '<ol style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<li\b/gi, '<li style="margin-bottom: 2px; font-size: 9.5px; color: #333; line-height: 1.35;"');
+      return html + `<div style="font-size: 9.5px; color: #333; line-height: 1.35;">${styledHtml}</div>`;
+    }
+
+    const lines = trimmedDesc.split('\n');
+    const parsedLines = lines
+      .map((rawLine) => {
+        const line = rawLine.trim();
+        if (!line) return '<div style="height: 3px;"></div>';
+
+        const bulletMatch = line.match(/^([•\-\*\+])\s+(.*)$/);
+        if (bulletMatch) {
+          const itemContent = formatInlineText(bulletMatch[2]);
+          return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 9.5px; color: #333; line-height: 1.35;">
+                    <span style="display: inline-block; width: 12px; min-width: 12px; color: #333; font-weight: bold; font-size: 10px; line-height: 1.2;">&bull;</span>
+                    <div style="flex: 1;">${itemContent}</div>
+                  </div>`;
+        }
+
+        const numberMatch = line.match(/^(\d+[\.\-\)])\s+(.*)$/);
+        if (numberMatch) {
+          const numPrefix = escapeHtml(numberMatch[1]);
+          const itemContent = formatInlineText(numberMatch[2]);
+          return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 9.5px; color: #333; line-height: 1.35;">
+                    <span style="display: inline-block; width: 16px; min-width: 16px; color: #333; font-weight: 700; font-size: 9px; line-height: 1.3;">${numPrefix}</span>
+                    <div style="flex: 1;">${itemContent}</div>
+                  </div>`;
+        }
+
+        return `<div style="margin-bottom: 2px; font-size: 9.5px; color: #333; line-height: 1.35;">${formatInlineText(line)}</div>`;
+      })
+      .join('');
+
+    return html + parsedLines;
+  };
+
+  const lineas = orden.lineas || [];
+  const hasIva = Number(orden.iva || 0) > 0 || lineas.some((l) => Number(l.impuestoPorcentaje || 0) > 0);
+  const uniqueTaxes = Array.from(new Set(lineas.map((l) => Number(l.impuestoPorcentaje || 0)).filter((p) => p > 0)));
+  const ivaLabel = uniqueTaxes.length === 1 ? `I.V.A. ${uniqueTaxes[0]}%` : 'I.V.A.';
+  const importeLetra = numeroALetras(Number(orden.total || 0), orden.moneda || 'MXN');
+  const monedaDisplay = getMonedaDisplayName(orden.moneda);
+  const showTipoCambio = (orden.moneda && orden.moneda !== 'MXN') || (Number(orden.tipoCambio || 1) !== 1);
+  const tipoCambioStr = Number(orden.tipoCambio || 1).toFixed(4);
+
+  const ciudadEstado = [orden.proveedorCiudad, orden.proveedorEstado].filter((v) => v && v.trim()).join(', ');
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>${escapeHtml(title)}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap');
+        @page {
+          size: letter;
+          margin: 0;
+        }
+        * {
+          box-sizing: border-box;
+        }
+        body {
+          font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
+          color: #333;
+          margin: 0;
+          padding: 0;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .page-container {
+          width: 100%;
+          min-height: 100vh;
+          box-sizing: border-box;
+          position: relative;
+        }
+        .header-content {
+          padding: 15px 40px 0 40px;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          height: 174px;
+          position: relative;
+          z-index: 10;
+        }
+        .company-details { text-align: right; font-size: 11px; line-height: 1.4; color: #333; margin-top: 5px; }
+
+        .page-body {
+          padding: 0px 40px 130px 40px;
+          position: relative;
+          z-index: 10;
+          margin-top: -50px;
+        }
+
+        .row { display: flex; flex-wrap: wrap; margin-bottom: 16px; }
+        .col-6 { width: 50%; box-sizing: border-box; }
+        .col-7 { width: 56%; box-sizing: border-box; padding-right: 18px; }
+        .col-5 { width: 44%; box-sizing: border-box; }
+
+        .text-end { text-align: right; }
+        .text-center { text-align: center; }
+        .fw-bold { font-weight: bold; }
+        .mb-2 { margin-bottom: 8px; }
+        .mb-3 { margin-bottom: 14px; }
+        .mb-4 { margin-bottom: 20px; }
+        .mt-3 { margin-top: 16px; }
+        .mt-4 { margin-top: 22px; }
+        .ps-1 { padding-left: 2px; }
+        .text-muted { color: #6c757d; }
+
+        .inttec-red { color: #8B1D22; }
+        .section-header { border-bottom: 2px solid #8B1D22; font-weight: bold; margin-bottom: 7px; color: #8B1D22; text-transform: uppercase; padding-bottom: 3px; font-size: 10px; }
+
+        .table { width: 100%; border-collapse: collapse; margin-bottom: 0.75rem; }
+
+        .table-red { border: 1px solid #dee2e6; border-top: none; }
+        .table-red thead th { background-color: #8B1D22; color: #FFFFFF !important; padding: 7px 5px; font-size: 9px; border-right: 1px solid #fff; }
+        .table-red thead th:last-child { border-right: none; }
+        .table-red tbody td { border: 1px solid #dee2e6; padding: 6px 5px; font-size: 9.5px; vertical-align: top; }
+
+        .info-text { font-size: 10px; line-height: 1.45; color: #333; }
+
+        .table-details { width: 100%; border-collapse: collapse; border: 1px solid #dee2e6; }
+        .table-details td { padding: 3.5px 7px; border: 1px solid #dee2e6; font-size: 9.5px; }
+        .label-col { width: 42%; background-color: #f4f5f6; font-weight: 500; color: #111; }
+        .value-col { width: 58%; text-align: right; }
+
+        .table-totals { width: 100%; border-collapse: collapse; }
+        .table-totals td { padding: 5px 0; border-bottom: 1px solid #dee2e6; font-size: 11px; }
+        .table-totals tr:last-child td { border-bottom: none; border-top: 2px solid #333; font-size: 15px; font-weight: bold; padding-top: 8px; color: #111; }
+
+        .importe-letra-box {
+          background-color: #f8f9fa;
+          border: 1px solid #dee2e6;
+          border-left: 3px solid #8B1D22;
+          padding: 7px 10px;
+          font-size: 9.5px;
+          color: #111;
+          margin-bottom: 14px;
+        }
+
+        .signatures-row {
+          display: flex;
+          justify-content: space-around;
+          align-items: flex-end;
+          margin-top: 42px;
+          padding-top: 10px;
+        }
+        .signature-box {
+          width: 40%;
+          text-align: center;
+        }
+        .signature-title {
+          font-size: 9.5px;
+          font-weight: 700;
+          color: #555;
+          letter-spacing: 0.5px;
+          margin-bottom: 36px;
+        }
+        .signature-line {
+          border-top: 1px solid #444;
+          padding-top: 5px;
+          font-size: 10.5px;
+          font-weight: 600;
+          color: #111;
+        }
+
+        .footer-bank { position: absolute; bottom: 35px; left: 40px; right: 40px; border-top: 1px solid #000; padding-top: 9px; font-size: 9px; color: #333; line-height: 1.4; display: flex; justify-content: space-between; }
+        .footer-bank strong { color: #111; font-weight: bold; }
+      </style>
+    </head>
+    <body>
+      <div class="page-container">
+        <!-- HEADER BG ODOO Exact Shape -->
+        <div style="position: absolute; top: -90px; left: 0; width: 100%; height: 174px; z-index: 1;">
+          <div style="position: absolute; top: 87px; left: 0; width: 100%; height: 0; border-top: 87px solid #EAE6E2;"></div>
+          <div style="position: absolute; top: 174px; left: 0; width: 60%; height: 0; border-top: 87px solid #EAE6E2;"></div>
+          <div style="position: absolute; top: 174px; left: 60%; width: 0; height: 0; border-top: 87px solid #EAE6E2; border-right: 80px solid transparent;"></div>
+        </div>
+
+        <div class="header-content">
+          <div style="width: 50%;">
+            <img src="${branding.logo}" alt="Logo" style="${branding.logoStyle || 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;'}">
+          </div>
+          <div class="company-details" style="width: 50%;">
+            <div>${branding.name}</div>
+            <div>${branding.addressLine1}</div>
+            <div>${branding.addressLine2}</div>
+            <div>México</div>
+          </div>
+        </div>
+
+        <div class="page-body">
+          <div class="row mb-3" style="margin-top: -15px;">
+            <div class="col-6"></div>
+            <div class="col-6 text-end">
+              <h1 class="inttec-red fw-bold" style="font-size: 24px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">ORDEN DE COMPRA</h1>
+              <h2 class="text-muted" style="font-size: 18px; font-weight: normal; margin-top: 0;">FOLIO: ${escapeHtml(folioPDF)}</h2>
+            </div>
+          </div>
+
+          <div class="row mb-3">
+            <div class="col-7">
+              <div class="section-header">Datos del Proveedor</div>
+              <div class="info-text ps-1">
+                <strong style="font-size: 11px;">${escapeHtml(orden.proveedorNombre || 'Proveedor')}</strong><br/>
+                ${orden.proveedorRFC ? `<strong>RFC:</strong> ${escapeHtml(orden.proveedorRFC)}<br/>` : ''}
+                ${orden.proveedorCalleNumero ? `<strong>Calle y No.:</strong> ${escapeHtml(orden.proveedorCalleNumero)}<br/>` : ''}
+                ${orden.proveedorColonia ? `<strong>Colonia:</strong> ${escapeHtml(orden.proveedorColonia)}<br/>` : ''}
+                ${ciudadEstado ? `<strong>Ciudad / Estado:</strong> ${escapeHtml(ciudadEstado)}<br/>` : ''}
+                ${orden.proveedorCP ? `<strong>C.P.:</strong> ${escapeHtml(orden.proveedorCP)}<br/>` : ''}
+                ${orden.referencia ? `<strong>Referencia:</strong> ${escapeHtml(orden.referencia)}` : ''}
+              </div>
+            </div>
+            <div class="col-5">
+              <div class="section-header">Detalles de la Compra</div>
+              <table class="table-details">
+                <tr>
+                  <td class="label-col">Fecha:</td>
+                  <td class="value-col">${escapeHtml(orden.fechaCreacion || '')}</td>
+                </tr>
+                <tr>
+                  <td class="label-col">Facturar:</td>
+                  <td class="value-col"><strong>${orden.facturar ? 'SI' : 'NO'}</strong></td>
+                </tr>
+                <tr>
+                  <td class="label-col">Estatus de Proceso:</td>
+                  <td class="value-col">${escapeHtml(orden.estatusProceso || 'En Proceso')}</td>
+                </tr>
+                <tr>
+                  <td class="label-col">Tipo de Moneda:</td>
+                  <td class="value-col">${escapeHtml(monedaDisplay)}</td>
+                </tr>
+                ${showTipoCambio ? `
+                <tr>
+                  <td class="label-col">Tipo de Cambio:</td>
+                  <td class="value-col">${tipoCambioStr}</td>
+                </tr>` : ''}
+              </table>
+            </div>
+          </div>
+
+          <table class="table table-red mt-3">
+            <thead>
+              <tr>
+                <th width="4%" class="text-center">NO.</th>
+                <th width="9%" class="text-center">ENTREGA</th>
+                <th width="8%" class="text-center">UNIDAD</th>
+                <th width="${hasIva ? '35%' : '40%'}" style="text-align: left; padding-left: 8px;">DESCRIPCIÓN</th>
+                <th width="6%" class="text-center">CANT.</th>
+                <th width="10%" class="text-center">P. LISTA</th>
+                <th width="6%" class="text-center">%+-</th>
+                <th width="10%" class="text-center">P. UNIT.</th>
+                ${hasIva ? '<th width="5%" class="text-center">IVA</th>' : ''}
+                <th width="10%" class="text-center">IMPORTE</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${lineas
+                .map(
+                  (linea, idx) => {
+                    const pctVal = Number(linea.descuentoPorcentaje || 0);
+                    const pctText = pctVal > 0 ? `+${pctVal}%` : pctVal < 0 ? `${pctVal}%` : '0%';
+                    return `
+                  <tr>
+                    <td class="text-center">${idx + 1}</td>
+                    <td class="text-center">${escapeHtml(linea.tiempoEntrega || '')}</td>
+                    <td class="text-center">${escapeHtml(linea.unidad || 'Pieza')}</td>
+                    <td style="padding: 5px 8px;">
+                      ${renderDescription(linea.productoNombre, linea.productoDescripcion)}
+                    </td>
+                    <td class="text-center" style="white-space: nowrap;">${Number(linea.cantidad || 0)}</td>
+                    <td class="text-end" style="white-space: nowrap;">$${formatMoney(linea.precioLista ?? linea.precioUnitario)}</td>
+                    <td class="text-center" style="white-space: nowrap; font-weight: 500;">${pctText}</td>
+                    <td class="text-end" style="white-space: nowrap;">$${formatMoney(linea.precioUnitario)}</td>
+                    ${hasIva ? `<td class="text-center" style="white-space: nowrap;">${Number(linea.impuestoPorcentaje || 0)}%</td>` : ''}
+                    <td class="text-end" style="white-space: nowrap;">$${formatMoney(linea.importe)}</td>
+                  </tr>`;
+                  }
+                )
+                .join('')}
+            </tbody>
+          </table>
+
+          <div class="importe-letra-box">
+            <strong>IMPORTE CON LETRA:</strong> ${escapeHtml(importeLetra)}
+          </div>
+
+          <div class="row mt-3">
+            <div class="col-7">
+              <div class="info-text">
+                <div class="section-header">Información Adicional</div>
+                <div style="padding-top: 4px; white-space: pre-line;">
+                  <strong>Observaciones:</strong> ${orden.observaciones ? escapeHtml(orden.observaciones) : '<span class="text-muted">Ninguna</span>'}
+                </div>
+                <div style="padding-top: 6px; white-space: pre-line;">
+                  <strong>Condiciones de Trabajo:</strong> ${orden.condicionesTrabajo ? escapeHtml(orden.condicionesTrabajo) : '<span class="text-muted">Ninguna</span>'}
+                </div>
+                ${orden.clienteFinal ? `
+                <div style="margin-top: 8px; padding: 6px 8px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-left: 3px solid #0284c7; border-radius: 3px;">
+                  <strong style="color: #0284c7; font-size: 9.5px;">DATOS DEL CLIENTE FINAL:</strong>
+                  <div style="padding-top: 2px; white-space: pre-line; color: #111; font-size: 9px;">${escapeHtml(orden.clienteFinal)}</div>
+                </div>` : ''}
+              </div>
+            </div>
+            <div class="col-5">
+              <table class="table-totals">
+                <tr><td>Subtotal</td><td class="text-end">$ ${formatMoney(orden.subtotal)}</td></tr>
+                ${hasIva ? `<tr><td>${ivaLabel}</td><td class="text-end">$ ${formatMoney(orden.iva)}</td></tr>` : ''}
+                <tr>
+                  <td>TOTAL</td>
+                  <td class="text-end">$ ${formatMoney(orden.total)}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <!-- BLOQUE DE FIRMAS -->
+          <div class="signatures-row">
+            <div class="signature-box">
+              <div class="signature-title">REALIZÓ LA COMPRA</div>
+              <div class="signature-line">${escapeHtml(orden.realizoCompra || 'NOMBRE Y FIRMA')}</div>
+            </div>
+            <div class="signature-box">
+              <div class="signature-title">RECIBIDO POR</div>
+              <div class="signature-line">${escapeHtml(orden.recibidoPor || 'NOMBRE Y FIRMA')}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- FOOTER FIXED -->
+        <div class="footer-bank">
+          <div style="width: 60%;">
+            <strong>${branding.legalName}</strong><br>
+            RFC: ${branding.rfc} &bull; TEL: ${branding.phone} &bull; MAIL: ${branding.email}
+          </div>
+          <div style="width: 40%; text-align: right; color: #666; display: flex; align-items: flex-end; justify-content: flex-end;">
+            PÁGINA 1 / 1
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  try {
+    if (Platform.OS === 'web') {
+      if (action === 'download') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+
+          setTimeout(() => {
+            const originalTitle = document.title;
+            document.title = title;
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+
+            setTimeout(() => {
+              document.title = originalTitle;
+            }, 1000);
+
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+            }, 1000);
+          }, 500);
+        }
+      } else {
+        const newWindow = window.open('', '_blank');
+        if (newWindow) {
+          newWindow.document.write(htmlContent);
+          newWindow.document.close();
+        } else {
+          window.alert('Por favor, permite las ventanas emergentes (pop-ups) en tu navegador para ver el documento.');
+        }
+      }
+    } else {
+      if (action === 'view') {
+        await Print.printAsync({ html: htmlContent });
+      } else {
+        const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+        const customNameUri = `${cacheDirectory}${titleStr} - ${folioPDF}.pdf`;
+        await writeAsStringAsync(customNameUri, base64 || '', {
+          encoding: EncodingType.Base64,
+        });
+        await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: `Compartir ${titleStr}` });
+      }
+    }
+  } catch (error: any) {
+    logger.error('Error generando PDF de Orden de Compra:', error);
+    if (Platform.OS === 'web') {
+      window.alert('Error: No se pudo generar el documento PDF de Orden de Compra. ' + (error.message || ''));
+    } else {
+      Alert.alert('Error', 'No se pudo generar el documento PDF de Orden de Compra. ' + (error.message || ''));
     }
   }
 }
@@ -5465,10 +7056,9 @@ export async function generarFacturaHTML(venta: any, facturaData: any, isDraft =
               ${branding.addressLine1}, Chihuahua, Chih., CP: ${branding.cp} | TEL: ${branding.phone}<br>
               MAIL: ${branding.email}
             </div>
-            <div style="width: 25%; text-align: center;">
+            <div style="width: 28%; text-align: center;">
               <strong>DATOS BANCARIOS</strong><br>
-              BBVA: 012150001930925930<br>
-              Banorte: 1222453474
+              ${branding.bankSummaryHtml}
             </div>
             <div style="width: 30%; text-align: right;">
               Este documento es una representación impresa de un CFDI (Versión 4.0)<br>

@@ -309,6 +309,27 @@ GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE pub
 GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.asistencias TO inttec_admin;
 
 
+-- public.asistencias_ausencias definition
+
+CREATE TABLE IF NOT EXISTS public.asistencias_ausencias (
+	id uuid DEFAULT gen_random_uuid() NOT NULL,
+	empleado_id uuid NOT NULL,
+	tipo varchar(30) NOT NULL CHECK (tipo IN ('VACACIONES', 'PERMISO_SIN_GOCE')),
+	fecha date NOT NULL,
+	motivo text NULL,
+	creado_por uuid NULL,
+	creado_en timestamptz DEFAULT now() NULL,
+	CONSTRAINT asistencias_ausencias_pkey PRIMARY KEY (id),
+	CONSTRAINT asistencias_ausencias_empleado_fecha_key UNIQUE (empleado_id, fecha),
+	CONSTRAINT asistencias_ausencias_empleado_id_fkey FOREIGN KEY (empleado_id) REFERENCES public.usuarios(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_asistencias_ausencias_empleado_fecha ON public.asistencias_ausencias USING btree (empleado_id, fecha);
+
+ALTER TABLE public.asistencias_ausencias OWNER TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.asistencias_ausencias TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.asistencias_ausencias TO inttec_admin;
+
+
 -- public.auditorias_tarjeta definition
 
 -- Drop table
@@ -1467,3 +1488,52 @@ GRANT ALL ON SCHEMA public TO pg_database_owner;
 GRANT USAGE ON SCHEMA public TO public;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLES TO inttec_admin;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT UPDATE, SELECT, USAGE ON SEQUENCES TO inttec_admin;
+
+
+-- public.ordenes_compra definition
+
+CREATE TABLE IF NOT EXISTS public.ordenes_compra (
+	id uuid DEFAULT gen_random_uuid() NOT NULL,
+	folio text NOT NULL,
+	proveedor_id uuid NULL,
+	proveedor_nombre text NOT NULL,
+	proveedor_rfc text NULL,
+	proveedor_correo text NULL,
+	proveedor_calle_numero text NULL,
+	proveedor_colonia text NULL,
+	proveedor_ciudad text NULL,
+	proveedor_estado text NULL,
+	proveedor_cp text NULL,
+	referencia text NULL,
+	facturar bool DEFAULT true NOT NULL,
+	estatus_proceso text DEFAULT 'En Proceso'::text NOT NULL,
+	moneda text DEFAULT 'MXN'::text NOT NULL,
+	tipo_cambio numeric(12, 4) DEFAULT 1 NOT NULL,
+	fecha_creacion text NULL,
+	realizo_compra text NULL,
+	recibido_por text NULL,
+	subtotal numeric DEFAULT 0 NULL,
+	iva numeric DEFAULT 0 NULL,
+	total numeric DEFAULT 0 NULL,
+	lineas jsonb DEFAULT '[]'::jsonb NULL,
+	observaciones text NULL,
+	condiciones_trabajo text NULL,
+	cliente_final text NULL,
+	creado_en timestamptz DEFAULT now() NULL,
+	actualizado_en timestamptz DEFAULT now() NULL,
+	CONSTRAINT ordenes_compra_folio_key UNIQUE (folio),
+	CONSTRAINT ordenes_compra_pkey PRIMARY KEY (id)
+);
+
+ALTER TABLE public.ordenes_compra OWNER TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.ordenes_compra TO postgres;
+GRANT INSERT, UPDATE, SELECT, TRUNCATE, TRIGGER, REFERENCES, DELETE ON TABLE public.ordenes_compra TO inttec_admin;
+
+-- Columnas adicionales de dirección y contacto en proveedores
+ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS correo_electronico text NULL;
+ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS calle_numero text NULL;
+ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS colonia text NULL;
+ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS ciudad text NULL;
+ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS estado text NULL;
+ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS codigo_postal text NULL;
+ALTER TABLE public.ordenes_compra ADD COLUMN IF NOT EXISTS cliente_final text NULL;

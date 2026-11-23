@@ -40,6 +40,9 @@ interface ProyectosTabViewProps {
   onRefreshProyectoDetail: () => void;
   onSelectGastoForReview: (gasto: Gasto) => void;
   onOpenAssignProyecto: (gasto: Gasto) => void;
+  onExportProyectoPDF?: () => void;
+  onExportProyectoXLSX?: () => void;
+  isExportingProyecto?: boolean;
   headerComponent?: React.ReactNode;
 }
 
@@ -66,6 +69,9 @@ export function ProyectosTabView({
   onRefreshProyectoDetail,
   onSelectGastoForReview,
   onOpenAssignProyecto,
+  onExportProyectoPDF,
+  onExportProyectoXLSX,
+  isExportingProyecto,
   headerComponent,
 }: ProyectosTabViewProps) {
   const counts = useMemo(() => {
@@ -130,6 +136,9 @@ export function ProyectosTabView({
             onToggleProyectoStatus={onToggleProyectoStatus}
             onSelectGastoForReview={onSelectGastoForReview}
             onOpenAssignProyecto={onOpenAssignProyecto}
+            onExportProyectoPDF={onExportProyectoPDF}
+            onExportProyectoXLSX={onExportProyectoXLSX}
+            isExportingProyecto={isExportingProyecto}
           />
         </View>
       );

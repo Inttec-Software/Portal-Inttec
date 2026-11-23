@@ -23,7 +23,7 @@ export default function LoginScreen() {
   const scheme = useColorScheme();
   const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
-  const { isLoading, setUser, company, changeCompany } = useAuth();
+  const { isLoading, setUser, company, changeCompany, sessionExpiredMessage, clearSessionExpiredMessage } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -59,6 +59,7 @@ export default function LoginScreen() {
     setIsSubmitting(true);
     try {
       const user = await AuthService.login(email, password);
+      clearSessionExpiredMessage();
       setUser(user);
     } catch (err: any) {
       setErrorMsg(err.message || 'Error al iniciar sesión');
@@ -146,6 +147,13 @@ export default function LoginScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+
+            {sessionExpiredMessage && !errorMsg ? (
+              <View style={[styles.errorAlert, { backgroundColor: themeColors.warning + '20' }]}>
+                <Ionicons name="time-outline" size={20} color={themeColors.warning} />
+                <Text style={[styles.errorAlertText, { color: themeColors.text }]}>{sessionExpiredMessage}</Text>
+              </View>
+            ) : null}
 
             {errorMsg ? (
               <View style={[styles.errorAlert, { backgroundColor: themeColors.danger + '15' }]}>

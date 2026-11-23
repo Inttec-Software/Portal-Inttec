@@ -1,4 +1,4 @@
-import { Asistencia } from '@/services/supabase';
+import { Asistencia, AusenciaAsistencia, TipoAusencia } from '@/services/supabase';
 import {
   extractTimezoneFromRecord,
   cleanAddressForDisplay,
@@ -65,8 +65,68 @@ export interface DiaAsistencia {
   turnos: TurnoAsistencia[];
   tieneTurnoEnCurso: boolean;
   comidaDescontada?: boolean;
+  sinComidaManual?: boolean;
   minutosComidaDescontados?: number;
   minutosBrutos?: number;
+  ausencia?: AusenciaAsistencia | null;
+}
+
+export function getAusenciaLabel(tipo: TipoAusencia): string {
+  return tipo === 'VACACIONES' ? 'Vacaciones' : 'Permiso sin goce';
+}
+
+export function calcularDiasHabilesPreview(
+  fechaInicio: string,
+  options: { fechaFin?: string; diasHabiles?: number }
+): string[] {
+  const parseYMD = (str: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(str || '').trim());
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+    return dt;
+  };
+  const formatYMD = (dt: Date) => dt.toISOString().slice(0, 10);
+
+  const startDt = parseYMD(fechaInicio);
+  if (!startDt) return [];
+
+  const result: string[] = [];
+  if (typeof options.diasHabiles === 'number' && Number.isFinite(options.diasHabiles) && options.diasHabiles > 0) {
+    const target = Math.min(Math.floor(options.diasHabiles), 120);
+    const cur = new Date(startDt.getTime());
+    let guard = 0;
+    while (result.length < target && guard < 365) {
+      const dow = cur.getUTCDay();
+      if (dow !== 0 && dow !== 6) {
+        result.push(formatYMD(cur));
+      }
+      cur.setUTCDate(cur.getUTCDate() + 1);
+      guard++;
+    }
+    return result;
+  }
+
+  if (options.fechaFin) {
+    const endDt = parseYMD(options.fechaFin);
+    if (!endDt || endDt.getTime() < startDt.getTime()) return [];
+    const cur = new Date(startDt.getTime());
+    let guard = 0;
+    while (cur.getTime() <= endDt.getTime() && guard < 365) {
+      const dow = cur.getUTCDay();
+      if (dow !== 0 && dow !== 6) {
+        result.push(formatYMD(cur));
+      }
+      cur.setUTCDate(cur.getUTCDate() + 1);
+      guard++;
+    }
+    return result;
+  }
+
+  return [];
 }
 
 export interface SemanaAsistencia {
@@ -468,7 +528,8 @@ export function processAsistenciasSemana(
   asistencias: Asistencia[],
   weekDateInput?: Date | string,
   userRole?: string | null,
-  jornadaHoras: number = JORNADA_SEMANAL_HORAS
+  jornadaHoras: number = JORNADA_SEMANAL_HORAS,
+  ausencias?: AusenciaAsistencia[]
 ): SemanaAsistencia {
   const range = getWeekRange(weekDateInput);
 
@@ -493,6 +554,12 @@ export function processAsistenciasSemana(
     const list = porFecha.get(f) || [];
     list.push({ ...a, fecha: f });
     porFecha.set(f, list);
+  }
+
+  const ausenciasPorFecha = new Map<string, AusenciaAsistencia>();
+  for (const aus of ausencias || []) {
+    const f = cleanFecha(aus.fecha);
+    if (f) ausenciasPorFecha.set(f, { ...aus, fecha: f });
   }
 
   let totalMinutosSemana = 0;
@@ -532,7 +599,14 @@ export function processAsistenciasSemana(
 
       let minsBrutos = 0;
       if (horaSalidaEfectiva) {
-        minsBrutos = calculateDurationMinutes(item.hora_entrada, horaSalidaEfectiva);
+        if (autoCerrado) {
+          const pIn = (item.hora_entrada || '00:00').split(':').map(Number);
+          const minsIn = (pIn[0] || 0) * 60 + (pIn[1] || 0);
+          const minsOut = 18 * 60; // 6:00 PM (18:00)
+          minsBrutos = Math.max(0, minsOut - minsIn);
+        } else {
+          minsBrutos = calculateDurationMinutes(item.hora_entrada, horaSalidaEfectiva);
+        }
       }
 
       minutosDiaBruto += minsBrutos;
@@ -553,9 +627,13 @@ export function processAsistenciasSemana(
       };
     });
 
-    // REGLA: A roles ADMIN y EMPLEADO se les resta 1 hora (60 min) de comida por jornada
-    // A rol DEV se les deja con las horas que registren tal cual
-    const minutosADescontar = (aplicaDescuentoComida && minutosDiaBruto > 0)
+    // REGLA: A roles ADMIN y EMPLEADO se les resta 1 hora (60 min) de comida por jornada,
+    // salvo que ADMIN o DEV hayan quitado el descuento manualmente ese día ([SIN_COMIDA]).
+    const sinComidaManual = items.some((it) =>
+      String(it.direccion_entrada || '').includes('[SIN_COMIDA]') ||
+      String(it.direccion_salida || '').includes('[SIN_COMIDA]')
+    );
+    const minutosADescontar = (aplicaDescuentoComida && !sinComidaManual && minutosDiaBruto > 0)
       ? Math.min(MINUTOS_COMIDA_DIARIA, minutosDiaBruto)
       : 0;
 
@@ -578,16 +656,16 @@ export function processAsistenciasSemana(
         hora_salida: t.autoCerrado
           ? '18:00 (Auto)'
           : t.item.hora_salida
-          ? formatHoraDisplay(t.item.hora_salida)
-          : null,
+            ? formatHoraDisplay(t.item.hora_salida)
+            : null,
         foto_entrada_url: t.item.foto_entrada_url,
         foto_salida_url: (t.enCurso || t.autoCerrado) ? null : t.item.foto_salida_url,
         direccion_entrada: cleanAddressForDisplay(t.item.direccion_entrada),
         direccion_salida: t.autoCerrado
           ? 'Cierre automático 6:00 PM (olvido de checada)'
           : t.enCurso
-          ? null
-          : cleanAddressForDisplay(t.item.direccion_salida),
+            ? null
+            : cleanAddressForDisplay(t.item.direccion_salida),
         latitud_entrada: t.item.latitud_entrada,
         longitud_entrada: t.item.longitud_entrada,
         latitud_salida: (t.enCurso || t.autoCerrado) ? null : t.item.latitud_salida,
@@ -627,8 +705,10 @@ export function processAsistenciasSemana(
       turnos,
       tieneTurnoEnCurso,
       comidaDescontada: minutosADescontar > 0,
+      sinComidaManual: aplicaDescuentoComida && sinComidaManual && minutosDiaBruto > 0,
       minutosComidaDescontados: minutosADescontar,
       minutosBrutos: minutosDiaBruto,
+      ausencia: ausenciasPorFecha.get(dayInfo.dateStr) || null,
     };
   });
 
@@ -683,7 +763,8 @@ export interface PeriodoAsistencia {
 export function processAsistenciasPeriodo(
   asistencias: Asistencia[],
   range: { startStr: string; endStr: string; days: WeekDayInfo[]; label: string },
-  userRole?: string | null
+  userRole?: string | null,
+  ausencias?: AusenciaAsistencia[]
 ): PeriodoAsistencia {
   const cleanFecha = (f?: string | null) => (f ? String(f).split('T')[0] : '');
 
@@ -694,14 +775,22 @@ export function processAsistenciasPeriodo(
 
   // Filtrar registros que caigan dentro del rango
   const asistenciasPeriodo = (asistencias || []).filter((a) => {
-    return a.fecha >= range.startStr && a.fecha <= range.endStr;
+    const f = cleanFecha(a.fecha);
+    return f >= range.startStr && f <= range.endStr;
   });
 
   const porFecha = new Map<string, Asistencia[]>();
   for (const a of asistenciasPeriodo) {
-    const list = porFecha.get(a.fecha) || [];
-    list.push(a);
-    porFecha.set(a.fecha, list);
+    const f = cleanFecha(a.fecha);
+    const list = porFecha.get(f) || [];
+    list.push({ ...a, fecha: f });
+    porFecha.set(f, list);
+  }
+
+  const ausenciasPorFecha = new Map<string, AusenciaAsistencia>();
+  for (const aus of ausencias || []) {
+    const f = cleanFecha(aus.fecha);
+    if (f) ausenciasPorFecha.set(f, { ...aus, fecha: f });
   }
 
   let totalMinutosPeriodo = 0;
@@ -739,7 +828,14 @@ export function processAsistenciasPeriodo(
 
       let minsBrutos = 0;
       if (horaSalidaEfectiva) {
-        minsBrutos = calculateDurationMinutes(item.hora_entrada, horaSalidaEfectiva);
+        if (autoCerrado) {
+          const pIn = (item.hora_entrada || '00:00').split(':').map(Number);
+          const minsIn = (pIn[0] || 0) * 60 + (pIn[1] || 0);
+          const minsOut = 18 * 60; // 6:00 PM (18:00)
+          minsBrutos = Math.max(0, minsOut - minsIn);
+        } else {
+          minsBrutos = calculateDurationMinutes(item.hora_entrada, horaSalidaEfectiva);
+        }
       }
 
       minutosDiaBruto += minsBrutos;
@@ -760,8 +856,12 @@ export function processAsistenciasPeriodo(
       };
     });
 
-    // Deducción de comida de 1 hora por jornada para ADMIN y EMPLEADO
-    const minutosADescontar = (aplicaDescuentoComida && minutosDiaBruto > 0)
+    // Deducción de comida de 1 hora por jornada para ADMIN y EMPLEADO (salvo [SIN_COMIDA])
+    const sinComidaManual = items.some((it) =>
+      String(it.direccion_entrada || '').includes('[SIN_COMIDA]') ||
+      String(it.direccion_salida || '').includes('[SIN_COMIDA]')
+    );
+    const minutosADescontar = (aplicaDescuentoComida && !sinComidaManual && minutosDiaBruto > 0)
       ? Math.min(MINUTOS_COMIDA_DIARIA, minutosDiaBruto)
       : 0;
 
@@ -783,16 +883,16 @@ export function processAsistenciasPeriodo(
         hora_salida: t.autoCerrado
           ? '18:00 (Auto)'
           : t.item.hora_salida
-          ? formatHoraDisplay(t.item.hora_salida)
-          : null,
+            ? formatHoraDisplay(t.item.hora_salida)
+            : null,
         foto_entrada_url: t.item.foto_entrada_url,
         foto_salida_url: (t.enCurso || t.autoCerrado) ? null : t.item.foto_salida_url,
         direccion_entrada: cleanAddressForDisplay(t.item.direccion_entrada),
         direccion_salida: t.autoCerrado
           ? 'Cierre automático 6:00 PM (olvido de checada)'
           : t.enCurso
-          ? null
-          : cleanAddressForDisplay(t.item.direccion_salida),
+            ? null
+            : cleanAddressForDisplay(t.item.direccion_salida),
         latitud_entrada: t.item.latitud_entrada,
         longitud_entrada: t.item.longitud_entrada,
         latitud_salida: (t.enCurso || t.autoCerrado) ? null : t.item.latitud_salida,
@@ -832,8 +932,10 @@ export function processAsistenciasPeriodo(
       turnos,
       tieneTurnoEnCurso,
       comidaDescontada: minutosADescontar > 0,
+      sinComidaManual: aplicaDescuentoComida && sinComidaManual && minutosDiaBruto > 0,
       minutosComidaDescontados: minutosADescontar,
       minutosBrutos: minutosDiaBruto,
+      ausencia: ausenciasPorFecha.get(dayInfo.dateStr) || null,
     };
   });
 
@@ -861,7 +963,8 @@ export function processAsistenciasPeriodo(
 export function processAsistenciasMes(
   asistencias: Asistencia[],
   monthDateInput?: Date | string | { year: number; month: number },
-  userRole?: string | null
+  userRole?: string | null,
+  ausencias?: AusenciaAsistencia[]
 ): PeriodoAsistencia {
   const range = getMonthRange(monthDateInput);
   return processAsistenciasPeriodo(asistencias, {
@@ -869,5 +972,5 @@ export function processAsistenciasMes(
     endStr: range.endStr,
     days: range.days,
     label: range.label,
-  }, userRole);
+  }, userRole, ausencias);
 }

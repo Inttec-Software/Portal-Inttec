@@ -37,7 +37,11 @@ function ExpenseCard({
   const sucursalNombre = GastoHelper.getSucursal(gasto);
 
   const isDevueltoFactura = gasto.status === 'PENDING' && Boolean(gasto.devuelto_por_factura);
-  const isNuevoConFacturaDetectada = gasto.status === 'PENDING' && !gasto.devuelto_por_factura && Boolean(gasto.factura_sugerida_rel || gasto.factura_sugerida_id);
+  const isNuevoConFacturaDetectada =
+    !gasto.devuelto_por_factura &&
+    !gasto.facturado &&
+    Boolean(gasto.factura_sugerida_rel || gasto.factura_sugerida_id) &&
+    (gasto.status === 'PENDING' || gasto.status === 'APPROVED');
 
   // Configuración de estados
   let statusText = 'PENDIENTE';
@@ -52,7 +56,7 @@ function ExpenseCard({
     statusText = 'FACTURA DETECTADA (DEVUELTO)';
     statusColor = '#0284C7';
     statusIcon = 'document-attach-outline';
-  } else if (isNuevoConFacturaDetectada) {
+  } else if (isNuevoConFacturaDetectada && gasto.status === 'PENDING') {
     statusText = 'COMPROBAR FACTURA';
     statusColor = '#D97706';
     statusIcon = 'search-outline';

@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Spacing, BorderRadius } from '@/constants/theme';
@@ -115,6 +116,16 @@ export function AdminExtraModals({ vm }: AdminExtraModalsProps) {
     isFetchingInventario,
     isFetchingConsumos,
     isFetchingVentas,
+    proyectos,
+    startDateFilter,
+    endDateFilter,
+    exportScope,
+    setExportScope,
+    exportProyectoId,
+    setExportProyectoId,
+    exportIncludeRejected,
+    setExportIncludeRejected,
+    isExportingGastos,
     handleSaveProfile,
     handleAddUser,
     handleOpenEditUser,
@@ -585,13 +596,114 @@ export function AdminExtraModals({ vm }: AdminExtraModalsProps) {
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.configCardTitle, { color: themeColors.text }]}>Reporte de Gastos</Text>
                     <Text style={{ color: themeColors.textSecondary, fontSize: 11 }}>
-                      Consolidado de gastos registrados, estados y montos.
+                      Excel multi-hoja (Resumen, Detalle, Hospedaje Diario) y PDF.
+                      {(startDateFilter || endDateFilter) ? ` • Fechas: ${startDateFilter || 'Inicio'} al ${endDateFilter || 'Hoy'}` : ''}
                     </Text>
                   </View>
                 </View>
+
+                {/* Selector de alcance */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                  {(
+                    [
+                      { key: 'ALL', label: 'Todos' },
+                      { key: 'PROYECTOS', label: 'Proyectos' },
+                      { key: 'PROYECTO', label: 'Un Proyecto' },
+                      { key: 'OPERATIVOS', label: 'Operativos' },
+                      { key: 'HISTORICO', label: 'Histórico' },
+                    ] as const
+                  ).map((item) => {
+                    const active = exportScope === item.key;
+                    return (
+                      <TouchableOpacity
+                        key={item.key}
+                        onPress={() => setExportScope(item.key)}
+                        style={{
+                          paddingVertical: 5,
+                          paddingHorizontal: 10,
+                          borderRadius: BorderRadius.pill,
+                          borderWidth: 1,
+                          borderColor: active ? themeColors.primary : themeColors.border,
+                          backgroundColor: active ? themeColors.primary + '18' : themeColors.background,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            fontWeight: active ? '700' : '500',
+                            color: active ? themeColors.primary : themeColors.textSecondary,
+                          }}
+                        >
+                          {item.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Selector de Proyecto específico cuando scope === 'PROYECTO' */}
+                {exportScope === 'PROYECTO' && (
+                  <View style={{ marginTop: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text, marginBottom: 4 }}>
+                      Selecciona el proyecto (genera hojas por categoría en Excel):
+                    </Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ gap: 6, paddingVertical: 2 }}
+                    >
+                      {proyectos.map((p) => {
+                        const selected = exportProyectoId === p.id;
+                        return (
+                          <TouchableOpacity
+                            key={p.id}
+                            onPress={() => setExportProyectoId(p.id)}
+                            style={{
+                              paddingVertical: 6,
+                              paddingHorizontal: 10,
+                              borderRadius: BorderRadius.medium,
+                              borderWidth: 1,
+                              borderColor: selected ? themeColors.primary : themeColors.border,
+                              backgroundColor: selected ? themeColors.primary : themeColors.background,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                fontWeight: '700',
+                                color: selected ? '#fff' : themeColors.text,
+                              }}
+                            >
+                              {p.nombre}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                      {proyectos.length === 0 && (
+                        <Text style={{ fontSize: 11, color: themeColors.textSecondary, fontStyle: 'italic' }}>
+                          No hay proyectos registrados.
+                        </Text>
+                      )}
+                    </ScrollView>
+                  </View>
+                )}
+
+                {/* Toggle incluir rechazados */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                  <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                    Incluir gastos rechazados (solo detalle)
+                  </Text>
+                  <Switch
+                    value={exportIncludeRejected}
+                    onValueChange={setExportIncludeRejected}
+                    trackColor={{ false: themeColors.border, true: themeColors.primary + '80' }}
+                    thumbColor={exportIncludeRejected ? themeColors.primary : '#f4f3f4'}
+                  />
+                </View>
+
                 <View style={{ flexDirection: 'row', gap: Spacing.two, marginTop: 4 }}>
-                  <CustomButton title="PDF" onPress={handleExportPDF} style={{ flex: 1, height: 36 }} />
-                  <CustomButton title="Excel" onPress={handleExportCSV} variant="success" style={{ flex: 1, height: 36 }} />
+                  <CustomButton title="PDF" onPress={handleExportPDF} style={{ flex: 1, height: 36 }} loading={isExportingGastos} />
+                  <CustomButton title="Excel" onPress={handleExportCSV} variant="success" style={{ flex: 1, height: 36 }} loading={isExportingGastos} />
                 </View>
               </View>
 
