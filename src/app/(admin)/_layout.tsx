@@ -51,6 +51,8 @@ function AdminLayoutContent() {
     if (!lastPart || lastPart === 'dashboard') return 'Inicio';
     if (lastPart === 'ventas') return 'Ventas';
     if (lastPart === 'cotizaciones') return 'Cotizaciones';
+    if (lastPart === 'ordenes-compra') return 'Órdenes de Compra';
+    if (lastPart === 'nueva-orden-compra') return 'Orden de Compra';
     if (lastPart === 'empleados') return 'Empleados';
     if (lastPart === 'vehiculos') return 'Vehículos';
     if (lastPart === 'inventario') return 'Inventario';
@@ -89,6 +91,7 @@ function AdminLayoutContent() {
     { route: '/(admin)/gastos', icon: 'cash-outline', color: '#feca57', name: 'Gastos' },
     { route: '/(admin)/facturas-recibidas', icon: 'receipt-outline', color: '#2e86de', name: 'Facturas Recibidas' },
     { route: '/(admin)/cotizaciones', icon: 'document-text-outline', color: '#54a0ff', name: 'Cotizaciones' },
+    { route: '/(admin)/ordenes-compra', icon: 'bag-handle-outline', color: '#e67e22', name: 'Órdenes de Compra' },
     { route: '/(admin)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
     { route: '/(admin)/inventario', icon: 'cube-outline', color: '#48dbfb', name: 'Inventario' },
     { route: '/(admin)/empleados', icon: 'people-outline', color: '#1dd1a1', name: 'Empleados' },
@@ -118,6 +121,9 @@ function AdminLayoutContent() {
               if (pathname.includes('nueva-cotizacion')) {
                 if (router.canGoBack()) router.back();
                 else router.replace('/(admin)/cotizaciones');
+              } else if (pathname.includes('nueva-orden-compra')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/ordenes-compra');
               } else if (pathname.includes('editar-gasto') || pathname.includes('formulario')) {
                 if (router.canGoBack()) router.back();
                 else router.replace('/(admin)/gastos');

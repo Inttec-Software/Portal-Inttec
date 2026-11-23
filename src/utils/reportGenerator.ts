@@ -7,6 +7,8 @@ import { Platform, Alert } from 'react-native';
 import { Gasto, GastoHelper, Asistencia, Usuario, CompanyService } from '../services/supabase';
 import { apiClient } from '../services/apiClient';
 import { Cotizacion } from '@/types/ventas';
+import { OrdenCompra } from '@/types/ordenesCompra';
+import { numeroALetras, getMonedaDisplayName } from './numeroALetras';
 import { getWeekRange, getMonthRange, processAsistenciasSemana, processAsistenciasMes, formatMinutesToHours, formatHoraDisplay, isAutoCerradoAsistencia } from './asistenciaUtils';
 import {
   ProyectoCategoriaKey,
@@ -5669,6 +5671,468 @@ export async function exportarCotizacionOdooPDF(cotizacion: Cotizacion, action: 
     if (Platform.OS === 'web') {
       window.alert('Error: No se pudo generar el documento PDF corporativo. ' + (error.message || ''));
       Alert.alert('Error', 'No se pudo generar el documento PDF corporativo. ' + (error.message || ''));
+    }
+  }
+}
+
+export async function exportarOrdenCompraOdooPDF(orden: OrdenCompra, action: 'view' | 'download' = 'view') {
+  const branding = await getCompanyBranding();
+  const folioPDF = String(orden.folio || '').trim();
+  const titleStr = 'Orden de Compra';
+  const title = `${titleStr} - ${folioPDF}`;
+
+  const formatMoney = (val: any) => {
+    const num = typeof val === 'number' ? val : parseFloat(val);
+    return (isNaN(num) ? 0 : num).toLocaleString('es-MX', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
+  const escapeHtml = (text: string) => {
+    return (text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  const formatInlineText = (text: any) => {
+    let escaped = escapeHtml(text);
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\*([^*\n]+?)\*/g, '<strong style="color: #111; font-weight: bold;">$1</strong>');
+    escaped = escaped.replace(/\b_([^_]+?)_\b/g, '<em style="color: #333;">$1</em>');
+    return escaped;
+  };
+
+  const renderDescription = (name: string, description: string) => {
+    let html = '';
+
+    if (name && name.trim()) {
+      html += `<div style="font-weight: 700; font-size: 10.5px; color: #111; line-height: 1.35; margin-bottom: 3px;">${escapeHtml(name.trim())}</div>`;
+    }
+
+    if (!description || !description.trim()) {
+      return html || '<span style="color: #999; font-style: italic;">Sin descripción</span>';
+    }
+
+    const trimmedDesc = description.trim();
+    const isHtml = /<[a-z][\s\S]*>/i.test(trimmedDesc);
+    if (isHtml) {
+      const styledHtml = trimmedDesc
+        .replace(/<b\b/gi, '<b style="color: #111; font-weight: bold;"')
+        .replace(/<strong\b/gi, '<strong style="color: #111; font-weight: bold;"')
+        .replace(/<ul\b/gi, '<ul style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<ol\b/gi, '<ol style="margin: 2px 0 2px 16px; padding: 0; color: #333;"')
+        .replace(/<li\b/gi, '<li style="margin-bottom: 2px; font-size: 9.5px; color: #333; line-height: 1.35;"');
+      return html + `<div style="font-size: 9.5px; color: #333; line-height: 1.35;">${styledHtml}</div>`;
+    }
+
+    const lines = trimmedDesc.split('\n');
+    const parsedLines = lines
+      .map((rawLine) => {
+        const line = rawLine.trim();
+        if (!line) return '<div style="height: 3px;"></div>';
+
+        const bulletMatch = line.match(/^([•\-\*\+])\s+(.*)$/);
+        if (bulletMatch) {
+          const itemContent = formatInlineText(bulletMatch[2]);
+          return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 9.5px; color: #333; line-height: 1.35;">
+                    <span style="display: inline-block; width: 12px; min-width: 12px; color: #333; font-weight: bold; font-size: 10px; line-height: 1.2;">&bull;</span>
+                    <div style="flex: 1;">${itemContent}</div>
+                  </div>`;
+        }
+
+        const numberMatch = line.match(/^(\d+[\.\-\)])\s+(.*)$/);
+        if (numberMatch) {
+          const numPrefix = escapeHtml(numberMatch[1]);
+          const itemContent = formatInlineText(numberMatch[2]);
+          return `<div style="display: flex; align-items: flex-start; margin-bottom: 2px; padding-left: 2px; font-size: 9.5px; color: #333; line-height: 1.35;">
+                    <span style="display: inline-block; width: 16px; min-width: 16px; color: #333; font-weight: 700; font-size: 9px; line-height: 1.3;">${numPrefix}</span>
+                    <div style="flex: 1;">${itemContent}</div>
+                  </div>`;
+        }
+
+        return `<div style="margin-bottom: 2px; font-size: 9.5px; color: #333; line-height: 1.35;">${formatInlineText(line)}</div>`;
+      })
+      .join('');
+
+    return html + parsedLines;
+  };
+
+  const lineas = orden.lineas || [];
+  const hasIva = Number(orden.iva || 0) > 0 || lineas.some((l) => Number(l.impuestoPorcentaje || 0) > 0);
+  const uniqueTaxes = Array.from(new Set(lineas.map((l) => Number(l.impuestoPorcentaje || 0)).filter((p) => p > 0)));
+  const ivaLabel = uniqueTaxes.length === 1 ? `I.V.A. ${uniqueTaxes[0]}%` : 'I.V.A.';
+  const importeLetra = numeroALetras(Number(orden.total || 0), orden.moneda || 'MXN');
+  const monedaDisplay = getMonedaDisplayName(orden.moneda);
+  const showTipoCambio = (orden.moneda && orden.moneda !== 'MXN') || (Number(orden.tipoCambio || 1) !== 1);
+  const tipoCambioStr = Number(orden.tipoCambio || 1).toFixed(4);
+
+  const ciudadEstado = [orden.proveedorCiudad, orden.proveedorEstado].filter((v) => v && v.trim()).join(', ');
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <title>${escapeHtml(title)}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;800;900&display=swap');
+        @page {
+          size: letter;
+          margin: 0;
+        }
+        * {
+          box-sizing: border-box;
+        }
+        body {
+          font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
+          color: #333;
+          margin: 0;
+          padding: 0;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .page-container {
+          width: 100%;
+          min-height: 100vh;
+          box-sizing: border-box;
+          position: relative;
+        }
+        .header-content {
+          padding: 15px 40px 0 40px;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          height: 174px;
+          position: relative;
+          z-index: 10;
+        }
+        .company-details { text-align: right; font-size: 11px; line-height: 1.4; color: #333; margin-top: 5px; }
+
+        .page-body {
+          padding: 0px 40px 130px 40px;
+          position: relative;
+          z-index: 10;
+          margin-top: -50px;
+        }
+
+        .row { display: flex; flex-wrap: wrap; margin-bottom: 16px; }
+        .col-6 { width: 50%; box-sizing: border-box; }
+        .col-7 { width: 56%; box-sizing: border-box; padding-right: 18px; }
+        .col-5 { width: 44%; box-sizing: border-box; }
+
+        .text-end { text-align: right; }
+        .text-center { text-align: center; }
+        .fw-bold { font-weight: bold; }
+        .mb-2 { margin-bottom: 8px; }
+        .mb-3 { margin-bottom: 14px; }
+        .mb-4 { margin-bottom: 20px; }
+        .mt-3 { margin-top: 16px; }
+        .mt-4 { margin-top: 22px; }
+        .ps-1 { padding-left: 2px; }
+        .text-muted { color: #6c757d; }
+
+        .inttec-red { color: #8B1D22; }
+        .section-header { border-bottom: 2px solid #8B1D22; font-weight: bold; margin-bottom: 7px; color: #8B1D22; text-transform: uppercase; padding-bottom: 3px; font-size: 10px; }
+
+        .table { width: 100%; border-collapse: collapse; margin-bottom: 0.75rem; }
+
+        .table-red { border: 1px solid #dee2e6; border-top: none; }
+        .table-red thead th { background-color: #8B1D22; color: #FFFFFF !important; padding: 7px 5px; font-size: 9px; border-right: 1px solid #fff; }
+        .table-red thead th:last-child { border-right: none; }
+        .table-red tbody td { border: 1px solid #dee2e6; padding: 6px 5px; font-size: 9.5px; vertical-align: top; }
+
+        .info-text { font-size: 10px; line-height: 1.45; color: #333; }
+
+        .table-details { width: 100%; border-collapse: collapse; border: 1px solid #dee2e6; }
+        .table-details td { padding: 3.5px 7px; border: 1px solid #dee2e6; font-size: 9.5px; }
+        .label-col { width: 42%; background-color: #f4f5f6; font-weight: 500; color: #111; }
+        .value-col { width: 58%; text-align: right; }
+
+        .table-totals { width: 100%; border-collapse: collapse; }
+        .table-totals td { padding: 5px 0; border-bottom: 1px solid #dee2e6; font-size: 11px; }
+        .table-totals tr:last-child td { border-bottom: none; border-top: 2px solid #333; font-size: 15px; font-weight: bold; padding-top: 8px; color: #111; }
+
+        .importe-letra-box {
+          background-color: #f8f9fa;
+          border: 1px solid #dee2e6;
+          border-left: 3px solid #8B1D22;
+          padding: 7px 10px;
+          font-size: 9.5px;
+          color: #111;
+          margin-bottom: 14px;
+        }
+
+        .signatures-row {
+          display: flex;
+          justify-content: space-around;
+          align-items: flex-end;
+          margin-top: 42px;
+          padding-top: 10px;
+        }
+        .signature-box {
+          width: 40%;
+          text-align: center;
+        }
+        .signature-title {
+          font-size: 9.5px;
+          font-weight: 700;
+          color: #555;
+          letter-spacing: 0.5px;
+          margin-bottom: 36px;
+        }
+        .signature-line {
+          border-top: 1px solid #444;
+          padding-top: 5px;
+          font-size: 10.5px;
+          font-weight: 600;
+          color: #111;
+        }
+
+        .footer-bank { position: absolute; bottom: 35px; left: 40px; right: 40px; border-top: 1px solid #000; padding-top: 9px; font-size: 9px; color: #333; line-height: 1.4; display: flex; justify-content: space-between; }
+        .footer-bank strong { color: #111; font-weight: bold; }
+      </style>
+    </head>
+    <body>
+      <div class="page-container">
+        <!-- HEADER BG ODOO Exact Shape -->
+        <div style="position: absolute; top: -90px; left: 0; width: 100%; height: 174px; z-index: 1;">
+          <div style="position: absolute; top: 87px; left: 0; width: 100%; height: 0; border-top: 87px solid #EAE6E2;"></div>
+          <div style="position: absolute; top: 174px; left: 0; width: 60%; height: 0; border-top: 87px solid #EAE6E2;"></div>
+          <div style="position: absolute; top: 174px; left: 60%; width: 0; height: 0; border-top: 87px solid #EAE6E2; border-right: 80px solid transparent;"></div>
+        </div>
+
+        <div class="header-content">
+          <div style="width: 50%;">
+            <img src="${branding.logo}" alt="Logo" style="${branding.logoStyle || 'max-height: 150px; height: 170px; width: 450px; margin-top: -10px; z-index: 10; position: relative;'}">
+          </div>
+          <div class="company-details" style="width: 50%;">
+            <div>${branding.name}</div>
+            <div>${branding.addressLine1}</div>
+            <div>${branding.addressLine2}</div>
+            <div>México</div>
+          </div>
+        </div>
+
+        <div class="page-body">
+          <div class="row mb-3" style="margin-top: -15px;">
+            <div class="col-6"></div>
+            <div class="col-6 text-end">
+              <h1 class="inttec-red fw-bold" style="font-size: 24px; letter-spacing: 1px; margin-bottom: 2px; margin-top: 0;">ORDEN DE COMPRA</h1>
+              <h2 class="text-muted" style="font-size: 18px; font-weight: normal; margin-top: 0;">FOLIO: ${escapeHtml(folioPDF)}</h2>
+            </div>
+          </div>
+
+          <div class="row mb-3">
+            <div class="col-7">
+              <div class="section-header">Datos del Proveedor</div>
+              <div class="info-text ps-1">
+                <strong style="font-size: 11px;">${escapeHtml(orden.proveedorNombre || 'Proveedor')}</strong><br/>
+                ${orden.proveedorRFC ? `<strong>RFC:</strong> ${escapeHtml(orden.proveedorRFC)}<br/>` : ''}
+                ${orden.proveedorCalleNumero ? `<strong>Calle y No.:</strong> ${escapeHtml(orden.proveedorCalleNumero)}<br/>` : ''}
+                ${orden.proveedorColonia ? `<strong>Colonia:</strong> ${escapeHtml(orden.proveedorColonia)}<br/>` : ''}
+                ${ciudadEstado ? `<strong>Ciudad / Estado:</strong> ${escapeHtml(ciudadEstado)}<br/>` : ''}
+                ${orden.proveedorCP ? `<strong>C.P.:</strong> ${escapeHtml(orden.proveedorCP)}<br/>` : ''}
+                ${orden.referencia ? `<strong>Referencia:</strong> ${escapeHtml(orden.referencia)}` : ''}
+              </div>
+            </div>
+            <div class="col-5">
+              <div class="section-header">Detalles de la Compra</div>
+              <table class="table-details">
+                <tr>
+                  <td class="label-col">Fecha:</td>
+                  <td class="value-col">${escapeHtml(orden.fechaCreacion || '')}</td>
+                </tr>
+                <tr>
+                  <td class="label-col">Facturar:</td>
+                  <td class="value-col"><strong>${orden.facturar ? 'SI' : 'NO'}</strong></td>
+                </tr>
+                <tr>
+                  <td class="label-col">Estatus de Proceso:</td>
+                  <td class="value-col">${escapeHtml(orden.estatusProceso || 'En Proceso')}</td>
+                </tr>
+                <tr>
+                  <td class="label-col">Tipo de Moneda:</td>
+                  <td class="value-col">${escapeHtml(monedaDisplay)}</td>
+                </tr>
+                ${showTipoCambio ? `
+                <tr>
+                  <td class="label-col">Tipo de Cambio:</td>
+                  <td class="value-col">${tipoCambioStr}</td>
+                </tr>` : ''}
+              </table>
+            </div>
+          </div>
+
+          <table class="table table-red mt-3">
+            <thead>
+              <tr>
+                <th width="4%" class="text-center">NO.</th>
+                <th width="9%" class="text-center">ENTREGA</th>
+                <th width="8%" class="text-center">UNIDAD</th>
+                <th width="${hasIva ? '35%' : '40%'}" style="text-align: left; padding-left: 8px;">DESCRIPCIÓN</th>
+                <th width="6%" class="text-center">CANT.</th>
+                <th width="10%" class="text-center">P. LISTA</th>
+                <th width="6%" class="text-center">%+-</th>
+                <th width="10%" class="text-center">P. UNIT.</th>
+                ${hasIva ? '<th width="5%" class="text-center">IVA</th>' : ''}
+                <th width="10%" class="text-center">IMPORTE</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${lineas
+                .map(
+                  (linea, idx) => {
+                    const pctVal = Number(linea.descuentoPorcentaje || 0);
+                    const pctText = pctVal > 0 ? `+${pctVal}%` : pctVal < 0 ? `${pctVal}%` : '0%';
+                    return `
+                  <tr>
+                    <td class="text-center">${idx + 1}</td>
+                    <td class="text-center">${escapeHtml(linea.tiempoEntrega || '')}</td>
+                    <td class="text-center">${escapeHtml(linea.unidad || 'Pieza')}</td>
+                    <td style="padding: 5px 8px;">
+                      ${renderDescription(linea.productoNombre, linea.productoDescripcion)}
+                    </td>
+                    <td class="text-center" style="white-space: nowrap;">${Number(linea.cantidad || 0)}</td>
+                    <td class="text-end" style="white-space: nowrap;">$${formatMoney(linea.precioLista ?? linea.precioUnitario)}</td>
+                    <td class="text-center" style="white-space: nowrap; font-weight: 500;">${pctText}</td>
+                    <td class="text-end" style="white-space: nowrap;">$${formatMoney(linea.precioUnitario)}</td>
+                    ${hasIva ? `<td class="text-center" style="white-space: nowrap;">${Number(linea.impuestoPorcentaje || 0)}%</td>` : ''}
+                    <td class="text-end" style="white-space: nowrap;">$${formatMoney(linea.importe)}</td>
+                  </tr>`;
+                  }
+                )
+                .join('')}
+            </tbody>
+          </table>
+
+          <div class="importe-letra-box">
+            <strong>IMPORTE CON LETRA:</strong> ${escapeHtml(importeLetra)}
+          </div>
+
+          <div class="row mt-3">
+            <div class="col-7">
+              <div class="info-text">
+                <div class="section-header">Información Adicional</div>
+                <div style="padding-top: 4px; white-space: pre-line;">
+                  <strong>Observaciones:</strong> ${orden.observaciones ? escapeHtml(orden.observaciones) : '<span class="text-muted">Ninguna</span>'}
+                </div>
+                <div style="padding-top: 6px; white-space: pre-line;">
+                  <strong>Condiciones de Trabajo:</strong> ${orden.condicionesTrabajo ? escapeHtml(orden.condicionesTrabajo) : '<span class="text-muted">Ninguna</span>'}
+                </div>
+                ${orden.clienteFinal ? `
+                <div style="margin-top: 8px; padding: 6px 8px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-left: 3px solid #0284c7; border-radius: 3px;">
+                  <strong style="color: #0284c7; font-size: 9.5px;">DATOS DEL CLIENTE FINAL:</strong>
+                  <div style="padding-top: 2px; white-space: pre-line; color: #111; font-size: 9px;">${escapeHtml(orden.clienteFinal)}</div>
+                </div>` : ''}
+              </div>
+            </div>
+            <div class="col-5">
+              <table class="table-totals">
+                <tr><td>Subtotal</td><td class="text-end">$ ${formatMoney(orden.subtotal)}</td></tr>
+                ${hasIva ? `<tr><td>${ivaLabel}</td><td class="text-end">$ ${formatMoney(orden.iva)}</td></tr>` : ''}
+                <tr>
+                  <td>TOTAL</td>
+                  <td class="text-end">$ ${formatMoney(orden.total)}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <!-- BLOQUE DE FIRMAS -->
+          <div class="signatures-row">
+            <div class="signature-box">
+              <div class="signature-title">REALIZÓ LA COMPRA</div>
+              <div class="signature-line">${escapeHtml(orden.realizoCompra || 'NOMBRE Y FIRMA')}</div>
+            </div>
+            <div class="signature-box">
+              <div class="signature-title">RECIBIDO POR</div>
+              <div class="signature-line">${escapeHtml(orden.recibidoPor || 'NOMBRE Y FIRMA')}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- FOOTER FIXED -->
+        <div class="footer-bank">
+          <div style="width: 60%;">
+            <strong>${branding.legalName}</strong><br>
+            RFC: ${branding.rfc} &bull; TEL: ${branding.phone} &bull; MAIL: ${branding.email}
+          </div>
+          <div style="width: 40%; text-align: right; color: #666; display: flex; align-items: flex-end; justify-content: flex-end;">
+            PÁGINA 1 / 1
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  try {
+    if (Platform.OS === 'web') {
+      if (action === 'download') {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.close();
+
+          setTimeout(() => {
+            const originalTitle = document.title;
+            document.title = title;
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+
+            setTimeout(() => {
+              document.title = originalTitle;
+            }, 1000);
+
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+            }, 1000);
+          }, 500);
+        }
+      } else {
+        const newWindow = window.open('', '_blank');
+        if (newWindow) {
+          newWindow.document.write(htmlContent);
+          newWindow.document.close();
+        } else {
+          window.alert('Por favor, permite las ventanas emergentes (pop-ups) en tu navegador para ver el documento.');
+        }
+      }
+    } else {
+      if (action === 'view') {
+        await Print.printAsync({ html: htmlContent });
+      } else {
+        const { base64 } = await Print.printToFileAsync({ html: htmlContent, base64: true });
+        const customNameUri = `${cacheDirectory}${titleStr} - ${folioPDF}.pdf`;
+        await writeAsStringAsync(customNameUri, base64 || '', {
+          encoding: EncodingType.Base64,
+        });
+        await Sharing.shareAsync(customNameUri, { mimeType: 'application/pdf', dialogTitle: `Compartir ${titleStr}` });
+      }
+    }
+  } catch (error: any) {
+    logger.error('Error generando PDF de Orden de Compra:', error);
+    if (Platform.OS === 'web') {
+      window.alert('Error: No se pudo generar el documento PDF de Orden de Compra. ' + (error.message || ''));
+    } else {
+      Alert.alert('Error', 'No se pudo generar el documento PDF de Orden de Compra. ' + (error.message || ''));
     }
   }
 }
