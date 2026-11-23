@@ -18,7 +18,7 @@ export const CompanyService = {
   },
   async setActiveCompany(company: 'inttec' | 'daravisa'): Promise<void> {
     activeCompany = company;
-        invalidateHeaderCache();
+    invalidateHeaderCache();
     if (isBrowser) {
       await AsyncStorage.setItem('active_company', company);
     }
@@ -28,7 +28,7 @@ export const CompanyService = {
       const saved = await AsyncStorage.getItem('active_company');
       if (saved === 'daravisa' || saved === 'inttec') {
         activeCompany = saved;
-                invalidateHeaderCache();
+        invalidateHeaderCache();
       }
     }
     return activeCompany;
@@ -42,7 +42,7 @@ export const EnvService = {
   },
   async setActiveEnv(env: 'cloud' | 'test'): Promise<void> {
     activeEnv = env;
-        invalidateHeaderCache();
+    invalidateHeaderCache();
     if (isBrowser) {
       await AsyncStorage.setItem('active_env', env);
     }
@@ -52,7 +52,7 @@ export const EnvService = {
       const saved = await AsyncStorage.getItem('active_env');
       if (saved === 'cloud' || saved === 'test') {
         activeEnv = saved;
-              }
+      }
     }
     return activeEnv;
   }
@@ -119,9 +119,9 @@ export interface Gasto {
   } | null;
   // Relaciones Joins normalizadas
   categoria_rel?: { id: string; nombre: string } | null;
-  subcategoria_rel?: { 
-    id: string; 
-    nombre: string; 
+  subcategoria_rel?: {
+    id: string;
+    nombre: string;
     categoria_id?: string;
     categoria_rel?: { id: string; nombre: string } | null;
   } | null;
@@ -231,7 +231,7 @@ export const GastoHelper = {
             .filter((u: any) => typeof u === 'string' && u.trim().length > 0 && !u.startsWith('cfdi://'))
             .map((u: string) => u.trim().replace(/^[\["\']+|[\]"\']+$/g, '').trim());
         }
-      } catch {}
+      } catch { }
     }
 
     // Comma-separated o single string, limpiando corchetes y comillas accidentales
@@ -262,7 +262,7 @@ export const GastoHelper = {
         if (Array.isArray(parsed)) {
           return parsed.map((item: any) => typeof item === 'string' ? item : item?.uri || item?.url).filter(Boolean);
         }
-      } catch {}
+      } catch { }
     }
     return trimmed.split(',').map(u => {
       const s = u.trim();
@@ -602,6 +602,18 @@ export interface Asistencia {
   creado_en?: string;
 }
 
+export type TipoAusencia = 'VACACIONES' | 'PERMISO_SIN_GOCE';
+
+export interface AusenciaAsistencia {
+  id: string;
+  empleado_id: string;
+  tipo: TipoAusencia;
+  fecha: string; // YYYY-MM-DD
+  motivo?: string | null;
+  creado_por?: string | null;
+  creado_en?: string;
+}
+
 /**
  * Servicio de Asistencias (Auto-Checador)
  */
@@ -919,6 +931,68 @@ export const AsistenciaService = {
       return { success: true, message: 'Turno registrado correctamente (fallback directo)', data: record };
     }
   },
+
+  async getAusencias(options: {
+    empleadoId?: string;
+    startDate?: string;
+    endDate?: string;
+  } = {}): Promise<AusenciaAsistencia[]> {
+    const headers = await getApiHeaders();
+    const params = new URLSearchParams();
+    if (options.empleadoId) params.append('empleado_id', options.empleadoId);
+    if (options.startDate) params.append('startDate', options.startDate);
+    if (options.endDate) params.append('endDate', options.endDate);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`${getApiUrl()}/api/asistencias/ausencias${qs}`, { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (Array.isArray(data) ? data : []).map((item: AusenciaAsistencia) => ({
+      ...item,
+      fecha: item.fecha ? String(item.fecha).split('T')[0] : item.fecha,
+    }));
+  },
+
+  async asignarAusencias(payload: {
+    empleado_id: string;
+    tipo: TipoAusencia;
+    fecha_inicio: string;
+    fecha_fin?: string;
+    dias_habiles?: number;
+    motivo?: string;
+  }): Promise<{ success: boolean; dias: string[]; count: number; message?: string }> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/ausencias`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'No se pudieron guardar las vacaciones o permiso');
+    }
+    return data;
+  },
+
+  async eliminarAusencia(params: {
+    id?: string;
+    empleado_id?: string;
+    fecha?: string;
+  }): Promise<{ success: boolean }> {
+    const headers = await getApiHeaders();
+    const qs = new URLSearchParams();
+    if (params.id) qs.append('id', params.id);
+    if (params.empleado_id) qs.append('empleado_id', params.empleado_id);
+    if (params.fecha) qs.append('fecha', params.fecha);
+    const res = await fetch(`${getApiUrl()}/api/asistencias/admin/ausencias?${qs.toString()}`, {
+      method: 'DELETE',
+      headers,
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'No se pudo eliminar el registro');
+    }
+    return data;
+  },
 };
 
 export interface Venta {
@@ -1096,12 +1170,12 @@ export const VehiculoService = {
 
   async getRegistrosGasolina(filtros?: { vehiculoId?: string; empleadoId?: string; placas?: string }): Promise<RegistroGasolina[]> {
     const headers = await getApiHeaders();
-    
+
     let url = `${getApiUrl()}/api/vehiculos/gasolina?`;
     if (filtros?.vehiculoId) url += `vehiculoId=${filtros.vehiculoId}&`;
     if (filtros?.empleadoId) url += `empleadoId=${filtros.empleadoId}&`;
     if (filtros?.placas) url += `placas=${filtros.placas}&`;
-    
+
     const res = await fetch(url, { headers });
     if (!res.ok) throw new Error('Error al obtener registros de gasolina');
     return res.json();
@@ -1155,7 +1229,7 @@ export const AuditoriaService = {
 
   async obtenerAuditorias(tarjeta?: string): Promise<AuditoriaTarjeta[]> {
     const headers = await getApiHeaders();
-    const url = tarjeta && tarjeta !== 'TODAS' 
+    const url = tarjeta && tarjeta !== 'TODAS'
       ? `${getApiUrl()}/api/auditoria?tarjeta=${encodeURIComponent(tarjeta)}`
       : `${getApiUrl()}/api/auditoria`;
 
@@ -1774,10 +1848,10 @@ class FrontendQueryBuilder {
   ilike(col: string, val: any) { this.query.conditions.push({ col, op: 'ilike', val }); return this; }
   or(val: string) { this.query.conditions.push({ col: '', op: 'or', val }); return this; }
 
-  order(col: string, opts: { ascending?: boolean } = {}) { 
-    this.query.orderCol = col; 
-    this.query.orderAsc = opts.ascending ?? true; 
-    return this; 
+  order(col: string, opts: { ascending?: boolean } = {}) {
+    this.query.orderCol = col;
+    this.query.orderAsc = opts.ascending ?? true;
+    return this;
   }
   limit(n: number) { this.query.limitCount = n; return this; }
   single() { this.query.isSingle = true; this.query.limitCount = 1; return this; }
@@ -1809,7 +1883,7 @@ class FrontendQueryBuilder {
       } else {
         return { data: json.data, error: null };
       }
-    } catch(e) {
+    } catch (e) {
       return { data: null, error: e };
     }
   }
@@ -1854,14 +1928,14 @@ const createShimClient = (clientType: 'inttec' | 'daravisa' | 'active') => {
               })
             });
             const json = await res.json();
-            if(!res.ok) return { data: null, error: json.error || new Error('Error al subir archivo') };
+            if (!res.ok) return { data: null, error: json.error || new Error('Error al subir archivo') };
             return { data: { path }, error: null };
-          } catch(e) {
+          } catch (e) {
             return { data: null, error: e };
           }
         },
         download: async (path: string) => {
-          const bucketName = 'portal-inttec-storage'; 
+          const bucketName = 'portal-inttec-storage';
           const region = 'us-east-2';
           const company = CompanyService.getActiveCompany();
           const fullPath = path.startsWith('http')
@@ -1875,12 +1949,12 @@ const createShimClient = (clientType: 'inttec' | 'daravisa' | 'active') => {
             if (!res.ok) return { data: null, error: new Error('Not found') };
             const blob = await res.blob();
             return { data: blob, error: null };
-          } catch(e) {
+          } catch (e) {
             return { data: null, error: e };
           }
         },
         getPublicUrl: (path: string) => {
-          const bucketName = 'portal-inttec-storage'; 
+          const bucketName = 'portal-inttec-storage';
           const region = 'us-east-2';
           const company = CompanyService.getActiveCompany();
           if (path.startsWith('http')) return { data: { publicUrl: path } };
@@ -1891,25 +1965,25 @@ const createShimClient = (clientType: 'inttec' | 'daravisa' | 'active') => {
         }
       })
     },
-    auth: { updateUser: async (updates: any) => { return { data: null, error: null }; } }, 
-    functions: { 
-      invoke: async (functionName: string, options?: any) => { 
-        const headers = await getApiHeaders(); 
+    auth: { updateUser: async (updates: any) => { return { data: null, error: null }; } },
+    functions: {
+      invoke: async (functionName: string, options?: any) => {
+        const headers = await getApiHeaders();
         let endpoint = `/api/functions/${functionName}`;
         if (functionName === 'facturar-venta') endpoint = '/api/sat/timbrar-factura';
         if (functionName === 'cancelar-factura') endpoint = '/api/sat/cancelar-factura';
         if (functionName === 'sync-facturas-recibidas') endpoint = '/api/sat/sync-facturas-recibidas';
         if (functionName === 'send-push') endpoint = '/api/notificaciones/send-push';
-        
-        const res = await fetch(`${getApiUrl()}${endpoint}`, { 
-          method: 'POST', 
-          headers: { ...headers, 'Content-Type': 'application/json' }, 
-          body: JSON.stringify(options?.body || {}) 
-        }); 
-        const json = await res.json().catch(() => ({})); 
-        if (!res.ok) return { data: null, error: json.error || new Error('Invoke failed') }; 
-        return { data: json.data || json, error: null }; 
-      } 
+
+        const res = await fetch(`${getApiUrl()}${endpoint}`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(options?.body || {})
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) return { data: null, error: json.error || new Error('Invoke failed') };
+        return { data: json.data || json, error: null };
+      }
     }
   };
 };

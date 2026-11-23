@@ -995,3 +995,228 @@ export const toggleComidaAsistencia = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+export function calcularDiasHabiles(
+  fechaInicio: string,
+  options: { fechaFin?: string; diasHabiles?: number }
+): string[] {
+  const parseYMD = (str: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(str || '').trim());
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+    return dt;
+  };
+  const formatYMD = (dt: Date) => dt.toISOString().slice(0, 10);
+
+  const startDt = parseYMD(fechaInicio);
+  if (!startDt) return [];
+
+  const result: string[] = [];
+
+  if (typeof options.diasHabiles === 'number' && Number.isFinite(options.diasHabiles) && options.diasHabiles > 0) {
+    const target = Math.min(Math.floor(options.diasHabiles), 120);
+    const cur = new Date(startDt.getTime());
+    let guard = 0;
+    while (result.length < target && guard < 365) {
+      const dow = cur.getUTCDay();
+      if (dow !== 0 && dow !== 6) {
+        result.push(formatYMD(cur));
+      }
+      cur.setUTCDate(cur.getUTCDate() + 1);
+      guard++;
+    }
+    return result;
+  }
+
+  if (options.fechaFin) {
+    const endDt = parseYMD(options.fechaFin);
+    if (!endDt || endDt.getTime() < startDt.getTime()) return [];
+    const cur = new Date(startDt.getTime());
+    let guard = 0;
+    while (cur.getTime() <= endDt.getTime() && guard < 365) {
+      const dow = cur.getUTCDay();
+      if (dow !== 0 && dow !== 6) {
+        result.push(formatYMD(cur));
+      }
+      cur.setUTCDate(cur.getUTCDate() + 1);
+      guard++;
+    }
+    return result;
+  }
+
+  return [];
+}
+
+export const getAusencias = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const pool = getDbPool(company, env);
+
+    const { empleado_id, startDate, endDate } = req.query as {
+      empleado_id?: string;
+      startDate?: string;
+      endDate?: string;
+    };
+
+    let query = `SELECT id, empleado_id, tipo, fecha, motivo, creado_por, creado_en FROM public.asistencias_ausencias WHERE 1=1`;
+    const params: any[] = [];
+
+    if (empleado_id) {
+      params.push(empleado_id);
+      query += ` AND empleado_id = $${params.length}`;
+    }
+    if (startDate) {
+      params.push(startDate);
+      query += ` AND fecha >= $${params.length}`;
+    }
+    if (endDate) {
+      params.push(endDate);
+      query += ` AND fecha <= $${params.length}`;
+    }
+
+    query += ` ORDER BY fecha ASC`;
+
+    const result = await pool.query(query, params);
+    const rows = (result.rows || []).map((r: any) => ({
+      ...r,
+      fecha: r.fecha instanceof Date ? r.fecha.toISOString().slice(0, 10) : String(r.fecha).split('T')[0],
+    }));
+    return res.json(rows);
+  } catch (error: any) {
+    console.error('[GET AUSENCIAS ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const asignarAusencias = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+
+    const editorRole = (req.user?.rol || req.user?.role || '').toUpperCase();
+    if (editorRole !== 'ADMIN' && editorRole !== 'DEV') {
+      return res.status(403).json({ error: 'Solo administradores o devs pueden asignar vacaciones o permisos.' });
+    }
+
+    const { empleado_id, tipo, fecha_inicio, fecha_fin, dias_habiles, motivo } = req.body || {};
+    if (!empleado_id || !fecha_inicio || (tipo !== 'VACACIONES' && tipo !== 'PERMISO_SIN_GOCE')) {
+      return res.status(400).json({
+        error: 'Se requieren empleado_id, fecha_inicio y tipo (VACACIONES o PERMISO_SIN_GOCE).',
+      });
+    }
+
+    const dias = calcularDiasHabiles(fecha_inicio, {
+      fechaFin: fecha_fin,
+      diasHabiles: typeof dias_habiles === 'number' ? dias_habiles : (dias_habiles ? Number(dias_habiles) : undefined),
+    });
+
+    if (dias.length === 0) {
+      return res.status(400).json({
+        error: 'El rango seleccionado no contiene días hábiles (lunes a viernes) o las fechas son inválidas.',
+      });
+    }
+
+    const { env } = tenant;
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
+
+    const creadoPor = req.user?.id || null;
+    const cleanMotivo = motivo ? String(motivo).trim() : null;
+
+    const upsertSql = `
+      INSERT INTO public.asistencias_ausencias (empleado_id, tipo, fecha, motivo, creado_por)
+      SELECT $1, $2, d::date, $3, $4
+      FROM unnest($5::text[]) AS d
+      ON CONFLICT (empleado_id, fecha)
+      DO UPDATE SET tipo = EXCLUDED.tipo, motivo = EXCLUDED.motivo, creado_por = EXCLUDED.creado_por
+    `;
+    const params = [empleado_id, tipo, cleanMotivo, creadoPor, dias];
+
+    const results = await Promise.allSettled([
+      poolInttec.query(upsertSql, params),
+      poolDaravisa.query(upsertSql, params),
+    ]);
+
+    const errors: any[] = [];
+    let affected = 0;
+    for (const r of results) {
+      if (r.status === 'rejected') errors.push(r.reason);
+      else affected += (r.value as any).rowCount || 0;
+    }
+
+    if (affected === 0 && errors.length > 0) {
+      throw new Error(errors[0]?.message || 'Error al guardar las ausencias en la base de datos');
+    }
+
+    return res.json({
+      success: true,
+      empleado_id,
+      tipo,
+      dias,
+      count: dias.length,
+      message: `${tipo === 'VACACIONES' ? 'Vacaciones' : 'Permiso sin goce'} asignado(s) para ${dias.length} día(s) hábil(es).`,
+    });
+  } catch (error: any) {
+    console.error('[ASIGNAR AUSENCIAS ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const eliminarAusencia = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+
+    const editorRole = (req.user?.rol || req.user?.role || '').toUpperCase();
+    if (editorRole !== 'ADMIN' && editorRole !== 'DEV') {
+      return res.status(403).json({ error: 'Solo administradores o devs pueden eliminar vacaciones o permisos.' });
+    }
+
+    const id = (req.query.id || req.body?.id) as string | undefined;
+    const empleado_id = (req.query.empleado_id || req.body?.empleado_id) as string | undefined;
+    const fecha = (req.query.fecha || req.body?.fecha) as string | undefined;
+
+    if (!id && (!empleado_id || !fecha)) {
+      return res.status(400).json({ error: 'Se requiere id o (empleado_id y fecha).' });
+    }
+
+    const { env } = tenant;
+    const poolInttec = getDbPool('inttec', env);
+    const poolDaravisa = getDbPool('daravisa', env);
+
+    const sql = id
+      ? `DELETE FROM public.asistencias_ausencias WHERE id = $1`
+      : `DELETE FROM public.asistencias_ausencias WHERE empleado_id = $1 AND fecha = $2`;
+    const params = id ? [id] : [empleado_id, fecha];
+
+    const results = await Promise.allSettled([
+      poolInttec.query(sql, params),
+      poolDaravisa.query(sql, params),
+    ]);
+
+    const errors: any[] = [];
+    let deletedCount = 0;
+    for (const r of results) {
+      if (r.status === 'rejected') errors.push(r.reason);
+      else deletedCount += (r.value as any).rowCount || 0;
+    }
+
+    if (deletedCount === 0 && errors.length > 0) {
+      throw new Error(errors[0]?.message || 'Error al eliminar la ausencia en la base de datos');
+    }
+    if (deletedCount === 0) {
+      return res.status(404).json({ error: 'No se encontró el registro de vacaciones o permiso.' });
+    }
+
+    return res.json({ success: true, message: 'Registro eliminado correctamente.' });
+  } catch (error: any) {
+    console.error('[ELIMINAR AUSENCIA ERROR]:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
