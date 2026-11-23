@@ -37,12 +37,6 @@ function ExpenseCard({
   const sucursalNombre = GastoHelper.getSucursal(gasto);
 
   const isDevueltoFactura = gasto.status === 'PENDING' && Boolean(gasto.devuelto_por_factura);
-  const isNuevoConFacturaDetectada =
-    !gasto.devuelto_por_factura &&
-    !gasto.facturado &&
-    Boolean(gasto.factura_sugerida_rel || gasto.factura_sugerida_id) &&
-    (gasto.status === 'PENDING' || gasto.status === 'APPROVED');
-
   // Configuración de estados
   let statusText = 'PENDIENTE';
   let statusColor: string = themeColors.warning;
@@ -56,10 +50,6 @@ function ExpenseCard({
     statusText = 'FACTURA DETECTADA (DEVUELTO)';
     statusColor = '#0284C7';
     statusIcon = 'document-attach-outline';
-  } else if (isNuevoConFacturaDetectada && gasto.status === 'PENDING') {
-    statusText = 'COMPROBAR FACTURA';
-    statusColor = '#D97706';
-    statusIcon = 'search-outline';
   } else if (gasto.status === 'APPROVED') {
     statusText = 'APROBADO';
     statusColor = themeColors.success;
@@ -92,12 +82,10 @@ function ExpenseCard({
           backgroundColor: themeColors.backgroundElement,
           borderColor: isDevueltoFactura
             ? '#0284C7'
-            : isNuevoConFacturaDetectada
-            ? '#F59E0B'
             : gasto.status === 'ACTION_REQUIRED'
             ? themeColors.actionRequired
             : themeColors.border,
-          borderWidth: (isDevueltoFactura || isNuevoConFacturaDetectada || gasto.status === 'ACTION_REQUIRED') ? 1.5 : 1,
+          borderWidth: (isDevueltoFactura || gasto.status === 'ACTION_REQUIRED') ? 1.5 : 1,
         },
       ]}
     >
@@ -253,15 +241,6 @@ function ExpenseCard({
           </Text>
           <Text style={{ fontSize: 12, color: themeColors.text, fontWeight: '600' }} numberOfLines={2}>
             Coincide con CFDI de {gasto.factura_sugerida_rel.nombre_emisor || gasto.factura_sugerida_rel.rfc_emisor || 'Proveedor'} por {montoFormatted}. Toca para ver PDF y volver a enviar.
-          </Text>
-        </View>
-      ) : isNuevoConFacturaDetectada && gasto.factura_sugerida_rel ? (
-        <View style={[styles.feedbackContainer, { backgroundColor: '#F59E0B18', borderLeftColor: '#D97706' }]}>
-          <Text style={[styles.feedbackTitle, { color: '#D97706' }]}>
-            ⚠️ Favor de comprobar que la factura recibida coincide con el gasto
-          </Text>
-          <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={2}>
-            Se detectó una factura recibida por {montoFormatted} ({gasto.factura_sugerida_rel.nombre_emisor || gasto.factura_sugerida_rel.rfc_emisor || 'SAT'}).
           </Text>
         </View>
       ) : null}
