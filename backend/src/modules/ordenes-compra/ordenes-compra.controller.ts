@@ -2,70 +2,13 @@ import { Request, Response } from 'express';
 import { Pool } from 'pg';
 import { getDbPool } from '../../config/database';
 
-const initializedSchemas = new Set<string>();
-
-/**
- * Asegura que la tabla ordenes_compra y las columnas de dirección en proveedores
- * existan en la base de datos del tenant actual.
- */
-const ensureOrdenesCompraSchema = async (pool: Pool, tenantKey: string) => {
-  if (initializedSchemas.has(tenantKey)) return;
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.ordenes_compra (
-      id uuid DEFAULT gen_random_uuid() NOT NULL,
-      folio text NOT NULL,
-      proveedor_id uuid NULL,
-      proveedor_nombre text NOT NULL,
-      proveedor_rfc text NULL,
-      proveedor_correo text NULL,
-      proveedor_calle_numero text NULL,
-      proveedor_colonia text NULL,
-      proveedor_ciudad text NULL,
-      proveedor_estado text NULL,
-      proveedor_cp text NULL,
-      referencia text NULL,
-      facturar boolean DEFAULT true NOT NULL,
-      estatus_proceso text DEFAULT 'En Proceso'::text NOT NULL,
-      moneda text DEFAULT 'MXN'::text NOT NULL,
-      tipo_cambio numeric(12, 4) DEFAULT 1 NOT NULL,
-      fecha_creacion text NULL,
-      realizo_compra text NULL,
-      recibido_por text NULL,
-      subtotal numeric DEFAULT 0 NULL,
-      iva numeric DEFAULT 0 NULL,
-      total numeric DEFAULT 0 NULL,
-      lineas jsonb DEFAULT '[]'::jsonb NULL,
-      observaciones text NULL,
-      condiciones_trabajo text NULL,
-      creado_en timestamptz DEFAULT now() NULL,
-      actualizado_en timestamptz DEFAULT now() NULL,
-      CONSTRAINT ordenes_compra_folio_key UNIQUE (folio),
-      CONSTRAINT ordenes_compra_pkey PRIMARY KEY (id)
-    );
-  `);
-
-  // Agregar columnas opcionales de dirección/contacto a proveedores si no existen
-  await pool.query(`ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS correo_electronico text NULL;`);
-  await pool.query(`ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS calle_numero text NULL;`);
-  await pool.query(`ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS colonia text NULL;`);
-  await pool.query(`ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS ciudad text NULL;`);
-  await pool.query(`ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS estado text NULL;`);
-  await pool.query(`ALTER TABLE public.proveedores ADD COLUMN IF NOT EXISTS codigo_postal text NULL;`);
-  await pool.query(`ALTER TABLE public.ordenes_compra ADD COLUMN IF NOT EXISTS cliente_final text NULL;`);
-
-  initializedSchemas.add(tenantKey);
-};
-
-const getTenantPool = async (req: Request, res: Response): Promise<Pool | null> => {
+const getTenantPool = (req: Request, res: Response): Pool | null => {
   const tenant = (req as any).tenant;
   if (!tenant) {
     res.status(400).json({ error: 'Tenant no especificado' });
     return null;
   }
-  const pool = getDbPool(tenant.company, tenant.env);
-  await ensureOrdenesCompraSchema(pool, `${tenant.company}:${tenant.env}`);
-  return pool;
+  return getDbPool(tenant.company, tenant.env);
 };
 
 /**

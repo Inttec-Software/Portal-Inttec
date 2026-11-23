@@ -27,7 +27,8 @@ export const getSupabaseClient = (company: 'inttec' | 'daravisa', env: 'cloud' |
       if (c.op === 'or') {
         const parts = String(c.val).split(',');
         const orClauses = parts.map((p: string) => {
-          const [col, op, val] = p.split('.');
+          const [col, op, ...rest] = p.trim().split('.');
+          const val = rest.join('.');
           if (op === 'eq') {
             params.push(val);
             return `${col} = $${params.length}`;
@@ -40,6 +41,22 @@ export const getSupabaseClient = (company: 'inttec' | 'daravisa', env: 'cloud' |
             params.push(val);
             return `${col} ILIKE $${params.length}`;
           }
+          if (op === 'is') {
+            if (val === 'null') return `${col} IS NULL`;
+            if (val === 'true') return `${col} IS TRUE`;
+            if (val === 'false') return `${col} IS FALSE`;
+            params.push(val);
+            return `${col} = $${params.length}`;
+          }
+          if (op === 'not') {
+            const [subOp, ...subRest] = rest;
+            const subVal = subRest.join('.');
+            if (subOp === 'is' && subVal === 'null') return `${col} IS NOT NULL`;
+            if (subOp === 'eq') {
+              params.push(subVal);
+              return `${col} != $${params.length}`;
+            }
+          }
           return p;
         });
         clauses.push(`(${orClauses.join(' OR ')})`);
@@ -47,8 +64,8 @@ export const getSupabaseClient = (company: 'inttec' | 'daravisa', env: 'cloud' |
         params.push(c.val);
         clauses.push(`${c.col} ILIKE $${params.length}`);
       } else if (c.op === 'in') {
-        params.push(c.val);
-        clauses.push(`${c.col} = ANY($${params.length}::text[])`);
+        params.push((c.val || []).map(String));
+        clauses.push(`${c.col}::text = ANY($${params.length}::text[])`);
       } else if (c.op === 'neq') {
         params.push(c.val);
         clauses.push(`${c.col} != $${params.length}`);
@@ -187,8 +204,8 @@ export const getSupabaseClient = (company: 'inttec' | 'daravisa', env: 'cloud' |
               queryParams.push(c.val);
               whereClauses.push(`${c.col} ILIKE $${queryParams.length}`);
             } else if (c.op === 'in') {
-              queryParams.push(c.val);
-              whereClauses.push(`${c.col} = ANY($${queryParams.length}::text[])`);
+              queryParams.push((c.val || []).map(String));
+              whereClauses.push(`${c.col}::text = ANY($${queryParams.length}::text[])`);
             } else if (c.op === 'is') {
               if (c.val === null || c.val === 'null') {
                 whereClauses.push(`${c.col} IS NULL`);
