@@ -1973,13 +1973,11 @@ export default function GastoFormView({ role, mode, gastoId }: GastoFormViewProp
                 />
               )}
 
-              {/* Opción opcional de dividir gasto entre clientes */}
-              {mode === 'create' && (
+              {/* Opción opcional de dividir gasto operativo entre clientes */}
+              {mode === 'create' && tipoGasto === 'OPERATIVO' && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.one }}>
                   <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '600', flex: 1, marginRight: 8 }}>
-                    {tipoGasto === 'OPERATIVO'
-                      ? '¿Dividir este gasto operativo entre varios clientes?'
-                      : '¿Dividir este ticket en varios clientes?'}
+                    ¿Dividir este gasto operativo entre varios clientes?
                   </Text>
                   <Switch
                     value={isSplit}
@@ -1990,7 +1988,7 @@ export default function GastoFormView({ role, mode, gastoId }: GastoFormViewProp
                 </View>
               )}
 
-              {mode === 'create' && isSplit && (() => {
+              {mode === 'create' && tipoGasto === 'OPERATIVO' && isSplit && (() => {
                 const currentTotalGasto =
                   Number(monto || 0) + (esAlimentos && incluyePropina === false ? Number(montoPropina || 0) : 0);
                 const sumDividido = splits.reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
