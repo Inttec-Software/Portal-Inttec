@@ -369,6 +369,10 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
   const handleSelectTipoGasto = (nuevoTipo: TipoGastoDestino) => {
     setTipoGasto(nuevoTipo);
     setShowProyectoDropdown(false);
+    if (nuevoTipo !== 'OPERATIVO') {
+      setIsSplit(false);
+      setSplits([]);
+    }
     if (nuevoTipo === 'OPERATIVO') {
       setSelectedProyectoId(null);
       setComentarioProyecto('');
@@ -1585,7 +1589,8 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
 
       const totalGasto = Number(monto) + (esComida && incluyePropina === false ? Number(montoPropina || 0) : 0);
 
-      if (isSplit) {
+      const isSplitOperativo = isSplit && tipoGasto === 'OPERATIVO';
+      if (isSplitOperativo) {
         if (splits.length === 0) {
           showAlert('Validación', 'Por favor agrega al menos una división o desactiva la opción de dividir gasto.');
           setCurrentStep(3);
@@ -1789,12 +1794,13 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
             }
           }
 
-          const payloadsToInsert = isSplit ? splits.map((s, index) => {
+          const splitLabelPrefix = 'Gasto operativo dividido';
+          const payloadsToInsert = isSplitOperativo ? splits.map((s, index) => {
             const splitCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (s.clienteId || '').trim().toLowerCase());
             const splitSucObj = sucursalesCliente.find(suc => suc.nombre && suc.nombre.trim().toLowerCase() === (s.sucursalNombre || '').trim().toLowerCase() && (!splitCliObj || suc.cliente_id === splitCliObj.id));
             const justifSplit = role === 'empleado'
-              ? `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${index + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre || s.comentarioSucursal})${s.comentarioSucursal ? `\n[Sucursal a agregar: ${s.comentarioSucursal}]` : ''}\n\n${gastoPayload.justificacion}`
-              : `[Gasto dividido del ticket total de $${totalGasto.toFixed(2)}] - División ${index + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`;
+              ? `[${splitLabelPrefix} del ticket total de $${totalGasto.toFixed(2)}] - División ${index + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre || s.comentarioSucursal})${s.comentarioSucursal ? `\n[Sucursal a agregar: ${s.comentarioSucursal}]` : ''}\n\n${gastoPayload.justificacion}`
+              : `[${splitLabelPrefix} del ticket total de $${totalGasto.toFixed(2)}] - División ${index + 1}/${splits.length} (Cliente: ${s.clienteId} | Sucursal: ${s.sucursalNombre})\n\n${gastoPayload.justificacion}`;
             return {
               ...gastoPayload,
               monto: Number(s.monto),
@@ -1860,7 +1866,8 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
           const esGasolina =
             (tipoGasto === 'PROYECTO' && bloqueProyecto === 'TRANSPORTE' && subtipoTransporte === 'COMBUSTIBLE') ||
             isCombustibleExpense(selectedCategoria, selectedSubcategoria);
-          if (isSplit) {
+          const isSplitOperativo = isSplit && tipoGasto === 'OPERATIVO';
+      if (isSplitOperativo) {
             for (let i = 0; i < splits.length; i++) {
               const s = splits[i];
               const splitCliObj = clientes.find(c => c.nombre && c.nombre.trim().toLowerCase() === (s.clienteId || '').trim().toLowerCase());
