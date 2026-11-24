@@ -335,29 +335,34 @@ export default function CotizacionesListScreen() {
       const headers = await getApiHeaders();
       const res = await fetch(`${getApiUrl()}/api/cotizaciones/${cot.id}/pdf-data`, { headers });
       let clientData = null;
+      let apiCot = cot;
       if (res.ok) {
         const data = await res.json();
         clientData = data.clientData;
+        if (data.cotizacion) {
+          apiCot = data.cotizacion;
+        }
       }
 
       // Reconstruir objeto Cotizacion a partir de la BD
       const cotData: Cotizacion = {
-        id: cot.id,
-        numeroCotizacion: cot.folio,
-        clienteNombre: cot.cliente_nombre,
+        id: apiCot.id,
+        numeroCotizacion: apiCot.folio,
+        clienteNombre: apiCot.cliente_nombre,
         clienteRFC: clientData?.rfc || '',
         clienteCorreo: clientData?.correo_electronico || '',
         clienteCP: clientData?.codigo_postal || '',
         direccionFactura: clientData?.direccion || '',
-        vendedor: cot.vendedor || '',
-        moneda: cot.moneda || 'MXN',
-        fechaCreacion: cot.fecha_creacion,
-        subtotal: cot.subtotal,
-        iva: cot.iva,
-        total: cot.total,
-        lineas: cot.lineas || [],
-        terminosCondiciones: cot.terminos_condiciones || 'https://inttec.odoo.com/terms',
-        notasObservaciones: cot.notas_observaciones || '',
+        vendedor: apiCot.vendedor || '',
+        moneda: apiCot.moneda || 'MXN',
+        fechaCreacion: apiCot.fecha_creacion,
+        fechaVencimiento: apiCot.fecha_vencimiento || cot.fecha_vencimiento || '',
+        subtotal: apiCot.subtotal,
+        iva: apiCot.iva,
+        total: apiCot.total,
+        lineas: apiCot.lineas || [],
+        terminosCondiciones: apiCot.terminos_condiciones || 'https://inttec.odoo.com/terms',
+        notasObservaciones: apiCot.notas_observaciones || '',
       };
       
       await exportarCotizacionOdooPDF(cotData, action);
@@ -557,13 +562,14 @@ export default function CotizacionesListScreen() {
         {/* Encabezado de la Tabla */}
         <View style={styles.tableHeaderRow}>
           <Text style={[styles.tableHeaderCell, { width: '5%', textAlign: 'center' }]}>No. C</Text>
-          <Text style={[styles.tableHeaderCell, { width: '8%', textAlign: 'center' }]}>Folio</Text>
-          <Text style={[styles.tableHeaderCell, { width: '9%', textAlign: 'center' }]}>Fecha</Text>
+          <Text style={[styles.tableHeaderCell, { width: '7%', textAlign: 'center' }]}>Folio</Text>
+          <Text style={[styles.tableHeaderCell, { width: '8%', textAlign: 'center' }]}>Fecha</Text>
+          <Text style={[styles.tableHeaderCell, { width: '8%', textAlign: 'center' }]}>Vencimiento</Text>
           <Text style={[styles.tableHeaderCell, { width: '8%', textAlign: 'center' }]}>Usuario</Text>
-          <Text style={[styles.tableHeaderCell, { width: '18%', textAlign: 'left', paddingHorizontal: 6 }]}>Empresa</Text>
-          <Text style={[styles.tableHeaderCell, { width: '14%', textAlign: 'left', paddingHorizontal: 6 }]}>Referencia</Text>
-          <Text style={[styles.tableHeaderCell, { width: '10%', textAlign: 'center' }]}>Estado</Text>
-          <Text style={[styles.tableHeaderCell, { width: '9%', textAlign: 'right', paddingRight: 8 }]}>Total</Text>
+          <Text style={[styles.tableHeaderCell, { width: '16%', textAlign: 'left', paddingHorizontal: 6 }]}>Empresa</Text>
+          <Text style={[styles.tableHeaderCell, { width: '12%', textAlign: 'left', paddingHorizontal: 6 }]}>Referencia</Text>
+          <Text style={[styles.tableHeaderCell, { width: '9%', textAlign: 'center' }]}>Estado</Text>
+          <Text style={[styles.tableHeaderCell, { width: '8%', textAlign: 'right', paddingRight: 8 }]}>Total</Text>
           <Text style={[styles.tableHeaderCell, { width: '19%', textAlign: 'center' }]}>Acciones</Text>
         </View>
 
@@ -596,21 +602,24 @@ export default function CotizacionesListScreen() {
                   ]}
                 >
                   <Text style={[styles.tableCell, { width: '5%', textAlign: 'center', color: themeColors.textSecondary }]}>{sequentialId}</Text>
-                  <Text style={[styles.tableCell, { width: '8%', textAlign: 'center', color: themeColors.textSecondary }]}>{cot.folio}</Text>
-                  <Text style={[styles.tableCell, { width: '9%', textAlign: 'center' }]}>{cot.fecha_creacion}</Text>
+                  <Text style={[styles.tableCell, { width: '7%', textAlign: 'center', color: themeColors.textSecondary }]}>{cot.folio}</Text>
+                  <Text style={[styles.tableCell, { width: '8%', textAlign: 'center' }]}>{cot.fecha_creacion}</Text>
+                  <Text style={[styles.tableCell, { width: '8%', textAlign: 'center', color: cot.fecha_vencimiento ? themeColors.text : themeColors.textSecondary }]}>
+                    {cot.fecha_vencimiento || '—'}
+                  </Text>
                   <Text style={[styles.tableCell, { width: '8%', textAlign: 'center' }]} numberOfLines={1}>{cot.vendedor || 'Admin'}</Text>
-                  <Text style={[styles.tableCell, { width: '18%', textAlign: 'left', paddingHorizontal: 6, fontWeight: '600', color: themeColors.text }]} numberOfLines={1}>
+                  <Text style={[styles.tableCell, { width: '16%', textAlign: 'left', paddingHorizontal: 6, fontWeight: '600', color: themeColors.text }]} numberOfLines={1}>
                     {cot.cliente_nombre}
                   </Text>
-                  <Text style={[styles.tableCell, { width: '14%', textAlign: 'left', paddingHorizontal: 6, color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
-                  <View style={{ width: '10%', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={[styles.tableCell, { width: '12%', textAlign: 'left', paddingHorizontal: 6, color: themeColors.textSecondary }]} numberOfLines={1}>{firstLineName}</Text>
+                  <View style={{ width: '9%', alignItems: 'center', justifyContent: 'center' }}>
                     <View style={[styles.badge, { backgroundColor: config.bg, borderWidth: 1, borderColor: config.color + '30', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 10, alignSelf: 'center' }]}>
                       <Text style={{ fontSize: 9, fontWeight: 'bold', color: config.color }}>
                         {estadoDisplay}
                       </Text>
                     </View>
                   </View>
-                  <Text style={[styles.tableCell, { width: '9%', textAlign: 'right', paddingRight: 8, fontWeight: 'bold' }]}>{formatearMoneda(cot.total)}</Text>
+                  <Text style={[styles.tableCell, { width: '8%', textAlign: 'right', paddingRight: 8, fontWeight: 'bold' }]}>{formatearMoneda(cot.total)}</Text>
                   
                   {/* Iconos de acción con Tooltips en Hover */}
                   <View style={[styles.rowActionsContainer, { width: '19%' }]}>
@@ -807,6 +816,12 @@ export default function CotizacionesListScreen() {
                           <Ionicons name="calendar-outline" size={12} color={themeColors.textSecondary} />
                           <Text style={styles.cardFecha}>Fecha: {cot.fecha_creacion}</Text>
                         </View>
+                        {!!cot.fecha_vencimiento && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="time-outline" size={12} color={themeColors.textSecondary} />
+                            <Text style={styles.cardFecha}>Vencimiento: {cot.fecha_vencimiento}</Text>
+                          </View>
+                        )}
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                           <Ionicons name="person-outline" size={12} color={themeColors.textSecondary} />
                           <Text style={styles.cardFecha}>Vendedor: {cot.vendedor || 'Admin'}</Text>

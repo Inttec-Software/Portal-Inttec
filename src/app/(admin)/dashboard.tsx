@@ -34,6 +34,7 @@ const MODULES: ModuleConfig[] = [
   { id: 'gastos', name: 'Gastos', icon: 'cash', route: '/(admin)/gastos', color: '#feca57' },
   { id: 'facturas_recibidas', name: 'Facturas Recibidas', icon: 'receipt', route: '/(admin)/facturas-recibidas', color: '#2e86de' },
   { id: 'cotizaciones', name: 'Cotizaciones', icon: 'document-text', route: '/(admin)/cotizaciones', color: '#54a0ff' },
+  { id: 'ordenes_compra', name: 'Órdenes de Compra', icon: 'bag-handle', route: '/(admin)/ordenes-compra', color: '#e67e22' },
   { id: 'tareas', name: 'Tareas', icon: 'checkbox-outline', route: '/(admin)/tareas', color: '#f39c12' },
   { id: 'inventario', name: 'Inventario', icon: 'cube', route: '/(admin)/inventario', color: '#48dbfb' },
   { id: 'empleados', name: 'Empleados', icon: 'people', route: '/(admin)/empleados', color: '#1dd1a1' },

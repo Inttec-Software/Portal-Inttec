@@ -247,7 +247,13 @@ export function useEmpleadoGastos() {
 
   // Filtrar Gastos por Pestaña
   const pendingList: GastoDisplay[] = [
-    ...offlineGastos.map((g) => ({ ...g, isOffline: true, status: 'PENDING' as const })),
+    ...offlineGastos
+      .filter((off) => !gastos.some((g) =>
+        Number(g.monto) === Number(off.monto) &&
+        (g.fecha_comprobante || '').split('T')[0] === (off.fecha_comprobante || '').split('T')[0] &&
+        (g.justificacion || '').trim().toLowerCase() === (off.justificacion || '').trim().toLowerCase()
+      ))
+      .map((g) => ({ ...g, isOffline: true, status: 'PENDING' as const })),
     ...gastos.filter((g) => g.status === 'PENDING' || g.status === 'ACTION_REQUIRED'),
   ];
 
@@ -293,6 +299,139 @@ export function useEmpleadoGastos() {
       };
     }
     return { alerta: null, justificacion: just };
+  };
+
+  const getDestinoInfo = (gasto: any) => {
+    if (!gasto) {
+      return { tipo: 'HISTORICO' as const, label: 'Sin proyecto', sublabel: '' };
+    }
+    if (gasto.proyecto_rel?.nombre) {
+      const sub = [gasto.proyecto_rel.cliente_nombre, gasto.proyecto_rel.sucursal_nombre]
+        .filter(Boolean)
+        .join(' • ');
+      return {
+        tipo: 'PROYECTO' as const,
+        label: gasto.proyecto_rel.nombre,
+        sublabel: sub,
+      };
+    }
+    if (gasto.proyecto_id) {
+      return {
+        tipo: 'PROYECTO' as const,
+        label: gasto.detalle_servicio_proyecto || 'Proyecto Asignado',
+        sublabel: '',
+      };
+    }
+    const matchSugerido = gasto.justificacion?.match(/\[Proyecto a agregar:\s*([^\]]+)\]/i);
+    if (matchSugerido) {
+      return {
+        tipo: 'PROYECTO_SUGERIDO' as const,
+        label: matchSugerido[1].trim(),
+        sublabel: 'Pendiente de alta por Administración',
+      };
+    }
+    if (gasto.tipo_gasto === 'PROYECTO') {
+      return {
+        tipo: 'PROYECTO_SUGERIDO' as const,
+        label: gasto.detalle_servicio_proyecto || 'Proyecto sugerido',
+        sublabel: 'Pendiente de alta por Administración',
+      };
+    }
+    if (gasto.tipo_gasto === 'OPERATIVO' || gasto.tipo_servicio_proyecto === 'Operativo') {
+      return {
+        tipo: 'OPERATIVO' as const,
+        label: 'Gasto Operativo / General',
+        sublabel: gasto.detalle_servicio_proyecto || '',
+      };
+    }
+    return {
+      tipo: 'HISTORICO' as const,
+      label: gasto.detalle_servicio_proyecto
+        ? `Sin proyecto (${gasto.detalle_servicio_proyecto})`
+        : 'Sin proyecto',
+      sublabel: '',
+    };
+  };
+
+  const getHospedajeInfo = (gasto: any) => {
+    if (!gasto) {
+      return {
+        isHospedaje: false,
+        fechaInicio: null,
+        fechaFin: null,
+        diasCount: 0,
+        costoPorDia: 0,
+        dias: [] as { id?: string; fecha: string; monto_diario: number }[],
+      };
+    }
+
+    const rawDias: any[] = Array.isArray(gasto.hospedaje_dias) ? gasto.hospedaje_dias : [];
+    const fInicio = gasto.fecha_hospedaje_inicio
+      ? String(gasto.fecha_hospedaje_inicio).split('T')[0]
+      : rawDias.length > 0
+      ? String(rawDias[0].fecha).split('T')[0]
+      : null;
+    const fFin = gasto.fecha_hospedaje_fin
+      ? String(gasto.fecha_hospedaje_fin).split('T')[0]
+      : rawDias.length > 0
+      ? String(rawDias[rawDias.length - 1].fecha).split('T')[0]
+      : null;
+
+    if (rawDias.length > 0) {
+      const total = Number(gasto.monto) || 0;
+      const count = rawDias.length;
+      return {
+        isHospedaje: true,
+        fechaInicio: fInicio,
+        fechaFin: fFin,
+        diasCount: count,
+        costoPorDia: count > 0 ? Math.round((total / count) * 100) / 100 : 0,
+        dias: rawDias.map((d) => ({
+          id: d.id,
+          fecha: String(d.fecha).split('T')[0],
+          monto_diario: Number(d.monto_diario) || 0,
+        })),
+      };
+    }
+
+    if (fInicio && fFin && /^\d{4}-\d{2}-\d{2}$/.test(fInicio) && /^\d{4}-\d{2}-\d{2}$/.test(fFin)) {
+      const [sy, sm, sd] = fInicio.split('-').map(Number);
+      const [ey, em, ed] = fFin.split('-').map(Number);
+      const startD = new Date(sy, sm - 1, sd);
+      const endD = new Date(ey, em - 1, ed);
+      const diff = Math.max(1, Math.round((endD.getTime() - startD.getTime()) / 86400000));
+      const total = Number(gasto.monto) || 0;
+      const perDay = Math.round((total / diff) * 100) / 100;
+      const calcDias: { fecha: string; monto_diario: number }[] = [];
+      for (let i = 0; i < diff; i++) {
+        const d = new Date(sy, sm - 1, sd + i);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const isLast = i === diff - 1;
+        calcDias.push({
+          fecha: `${yyyy}-${mm}-${dd}`,
+          monto_diario: isLast && total > 0 ? Math.max(0, Math.round((total - perDay * (diff - 1)) * 100) / 100) : perDay,
+        });
+      }
+      return {
+        isHospedaje: true,
+        fechaInicio: fInicio,
+        fechaFin: fFin,
+        diasCount: diff,
+        costoPorDia: perDay,
+        dias: calcDias,
+      };
+    }
+
+    return {
+      isHospedaje: false,
+      fechaInicio: null,
+      fechaFin: null,
+      diasCount: 0,
+      costoPorDia: 0,
+      dias: [] as { id?: string; fecha: string; monto_diario: number }[],
+    };
   };
 
   return {
@@ -348,5 +487,7 @@ export function useEmpleadoGastos() {
     formatCurrency,
     formatFriendlyDate,
     parseJustificacion,
+    getDestinoInfo,
+    getHospedajeInfo,
   };
 }

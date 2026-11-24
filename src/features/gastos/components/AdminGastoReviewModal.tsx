@@ -16,8 +16,15 @@ import { GastoHelper } from '@/services/supabase';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
 import GastoFotosGallery from '@/components/GastoFotosGallery';
+import { SatFacturaLinker } from './SatFacturaLinker';
 import { styles } from './adminGastosStyles';
 import { useAdminGastos } from '../hooks/useAdminGastos';
+import {
+  getProyectoNombreFromGasto,
+  getOrComputeHospedajeDias,
+  isGastoHospedaje,
+  SUBTIPOS_TRASLADO_LABELS,
+} from '@/features/proyectos/types';
 
 interface AdminGastoReviewModalProps {
   vm: ReturnType<typeof useAdminGastos>;
@@ -28,6 +35,7 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
     router,
     themeColors,
     adminUser,
+    proyectos,
     selectedGasto,
     setSelectedGasto,
     reviewModalVisible,
@@ -53,16 +61,20 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
     setSatFacturaPreviewModalVisible,
     satFacturaToPreview,
     isSavingQuickProv,
+    isSavingQuickProy,
     handleUpdateStatus,
     handleApproveClick,
     handlePreviewSatFactura,
     handleDownloadSatFacturaPdf,
     handleAttachSatFacturaAndSend,
+    handleDetachSatFactura,
     handleDismissSatFactura,
     handleOpenRelinkSaleModal,
     handleDirectUnlinkSale,
+    handleOpenAssignProyecto,
     handleOpenQuickEditProveedor,
     handleQuickCreateProveedorAndAssign,
+    handleQuickCreateProyectoAndAssign,
     handleOpenQuickEditField,
     handleCaptureAdminInvoice,
     handleSelectAdminInvoiceDocument,
@@ -76,16 +88,6 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
     formatFriendlyDate,
     parseJustificacion,
   } = vm;
-
-  const [uuidInput, setUuidInput] = React.useState('');
-
-  React.useEffect(() => {
-    if (selectedGasto) {
-      setUuidInput(selectedGasto.factura_recibida_rel?.uuid || '');
-    } else {
-      setUuidInput('');
-    }
-  }, [selectedGasto?.id, selectedGasto?.factura_recibida_rel?.uuid]);
 
   return (
     <>
@@ -460,25 +462,328 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                   </Text>
                 </View>
 
-                {/* Servicio / Proyecto */}
-                <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
-                  <View style={{ flex: 1, marginRight: Spacing.two }}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Servicio / Proyecto</Text>
-                    <Text style={[styles.detailValue, { color: themeColors.text }]}>
-                      {selectedGasto.tipo_servicio_proyecto ? `Tipo: ${selectedGasto.tipo_servicio_proyecto}` : 'No especificado'}
-                      {selectedGasto.detalle_servicio_proyecto ? `\nDetalle: ${selectedGasto.detalle_servicio_proyecto}` : ''}
-                    </Text>
-                  </View>
-                  {selectedGasto.status === 'APPROVED' && (
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditField('servicio')}
-                      style={styles.quickFieldBtn}
+                {/* Proyecto / Destino del Gasto (Editable antes y después de aprobar) */}
+                {(() => {
+                  const proyName = getProyectoNombreFromGasto(selectedGasto, proyectos);
+                  const isOperativo =
+                    selectedGasto.tipo_gasto === 'OPERATIVO' ||
+                    (!selectedGasto.proyecto_id &&
+                      (selectedGasto.tipo_servicio_proyecto || '').toLowerCase() === 'operativo');
+                  const parsedProy = parseJustificacion(selectedGasto.justificacion);
+                  const proySugerido =
+                    parsedProy.proyectoSugerido ||
+                    (!proyName && selectedGasto.tipo_gasto === 'PROYECTO'
+                      ? selectedGasto.detalle_servicio_proyecto || null
+                      : null);
+
+                  return (
+                    <View
+                      style={[
+                        styles.detailItem,
+                        {
+                          flexDirection: 'column',
+                          backgroundColor: proyName
+                            ? themeColors.primary + '12'
+                            : isOperativo
+                            ? '#0284c712'
+                            : themeColors.warning + '12',
+                          padding: Spacing.two,
+                          borderRadius: BorderRadius.medium,
+                          borderWidth: 1,
+                          borderColor: proyName
+                            ? themeColors.primary + '40'
+                            : isOperativo
+                            ? '#0284c740'
+                            : themeColors.warning + '50',
+                        },
+                      ]}
                     >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>Cambiar</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <View style={{ flex: 1, marginRight: Spacing.two, gap: 2 }}>
+                          <Text
+                            style={[
+                              styles.detailLabel,
+                              {
+                                color: proyName
+                                  ? themeColors.primary
+                                  : isOperativo
+                                  ? '#0284c7'
+                                  : themeColors.warning,
+                                fontWeight: '800',
+                              },
+                            ]}
+                          >
+                            {proyName
+                              ? '📁 Proyecto Asignado'
+                              : isOperativo
+                              ? '🏢 Destino: Gasto Operativo / General'
+                              : proySugerido
+                              ? '📝 Proyecto Pendiente de Dar de Alta'
+                              : '🕓 Histórico / Sin Proyecto Asignado'}
+                          </Text>
+
+                          <Text
+                            style={[
+                              styles.detailValue,
+                              {
+                                color: themeColors.text,
+                                fontWeight: '800',
+                                fontSize: 15,
+                              },
+                            ]}
+                          >
+                            {proyName ||
+                              (isOperativo
+                                ? 'Gasto Operativo / Oficina'
+                                : proySugerido
+                                ? `Sugerido: "${proySugerido}"`
+                                : 'Sin proyecto asignado')}
+                          </Text>
+
+                          {selectedGasto.proyecto_rel?.cliente_nombre ||
+                          selectedGasto.proyecto_rel?.sucursal_nombre ? (
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                color: themeColors.textSecondary,
+                              }}
+                            >
+                              {selectedGasto.proyecto_rel.cliente_nombre || ''}
+                              {selectedGasto.proyecto_rel.sucursal_nombre
+                                ? ` • Sucursal: ${selectedGasto.proyecto_rel.sucursal_nombre}`
+                                : ''}
+                            </Text>
+                          ) : null}
+
+                          {(selectedGasto.tipo_servicio_proyecto ||
+                            selectedGasto.detalle_servicio_proyecto) ? (
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                color: themeColors.textSecondary,
+                                marginTop: 2,
+                              }}
+                            >
+                              Ref. texto empleado:{' '}
+                              {selectedGasto.tipo_servicio_proyecto
+                                ? `[${selectedGasto.tipo_servicio_proyecto}] `
+                                : ''}
+                              {selectedGasto.detalle_servicio_proyecto || ''}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        <TouchableOpacity
+                          onPress={() => handleOpenAssignProyecto(selectedGasto)}
+                          style={[
+                            styles.quickFieldBtn,
+                            {
+                              backgroundColor: themeColors.primary,
+                              borderColor: themeColors.primary,
+                              paddingVertical: 7,
+                              paddingHorizontal: 11,
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name="folder-open-outline"
+                            size={14}
+                            color="#fff"
+                          />
+                          <Text
+                            style={[
+                              styles.quickFieldBtnText,
+                              { color: '#fff', fontWeight: '800' },
+                            ]}
+                          >
+                            {proyName ? 'Cambiar' : 'Asignar'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {!proyName && !isOperativo && !!proySugerido && (
+                        <View
+                          style={{
+                            marginTop: 10,
+                            padding: 10,
+                            backgroundColor: themeColors.backgroundElement,
+                            borderRadius: BorderRadius.small,
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: themeColors.text }}>
+                            📝 Proyecto a agregar indicado por el empleado:
+                          </Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.primary, marginTop: 2, marginBottom: 6 }}>
+                            {proySugerido}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => handleQuickCreateProyectoAndAssign(proySugerido)}
+                            disabled={isSavingQuickProy}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: 6,
+                              backgroundColor: themeColors.primary,
+                              paddingVertical: 8,
+                              paddingHorizontal: 12,
+                              borderRadius: BorderRadius.small,
+                            }}
+                          >
+                            {isSavingQuickProy ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <>
+                                <Ionicons name="flash-outline" size={16} color="#fff" />
+                                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>
+                                  ⚡ Crear y Asignar &quot;{proySugerido}&quot;
+                                </Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
+
+                {/* Desglose Diario Automático de Hospedaje (cuando aplica) */}
+                {(() => {
+                  if (!isGastoHospedaje(selectedGasto)) return null;
+                  const hospDias = getOrComputeHospedajeDias(selectedGasto);
+                  if (
+                    hospDias.length === 0 &&
+                    !selectedGasto.fecha_hospedaje_inicio
+                  )
+                    return null;
+
+                  return (
+                    <View
+                      style={{
+                        backgroundColor: '#4f46e512',
+                        borderColor: '#4f46e550',
+                        borderWidth: 1.5,
+                        borderRadius: BorderRadius.medium,
+                        padding: Spacing.two,
+                        gap: 8,
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: 6,
+                        }}
+                      >
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                        >
+                          <Ionicons name="bed" size={18} color="#4f46e5" />
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: '800',
+                              color: '#4f46e5',
+                            }}
+                          >
+                            ESTANCIA DE HOSPEDAJE ({hospDias.length}{' '}
+                            {hospDias.length === 1 ? 'NOCHE' : 'NOCHES'})
+                          </Text>
+                        </View>
+
+                        {(selectedGasto.fecha_hospedaje_inicio ||
+                          hospDias.length > 0) && (
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontWeight: '700',
+                              color: themeColors.text,
+                            }}
+                          >
+                            {formatFriendlyDate(
+                              selectedGasto.fecha_hospedaje_inicio ||
+                                hospDias[0]?.fecha
+                            )}{' '}
+                            →{' '}
+                            {formatFriendlyDate(
+                              selectedGasto.fecha_hospedaje_fin ||
+                                hospDias[hospDias.length - 1]?.fecha
+                            )}
+                          </Text>
+                        )}
+                      </View>
+
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          color: themeColors.textSecondary,
+                          lineHeight: 16,
+                        }}
+                      >
+                        La aprobación y conciliación con el SAT se realiza{' '}
+                        <Text
+                          style={{ fontWeight: '800', color: themeColors.text }}
+                        >
+                          1 sola vez
+                        </Text>{' '}
+                        por el total de {formatCurrency(selectedGasto.monto)}.
+                        Desglose diario en el proyecto:
+                      </Text>
+
+                      {hospDias.length > 0 && (
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            flexWrap: 'wrap',
+                            gap: 6,
+                          }}
+                        >
+                          {hospDias.map((d, i) => (
+                            <View
+                              key={`${d.fecha}_${i}`}
+                              style={{
+                                backgroundColor: themeColors.backgroundElement,
+                                borderWidth: 1,
+                                borderColor: themeColors.border,
+                                borderRadius: BorderRadius.small,
+                                paddingVertical: 5,
+                                paddingHorizontal: 8,
+                                minWidth: 115,
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: '700',
+                                  color: themeColors.textSecondary,
+                                }}
+                              >
+                                Día {i + 1}: {formatFriendlyDate(d.fecha)}
+                              </Text>
+                              <Text
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: '800',
+                                  color: '#4f46e5',
+                                }}
+                              >
+                                {formatCurrency(Number(d.monto_diario || 0))}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
 
                 {/* Proveedor */}
                 <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
@@ -488,17 +793,15 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                       {GastoHelper.getProveedor(selectedGasto) || '⚠️ En blanco (Sin asignar)'}
                     </Text>
                   </View>
-                  {selectedGasto.status === 'APPROVED' && (
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>
-                        {GastoHelper.getProveedor(selectedGasto) ? 'Cambiar' : 'Asignar'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    onPress={() => handleOpenQuickEditProveedor(selectedGasto)}
+                    style={styles.quickFieldBtn}
+                  >
+                    <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                    <Text style={styles.quickFieldBtnText}>
+                      {GastoHelper.getProveedor(selectedGasto) ? 'Cambiar' : 'Asignar'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
 
                 {(!GastoHelper.getProveedor(selectedGasto) || !GastoHelper.getProveedor(selectedGasto).trim()) && (
@@ -633,15 +936,13 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                       {GastoHelper.getCliente(selectedGasto) || 'No especificado'} {GastoHelper.getSucursal(selectedGasto) ? `- Sucursal: ${GastoHelper.getSucursal(selectedGasto)}` : ''}
                     </Text>
                   </View>
-                  {selectedGasto.status === 'APPROVED' && (
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditField('cliente')}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>Cambiar</Text>
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    onPress={() => handleOpenQuickEditField('cliente')}
+                    style={styles.quickFieldBtn}
+                  >
+                    <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                    <Text style={styles.quickFieldBtnText}>Cambiar</Text>
+                  </TouchableOpacity>
                 </View>
 
                 {/* Fecha de Gasto */}
@@ -663,23 +964,26 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                   )}
                 </View>
 
-                {/* Categoría / Subcategoría */}
+                {/* Categoría / Subcategoría (Editable también antes de aprobar para correcciones rápidas) */}
                 <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
                   <View style={{ flex: 1, marginRight: Spacing.two }}>
                     <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Categoría / Subcategoría</Text>
                     <Text style={[styles.detailValue, { color: themeColors.text }]}>
                       {GastoHelper.getCategoria(selectedGasto) || 'Sin Categoría'} {GastoHelper.getSubcategoria(selectedGasto) ? `> ${GastoHelper.getSubcategoria(selectedGasto)}` : ''}
                     </Text>
+                    {selectedGasto.subtipo_traslado ? (
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#0284c7', marginTop: 2 }}>
+                        Subtipo de Traslado: {SUBTIPOS_TRASLADO_LABELS[selectedGasto.subtipo_traslado] || selectedGasto.subtipo_traslado}
+                      </Text>
+                    ) : null}
                   </View>
-                  {selectedGasto.status === 'APPROVED' && (
-                    <TouchableOpacity
-                      onPress={() => handleOpenQuickEditField('categoria')}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="pencil" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>Cambiar</Text>
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    onPress={() => handleOpenQuickEditField('categoria')}
+                    style={styles.quickFieldBtn}
+                  >
+                    <Ionicons name="pencil" size={14} color={themeColors.accent} />
+                    <Text style={styles.quickFieldBtnText}>Cambiar</Text>
+                  </TouchableOpacity>
                 </View>
 
                 {/* Parsear justificación para ver si hay alerta de IA */}
@@ -819,80 +1123,21 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                           })()}
                         </View>
 
-                        {/* Secciones según el toggle */}
-                        {(selectedGasto.facturado || (!selectedGasto.facturado && !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE'))) && (
-                          <View style={{ marginBottom: Spacing.two }}>
-                            <CustomInput
-                              label="UUID"
-                              placeholder="Ingresa el UUID..."
-                              value={uuidInput}
-                              onChangeText={setUuidInput}
-                              style={{ height: 40 }}
-                              iconName="key-outline"
-                              autoCapitalize="characters"
-                            />
-                          </View>
+                        {/* Vinculación Inteligente de Facturas SAT */}
+                        {(selectedGasto.facturado || selectedGasto.factura_recibida_rel || (!selectedGasto.facturado && !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE'))) && (
+                          <SatFacturaLinker
+                            gasto={selectedGasto}
+                            themeColors={themeColors}
+                            onAttachFactura={handleAttachSatFacturaAndSend}
+                            onDetachFactura={handleDetachSatFactura}
+                            onPreviewFactura={handlePreviewSatFactura}
+                            onDownloadPdf={handleDownloadSatFacturaPdf}
+                            isExportingSatPdf={isExportingSatPdf}
+                            isAttaching={isAttachingSatFactura}
+                          />
                         )}
                         {selectedGasto.facturado ? (
                           <View style={{ gap: Spacing.one }}>
-                            {selectedGasto.factura_recibida_rel && (
-                              <View style={{
-                                backgroundColor: themeColors.success + '12',
-                                borderWidth: 1,
-                                borderColor: themeColors.success + '50',
-                                borderRadius: BorderRadius.small,
-                                padding: Spacing.two,
-                                marginBottom: 4,
-                                gap: 6,
-                              }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                  <Ionicons name="shield-checkmark" size={16} color={themeColors.success} />
-                                  <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.success, flex: 1 }}>
-                                    CFDI SAT Vinculado: {selectedGasto.factura_recibida_rel.nombre_emisor || selectedGasto.factura_recibida_rel.rfc_emisor}
-                                  </Text>
-                                </View>
-                                <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                                  UUID: {selectedGasto.factura_recibida_rel.uuid}
-                                </Text>
-                                <View style={{ flexDirection: 'row', gap: 8 }}>
-                                  <TouchableOpacity
-                                    onPress={() => handlePreviewSatFactura(selectedGasto.factura_recibida_rel)}
-                                    style={{
-                                      flex: 1,
-                                      flexDirection: 'row',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      gap: 4,
-                                      backgroundColor: themeColors.backgroundElement,
-                                      borderWidth: 1,
-                                      borderColor: themeColors.border,
-                                      paddingVertical: 6,
-                                      borderRadius: BorderRadius.small,
-                                    }}
-                                  >
-                                    <Ionicons name="eye-outline" size={14} color={themeColors.text} />
-                                    <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>Mostrar CFDI</Text>
-                                  </TouchableOpacity>
-                                  <TouchableOpacity
-                                    onPress={() => handleDownloadSatFacturaPdf(selectedGasto.factura_recibida_rel)}
-                                    disabled={isExportingSatPdf}
-                                    style={{
-                                      flex: 1,
-                                      flexDirection: 'row',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      gap: 4,
-                                      backgroundColor: '#e74c3c',
-                                      paddingVertical: 6,
-                                      borderRadius: BorderRadius.small,
-                                    }}
-                                  >
-                                    <Ionicons name="download-outline" size={14} color="#fff" />
-                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>Descargar PDF SAT</Text>
-                                  </TouchableOpacity>
-                                </View>
-                              </View>
-                            )}
                             <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginBottom: 2 }}>
                               Archivos de Factura Adjuntos ({GastoHelper.getFacturaUrls(selectedGasto).length}):
                             </Text>
@@ -906,9 +1151,7 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                                         <TouchableOpacity
                                           style={[styles.invoiceLinkBtn, { backgroundColor: themeColors.accent + '15', flex: 1, height: 40, justifyContent: 'center', borderRadius: BorderRadius.small }]}
                                           onPress={() => {
-                                            if ((url.startsWith('cfdi://') || url.toLowerCase().endsWith('.xml')) && selectedGasto.factura_recibida_rel) {
-                                              handleDownloadSatFacturaPdf(selectedGasto.factura_recibida_rel);
-                                            } else if (url.toLowerCase().includes('.pdf') || url.toLowerCase().endsWith('.xml')) {
+                                            if (url.toLowerCase().includes('.pdf') || url.toLowerCase().endsWith('.xml')) {
                                               Linking.openURL(url).catch(() => {
                                                 Alert.alert('Error', 'No se pudo abrir el archivo de factura.');
                                               });

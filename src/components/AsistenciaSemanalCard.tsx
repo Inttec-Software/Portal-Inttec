@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,16 +6,19 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Platform,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { Asistencia } from '@/services/supabase';
+import { Asistencia, AusenciaAsistencia, AsistenciaService } from '@/services/supabase';
+import { getApiHeaders, getApiUrl } from '@/services/apiHelper';
 import { useAuth } from '@/context/AuthContext';
 import PeriodoPickerModal from '@/components/PeriodoPickerModal';
 import EditarTurnoModal from '@/components/EditarTurnoModal';
 import RegistrarTurnoModal from '@/components/RegistrarTurnoModal';
+import AsignarAusenciaModal from '@/components/AsignarAusenciaModal';
 import {
   WeekRange,
   TurnoAsistencia,
@@ -31,10 +34,12 @@ import {
   getPreviousMonthDate,
   getNextMonthDate,
   formatContadorJornada48,
+  getAusenciaLabel,
 } from '@/utils/asistenciaUtils';
 
 interface AsistenciaSemanalCardProps {
   asistencias: Asistencia[];
+  ausencias?: AusenciaAsistencia[];
   empleadoId?: string;
   empleadoNombre?: string;
   empleadoRol?: string;
@@ -65,6 +70,7 @@ interface AsistenciaSemanalCardProps {
 
 export default function AsistenciaSemanalCard({
   asistencias,
+  ausencias,
   empleadoNombre = 'Empleado',
   empleadoRol,
   empleadoId,
@@ -104,19 +110,101 @@ export default function AsistenciaSemanalCard({
   // Estado del modal de registro de nuevo turno (ADMIN / DEV)
   const [registrarModalVisible, setRegistrarModalVisible] = useState(false);
   const [fechaParaNuevoTurno, setFechaParaNuevoTurno] = useState<string>('');
+  const [togglingComidaFecha, setTogglingComidaFecha] = useState<string | null>(null);
+
+  const handleToggleComidaDia = async (fecha: string, sinComida: boolean) => {
+    if (!effectiveEmpleadoId || togglingComidaFecha) return;
+    try {
+      setTogglingComidaFecha(fecha);
+      const headers = await getApiHeaders();
+      const response = await fetch(`${getApiUrl()}/api/asistencias/admin/toggle-comida`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          empleado_id: effectiveEmpleadoId,
+          fecha,
+          sin_comida: sinComida,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'No se pudo actualizar el descuento de comida');
+      }
+      onRefresh?.();
+    } catch (error: any) {
+      const msg = error?.message || 'No se pudo actualizar el descuento de comida';
+      if (Platform.OS === 'web') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Error', msg);
+      }
+    } finally {
+      setTogglingComidaFecha(null);
+    }
+  };
 
   // Estados de días expandidos (por defecto expandir días que tengan turnos)
   const [expandedDays, setExpandedDays] = useState<{ [dateStr: string]: boolean }>({});
 
+  // Ausencias (Vacaciones / Permiso sin goce)
+  const [fetchedAusencias, setFetchedAusencias] = useState<AusenciaAsistencia[]>([]);
+  const [ausenciaModalVisible, setAusenciaModalVisible] = useState(false);
+  const [fechaParaAusencia, setFechaParaAusencia] = useState<string>('');
+  const [deletingAusenciaFecha, setDeletingAusenciaFecha] = useState<string | null>(null);
+
+  const periodRange = isMes ? getMonthRange(selectedMonth) : getWeekRange(selectedMonday);
+  const periodStartStr = isMes ? (periodRange as any).startStr : (periodRange as WeekRange).mondayStr;
+  const periodEndStr = isMes ? (periodRange as any).endStr : (periodRange as WeekRange).sundayStr;
+  const hasExternalAusencias = ausencias !== undefined;
+
+  const loadAusenciasLocal = useCallback(async () => {
+    if (hasExternalAusencias || !effectiveEmpleadoId) return;
+    try {
+      const list = await AsistenciaService.getAusencias({
+        empleadoId: effectiveEmpleadoId,
+        startDate: periodStartStr,
+        endDate: periodEndStr,
+      });
+      setFetchedAusencias(list);
+    } catch {
+      setFetchedAusencias([]);
+    }
+  }, [hasExternalAusencias, effectiveEmpleadoId, periodStartStr, periodEndStr]);
+
+  useEffect(() => {
+    loadAusenciasLocal();
+  }, [loadAusenciasLocal]);
+
+  const effectiveAusencias = ausencias !== undefined ? ausencias : fetchedAusencias;
+
+  const handleDeleteAusencia = async (fecha: string) => {
+    if (!effectiveEmpleadoId || deletingAusenciaFecha) return;
+    try {
+      setDeletingAusenciaFecha(fecha);
+      await AsistenciaService.eliminarAusencia({
+        empleado_id: effectiveEmpleadoId,
+        fecha,
+      });
+      await loadAusenciasLocal();
+      onRefresh?.();
+    } catch (error: any) {
+      const msg = error?.message || 'No se pudo eliminar la ausencia';
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Error', msg);
+    } finally {
+      setDeletingAusenciaFecha(null);
+    }
+  };
+
   // Procesar asistencias para la semana seleccionada
   const semanaData: SemanaAsistencia = useMemo(() => {
-    return processAsistenciasSemana(asistencias, selectedMonday, effectiveRole, empleadoHorasSemanales);
-  }, [asistencias, selectedMonday, effectiveRole, empleadoHorasSemanales]);
+    return processAsistenciasSemana(asistencias, selectedMonday, effectiveRole, empleadoHorasSemanales, effectiveAusencias);
+  }, [asistencias, selectedMonday, effectiveRole, empleadoHorasSemanales, effectiveAusencias]);
 
   // Procesar asistencias para el mes seleccionado
   const mesData: PeriodoAsistencia = useMemo(() => {
-    return processAsistenciasMes(asistencias, selectedMonth, effectiveRole);
-  }, [asistencias, selectedMonth, effectiveRole]);
+    return processAsistenciasMes(asistencias, selectedMonth, effectiveRole, effectiveAusencias);
+  }, [asistencias, selectedMonth, effectiveRole, effectiveAusencias]);
 
   const currentWeekMonday = useMemo(() => {
     return getWeekRange().mondayDate;
@@ -278,6 +366,24 @@ export default function AsistenciaSemanalCard({
               activeOpacity={0.7}
             >
               <Ionicons name="chevron-forward" size={20} color={themeColors.text} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {canEditTurnos && effectiveEmpleadoId && (
+          <View style={styles.adminHeaderActionsRow}>
+            <TouchableOpacity
+              style={[styles.ausenciaHeaderBtn, { backgroundColor: '#0284c715', borderColor: '#0284c745' }]}
+              onPress={() => {
+                setFechaParaAusencia(semanaData.range.mondayStr);
+                setAusenciaModalVisible(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="airplane-outline" size={14} color="#0284c7" />
+              <Text style={[styles.ausenciaHeaderBtnText, { color: '#0284c7' }]}>
+                + Vacaciones / Permiso
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -477,21 +583,142 @@ export default function AsistenciaSemanalCard({
                 </View>
 
                 <View style={styles.dayInfoRight}>
-                  {dia.comidaDescontada && (
-                    <View
-                      style={[
-                        styles.comidaBadge,
-                        {
-                          backgroundColor: themeColors.accent + '15',
-                          borderColor: themeColors.accent + '35',
-                        },
-                      ]}
-                    >
-                      <Ionicons name="restaurant-outline" size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
-                      <Text style={[styles.comidaBadgeText, { color: themeColors.accent }]}>
-                        -1h comida
-                      </Text>
-                    </View>
+                  {dia.ausencia && (
+                    canEditTurnos && effectiveEmpleadoId ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.comidaBadge,
+                          {
+                            backgroundColor: dia.ausencia.tipo === 'VACACIONES' ? '#0284c718' : '#d9770618',
+                            borderColor: dia.ausencia.tipo === 'VACACIONES' ? '#0284c750' : '#d9770650',
+                          },
+                        ]}
+                        onPress={(e) => {
+                          (e as any)?.stopPropagation?.();
+                          handleDeleteAusencia(dia.dateStr);
+                        }}
+                        disabled={deletingAusenciaFecha === dia.dateStr}
+                        activeOpacity={0.7}
+                      >
+                        {deletingAusenciaFecha === dia.dateStr ? (
+                          <ActivityIndicator
+                            size={10}
+                            color={dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706'}
+                            style={{ marginRight: 3 }}
+                          />
+                        ) : (
+                          <Ionicons
+                            name={dia.ausencia.tipo === 'VACACIONES' ? 'airplane-outline' : 'calendar-clear-outline'}
+                            size={10}
+                            color={dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706'}
+                            style={{ marginRight: 3 }}
+                          />
+                        )}
+                        <Text
+                          style={[
+                            styles.comidaBadgeText,
+                            { color: dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706' },
+                          ]}
+                        >
+                          {getAusenciaLabel(dia.ausencia.tipo)} ✕
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View
+                        style={[
+                          styles.comidaBadge,
+                          {
+                            backgroundColor: dia.ausencia.tipo === 'VACACIONES' ? '#0284c718' : '#d9770618',
+                            borderColor: dia.ausencia.tipo === 'VACACIONES' ? '#0284c750' : '#d9770650',
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name={dia.ausencia.tipo === 'VACACIONES' ? 'airplane-outline' : 'calendar-clear-outline'}
+                          size={10}
+                          color={dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706'}
+                          style={{ marginRight: 3 }}
+                        />
+                        <Text
+                          style={[
+                            styles.comidaBadgeText,
+                            { color: dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706' },
+                          ]}
+                        >
+                          {getAusenciaLabel(dia.ausencia.tipo)}
+                        </Text>
+                      </View>
+                    )
+                  )}
+                  {canEditTurnos && effectiveEmpleadoId ? (
+                    dia.comidaDescontada ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.comidaBadge,
+                          {
+                            backgroundColor: themeColors.accent + '15',
+                            borderColor: themeColors.accent + '45',
+                          },
+                        ]}
+                        onPress={(e) => {
+                          (e as any)?.stopPropagation?.();
+                          handleToggleComidaDia(dia.dateStr, true);
+                        }}
+                        disabled={togglingComidaFecha === dia.dateStr}
+                        activeOpacity={0.7}
+                      >
+                        {togglingComidaFecha === dia.dateStr ? (
+                          <ActivityIndicator size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
+                        ) : (
+                          <Ionicons name="restaurant-outline" size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
+                        )}
+                        <Text style={[styles.comidaBadgeText, { color: themeColors.accent }]}>
+                          -1h comida ✕
+                        </Text>
+                      </TouchableOpacity>
+                    ) : dia.sinComidaManual ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.comidaBadge,
+                          {
+                            backgroundColor: '#10b98118',
+                            borderColor: '#10b98150',
+                          },
+                        ]}
+                        onPress={(e) => {
+                          (e as any)?.stopPropagation?.();
+                          handleToggleComidaDia(dia.dateStr, false);
+                        }}
+                        disabled={togglingComidaFecha === dia.dateStr}
+                        activeOpacity={0.7}
+                      >
+                        {togglingComidaFecha === dia.dateStr ? (
+                          <ActivityIndicator size={10} color="#10b981" style={{ marginRight: 3 }} />
+                        ) : (
+                          <Ionicons name="refresh-outline" size={10} color="#10b981" style={{ marginRight: 3 }} />
+                        )}
+                        <Text style={[styles.comidaBadgeText, { color: '#10b981' }]}>
+                          Sin -1h comida ↺
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null
+                  ) : (
+                    dia.comidaDescontada && (
+                      <View
+                        style={[
+                          styles.comidaBadge,
+                          {
+                            backgroundColor: themeColors.accent + '15',
+                            borderColor: themeColors.accent + '35',
+                          },
+                        ]}
+                      >
+                        <Ionicons name="restaurant-outline" size={10} color={themeColors.accent} style={{ marginRight: 3 }} />
+                        <Text style={[styles.comidaBadgeText, { color: themeColors.accent }]}>
+                          -1h comida
+                        </Text>
+                      </View>
+                    )
                   )}
 
                   {canViewOvertime && dia.minutosExtra > 0 && (
@@ -561,9 +788,24 @@ export default function AsistenciaSemanalCard({
               {expanded && (
                 <View style={[styles.turnosContainer, { borderTopColor: themeColors.border }]}>
                   {!hasTurnos ? (
-                    <Text style={[styles.noTurnosText, { color: themeColors.textSecondary }]}>
-                      Sin registros de asistencia
-                    </Text>
+                    dia.ausencia ? (
+                      <Text
+                        style={[
+                          styles.noTurnosText,
+                          {
+                            color: dia.ausencia.tipo === 'VACACIONES' ? '#0284c7' : '#d97706',
+                            fontWeight: '600',
+                          },
+                        ]}
+                      >
+                        {getAusenciaLabel(dia.ausencia.tipo)}
+                        {dia.ausencia.motivo ? ` — ${dia.ausencia.motivo}` : ''}
+                      </Text>
+                    ) : (
+                      <Text style={[styles.noTurnosText, { color: themeColors.textSecondary }]}>
+                        Sin registros de asistencia
+                      </Text>
+                    )
                   ) : (
                     dia.turnos.map((turno) => (
                       <View
@@ -819,6 +1061,24 @@ export default function AsistenciaSemanalCard({
           empleadoNombre={empleadoNombre}
           defaultFecha={fechaParaNuevoTurno || undefined}
           onSaveSuccess={() => {
+            onRefresh?.();
+          }}
+        />
+      )}
+
+      {/* Modal de Vacaciones / Permiso sin goce (ADMIN / DEV) */}
+      {effectiveEmpleadoId && (
+        <AsignarAusenciaModal
+          visible={ausenciaModalVisible}
+          onClose={() => {
+            setAusenciaModalVisible(false);
+            setFechaParaAusencia('');
+          }}
+          empleadoId={effectiveEmpleadoId}
+          empleadoNombre={empleadoNombre}
+          defaultFecha={fechaParaAusencia || undefined}
+          onSaveSuccess={() => {
+            loadAusenciasLocal();
             onRefresh?.();
           }}
         />
@@ -1198,6 +1458,24 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.small,
     borderWidth: 1,
     marginRight: 6,
+  },
+  adminHeaderActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: Spacing.two,
+  },
+  ausenciaHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.small,
+    borderWidth: 1,
+  },
+  ausenciaHeaderBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   extraHoursText: {
     fontSize: 10,

@@ -27,14 +27,21 @@ export const invalidateHeaderCache = () => {
   headerCache = null;
 };
 
-export const getApiHeaders = async (forceRefresh = false) => {
+const buildHeaders = (company: string, env: string, token: string | null): Record<string, string> => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-company': company,
+    'x-env': env,
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+};
+
+export const getApiHeaders = async (forceRefresh = false): Promise<Record<string, string>> => {
   if (!forceRefresh && headerCache) {
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${headerCache.token}`,
-      'x-company': headerCache.company,
-      'x-env': headerCache.env
-    };
+    return buildHeaders(headerCache.company, headerCache.env, headerCache.token);
   }
 
   let company = 'inttec';
@@ -59,12 +66,7 @@ export const getApiHeaders = async (forceRefresh = false) => {
   
   headerCache = { company, env, token };
 
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
-    'x-company': company,
-    'x-env': env
-  };
+  return buildHeaders(company, env, token);
 };
 
 export const getApiUrl = () => {

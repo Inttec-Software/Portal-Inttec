@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAdminReportes, updateGastoStatus, getSalesForLinking, getExportData, updateGasto, recalculateVentaTotals, deleteGasto, saveQuickSale, getFormCatalogs, createGastos, getEmpleadoGastos, getGastoById, relinkGastoVenta, attachSatFacturaToGasto, dismissSatFacturaFromGasto } from './reportes.controller';
+import { getAdminReportes, updateGastoStatus, getSalesForLinking, getExportData, updateGasto, recalculateVentaTotals, deleteGasto, saveQuickSale, getFormCatalogs, createGastos, getEmpleadoGastos, getGastoById, relinkGastoVenta, assignGastoProyecto, attachSatFacturaToGasto, detachSatFacturaFromGasto, dismissSatFacturaFromGasto } from './reportes.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
 
@@ -13,6 +13,7 @@ router.use(tenantMiddleware);
 const reportesMutate = (req: any, res: any, next: any) => {
   invalidateCache('reportes');
   invalidateCache('ventas');
+  invalidateCache('proyectos');
   next();
 };
 
@@ -24,7 +25,9 @@ router.get('/gastos/:id', getGastoById);
 router.post('/ventas/quick', reportesMutate, saveQuickSale);
 router.put('/gastos/:id/status', reportesMutate, updateGastoStatus);
 router.put('/gastos/:id/relink-venta', reportesMutate, relinkGastoVenta);
+router.put('/gastos/:id/assign-proyecto', reportesMutate, assignGastoProyecto);
 router.post('/gastos/:id/attach-sat-factura', reportesMutate, attachSatFacturaToGasto);
+router.post('/gastos/:id/detach-sat-factura', reportesMutate, detachSatFacturaFromGasto);
 router.post('/gastos/:id/dismiss-sat-factura', reportesMutate, dismissSatFacturaFromGasto);
 router.put('/gastos/:id', reportesMutate, updateGasto);
 router.post('/gastos', reportesMutate, createGastos);

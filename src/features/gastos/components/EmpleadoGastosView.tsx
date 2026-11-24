@@ -59,6 +59,9 @@ export default function EmpleadoGastosView() {
     saldoPendiente,
     totalAprobado,
     formatCurrency,
+    formatFriendlyDate,
+    getDestinoInfo,
+    getHospedajeInfo,
   } = emp;
 
   return (
@@ -351,15 +354,115 @@ export default function EmpleadoGastosView() {
           data={activeTab === 'pendientes' ? pendingList : historyList}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <ExpenseCard
-              gasto={item}
-              onPress={() => {
-                setSelectedGasto(item);
-                setModalVisible(true);
-              }}
-            />
-          )}
+          renderItem={({ item }) => {
+            const destino = getDestinoInfo(item);
+            const hosp = getHospedajeInfo(item);
+            const subtipoTraslado = (item as any).subtipo_traslado;
+            const badgeColor =
+              destino.tipo === 'PROYECTO'
+                ? themeColors.primary
+                : destino.tipo === 'PROYECTO_SUGERIDO'
+                ? themeColors.warning
+                : destino.tipo === 'OPERATIVO'
+                ? themeColors.accent
+                : themeColors.textSecondary;
+
+            return (
+              <View style={{ marginBottom: 4 }}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingHorizontal: 10,
+                    marginBottom: 4,
+                  }}
+                >
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: badgeColor + '18',
+                      borderColor: badgeColor + '40',
+                      borderWidth: 1,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: BorderRadius.small,
+                    }}
+                  >
+                    <Ionicons
+                      name={
+                        destino.tipo === 'PROYECTO'
+                          ? 'briefcase-outline'
+                          : destino.tipo === 'PROYECTO_SUGERIDO'
+                          ? 'create-outline'
+                          : destino.tipo === 'OPERATIVO'
+                          ? 'business-outline'
+                          : 'time-outline'
+                      }
+                      size={12}
+                      color={badgeColor}
+                    />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: badgeColor }} numberOfLines={1}>
+                      {destino.tipo === 'PROYECTO'
+                        ? `Proyecto: ${destino.label}`
+                        : destino.tipo === 'PROYECTO_SUGERIDO'
+                        ? `Proyecto sugerido: ${destino.label}`
+                        : destino.label}
+                    </Text>
+                  </View>
+
+                  {hosp.isHospedaje && (
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                        backgroundColor: themeColors.accent + '18',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: BorderRadius.small,
+                      }}
+                    >
+                      <Ionicons name="bed-outline" size={12} color={themeColors.accent} />
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.accent }}>
+                        {hosp.diasCount} {hosp.diasCount === 1 ? 'noche' : 'noches'} • {formatCurrency(hosp.costoPorDia)}/día
+                      </Text>
+                    </View>
+                  )}
+
+                  {!!subtipoTraslado && (
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                        backgroundColor: themeColors.primary + '15',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: BorderRadius.small,
+                      }}
+                    >
+                      <Ionicons name="navigate-outline" size={12} color={themeColors.primary} />
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.primary }}>
+                        {subtipoTraslado}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                <ExpenseCard
+                  gasto={item}
+                  onPress={() => {
+                    setSelectedGasto(item);
+                    setModalVisible(true);
+                  }}
+                />
+              </View>
+            );
+          }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="file-tray-outline" size={48} color={themeColors.textSecondary} />

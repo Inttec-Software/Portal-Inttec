@@ -55,6 +55,7 @@ export default function EvidenciaDetailModal({
   }
 
   const techName =
+    evidencia.empleado_nombre ||
     evidencia.creado_por_nombre ||
     evidencia.usuario?.nombre ||
     'Técnico Autorizado';

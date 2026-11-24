@@ -197,7 +197,7 @@ export function useRetiroMaterial() {
       const totalStock = getTotalStock(producto);
 
       if (existing) {
-        const curQty = typeof existing.cantidad === 'number' ? existing.cantidad : 0;
+        const curQty = Number(existing.cantidad) || 0;
         if (curQty < totalStock) {
           const nextQty = curQty + 1;
           const sNuevo = getStockNuevo(producto);

@@ -37,8 +37,6 @@ function ExpenseCard({
   const sucursalNombre = GastoHelper.getSucursal(gasto);
 
   const isDevueltoFactura = gasto.status === 'PENDING' && Boolean(gasto.devuelto_por_factura);
-  const isNuevoConFacturaDetectada = gasto.status === 'PENDING' && !gasto.devuelto_por_factura && Boolean(gasto.factura_sugerida_rel || gasto.factura_sugerida_id);
-
   // Configuración de estados
   let statusText = 'PENDIENTE';
   let statusColor: string = themeColors.warning;
@@ -52,10 +50,6 @@ function ExpenseCard({
     statusText = 'FACTURA DETECTADA (DEVUELTO)';
     statusColor = '#0284C7';
     statusIcon = 'document-attach-outline';
-  } else if (isNuevoConFacturaDetectada) {
-    statusText = 'COMPROBAR FACTURA';
-    statusColor = '#D97706';
-    statusIcon = 'search-outline';
   } else if (gasto.status === 'APPROVED') {
     statusText = 'APROBADO';
     statusColor = themeColors.success;
@@ -88,12 +82,10 @@ function ExpenseCard({
           backgroundColor: themeColors.backgroundElement,
           borderColor: isDevueltoFactura
             ? '#0284C7'
-            : isNuevoConFacturaDetectada
-            ? '#F59E0B'
             : gasto.status === 'ACTION_REQUIRED'
             ? themeColors.actionRequired
             : themeColors.border,
-          borderWidth: (isDevueltoFactura || isNuevoConFacturaDetectada || gasto.status === 'ACTION_REQUIRED') ? 1.5 : 1,
+          borderWidth: (isDevueltoFactura || gasto.status === 'ACTION_REQUIRED') ? 1.5 : 1,
         },
       ]}
     >
@@ -124,7 +116,14 @@ function ExpenseCard({
         {/* Badges de Estado */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 1 }}>
           {/* Factura Badge */}
-          {gasto.facturado ? (
+          {(gasto.factura_recibida_rel || gasto.factura_recibida_id) ? (
+            <View style={[styles.statusBadge, { backgroundColor: themeColors.success + '18' }]}>
+              <Ionicons name="shield-checkmark" size={11} color={themeColors.success} />
+              <Text style={[styles.statusText, { color: themeColors.success }]}>
+                CFDI SAT{gasto.es_factura_compartida ? ' (Comp)' : ''}
+              </Text>
+            </View>
+          ) : gasto.facturado ? (
             <View style={[styles.statusBadge, { backgroundColor: themeColors.success + '18' }]}>
               <Ionicons name="checkmark-circle-outline" size={11} color={themeColors.success} />
               <Text style={[styles.statusText, { color: themeColors.success }]}>Facturado</Text>
@@ -138,6 +137,29 @@ function ExpenseCard({
             <View style={[styles.statusBadge, { backgroundColor: themeColors.danger + '15' }]}>
               <Ionicons name="document-text-outline" size={11} color={themeColors.danger} />
               <Text style={[styles.statusText, { color: themeColors.danger }]}>Sin Factura</Text>
+            </View>
+          )}
+
+          {Number(gasto.monto_propina || 0) > 0 && (
+            <View style={[styles.statusBadge, { backgroundColor: '#f59e0b18' }]}>
+              <Ionicons name="restaurant-outline" size={11} color="#d97706" />
+              <Text style={[styles.statusText, { color: '#d97706' }]}>
+                Propina ${Number(gasto.monto_propina).toFixed(2)}
+              </Text>
+            </View>
+          )}
+
+          {gasto.motivo_sin_factura?.startsWith('COMISION_PLATAFORMA') && (
+            <View style={[styles.statusBadge, { backgroundColor: '#8b5cf618' }]}>
+              <Ionicons name="globe-outline" size={11} color="#7c3aed" />
+              <Text style={[styles.statusText, { color: '#7c3aed' }]}>Comisión</Text>
+            </View>
+          )}
+
+          {gasto.motivo_sin_factura?.startsWith('DIFERENCIA_AUTORIZADA') && (
+            <View style={[styles.statusBadge, { backgroundColor: '#64748b18' }]}>
+              <Ionicons name="shield-outline" size={11} color="#475569" />
+              <Text style={[styles.statusText, { color: '#475569' }]}>Dif. Autorizada</Text>
             </View>
           )}
 
@@ -221,15 +243,6 @@ function ExpenseCard({
             Coincide con CFDI de {gasto.factura_sugerida_rel.nombre_emisor || gasto.factura_sugerida_rel.rfc_emisor || 'Proveedor'} por {montoFormatted}. Toca para ver PDF y volver a enviar.
           </Text>
         </View>
-      ) : isNuevoConFacturaDetectada && gasto.factura_sugerida_rel ? (
-        <View style={[styles.feedbackContainer, { backgroundColor: '#F59E0B18', borderLeftColor: '#D97706' }]}>
-          <Text style={[styles.feedbackTitle, { color: '#D97706' }]}>
-            ⚠️ Favor de comprobar que la factura recibida coincide con el gasto
-          </Text>
-          <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={2}>
-            Se detectó una factura recibida por {montoFormatted} ({gasto.factura_sugerida_rel.nombre_emisor || gasto.factura_sugerida_rel.rfc_emisor || 'SAT'}).
-          </Text>
-        </View>
       ) : null}
 
       {/* 6. Feedback Box */}
@@ -256,6 +269,9 @@ const ExpenseCardMemo = React.memo(ExpenseCard, (prevProps, nextProps) => {
     prevProps.gasto.proveedor_id === nextProps.gasto.proveedor_id &&
     prevProps.gasto.devuelto_por_factura === nextProps.gasto.devuelto_por_factura &&
     prevProps.gasto.factura_sugerida_id === nextProps.gasto.factura_sugerida_id &&
+    prevProps.gasto.factura_recibida_id === nextProps.gasto.factura_recibida_id &&
+    prevProps.gasto.monto_propina === nextProps.gasto.monto_propina &&
+    prevProps.gasto.es_factura_compartida === nextProps.gasto.es_factura_compartida &&
     prevProps.showEmployeeName === nextProps.showEmployeeName
   );
 });
