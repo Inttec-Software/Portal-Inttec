@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Keyboard,
   Switch,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -1718,7 +1719,7 @@ export default function GastoFormView({ role, mode, gastoId }: GastoFormViewProp
               {/* Método de Pago */}
               <View style={styles.selectorGroup}>
                 <Text style={[styles.selectorLabel, { color: themeColors.text }]}>Método de Pago *</Text>
-                <View style={styles.paymentSelector}>
+                <View style={[styles.paymentSelector, { flexWrap: 'wrap' }]}>
                   {(
                     [
                       { key: 'efectivo', label: 'Efectivo' },
@@ -1750,12 +1751,18 @@ export default function GastoFormView({ role, mode, gastoId }: GastoFormViewProp
                           {
                             backgroundColor: isSelected ? themeColors.accent : themeColors.background,
                             borderColor: isSelected ? 'transparent' : themeColors.border,
-                            flex: 1,
+                            flexGrow: 1,
+                            flexBasis: '46%',
+                            paddingVertical: 10,
                             alignItems: 'center',
+                            justifyContent: 'center',
                           },
                         ]}
                       >
-                        <Text style={[styles.paymentOptionText, { color: isSelected ? '#ffffff' : themeColors.text }]}>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.paymentOptionText, { color: isSelected ? '#ffffff' : themeColors.text }]}
+                        >
                           {item.label}
                         </Text>
                       </TouchableOpacity>
@@ -1966,11 +1973,11 @@ export default function GastoFormView({ role, mode, gastoId }: GastoFormViewProp
                 />
               )}
 
-              {/* Opción opcional de dividir gasto entre clientes */}
-              {mode === 'create' && (
+              {/* Opción opcional de dividir gasto operativo entre clientes */}
+              {mode === 'create' && tipoGasto === 'OPERATIVO' && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.one }}>
-                  <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '600' }}>
-                    ¿Dividir este ticket en varios clientes?
+                  <Text style={{ color: themeColors.text, fontSize: 13, fontWeight: '600', flex: 1, marginRight: 8 }}>
+                    ¿Dividir este gasto operativo entre varios clientes?
                   </Text>
                   <Switch
                     value={isSplit}
@@ -1981,63 +1988,188 @@ export default function GastoFormView({ role, mode, gastoId }: GastoFormViewProp
                 </View>
               )}
 
-              {mode === 'create' && isSplit && (
-                <View style={{ marginTop: Spacing.two }}>
-                  {splits.map((s) => (
+              {mode === 'create' && tipoGasto === 'OPERATIVO' && isSplit && (() => {
+                const currentTotalGasto =
+                  Number(monto || 0) + (esAlimentos && incluyePropina === false ? Number(montoPropina || 0) : 0);
+                const sumDividido = splits.reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
+                const diff = currentTotalGasto - sumDividido;
+                const isBalanced = currentTotalGasto > 0 && Math.abs(diff) <= 0.05;
+
+                const handleDistribuirPartesIguales = () => {
+                  if (splits.length < 2 || currentTotalGasto <= 0) return;
+                  const totalCents = Math.round(currentTotalGasto * 100);
+                  const baseCents = Math.floor(totalCents / splits.length);
+                  const remainderCents = totalCents - baseCents * splits.length;
+                  setSplits(
+                    splits.map((item, idx) => {
+                      const cents = idx === splits.length - 1 ? baseCents + remainderCents : baseCents;
+                      return { ...item, monto: (cents / 100).toFixed(2) };
+                    })
+                  );
+                };
+
+                return (
+                  <View style={{ marginTop: Spacing.two }}>
+                    {/* Resumen de montos */}
                     <View
-                      key={s.id}
                       style={{
                         flexDirection: 'row',
                         justifyContent: 'space-between',
                         alignItems: 'center',
-                        padding: 8,
+                        paddingHorizontal: 10,
+                        paddingVertical: 8,
                         borderRadius: BorderRadius.small,
+                        backgroundColor: isBalanced
+                          ? (themeColors.success || '#10b981') + '15'
+                          : (themeColors.warning || '#f59e0b') + '15',
                         borderWidth: 1,
-                        borderColor: themeColors.border,
-                        marginBottom: 6,
+                        borderColor: isBalanced
+                          ? (themeColors.success || '#10b981') + '50'
+                          : (themeColors.warning || '#f59e0b') + '50',
+                        marginBottom: 8,
                       }}
                     >
-                      <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600', flex: 1 }}>
-                        {s.clienteId} ({s.sucursalNombre || s.comentarioSucursal || 'Sin sucursal'})
+                      <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '600' }}>
+                        Asignado: ${sumDividido.toFixed(2)} / ${currentTotalGasto.toFixed(2)}
                       </Text>
-                      <Text style={{ color: themeColors.primary, fontWeight: '700', marginRight: 8 }}>
-                        ${Number(s.monto).toFixed(2)}
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontWeight: '700',
+                          color: isBalanced
+                            ? (themeColors.success || '#10b981')
+                            : diff < -0.05
+                            ? themeColors.danger
+                            : (themeColors.warning || '#d97706'),
+                        }}
+                      >
+                        {isBalanced
+                          ? '✓ Cuadrado'
+                          : diff > 0
+                          ? `Falta: $${diff.toFixed(2)}`
+                          : `Exceso: $${Math.abs(diff).toFixed(2)}`}
                       </Text>
-                      <TouchableOpacity onPress={() => setSplits(splits.filter((item) => item.id !== s.id))}>
-                        <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
-                      </TouchableOpacity>
                     </View>
-                  ))}
-                  <TouchableOpacity
-                    onPress={() => {
-                      const currentTotalGasto = Number(monto || 0) + (esAlimentos && incluyePropina === false ? Number(montoPropina || 0) : 0);
-                      const sumDividido = splits.reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
-                      const remainder = Math.max(0, currentTotalGasto - sumDividido);
-                      setNewSplitClienteId('');
-                      setNewSplitSucursalNombre('');
-                      setNewSplitComentarioSucursal('');
-                      setNewSplitMonto(remainder > 0 ? remainder.toFixed(2) : '');
-                      setSplitClienteSearch('');
-                      setSplitSucursalSearch('');
-                      setShowNewSplitCliDropdown(false);
-                      setShowNewSplitSucDropdown(false);
-                      setShowSplitModal(true);
-                    }}
-                    style={{
-                      padding: 10,
-                      borderRadius: BorderRadius.small,
-                      borderWidth: 1,
-                      borderColor: themeColors.primary,
-                      borderStyle: 'dashed',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 12 }}>
-                      ➕ Agregar División de Gasto
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+
+                    {splits.map((s) => (
+                      <View
+                        key={s.id}
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: 8,
+                          borderRadius: BorderRadius.small,
+                          borderWidth: 1,
+                          borderColor: themeColors.border,
+                          marginBottom: 6,
+                          gap: 8,
+                        }}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>
+                            {s.clienteId}
+                          </Text>
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 11 }} numberOfLines={1}>
+                            Sucursal: {s.sucursalNombre || s.comentarioSucursal || 'Sin sucursal'}
+                          </Text>
+                        </View>
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                            borderRadius: BorderRadius.small,
+                            backgroundColor: themeColors.background,
+                            paddingHorizontal: 8,
+                            height: 34,
+                            width: 112,
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <Text style={{ color: themeColors.textSecondary, fontSize: 12, fontWeight: '700', marginRight: 4 }}>$</Text>
+                          <TextInput
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              width: '100%',
+                              color: themeColors.primary,
+                              fontWeight: '700',
+                              fontSize: 13,
+                              paddingHorizontal: 2,
+                              paddingVertical: 0,
+                              textAlign: 'right',
+                              ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+                            }}
+                            value={String(s.monto ?? '')}
+                            onChangeText={(txt) => {
+                              const cleaned = txt.replace(/[^0-9.]/g, '');
+                              setSplits(splits.map((item) => (item.id === s.id ? { ...item, monto: cleaned } : item)));
+                            }}
+                            keyboardType="decimal-pad"
+                            placeholder="0.00"
+                            placeholderTextColor={themeColors.textSecondary}
+                          />
+                        </View>
+                        <TouchableOpacity onPress={() => setSplits(splits.filter((item) => item.id !== s.id))}>
+                          <Ionicons name="trash-outline" size={16} color={themeColors.danger} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          const remainder = Math.max(0, currentTotalGasto - sumDividido);
+                          setNewSplitClienteId('');
+                          setNewSplitSucursalNombre('');
+                          setNewSplitComentarioSucursal('');
+                          setNewSplitMonto(remainder > 0 ? remainder.toFixed(2) : '');
+                          setSplitClienteSearch('');
+                          setSplitSucursalSearch('');
+                          setShowNewSplitCliDropdown(false);
+                          setShowNewSplitSucDropdown(false);
+                          setShowSplitModal(true);
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: 10,
+                          borderRadius: BorderRadius.small,
+                          borderWidth: 1,
+                          borderColor: themeColors.primary,
+                          borderStyle: 'dashed',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Text style={{ color: themeColors.primary, fontWeight: '700', fontSize: 12 }}>
+                          ➕ Agregar Cliente
+                        </Text>
+                      </TouchableOpacity>
+
+                      {splits.length >= 2 && currentTotalGasto > 0 && (
+                        <TouchableOpacity
+                          onPress={handleDistribuirPartesIguales}
+                          style={{
+                            paddingHorizontal: 12,
+                            paddingVertical: 10,
+                            borderRadius: BorderRadius.small,
+                            borderWidth: 1,
+                            borderColor: themeColors.accent,
+                            backgroundColor: themeColors.accent + '15',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Text style={{ color: themeColors.accent, fontWeight: '700', fontSize: 12 }}>
+                            ⚖️ Partes iguales
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                );
+              })()}
             </View>
 
             {/* =========================================================
