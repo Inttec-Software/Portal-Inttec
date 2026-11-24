@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ interface GastoSplitModalProps {
 }
 
 export default function GastoSplitModal({ form, themeColors }: GastoSplitModalProps) {
+  const scrollRef = useRef<ScrollView>(null);
   const {
     role,
     showSplitModal,
@@ -63,20 +64,25 @@ export default function GastoSplitModal({ form, themeColors }: GastoSplitModalPr
       animationType="slide"
       onRequestClose={() => setShowSplitModal(false)}
     >
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        behavior="padding"
+        keyboardVerticalOffset={0}
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}
+      >
         <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end', alignItems: 'center', padding: Spacing.four }}
+          style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: Spacing.three, paddingVertical: Spacing.two }}
           onPress={() => setShowSplitModal(false)}
         >
           <Pressable
-            style={{ width: '100%', maxWidth: 480, maxHeight: '90%' }}
+            style={{ width: '100%', maxWidth: 480, maxHeight: '92%' }}
             onPress={(e) => e.stopPropagation()}
           >
-            <View style={{ backgroundColor: themeColors.background, borderRadius: BorderRadius.large, padding: Spacing.four, width: '100%', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 }}>
+            <View style={{ backgroundColor: themeColors.background, borderRadius: BorderRadius.large, padding: Spacing.three, width: '100%', overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 }}>
               <ScrollView
+                ref={scrollRef}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ gap: Spacing.three }}
+                contentContainerStyle={{ gap: Spacing.three, paddingBottom: Spacing.two }}
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Text style={{ fontSize: 18, fontWeight: '700', color: themeColors.text }}>Agregar División de Gasto</Text>
@@ -321,6 +327,7 @@ export default function GastoSplitModal({ form, themeColors }: GastoSplitModalPr
                     onFocus={() => {
                       setShowNewSplitCliDropdown(false);
                       setShowNewSplitSucDropdown(false);
+                      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120);
                     }}
                   />
                   {(() => {

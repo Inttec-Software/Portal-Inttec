@@ -540,20 +540,22 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                                 : 'Sin proyecto asignado')}
                           </Text>
 
-                          {selectedGasto.proyecto_rel?.cliente_nombre ||
-                          selectedGasto.proyecto_rel?.sucursal_nombre ? (
-                            <Text
-                              style={{
-                                fontSize: 12,
-                                color: themeColors.textSecondary,
-                              }}
-                            >
-                              {selectedGasto.proyecto_rel.cliente_nombre || ''}
-                              {selectedGasto.proyecto_rel.sucursal_nombre
-                                ? ` • Sucursal: ${selectedGasto.proyecto_rel.sucursal_nombre}`
-                                : ''}
-                            </Text>
-                          ) : null}
+                          {(() => {
+                            const cliDisplay = selectedGasto.proyecto_rel?.cliente_nombre || GastoHelper.getCliente(selectedGasto);
+                            const sucDisplay = selectedGasto.proyecto_rel?.sucursal_nombre || GastoHelper.getSucursal(selectedGasto);
+                            if (!cliDisplay && !sucDisplay) return null;
+                            return (
+                              <Text
+                                style={{
+                                  fontSize: 12,
+                                  color: themeColors.textSecondary,
+                                }}
+                              >
+                                {cliDisplay || ''}
+                                {sucDisplay ? ` • Sucursal: ${sucDisplay}` : ''}
+                              </Text>
+                            );
+                          })()}
 
                           {(selectedGasto.tipo_servicio_proyecto ||
                             selectedGasto.detalle_servicio_proyecto) ? (
