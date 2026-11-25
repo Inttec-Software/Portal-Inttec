@@ -483,7 +483,7 @@ export function buildSimulatedTelemetryForVehicles(vehiculos: any[]): Map<string
 
   // Coordenadas base en Chihuahua (zona operativa de Inttec)
   const basePoints = [
-    { lat: 28.657972, lng: -106.118187, dir: 'Calle Camello, Col. Colonia Granjas, Chihuahua', speed: 0, ign: false },
+    { lat: 28.657943, lng: -106.118195, dir: 'Calle Camello, Col. Colonia Granjas, Chihuahua', speed: 0, ign: false },
     { lat: 28.635300, lng: -106.088900, dir: 'Av. Tecnológico, Chihuahua, Chih.', speed: 38, ign: true },
     { lat: 28.662100, lng: -106.105400, dir: 'Av. de las Industrias, Chihuahua, Chih.', speed: 45, ign: true },
     { lat: 28.648900, lng: -106.074300, dir: 'Av. Universidad, Chihuahua, Chih.', speed: 0, ign: true },
@@ -1392,9 +1392,9 @@ export async function fetchFleetSnapshotAtTime(params: {
     rawDir.includes('hikvision') ||
     rawDir.includes('facial');
 
-  // Coordenadas base de Oficinas Matriz Inttec Chihuahua (Av. José María Mata / Col. Granjas)
-  const OFICINA_INTTEC_LAT = 28.6508;
-  const OFICINA_INTTEC_LNG = -106.0955;
+  // Coordenadas base de Oficinas Matriz Inttec Chihuahua (Calle Camello / Calle Antílope, Col. Granjas)
+  const OFICINA_INTTEC_LAT = 28.657943;
+  const OFICINA_INTTEC_LNG = -106.118195;
 
   const empHasGps = !!(
     typeof resolvedEmpLat === 'number' &&

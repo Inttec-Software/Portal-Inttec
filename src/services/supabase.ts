@@ -631,6 +631,7 @@ export interface FleetGpsSnapshotItem {
   bateria_v?: number | null;
   direccion?: string | null;
   hora_reporte?: string | null;
+  hora_reporte_chihuahua?: string | null;
   timestamp?: number | null;
   diferencia_minutos?: number | null;
   distancia_empleado_m?: number | null;
@@ -643,6 +644,10 @@ export interface FleetGpsSnapshotItem {
 export interface CorroboracionFlotaResponse {
   fecha: string;
   hora_objetivo: string;
+  hora_oficina_chihuahua?: string;
+  utc_offset_empleado?: string;
+  desfase_horas_oficina?: number;
+  zona_horaria_detectada?: string;
   target_timestamp: number;
   empleado_nombre?: string | null;
   tipo_checada?: 'Entrada' | 'Salida';

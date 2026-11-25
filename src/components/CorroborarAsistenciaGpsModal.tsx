@@ -9,10 +9,11 @@ import {
   ActivityIndicator,
   Platform,
   Linking,
+  useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Spacing, BorderRadius } from '@/constants/theme';
+import { Colors, BorderRadius } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   AsistenciaService,
@@ -49,11 +50,12 @@ export default function CorroborarAsistenciaGpsModal({
   empleadoLng,
   empleadoDireccion,
   vehiculoId,
-  vehiculoPlacas,
-  gpsVehiculoAlerta,
 }: CorroborarAsistenciaGpsModalProps) {
   const scheme = useColorScheme();
-  const themeColors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const isDark = scheme === 'dark';
+  const themeColors = Colors[isDark ? 'dark' : 'light'];
+  const { width } = useWindowDimensions();
+  const isDesktop = Platform.OS === 'web' && width >= 860;
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +74,7 @@ export default function CorroborarAsistenciaGpsModal({
     const loadSnapshot = async () => {
       setIsLoading(true);
       setError(null);
+      setSelectedUnit(null);
       try {
         const res = await AsistenciaService.corroborarConFlotaGps({
           asistenciaId,
@@ -86,9 +89,7 @@ export default function CorroborarAsistenciaGpsModal({
         });
         if (isMounted) {
           setSnapshot(res);
-          if (res.unidades.length > 0) {
-            setSelectedUnit(res.unidades[0]);
-          }
+          // Iniciar sin unidad preseleccionada para que ningún popup tape el mapa al abrir
         }
       } catch (err: any) {
         if (isMounted) {
@@ -106,7 +107,7 @@ export default function CorroborarAsistenciaGpsModal({
     return () => {
       isMounted = false;
     };
-  }, [visible, asistenciaId, fecha, hora, empleadoLat, empleadoLng, tipo, vehiculoId]);
+  }, [visible, asistenciaId, fecha, hora, empleadoLat, empleadoLng, empleadoNombre, empleadoDireccion, tipo, vehiculoId]);
 
   const isChecadaOficina = useMemo(() => {
     if (snapshot?.empleado_en_oficina) return true;
@@ -133,13 +134,16 @@ export default function CorroborarAsistenciaGpsModal({
     }
   };
 
-  // Generador de HTML para Leaflet en Web con los pines del empleado y las camionetas
+  // Generador de HTML limpio para Leaflet en Web (con CartoDB Voyager sin ruido visual y sin auto-popup inicial)
   const leafletHtml = useMemo(() => {
     if (!snapshot) return null;
 
     const empLat = snapshot.empleado_lat;
     const empLng = snapshot.empleado_lng;
-    const empHasGps = (snapshot.empleado_gps_activo || snapshot.empleado_en_oficina || isChecadaOficina) && empLat && empLng;
+    const empHasGps =
+      (snapshot.empleado_gps_activo || snapshot.empleado_en_oficina || isChecadaOficina) &&
+      empLat &&
+      empLng;
 
     const unitsWithCoords = snapshot.unidades.filter((u) => u.lat && u.lng);
     const unitsJson = JSON.stringify(unitsWithCoords);
@@ -149,9 +153,10 @@ export default function CorroborarAsistenciaGpsModal({
             lat: empLat,
             lng: empLng,
             nombre: empleadoNombre,
-            dir: (snapshot.empleado_en_oficina || isChecadaOficina)
-              ? '🏢 Checador Físico en Oficina Matriz (Inttec)'
-              : (snapshot.empleado_direccion || empleadoDireccion || ''),
+            dir:
+              snapshot.empleado_en_oficina || isChecadaOficina
+                ? 'Checador Físico en Oficina Matriz'
+                : snapshot.empleado_direccion || empleadoDireccion || '',
             esOficina: Boolean(snapshot.empleado_en_oficina || isChecadaOficina),
           }
         : null
@@ -166,27 +171,30 @@ export default function CorroborarAsistenciaGpsModal({
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
-    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; font-family: system-ui, -apple-system, sans-serif; }
+    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; }
+    .leaflet-popup-content-wrapper { border-radius: 10px; box-shadow: 0 4px 16px rgba(15,23,42,0.14); padding: 2px; }
+    .leaflet-popup-content { margin: 10px 12px; }
     .unit-pin {
       display: flex; align-items: center; justify-content: center;
       border-radius: 50%; color: #fff; font-weight: 800; font-size: 11px;
-      border: 2.5px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.45);
-      cursor: pointer;
+      border: 2.5px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.32);
+      cursor: pointer; transition: transform 0.15s ease;
     }
     .emp-pin {
       display: flex; align-items: center; justify-content: center;
-      width: 32px; height: 32px; border-radius: 50%;
-      background: #7c3aed; color: #fff; font-weight: 900; font-size: 15px;
-      border: 3px solid #fff; box-shadow: 0 3px 8px rgba(124,58,237,0.5);
+      width: 30px; height: 30px; border-radius: 50%;
+      background: #7c3aed; color: #fff; font-weight: 800; font-size: 13px;
+      border: 2.5px solid #fff; box-shadow: 0 2px 8px rgba(124,58,237,0.45);
     }
     .oficina-pin {
       display: flex; align-items: center; justify-content: center;
-      width: 34px; height: 34px; border-radius: 50%;
-      background: #15803d; color: #fff; font-weight: 900; font-size: 16px;
-      border: 3px solid #fff; box-shadow: 0 3px 8px rgba(21,128,61,0.5);
+      width: 32px; height: 32px; border-radius: 8px;
+      background: #15803d; color: #fff; font-weight: 800; font-size: 15px;
+      border: 2.5px solid #fff; box-shadow: 0 2px 8px rgba(21,128,61,0.45);
     }
-    .popup-box { font-size: 12px; line-height: 1.4; color: #1f2937; }
-    .popup-title { font-weight: 800; font-size: 13px; margin-bottom: 2px; }
+    .popup-box { font-size: 12px; line-height: 1.45; color: #334155; min-width: 180px; }
+    .popup-title { font-weight: 700; font-size: 13px; color: #0f172a; margin-bottom: 2px; }
+    .popup-meta { font-size: 11px; color: #64748b; margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -196,7 +204,7 @@ export default function CorroborarAsistenciaGpsModal({
     const emp = ${empJson};
     const focusId = ${focusUnitIdJson};
 
-    const map = L.map('map');
+    const map = L.map('map', { zoomControl: true });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap'
@@ -204,71 +212,103 @@ export default function CorroborarAsistenciaGpsModal({
 
     const group = [];
 
-    // Pin de Empleado u Oficina
-    if (emp) {
-      const pinClass = emp.esOficina ? 'oficina-pin' : 'emp-pin';
-      const pinIcon = emp.esOficina ? '🏢' : '👤';
+    // Pin de Oficina Matriz Inttec
+    const OFICINA_LAT = 28.657943;
+    const OFICINA_LNG = -106.118195;
+    const oficinaIcon = L.divIcon({
+      className: '',
+      html: '<div class="oficina-pin">🏢</div>',
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+      popupAnchor: [0, -16]
+    });
+    const oficinaMarker = L.marker([OFICINA_LAT, OFICINA_LNG], { icon: oficinaIcon, zIndexOffset: 950 }).addTo(map);
+    const oficinaPopupHtml = emp && emp.esOficina
+      ? '<div class="popup-box"><div class="popup-title">Oficina Matriz Inttec</div><div>Checada presencial: <b>' + emp.nombre + '</b></div><div class="popup-meta">Calle Camello, Col. Granjas • ' + ${JSON.stringify(hora)} + '</div></div>'
+      : '<div class="popup-box"><div class="popup-title">Oficina Matriz Inttec</div><div class="popup-meta">Calle Camello, Col. Granjas</div></div>';
+    oficinaMarker.bindPopup(oficinaPopupHtml);
+    if (emp && emp.esOficina) {
+      group.push([OFICINA_LAT, OFICINA_LNG]);
+    }
+
+    // Pin de Empleado (cuando tiene GPS de celular fuera de oficina)
+    if (emp && !emp.esOficina) {
       const empIcon = L.divIcon({
         className: '',
-        html: '<div class="' + pinClass + '">' + pinIcon + '</div>',
-        iconSize: [34, 34],
-        iconAnchor: [17, 17],
-        popupAnchor: [0, -17]
+        html: '<div class="emp-pin">👤</div>',
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -15]
       });
       const empMarker = L.marker([emp.lat, emp.lng], { icon: empIcon, zIndexOffset: 1000 }).addTo(map);
-      const title = emp.esOficina
-        ? '<div class="popup-title" style="color:#15803d">🏢 Checador Físico de Oficina</div><div style="font-size:11px; color:#374151">👤 ' + emp.nombre + ' (' + ${JSON.stringify(tipo)} + ')</div>'
-        : '<div class="popup-title" style="color:#7c3aed">👤 ' + emp.nombre + ' (' + ${JSON.stringify(tipo)} + ')</div>';
-
-      empMarker.bindPopup('<div class="popup-box">' + title + '<div>📍 ' + (emp.dir || 'Oficina') + '</div><div style="color:#6b7280; font-size:11px; margin-top:2px">Hora: ' + ${JSON.stringify(hora)} + '</div></div>');
+      empMarker.bindPopup(
+        '<div class="popup-box">' +
+        '<div class="popup-title">' + emp.nombre + ' (' + ${JSON.stringify(tipo)} + ')</div>' +
+        '<div>' + (emp.dir || 'Ubicación registrada') + '</div>' +
+        '<div class="popup-meta">Hora: ' + ${JSON.stringify(hora)} + '</div>' +
+        '</div>'
+      );
       group.push([emp.lat, emp.lng]);
     }
 
-    // Pines de Unidades Ruptela
+    // Pines de Unidades
+    let focusedMarker = null;
+    let focusedCoords = null;
+
     units.forEach((u) => {
       const isMoving = u.velocidad > 10;
       const isAsignada = u.es_vehiculo_asignado;
-      const bg = isMoving ? '#16a34a' : (u.ignicion ? '#2563eb' : '#4b5563');
-      const size = isAsignada ? 32 : 28;
-      const border = isAsignada ? '3px solid #eab308' : '2.5px solid #fff';
+      const isSelected = focusId && u.vehiculo_id === focusId;
+      const bg = isMoving ? '#16a34a' : (u.ignicion ? '#2563eb' : '#475569');
+      const size = isSelected ? 34 : (isAsignada ? 30 : 26);
+      const border = isSelected ? '3px solid #0f172a' : (isAsignada ? '2.5px solid #eab308' : '2px solid #fff');
+      const zIdx = isSelected ? 1100 : (isAsignada ? 800 : 500);
 
       const pinIcon = L.divIcon({
         className: '',
-        html: '<div class="unit-pin" style="width:' + size + 'px; height:' + size + 'px; background:' + bg + '; border:' + border + ';">' + (isAsignada ? '⭐' : '🚐') + '</div>',
+        html: '<div class="unit-pin" style="width:' + size + 'px; height:' + size + 'px; background:' + bg + '; border:' + border + ';">' + (isAsignada ? '★' : '🚐') + '</div>',
         iconSize: [size, size],
         iconAnchor: [size/2, size/2],
         popupAnchor: [0, -size/2]
       });
 
-      const marker = L.marker([u.lat, u.lng], { icon: pinIcon }).addTo(map);
-      const distText = u.distancia_empleado_m !== null ? '<br/>📏 <b>Distancia al empleado:</b> ' + (u.distancia_empleado_m < 1000 ? u.distancia_empleado_m + ' m' : (u.distancia_empleado_m/1000).toFixed(2) + ' km') : '';
+      const marker = L.marker([u.lat, u.lng], { icon: pinIcon, zIndexOffset: zIdx }).addTo(map);
+      const statusTxt = isMoving
+        ? (u.velocidad + ' km/h en movimiento')
+        : (u.ignicion ? 'Motor encendido (detenida)' : 'Estacionada');
+      const distTxt = u.distancia_empleado_m !== null
+        ? ' • a ' + (u.distancia_empleado_m < 1000 ? u.distancia_empleado_m + ' m' : (u.distancia_empleado_m/1000).toFixed(1) + ' km')
+        : '';
+
       const popupHtml = '<div class="popup-box">' +
-        '<div class="popup-title" style="color:' + bg + '">🚐 ' + u.marca + ' ' + u.modelo + ' (' + u.placas + ')' + (isAsignada ? ' ⭐ CAMIONETA DEL TURNO' : '') + '</div>' +
-        '<div>📍 ' + (u.direccion || 'Ubicación') + '</div>' +
-        '<div>⚡ <b>Velocidad:</b> ' + u.velocidad + ' km/h ' + (isMoving ? '🚨 EN MOVIMIENTO' : (u.ignicion ? '🔵 Motor encendido' : '⚪ Motor apagado')) + '</div>' +
-        '<div>🕒 <b>Hora reporte:</b> ' + (u.hora_reporte || '') + ' (±' + (u.diferencia_minutos || 0) + ' min)</div>' +
-        distText +
+        '<div class="popup-title">' + u.marca + ' ' + u.modelo + ' (' + u.placas + ')</div>' +
+        '<div>' + (u.direccion || 'Ubicación') + '</div>' +
+        '<div class="popup-meta">' + statusTxt + distTxt + (u.hora_reporte ? ' • ' + u.hora_reporte : '') + '</div>' +
         '</div>';
 
       marker.bindPopup(popupHtml);
       group.push([u.lat, u.lng]);
 
-      if (focusId && u.vehiculo_id === focusId) {
-        setTimeout(() => marker.openPopup(), 250);
+      if (isSelected) {
+        focusedMarker = marker;
+        focusedCoords = [u.lat, u.lng];
       }
     });
 
-    if (group.length > 1) {
-      map.fitBounds(L.latLngBounds(group), { padding: [36, 36], maxZoom: 16 });
+    if (focusedMarker && focusedCoords) {
+      map.setView(focusedCoords, 16);
+      setTimeout(() => focusedMarker.openPopup(), 180);
+    } else if (group.length > 1) {
+      map.fitBounds(L.latLngBounds(group), { padding: [36, 36], maxZoom: 15 });
     } else if (group.length === 1) {
       map.setView(group[0], 15);
     } else {
-      map.setView([28.6353, -106.0889], 13);
+      map.setView([28.657943, -106.118195], 13);
     }
   </script>
 </body>
 </html>`;
-  }, [snapshot, selectedUnit, empleadoNombre, empleadoDireccion, hora, tipo]);
+  }, [snapshot, selectedUnit, empleadoNombre, empleadoDireccion, hora, tipo, isChecadaOficina]);
 
   // Static Map para dispositivos móviles nativos
   const staticMapUrl = useMemo(() => {
@@ -278,10 +318,14 @@ export default function CorroborarAsistenciaGpsModal({
 
     const markers: string[] = [];
 
-    const hasCoords = !!((snapshot.empleado_gps_activo || snapshot.empleado_en_oficina || isChecadaOficina) && snapshot.empleado_lat && snapshot.empleado_lng);
+    const hasCoords = !!(
+      (snapshot.empleado_gps_activo || snapshot.empleado_en_oficina || isChecadaOficina) &&
+      snapshot.empleado_lat &&
+      snapshot.empleado_lng
+    );
     if (hasCoords) {
-      const color = (snapshot.empleado_en_oficina || isChecadaOficina) ? 'green' : 'purple';
-      const label = (snapshot.empleado_en_oficina || isChecadaOficina) ? 'O' : 'E';
+      const color = snapshot.empleado_en_oficina || isChecadaOficina ? 'green' : 'purple';
+      const label = snapshot.empleado_en_oficina || isChecadaOficina ? 'O' : 'E';
       markers.push(
         `markers=color:${color}%7Clabel:${label}%7C${snapshot.empleado_lat!.toFixed(5)},${snapshot.empleado_lng!.toFixed(5)}`
       );
@@ -296,317 +340,369 @@ export default function CorroborarAsistenciaGpsModal({
     });
 
     if (markers.length === 0) return null;
-    return `https://maps.googleapis.com/maps/api/staticmap?size=640x320&scale=2&maptype=roadmap&${markers.join('&')}&key=${apiKey}`;
+    return `https://maps.googleapis.com/maps/api/staticmap?size=640x340&scale=2&maptype=roadmap&${markers.join('&')}&key=${apiKey}`;
   }, [snapshot, isChecadaOficina]);
+
+  // Determinar si existe alguna alerta importante que amerite mostrarse arriba
+  const anomalyMessage = useMemo(() => {
+    if (!snapshot) return null;
+    if (snapshot.resumen.alerta_principal) return snapshot.resumen.alerta_principal;
+    if (!isChecadaOficina && !snapshot.empleado_gps_activo) {
+      return 'El empleado registró asistencia con la ubicación del celular apagada.';
+    }
+    return null;
+  }, [snapshot, isChecadaOficina]);
+
+  const renderUnitRow = (unit: FleetGpsSnapshotItem) => {
+    const isSelected = selectedUnit?.vehiculo_id === unit.vehiculo_id;
+    const isMoving = unit.velocidad > 10;
+
+    const dotColor = isMoving
+      ? '#16a34a'
+      : unit.badge_color === 'azul'
+        ? '#2563eb'
+        : unit.badge_color === 'rojo'
+          ? '#dc2626'
+          : '#94a3b8';
+
+    const pillBg =
+      unit.badge_color === 'verde'
+        ? '#dcfce7'
+        : unit.badge_color === 'azul'
+          ? '#e0f2fe'
+          : unit.badge_color === 'rojo'
+            ? '#fee2e2'
+            : isDark
+              ? '#334155'
+              : '#f1f5f9';
+
+    const pillText =
+      unit.badge_color === 'verde'
+        ? '#15803d'
+        : unit.badge_color === 'azul'
+          ? '#0369a1'
+          : unit.badge_color === 'rojo'
+            ? '#b91c1c'
+            : themeColors.textSecondary;
+
+    const delayedReport = typeof unit.diferencia_minutos === 'number' && unit.diferencia_minutos > 30;
+
+    return (
+      <TouchableOpacity
+        key={unit.vehiculo_id}
+        activeOpacity={0.75}
+        onPress={() =>
+          setSelectedUnit((prev) => (prev?.vehiculo_id === unit.vehiculo_id ? null : unit))
+        }
+        style={[
+          styles.unitRow,
+          {
+            backgroundColor: isSelected
+              ? isDark
+                ? themeColors.accent + '22'
+                : '#eff6ff'
+              : themeColors.background,
+            borderColor: isSelected ? themeColors.accent : themeColors.border,
+          },
+        ]}
+      >
+        <View style={[styles.statusDot, { backgroundColor: dotColor }]} />
+
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <Text
+              style={{ fontSize: 13, fontWeight: '700', color: themeColors.text }}
+              numberOfLines={1}
+            >
+              {unit.marca} {unit.modelo}
+            </Text>
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: '600',
+                color: themeColors.textSecondary,
+                backgroundColor: themeColors.backgroundElement,
+                paddingHorizontal: 5,
+                paddingVertical: 1,
+                borderRadius: 4,
+              }}
+            >
+              {unit.placas}
+            </Text>
+            {unit.es_vehiculo_asignado && (
+              <View style={styles.assignedTag}>
+                <Text style={styles.assignedTagText}>Asignada</Text>
+              </View>
+            )}
+          </View>
+
+          <Text
+            style={{ fontSize: 11.5, color: themeColors.textSecondary, marginTop: 2 }}
+            numberOfLines={1}
+          >
+            {unit.direccion || 'Sin dirección disponible'}
+          </Text>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+            <View style={[styles.statusPill, { backgroundColor: pillBg }]}>
+              <Text style={{ fontSize: 10.5, fontWeight: '700', color: pillText }}>
+                {unit.motivo_estado}
+              </Text>
+            </View>
+
+            {delayedReport && unit.hora_reporte && (
+              <Text style={{ fontSize: 10.5, color: '#b45309', fontWeight: '600' }}>
+                Últ. señal {unit.hora_reporte}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {unit.lat && unit.lng && (
+          <TouchableOpacity
+            onPress={() => handleOpenGoogleMaps(unit.lat, unit.lng)}
+            style={[styles.iconActionBtn, { borderColor: themeColors.border }]}
+            accessibilityLabel="Abrir en Google Maps"
+          >
+            <Ionicons name="open-outline" size={15} color={themeColors.textSecondary} />
+          </TouchableOpacity>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <Modal
       statusBarTranslucent={true}
-      animationType="slide"
+      animationType="fade"
       transparent={true}
       visible={visible}
       onRequestClose={onClose}
     >
       <View style={styles.modalOverlay}>
-        <View style={[styles.modalContent, { backgroundColor: themeColors.background }]}>
-          {/* Header */}
+        <View
+          style={[
+            styles.modalContent,
+            isDesktop && { maxWidth: 940 },
+            { backgroundColor: themeColors.background },
+          ]}
+        >
+          {/* Header compacto con toda la información clave en una sola barra */}
           <View style={[styles.modalHeader, { borderBottomColor: themeColors.border }]}>
-            <View style={{ flex: 1, marginRight: 10 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={{ fontSize: 18 }}>🛰️</Text>
-                <Text style={[styles.modalTitle, { color: themeColors.text }]} numberOfLines={1}>
-                  Corroboración con Flota GPS
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Text style={[styles.modalTitle, { color: themeColors.text }]}>
+                  {empleadoNombre}
                 </Text>
+
+                <View
+                  style={[
+                    styles.headerChip,
+                    {
+                      backgroundColor:
+                        tipo === 'Entrada' ? '#dbeafe' : '#f3e8ff',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: '700',
+                      color: tipo === 'Entrada' ? '#1d4ed8' : '#6d28d9',
+                    }}
+                  >
+                    {tipo} • {formatHoraDisplay(hora)}
+                  </Text>
+                </View>
+
+                {snapshot && (
+                  <View
+                    style={[
+                      styles.headerChip,
+                      {
+                        backgroundColor: isChecadaOficina
+                          ? '#dcfce7'
+                          : snapshot.empleado_gps_activo
+                            ? '#dcfce7'
+                            : '#fee2e2',
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={
+                        isChecadaOficina
+                          ? 'business-outline'
+                          : snapshot.empleado_gps_activo
+                            ? 'location-outline'
+                            : 'warning-outline'
+                      }
+                      size={12}
+                      color={
+                        isChecadaOficina || snapshot.empleado_gps_activo ? '#15803d' : '#b91c1c'
+                      }
+                    />
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: '700',
+                        color:
+                          isChecadaOficina || snapshot.empleado_gps_activo ? '#15803d' : '#b91c1c',
+                      }}
+                    >
+                      {isChecadaOficina
+                        ? 'Checador Oficina'
+                        : snapshot.empleado_gps_activo
+                          ? 'GPS Celular Activo'
+                          : 'GPS Apagado'}
+                    </Text>
+                  </View>
+                )}
               </View>
-              <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
-                {empleadoNombre} • <Text style={{ fontWeight: '700', color: themeColors.accent }}>{tipo}</Text> a las{' '}
-                {formatHoraDisplay(hora)} ({fecha})
-                {snapshot?.desfase_horas_oficina && snapshot.desfase_horas_oficina !== 0 && snapshot.hora_oficina_chihuahua
-                  ? ` • 🕒 ${formatHoraDisplay(snapshot.hora_oficina_chihuahua)} Hora Chihuahua`
+
+              <Text
+                style={{ fontSize: 11.5, color: themeColors.textSecondary, marginTop: 3 }}
+                numberOfLines={1}
+              >
+                {fecha}
+                {snapshot?.desfase_horas_oficina &&
+                snapshot.desfase_horas_oficina !== 0 &&
+                snapshot.hora_oficina_chihuahua
+                  ? ` • Equivale a ${formatHoraDisplay(snapshot.hora_oficina_chihuahua)} Hora Chihuahua (${snapshot.utc_offset_empleado})`
                   : ''}
-                {isChecadaOficina ? ' • 🏢 Checador de Oficina' : ''}
+                {!isChecadaOficina && snapshot?.empleado_gps_activo && snapshot.empleado_direccion
+                  ? ` • ${snapshot.empleado_direccion}`
+                  : ''}
               </Text>
             </View>
+
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <Ionicons name="close" size={24} color={themeColors.text} />
+              <Ionicons name="close" size={22} color={themeColors.textSecondary} />
             </TouchableOpacity>
           </View>
 
           {isLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color={themeColors.accent} />
-              <Text style={{ fontSize: 13, fontWeight: '700', color: themeColors.text, marginTop: 12 }}>
-                Consultando satélites y telemetría de las 5 unidades...
-              </Text>
-              <Text style={{ fontSize: 11, color: themeColors.textSecondary, marginTop: 4, textAlign: 'center' }}>
-                Revisando ubicación, velocidad y motor de cada camioneta a las {formatHoraDisplay(hora)}
+              <Text style={{ fontSize: 13, fontWeight: '600', color: themeColors.text, marginTop: 12 }}>
+                Consultando ubicación de la flota a las {formatHoraDisplay(hora)}...
               </Text>
             </View>
           ) : error ? (
             <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle-outline" size={48} color={themeColors.danger} />
+              <Ionicons name="alert-circle-outline" size={40} color={themeColors.danger} />
               <Text style={{ fontSize: 14, fontWeight: '700', color: themeColors.danger, marginTop: 8 }}>
-                Error al consultar flota
+                No se pudo consultar la flota
               </Text>
               <Text style={{ fontSize: 12, color: themeColors.textSecondary, textAlign: 'center', marginTop: 4 }}>
                 {error}
               </Text>
             </View>
           ) : snapshot ? (
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 14, gap: 12 }}>
-              {/* Alerta de Checada en Oficina vs Celular con GPS vs Celular Apagado */}
-              {isChecadaOficina ? (
-                <View style={[styles.alertBanner, { backgroundColor: '#f0fdf4', borderColor: '#22c55e' }]}>
-                  <Ionicons name="business" size={22} color="#15803d" />
-                  <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#166534' }}>
-                      🏢 CHECADOR FÍSICO DE OFICINA
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#14532d', marginTop: 2 }}>
-                      Checada presencial registrada en el checador físico de la oficina (Hikvision MinMoe). Se sabe de antemano que la asistencia es física en las instalaciones centrales, por lo que no requiere ubicación del celular.
-                    </Text>
-                  </View>
+            <>
+              {/* Solo mostrar banner si existe una anomalía real que requiera atención */}
+              {anomalyMessage && (
+                <View style={styles.anomalyBanner}>
+                  <Ionicons name="alert-circle" size={16} color="#b45309" />
+                  <Text style={styles.anomalyText}>{anomalyMessage}</Text>
                 </View>
-              ) : !snapshot.empleado_gps_activo ? (
-                <View style={[styles.alertBanner, { backgroundColor: '#fee2e2', borderColor: '#ef4444' }]}>
-                  <Ionicons name="warning" size={20} color="#b91c1c" />
-                  <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#991b1b' }}>
-                      UBICACIÓN DEL CELULAR APAGADA
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#7f1d1d', marginTop: 2 }}>
-                      El empleado checó sin transmitir GPS. Revisa abajo dónde estaban las 5 camionetas a esa hora exacta para verificar si iba en alguna de ellas.
-                    </Text>
+              )}
+
+              {isDesktop ? (
+                /* VISTA ESCRITORIO: 2 Columnas limpias (Mapa a la izquierda, Lista a la derecha) */
+                <View style={styles.desktopBody}>
+                  <View
+                    style={[
+                      styles.desktopMapCol,
+                      { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement },
+                    ]}
+                  >
+                    {leafletHtml ? (
+                      <iframe
+                        title="Mapa Flota vs Asistencia"
+                        width="100%"
+                        height="100%"
+                        style={{ border: 0, minHeight: 430 }}
+                        srcDoc={leafletHtml}
+                      />
+                    ) : (
+                      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                          Sin coordenadas disponibles
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={[styles.desktopListCol, { borderLeftColor: themeColors.border }]}>
+                    <View style={styles.listHeaderRow}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                        Flota ({snapshot.resumen.total_unidades})
+                      </Text>
+                      <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                        {snapshot.resumen.en_movimiento > 0
+                          ? `${snapshot.resumen.en_movimiento} en ruta • `
+                          : ''}
+                        {snapshot.resumen.estacionadas} detenidas
+                        {selectedUnit ? ' • Toca de nuevo para ver todas' : ''}
+                      </Text>
+                    </View>
+
+                    <ScrollView
+                      style={{ flex: 1 }}
+                      contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12, gap: 6 }}
+                    >
+                      {snapshot.unidades.map(renderUnitRow)}
+                    </ScrollView>
                   </View>
                 </View>
               ) : (
-                <View style={[styles.alertBanner, { backgroundColor: '#f0fdf4', borderColor: '#22c55e' }]}>
-                  <Ionicons name="checkmark-circle" size={20} color="#15803d" />
-                  <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#166534' }}>
-                      CELULAR CON GPS ACTIVO
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#14532d', marginTop: 2 }}>
-                      📍 {snapshot.empleado_direccion || `${snapshot.empleado_lat?.toFixed(5)}, ${snapshot.empleado_lng?.toFixed(5)}`}
-                    </Text>
-                  </View>
-                </View>
-              )}
-
-              {/* Aviso de homologación de huso horario si el técnico estaba fuera de Chihuahua o su reloj tenía desfase */}
-              {snapshot.desfase_horas_oficina !== undefined && snapshot.desfase_horas_oficina !== 0 && (
-                <View style={[styles.alertBanner, { backgroundColor: '#eff6ff', borderColor: '#60a5fa' }]}>
-                  <Ionicons name="time" size={20} color="#1d4ed8" />
-                  <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#1e3a8a' }}>
-                      🕒 SINCRONIZACIÓN AUTOMÁTICA DE HUSO HORARIO ({snapshot.zona_horaria_detectada || snapshot.utc_offset_empleado})
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#1e40af', marginTop: 2 }}>
-                      La checada marcó las <Text style={{ fontWeight: '800' }}>{formatHoraDisplay(hora)}</Text> en el reloj del sitio/dispositivo ({snapshot.utc_offset_empleado}), lo que equivale exactamente a las{' '}
-                      <Text style={{ fontWeight: '800' }}>{formatHoraDisplay(snapshot.hora_oficina_chihuahua || hora)}</Text> en Hora Oficial de Oficina Chihuahua (UTC-6). El satélite GPS se consultó en el instante real exacto del reporte.
-                    </Text>
-                  </View>
-                </View>
-              )}
-
-              {/* Alerta de camioneta en movimiento o lejos si la hay */}
-              {snapshot.resumen.alerta_principal && (
-                <View style={[styles.alertBanner, { backgroundColor: '#fef3c7', borderColor: '#f59e0b' }]}>
-                  <Ionicons name="speedometer" size={20} color="#b45309" />
-                  <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#92400e' }}>
-                      ALERTA AUTOMÁTICA DE CHECADA
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#78350f', marginTop: 2 }}>
-                      {snapshot.resumen.alerta_principal}
-                    </Text>
-                  </View>
-                </View>
-              )}
-
-              {/* Resumen numérico */}
-              <View style={styles.metricsRow}>
-                <View style={[styles.metricChip, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.textSecondary }}>
-                    Camionetas
-                  </Text>
-                  <Text style={{ fontSize: 14, fontWeight: '800', color: themeColors.text }}>
-                    {snapshot.resumen.total_unidades}
-                  </Text>
-                </View>
-
-                <View style={[styles.metricChip, { backgroundColor: '#dcfce7', borderColor: '#86efac' }]}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#166534' }}>
-                    En movimiento
-                  </Text>
-                  <Text style={{ fontSize: 14, fontWeight: '800', color: '#15803d' }}>
-                    {snapshot.resumen.en_movimiento}
-                  </Text>
-                </View>
-
-                <View style={[styles.metricChip, { backgroundColor: '#e0f2fe', borderColor: '#7dd3fc' }]}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#075985' }}>
-                    Estacionadas
-                  </Text>
-                  <Text style={{ fontSize: 14, fontWeight: '800', color: '#0369a1' }}>
-                    {snapshot.resumen.estacionadas}
-                  </Text>
-                </View>
-
-                {(snapshot.empleado_gps_activo || isChecadaOficina) && (
-                  <View style={[styles.metricChip, { backgroundColor: '#ede9fe', borderColor: '#c4b5fd' }]}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#5b21b6' }}>
-                      {isChecadaOficina ? 'En oficina' : 'Junto al emp.'}
-                    </Text>
-                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#6d28d9' }}>
-                      {snapshot.resumen.cerca_empleado}
-                    </Text>
-                  </View>
-                )}
-              </View>
-
-              {/* MAPA COMPARATIVO */}
-              <View style={[styles.mapContainer, { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement }]}>
-                {Platform.OS === 'web' && leafletHtml ? (
-                  <iframe
-                    title="Mapa Comparativo Flota vs Asistencia"
-                    width="100%"
-                    height="320"
-                    style={{ border: 0 }}
-                    srcDoc={leafletHtml}
-                  />
-                ) : staticMapUrl ? (
-                  <Image
-                    source={{ uri: staticMapUrl }}
-                    style={{ width: '100%', height: 260 }}
-                    contentFit="cover"
-                  />
-                ) : (
-                  <View style={{ height: 200, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
-                      No se encontraron coordenadas para mostrar el mapa
-                    </Text>
-                  </View>
-                )}
-              </View>
-
-              {/* LISTA DETALLADA DE LAS 5 CAMIONETAS */}
-              <View style={{ gap: 8 }}>
-                <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.text }}>
-                  Posición de las unidades a las {formatHoraDisplay(hora)}:
-                </Text>
-
-                {snapshot.unidades.map((unit) => {
-                  const isMoving = unit.velocidad > 10;
-                  const isSelected = selectedUnit?.vehiculo_id === unit.vehiculo_id;
-
-                  const badgeBg =
-                    unit.badge_color === 'verde'
-                      ? '#dcfce7'
-                      : unit.badge_color === 'azul'
-                        ? '#e0f2fe'
-                        : unit.badge_color === 'rojo'
-                          ? '#fee2e2'
-                          : themeColors.backgroundElement;
-
-                  const badgeText =
-                    unit.badge_color === 'verde'
-                      ? '#15803d'
-                      : unit.badge_color === 'azul'
-                        ? '#0369a1'
-                        : unit.badge_color === 'rojo'
-                          ? '#b91c1c'
-                          : themeColors.textSecondary;
-
-                  return (
-                    <TouchableOpacity
-                      key={unit.vehiculo_id}
-                      activeOpacity={0.8}
-                      onPress={() => setSelectedUnit(unit)}
-                      style={[
-                        styles.unitCard,
-                        {
-                          backgroundColor: isSelected ? themeColors.accent + '10' : themeColors.background,
-                          borderColor: isSelected ? themeColors.accent : themeColors.border,
-                        },
-                      ]}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                        <View style={{ flex: 1 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                            <Text style={{ fontSize: 13, fontWeight: '800', color: themeColors.text }}>
-                              {unit.marca} {unit.modelo}
-                            </Text>
-                            <View style={{ backgroundColor: themeColors.backgroundElement, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: themeColors.border }}>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.text }}>
-                                {unit.placas}
-                              </Text>
-                            </View>
-                            {unit.es_vehiculo_asignado && (
-                              <View style={{ backgroundColor: '#fef08a', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#facc15' }}>
-                                <Text style={{ fontSize: 10, fontWeight: '800', color: '#854d0e' }}>
-                                  ⭐ CAMIONETA DEL TURNO
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-
-                          <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 4 }}>
-                            📍 {unit.direccion || 'Ubicación no disponible'}
-                          </Text>
-
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                            <View style={[styles.statusBadge, { backgroundColor: badgeBg }]}>
-                              <Text style={{ fontSize: 11, fontWeight: '800', color: badgeText }}>
-                                {unit.motivo_estado}
-                              </Text>
-                            </View>
-
-                            <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                              ⚡ {unit.velocidad} km/h • {unit.ignicion ? 'Motor ON' : 'Motor OFF'}
-                            </Text>
-
-                            {unit.bateria_v && (
-                              <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                                🔋 {unit.bateria_v} V
-                              </Text>
-                            )}
-
-                            {unit.hora_reporte && (
-                              <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
-                                🕒 Reportó: {unit.hora_reporte}
-                                {snapshot.desfase_horas_oficina !== undefined &&
-                                snapshot.desfase_horas_oficina !== 0 &&
-                                unit.hora_reporte_chihuahua &&
-                                unit.hora_reporte_chihuahua !== unit.hora_reporte
-                                  ? ` (${unit.hora_reporte_chihuahua} Chih.)`
-                                  : ''}
-                                {typeof unit.diferencia_minutos === 'number'
-                                  ? ` • ±${unit.diferencia_minutos} min`
-                                  : ''}
-                              </Text>
-                            )}
-                          </View>
-                        </View>
-
-                        {unit.lat && unit.lng && (
-                          <TouchableOpacity
-                            onPress={() => handleOpenGoogleMaps(unit.lat, unit.lng)}
-                            style={[styles.gmapsBtn, { backgroundColor: themeColors.accent + '15' }]}
-                            accessibilityLabel="Abrir en Google Maps"
-                          >
-                            <Ionicons name="navigate-outline" size={16} color={themeColors.accent} />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.accent }}>
-                              Maps
-                            </Text>
-                          </TouchableOpacity>
-                        )}
+                /* VISTA MÓVIL / PANTALLA COMPACTA */
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12, gap: 10 }}>
+                  <View
+                    style={[
+                      styles.mobileMapContainer,
+                      { borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement },
+                    ]}
+                  >
+                    {Platform.OS === 'web' && leafletHtml ? (
+                      <iframe
+                        title="Mapa Flota vs Asistencia"
+                        width="100%"
+                        height="260"
+                        style={{ border: 0 }}
+                        srcDoc={leafletHtml}
+                      />
+                    ) : staticMapUrl ? (
+                      <Image
+                        source={{ uri: staticMapUrl }}
+                        style={{ width: '100%', height: 230 }}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <View style={{ height: 180, justifyContent: 'center', alignItems: 'center' }}>
+                        <Text style={{ fontSize: 12, color: themeColors.textSecondary }}>
+                          Sin coordenadas disponibles
+                        </Text>
                       </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </ScrollView>
+                    )}
+                  </View>
+
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text }}>
+                      Unidades ({snapshot.resumen.total_unidades})
+                    </Text>
+                    <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
+                      {snapshot.resumen.en_movimiento > 0
+                        ? `${snapshot.resumen.en_movimiento} en ruta • `
+                        : ''}
+                      {snapshot.resumen.estacionadas} detenidas
+                    </Text>
+                  </View>
+
+                  <View style={{ gap: 6 }}>{snapshot.unidades.map(renderUnitRow)}</View>
+                </ScrollView>
+              )}
+            </>
           ) : null}
         </View>
       </View>
@@ -617,20 +713,20 @@ export default function CorroborarAsistenciaGpsModal({
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 12,
   },
   modalContent: {
     width: '100%',
-    maxWidth: 720,
-    maxHeight: '92%',
+    maxWidth: 680,
+    maxHeight: '90%',
     borderRadius: BorderRadius.large,
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
-    boxShadow: '0 8px 30px rgba(0,0,0,0.25)',
+    boxShadow: '0 12px 36px rgba(0,0,0,0.22)',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -641,64 +737,108 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
   },
-  closeBtn: {
-    padding: 6,
-  },
-  loadingContainer: {
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  errorContainer: {
-    padding: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  alertBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  metricsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  metricChip: {
-    flex: 1,
-    minWidth: 100,
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  mapContainer: {
-    borderRadius: 10,
-    overflow: 'hidden',
-    borderWidth: 1,
-  },
-  unitCard: {
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  gmapsBtn: {
+  headerChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingVertical: 2.5,
+    borderRadius: 999,
+  },
+  closeBtn: {
+    padding: 4,
     borderRadius: 6,
-    marginLeft: 8,
+  },
+  loadingContainer: {
+    padding: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorContainer: {
+    padding: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  anomalyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#fffbeb',
+    borderBottomWidth: 1,
+    borderBottomColor: '#fde68a',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  anomalyText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#92400e',
+  },
+  desktopBody: {
+    flexDirection: 'row',
+    height: 460,
+  },
+  desktopMapCol: {
+    flex: 1.35,
+    overflow: 'hidden',
+  },
+  desktopListCol: {
+    flex: 1,
+    borderLeftWidth: 1,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  listHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  mobileMapContainer: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+  },
+  unitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  assignedTag: {
+    backgroundColor: '#fef9c3',
+    borderColor: '#fde047',
+    borderWidth: 1,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  assignedTagText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#854d0e',
+  },
+  iconActionBtn: {
+    padding: 6,
+    borderRadius: 6,
+    borderWidth: 1,
   },
 });
