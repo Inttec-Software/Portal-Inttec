@@ -1122,6 +1122,7 @@ export function useAdminGastos() {
     factura: any, 
     approveDirectly: boolean,
     extraOptions?: { 
+      monto_aplicado?: number;
       monto_propina?: number; 
       es_compartida?: boolean;
       motivo_diferencia?: string | null;
@@ -1152,6 +1153,7 @@ export function useAdminGastos() {
           factura_id: factura.id,
           approve_directly: approveDirectly,
           actor_id: adminUser.id,
+          monto_aplicado: extraOptions?.monto_aplicado,
           monto_propina: extraOptions?.monto_propina || 0,
           es_compartida: extraOptions?.es_compartida || false,
           motivo_diferencia: extraOptions?.motivo_diferencia || null,
@@ -1207,7 +1209,7 @@ export function useAdminGastos() {
     }
   };
 
-  const handleDetachSatFactura = async () => {
+  const handleDetachSatFactura = async (facturaId?: string) => {
     if (!selectedGasto || !adminUser) return;
     const targetGastoId = selectedGasto.id;
     setIsAttachingSatFactura(true);
@@ -1218,6 +1220,7 @@ export function useAdminGastos() {
         headers,
         body: JSON.stringify({
           actor_id: adminUser.id,
+          factura_id: facturaId || undefined,
         }),
       });
 
@@ -1231,6 +1234,8 @@ export function useAdminGastos() {
         ...selectedGasto,
         factura_recibida_id: null,
         factura_recibida_rel: null,
+        facturas_recibidas_rel: [],
+        total_comprobado_sat: 0,
         monto_propina: 0,
         es_factura_compartida: false,
       };

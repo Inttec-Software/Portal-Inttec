@@ -213,9 +213,15 @@ const getGastoDestinoReportMeta = (g: Gasto) => {
 };
 
 const buildSatFieldsForGasto = (g: Gasto) => {
-  const uuidCfdi = g.factura_recibida_rel?.uuid || '';
-  const emisorCfdi = g.factura_recibida_rel ? (g.factura_recibida_rel.nombre_emisor || g.factura_recibida_rel.rfc_emisor || '') : '';
-  const totalFacturaSat = g.factura_recibida_rel?.total !== undefined ? Number(g.factura_recibida_rel.total) : '';
+  const facturasList = Array.isArray(g.facturas_recibidas_rel) && g.facturas_recibidas_rel.length > 0
+    ? g.facturas_recibidas_rel
+    : (g.factura_recibida_rel ? [g.factura_recibida_rel] : []);
+
+  const uuidCfdi = facturasList.map(f => f.uuid).filter(Boolean).join(', ');
+  const emisorCfdi = facturasList.map(f => f.nombre_emisor || f.rfc_emisor).filter(Boolean).join(', ');
+  const totalFacturaSat = facturasList.length > 0
+    ? facturasList.reduce((sum, f) => sum + Number((f as any).monto_aplicado ?? f.total ?? 0), 0)
+    : '';
   const montoPropina = Number(g.monto_propina || 0) > 0 ? Number(g.monto_propina) : 0;
   const esCompartida = g.es_factura_compartida ? 'Sí' : 'No';
 
@@ -226,7 +232,9 @@ const buildSatFieldsForGasto = (g: Gasto) => {
   }
 
   let comprobacionSat = 'Sin CFDI';
-  if (g.factura_recibida_rel || g.factura_recibida_id) {
+  if (facturasList.length > 1) {
+    comprobacionSat = `Comprobado con ${facturasList.length} CFDIs`;
+  } else if (facturasList.length === 1 || g.factura_recibida_id) {
     comprobacionSat = 'Comprobado con CFDI';
   } else if (g.facturado) {
     comprobacionSat = 'Factura Adjunta (Pendiente SAT)';

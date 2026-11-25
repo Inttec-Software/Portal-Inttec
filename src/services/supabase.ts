@@ -180,6 +180,32 @@ export interface Gasto {
     total_consumido?: number;
     total_gastos_vinculados?: number;
   } | null;
+  facturas_recibidas_rel?: Array<{
+    id: string;
+    uuid: string;
+    rfc_emisor?: string;
+    nombre_emisor?: string;
+    rfc_receptor?: string;
+    fecha_emision?: string;
+    subtotal?: number;
+    descuento?: number;
+    iva?: number;
+    retencion_isr?: number;
+    retencion_iva?: number;
+    total?: number;
+    moneda?: string;
+    tipo_comprobante?: string;
+    estado_sat?: string;
+    xml_url?: string | null;
+    pdf_url?: string | null;
+    conceptos_json?: any;
+    monto_aplicado?: number;
+    motivo_diferencia?: string | null;
+    detalle_diferencia?: string | null;
+    total_consumido?: number;
+    total_gastos_vinculados?: number;
+  }> | null;
+  total_comprobado_sat?: number | null;
 }
 
 export const GastoHelper = {

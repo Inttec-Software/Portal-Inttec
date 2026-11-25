@@ -85,18 +85,48 @@ export const FACTURA_REL_SUBQUERIES_SQL = `
     SELECT f.id, f.uuid, f.rfc_emisor, f.nombre_emisor, f.rfc_receptor, f.fecha_emision,
            f.subtotal, f.descuento, f.iva, f.retencion_isr, f.retencion_iva, f.total,
            f.moneda, f.tipo_comprobante, f.estado_sat, f.xml_url, f.pdf_url, f.conceptos_json,
-           (
-             SELECT COALESCE(SUM(COALESCE(g2.monto, 0) - COALESCE(g2.monto_propina, 0)), 0)
-             FROM gastos g2
-             WHERE g2.factura_recibida_id = f.id
-           ) as total_consumido,
-           (
-             SELECT COALESCE(COUNT(g2.id), 0)
-             FROM gastos g2
-             WHERE g2.factura_recibida_id = f.id
-           ) as total_gastos_vinculados
+           COALESCE((
+             SELECT SUM(gf2.monto_aplicado)
+             FROM gasto_facturas gf2
+             WHERE gf2.factura_recibida_id = f.id
+           ), 0) as total_consumido,
+           COALESCE((
+             SELECT COUNT(DISTINCT gf2.gasto_id)
+             FROM gasto_facturas gf2
+             WHERE gf2.factura_recibida_id = f.id
+           ), 0) as total_gastos_vinculados
     FROM facturas_recibidas f WHERE f.id = g.factura_recibida_id
-  ) fr_obj) as factura_recibida_rel
+  ) fr_obj) as factura_recibida_rel,
+  COALESCE((
+    SELECT json_agg(row_to_json(frs_obj) ORDER BY frs_obj.link_created_at ASC)
+    FROM (
+      SELECT f.id, f.uuid, f.rfc_emisor, f.nombre_emisor, f.rfc_receptor, f.fecha_emision,
+             f.subtotal, f.descuento, f.iva, f.retencion_isr, f.retencion_iva, f.total,
+             f.moneda, f.tipo_comprobante, f.estado_sat, f.xml_url, f.pdf_url, f.conceptos_json,
+             gf.monto_aplicado,
+             gf.motivo_diferencia,
+             gf.detalle_diferencia,
+             gf.created_at as link_created_at,
+             COALESCE((
+               SELECT SUM(gf2.monto_aplicado)
+               FROM gasto_facturas gf2
+               WHERE gf2.factura_recibida_id = f.id
+             ), 0) as total_consumido,
+             COALESCE((
+               SELECT COUNT(DISTINCT gf2.gasto_id)
+               FROM gasto_facturas gf2
+               WHERE gf2.factura_recibida_id = f.id
+             ), 0) as total_gastos_vinculados
+      FROM gasto_facturas gf
+      JOIN facturas_recibidas f ON f.id = gf.factura_recibida_id
+      WHERE gf.gasto_id = g.id
+    ) frs_obj
+  ), '[]'::json) as facturas_recibidas_rel,
+  COALESCE((
+    SELECT SUM(gf.monto_aplicado)
+    FROM gasto_facturas gf
+    WHERE gf.gasto_id = g.id
+  ), 0) as total_comprobado_sat
 `;
 
 export const GASTO_RELATIONS_SELECT_SQL = `

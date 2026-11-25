@@ -207,7 +207,14 @@ export const getAdminReportes = async (req: Request, res: Response) => {
           ) OR
           EXISTS (
             SELECT 1 FROM facturas_recibidas fr 
-            WHERE (fr.id = g.factura_recibida_id OR fr.id = g.factura_sugerida_id) 
+            WHERE (
+              fr.id = g.factura_recibida_id 
+              OR fr.id = g.factura_sugerida_id
+              OR EXISTS (
+                SELECT 1 FROM gasto_facturas gf 
+                WHERE gf.gasto_id = g.id AND gf.factura_recibida_id = fr.id
+              )
+            ) 
             AND (
               fr.uuid ILIKE $${pIdx}
               ${cleanParamIdx ? `OR replace(fr.uuid, '-', '') ILIKE $${cleanParamIdx}` : ''}
@@ -1411,6 +1418,7 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
       approve_directly, 
       factura_url: customFacturaUrl, 
       actor_id,
+      monto_aplicado,
       monto_propina = 0,
       es_compartida = false,
       motivo_diferencia = null,
@@ -1432,20 +1440,55 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Factura recibida no encontrada' });
     }
 
-    // Validar si hay otros gastos vinculados a esta misma factura
+    // 1. Validar si hay otros gastos vinculados a esta misma factura en gasto_facturas
     const otrosGastosRes = await pool.query(
-      'SELECT id, monto, COALESCE(monto_propina, 0) as monto_propina, COALESCE(es_factura_compartida, false) as es_factura_compartida FROM gastos WHERE factura_recibida_id = $1 AND id != $2',
+      `SELECT gf.gasto_id as id, gf.monto_aplicado, g.monto, COALESCE(g.monto_propina, 0) as monto_propina, COALESCE(g.es_factura_compartida, false) as es_factura_compartida
+       FROM gasto_facturas gf
+       JOIN gastos g ON g.id = gf.gasto_id
+       WHERE gf.factura_recibida_id = $1 AND gf.gasto_id != $2`,
       [factura.id, id]
     );
     const otrosGastos = otrosGastosRes.rows;
 
+    // 2. Consultar otras facturas ya vinculadas a este mismo gasto
+    const otrasFacturasGastoRes = await pool.query(
+      `SELECT gf.factura_recibida_id, gf.monto_aplicado, gf.motivo_diferencia, gf.detalle_diferencia
+       FROM gasto_facturas gf
+       WHERE gf.gasto_id = $1 AND gf.factura_recibida_id != $2`,
+      [id, factura.id]
+    );
+    const otrasFacturasGasto = otrasFacturasGastoRes.rows;
+
     const gastoMonto = Number(gasto.monto || 0);
     const facTotal = Number(factura.total || 0);
     const propinaNum = Math.max(0, Number(monto_propina) || 0);
-    const consumoActual = gastoMonto - propinaNum;
 
+    const totalComprobadoPrevio = otrasFacturasGasto.reduce(
+      (sum, row) => sum + Number(row.monto_aplicado || 0),
+      0
+    );
+    const saldoPendienteGasto = Math.max(0, gastoMonto - totalComprobadoPrevio);
+
+    const consumidoOtrosEnFactura = otrosGastos.reduce(
+      (sum, row) => sum + Number(row.monto_aplicado || 0),
+      0
+    );
+    const saldoDisponibleFactura = Math.max(0, facTotal - consumidoOtrosEnFactura);
+
+    // Determinar el monto aplicado al gasto por esta factura
+    const montoAplicadoNum =
+      monto_aplicado !== undefined && monto_aplicado !== null && !isNaN(Number(monto_aplicado))
+        ? Math.max(0, Number(monto_aplicado))
+        : Math.min(saldoDisponibleFactura, saldoPendienteGasto > 0 ? saldoPendienteGasto : gastoMonto);
+
+    if (montoAplicadoNum <= 0) {
+      return res.status(400).json({
+        error: 'El monto cubierto por la factura debe ser mayor a $0.00.',
+      });
+    }
+
+    // Validar saldo disponible en la factura (si es compartida o si facTotal > montoAplicadoNum)
     if (otrosGastos.length > 0) {
-      // Si la factura ya fue vinculada a otro gasto, debe estar registrada como factura compartida
       const esPreviamenteCompartida = otrosGastos.some(g => g.es_factura_compartida === true);
       if (!esPreviamenteCompartida && !es_compartida) {
         return res.status(400).json({
@@ -1453,69 +1496,96 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
         });
       }
 
-      // Validar saldo disponible de la factura compartida
-      const consumidoOtros = otrosGastos.reduce(
-        (sum, g) => sum + (Number(g.monto || 0) - Number(g.monto_propina || 0)),
-        0
-      );
-      const saldoDisponible = Math.max(0, facTotal - consumidoOtros);
-
-      if (consumoActual > saldoDisponible + 0.05) {
+      if (montoAplicadoNum > saldoDisponibleFactura + 0.05) {
         return res.status(400).json({
-          error: `Saldo insuficiente en la factura compartida. Saldo disponible: $${saldoDisponible.toFixed(2)}, pero este gasto requiere $${consumoActual.toFixed(2)}.`,
+          error: `Saldo insuficiente en la factura compartida. Saldo disponible: $${saldoDisponibleFactura.toFixed(2)}, pero intentas aplicar $${montoAplicadoNum.toFixed(2)}.`,
         });
       }
     } else {
-      // Primera vinculación de esta factura
-      if (facTotal > gastoMonto + 0.05 && !es_compartida) {
+      if (montoAplicadoNum > facTotal + 0.05) {
         return res.status(400).json({
-          error: `El total de la factura ($${facTotal.toFixed(2)}) es mayor al monto del gasto ($${gastoMonto.toFixed(2)}). Para usar una factura mayor debe marcarse como Factura Compartida.`,
+          error: `El monto aplicado ($${montoAplicadoNum.toFixed(2)}) no puede ser mayor al total de la factura ($${facTotal.toFixed(2)}).`,
         });
       }
+      if (facTotal > montoAplicadoNum + 0.05 && !es_compartida) {
+        return res.status(400).json({
+          error: `El total de la factura ($${facTotal.toFixed(2)}) es mayor al monto que cubre de este gasto ($${montoAplicadoNum.toFixed(2)}). Para usar una factura mayor debe marcarse como Factura Compartida.`,
+        });
+      }
+    }
 
-      if (gastoMonto > facTotal + 0.05) {
-        const diff = gastoMonto - facTotal;
-        const motivoValido = Boolean(motivo_diferencia && motivo_diferencia !== 'NINGUNO');
-        if (!motivoValido && Math.abs(diff - propinaNum) > 0.05) {
+    // Validar cobertura acumulada del gasto
+    const nuevoTotalComprobado = totalComprobadoPrevio + montoAplicadoNum;
+    if (nuevoTotalComprobado > gastoMonto + 0.05) {
+      return res.status(400).json({
+        error: `La suma comprobada ($${nuevoTotalComprobado.toFixed(2)}) excede el monto total del gasto ($${gastoMonto.toFixed(2)}). Saldo pendiente por comprobar: $${saldoPendienteGasto.toFixed(2)}.`,
+      });
+    }
+
+    const diffRestante = Math.max(0, gastoMonto - nuevoTotalComprobado);
+    let motivoFinalDiferencia: string | null = motivo_diferencia || null;
+    if (diffRestante > 0.05) {
+      const motivosPermitidos = new Set(['PARCIAL', 'PROPINA', 'COMISION_PLATAFORMA', 'DIFERENCIA_AUTORIZADA']);
+      if (!motivoFinalDiferencia || !motivosPermitidos.has(motivoFinalDiferencia)) {
+        if (propinaNum > 0 && Math.abs(diffRestante - propinaNum) <= 0.05) {
+          motivoFinalDiferencia = 'PROPINA';
+        } else {
           return res.status(400).json({
-            error: `El monto del gasto ($${gastoMonto.toFixed(2)}) es mayor al CFDI ($${facTotal.toFixed(2)}). Debes justificar la diferencia de $${diff.toFixed(2)} (ej. Propina o Comisión de plataforma).`,
+            error: `Quedan $${diffRestante.toFixed(2)} sin comprobar del gasto ($${gastoMonto.toFixed(2)}). Indica si falta otra factura o justifica la diferencia (Propina / Comisión / Autorizada).`,
           });
         }
       }
+    } else {
+      motivoFinalDiferencia = null;
     }
 
     // Determinar propina final y motivo_sin_factura
     let newMotivoSinFactura: string | null = null;
     let propinaFinal = 0;
-    if (gastoMonto > facTotal + 0.05) {
-      const diff = gastoMonto - facTotal;
-      if (motivo_diferencia === 'COMISION_PLATAFORMA') {
-        newMotivoSinFactura = `COMISION_PLATAFORMA: $${diff.toFixed(2)}${detalle_diferencia ? ` - ${detalle_diferencia}` : ''}`;
+    if (diffRestante > 0.05) {
+      if (motivoFinalDiferencia === 'COMISION_PLATAFORMA') {
+        newMotivoSinFactura = `COMISION_PLATAFORMA: $${diffRestante.toFixed(2)}${detalle_diferencia ? ` - ${detalle_diferencia}` : ''}`;
+      } else if (motivoFinalDiferencia === 'DIFERENCIA_AUTORIZADA') {
+        newMotivoSinFactura = `DIFERENCIA_AUTORIZADA: $${diffRestante.toFixed(2)}${detalle_diferencia ? ` - ${detalle_diferencia}` : ''}`;
+      } else if (motivoFinalDiferencia === 'PROPINA') {
+        propinaFinal = propinaNum > 0 ? propinaNum : diffRestante;
+      } else if (motivoFinalDiferencia === 'PARCIAL') {
+        // Comprobación parcial: no es propina ni error, falta otra factura
         propinaFinal = 0;
-      } else if (motivo_diferencia === 'DIFERENCIA_AUTORIZADA') {
-        newMotivoSinFactura = `DIFERENCIA_AUTORIZADA: $${diff.toFixed(2)}${detalle_diferencia ? ` - ${detalle_diferencia}` : ''}`;
-        propinaFinal = 0;
-      } else {
-        // PROPINA
-        propinaFinal = propinaNum > 0 ? propinaNum : diff;
         newMotivoSinFactura = null;
       }
     }
 
     const esCompartidaEfectiva = Boolean(es_compartida || otrosGastos.length > 0);
+    const actor = req.user?.id || actor_id || null;
 
-    // Si es compartida, actualizar la bandera en todos los gastos asociados
+    // 3. Insertar o actualizar vínculo en tabla puente gasto_facturas
+    await pool.query(
+      `INSERT INTO gasto_facturas (
+         gasto_id, factura_recibida_id, monto_aplicado, motivo_diferencia, detalle_diferencia, created_by
+       ) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (gasto_id, factura_recibida_id)
+       DO UPDATE SET
+         monto_aplicado = EXCLUDED.monto_aplicado,
+         motivo_diferencia = EXCLUDED.motivo_diferencia,
+         detalle_diferencia = EXCLUDED.detalle_diferencia`,
+      [id, factura.id, montoAplicadoNum, motivoFinalDiferencia, detalle_diferencia || null, actor]
+    );
+
+    // Si es compartida, actualizar la bandera en todos los gastos asociados a esa factura
     if (esCompartidaEfectiva) {
       await pool.query(
-        'UPDATE gastos SET es_factura_compartida = TRUE WHERE factura_recibida_id = $1',
+        `UPDATE gastos SET es_factura_compartida = TRUE
+         WHERE id IN (SELECT gasto_id FROM gasto_facturas WHERE factura_recibida_id = $1)`,
         [factura.id]
       );
     }
 
-    // Conservar la factura_url que el usuario ya tenía (archivos subidos). No concatenar cfdi:// ni volverlo array JSON.
-    const newFacturaUrlStr = gasto.factura_url || factura.pdf_url || null;
+    // Mantener factura_recibida_id sincronizado con la factura principal (primera vinculada)
+    const primaryFacturaId = gasto.factura_recibida_id || factura.id;
+    const newFacturaUrlStr = customFacturaUrl || gasto.factura_url || factura.pdf_url || null;
 
-    // Determinar si debe aprobarse directamente (por defecto sí cuando devuelto_por_factura es true o approve_directly = true)
+    // Determinar si debe aprobarse directamente
     const shouldApproveDirectly = approve_directly !== undefined ? Boolean(approve_directly) : Boolean(gasto.devuelto_por_factura);
 
     const newStatus = shouldApproveDirectly ? 'APPROVED' : gasto.status;
@@ -1537,9 +1607,9 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
       [
         newMotivoSinFactura,
         newFacturaUrlStr, 
-        factura.id, 
+        primaryFacturaId, 
         propinaFinal, 
-        esCompartidaEfectiva, 
+        esCompartidaEfectiva || Boolean(gasto.es_factura_compartida), 
         newStatus, 
         newApprovedAt, 
         id
@@ -1555,20 +1625,20 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
     }
 
     try {
-      const actor = req.user?.id || actor_id;
       let diffAudit = '';
-      if (gastoMonto > facTotal + 0.05) {
-        const diff = gastoMonto - facTotal;
-        if (motivo_diferencia === 'COMISION_PLATAFORMA') {
-          diffAudit = ` (Comisión de plataforma no comprobable: $${diff.toFixed(2)})`;
-        } else if (motivo_diferencia === 'DIFERENCIA_AUTORIZADA') {
-          diffAudit = ` (Diferencia autorizada: $${diff.toFixed(2)})`;
+      if (diffRestante > 0.05) {
+        if (motivoFinalDiferencia === 'COMISION_PLATAFORMA') {
+          diffAudit = ` (Comisión de plataforma no comprobable: $${diffRestante.toFixed(2)})`;
+        } else if (motivoFinalDiferencia === 'DIFERENCIA_AUTORIZADA') {
+          diffAudit = ` (Diferencia autorizada: $${diffRestante.toFixed(2)})`;
+        } else if (motivoFinalDiferencia === 'PARCIAL') {
+          diffAudit = ` (Comprobación parcial; pendiente por comprobar: $${diffRestante.toFixed(2)})`;
         } else {
           diffAudit = ` (Propina: $${propinaFinal.toFixed(2)})`;
         }
       }
       const compartidaText = esCompartidaEfectiva ? ' [Factura Compartida]' : '';
-      const auditDetails = `Factura recibida SAT (${factura.uuid} - ${factura.nombre_emisor || factura.rfc_emisor}) vinculada al gasto por $${gastoMonto.toFixed(2)}${diffAudit}.${compartidaText}${shouldApproveDirectly ? ' Enviado directamente a Historial (Aprobado).' : ''}`;
+      const auditDetails = `Factura recibida SAT (${factura.uuid} - ${factura.nombre_emisor || factura.rfc_emisor}) vinculada al gasto aplicando $${montoAplicadoNum.toFixed(2)} de $${gastoMonto.toFixed(2)}${diffAudit}.${compartidaText}${shouldApproveDirectly ? ' Enviado directamente a Historial (Aprobado).' : ''}`;
 
       await pool.query(
         `INSERT INTO audit_logs (action, actor_id, target_id, details) VALUES ($1, $2, $3, $4)`,
@@ -1607,38 +1677,84 @@ export const detachSatFacturaFromGasto = async (req: Request, res: Response) => 
     const pool = getDbPool(company, env);
 
     const { id } = req.params;
-    const { actor_id } = req.body;
+    const { actor_id, factura_id } = req.body;
 
     const gastoRes = await pool.query('SELECT * FROM gastos WHERE id = $1', [id]);
     const gasto = gastoRes.rows[0];
     if (!gasto) return res.status(404).json({ error: 'Gasto no encontrado' });
 
-    const oldFacturaId = gasto.factura_recibida_id;
-    if (!oldFacturaId) {
+    // Verificar vínculos actuales en gasto_facturas
+    const linksRes = await pool.query(
+      'SELECT factura_recibida_id FROM gasto_facturas WHERE gasto_id = $1 ORDER BY created_at ASC',
+      [id]
+    );
+    const currentLinks: string[] = linksRes.rows.map((r: any) => r.factura_recibida_id);
+
+    if (currentLinks.length === 0 && !gasto.factura_recibida_id) {
       return res.status(400).json({ error: 'Este gasto no tiene ninguna factura SAT vinculada' });
     }
 
-    // Desvincular factura en el gasto
-    await pool.query(
-      `UPDATE gastos
-       SET factura_recibida_id = NULL,
-           monto_propina = 0,
-           es_factura_compartida = FALSE
-       WHERE id = $1`,
+    const detachedFacturaIds: string[] = factura_id
+      ? [factura_id]
+      : (currentLinks.length > 0 ? currentLinks : [gasto.factura_recibida_id]);
+
+    // Eliminar de gasto_facturas (una específica o todas si no se envió factura_id)
+    if (factura_id) {
+      await pool.query(
+        'DELETE FROM gasto_facturas WHERE gasto_id = $1 AND factura_recibida_id = $2',
+        [id, factura_id]
+      );
+    } else {
+      await pool.query('DELETE FROM gasto_facturas WHERE gasto_id = $1', [id]);
+    }
+
+    // Consultar qué facturas siguen vinculadas a este gasto
+    const remainingLinksRes = await pool.query(
+      `SELECT gf.factura_recibida_id, gf.monto_aplicado,
+              EXISTS (
+                SELECT 1 FROM gasto_facturas gf2
+                WHERE gf2.factura_recibida_id = gf.factura_recibida_id AND gf2.gasto_id != $1
+              ) as es_compartida
+       FROM gasto_facturas gf
+       WHERE gf.gasto_id = $1
+       ORDER BY gf.created_at ASC`,
       [id]
     );
+    const remaining = remainingLinksRes.rows;
 
-    // Revisar si la factura sigue compartida con otros gastos
-    const restantesRes = await pool.query(
-      'SELECT id FROM gastos WHERE factura_recibida_id = $1',
-      [oldFacturaId]
+    const newPrimaryFacturaId = remaining.length > 0 ? remaining[0].factura_recibida_id : null;
+    const stillCompartidaOnGasto = remaining.some((r: any) => r.es_compartida);
+
+    await pool.query(
+      `UPDATE gastos
+       SET factura_recibida_id = $1::uuid,
+           monto_propina = CASE WHEN $1::uuid IS NULL THEN 0 ELSE monto_propina END,
+           es_factura_compartida = $2
+       WHERE id = $3`,
+      [newPrimaryFacturaId, stillCompartidaOnGasto, id]
     );
-    if (restantesRes.rows.length <= 1) {
-      // Si sólo queda 1 o ninguno, ya no es factura compartida
-      await pool.query(
-        'UPDATE gastos SET es_factura_compartida = FALSE WHERE factura_recibida_id = $1',
-        [oldFacturaId]
+
+    // Actualizar bandera es_factura_compartida para los otros gastos que compartían la(s) factura(s) desvinculada(s)
+    for (const oldFacId of detachedFacturaIds) {
+      if (!oldFacId) continue;
+      const restantesFacRes = await pool.query(
+        'SELECT DISTINCT gasto_id FROM gasto_facturas WHERE factura_recibida_id = $1',
+        [oldFacId]
       );
+      if (restantesFacRes.rows.length <= 1) {
+        for (const row of restantesFacRes.rows) {
+          const otherSharesRes = await pool.query(
+            `SELECT 1 FROM gasto_facturas gf1
+             JOIN gasto_facturas gf2 ON gf1.factura_recibida_id = gf2.factura_recibida_id
+             WHERE gf1.gasto_id = $1 AND gf2.gasto_id != $1 LIMIT 1`,
+            [row.gasto_id]
+          );
+          await pool.query(
+            'UPDATE gastos SET es_factura_compartida = $1 WHERE id = $2',
+            [otherSharesRes.rows.length > 0, row.gasto_id]
+          );
+        }
+      }
     }
 
     if (gasto.venta_id) {
@@ -1657,7 +1773,9 @@ export const detachSatFacturaFromGasto = async (req: Request, res: Response) => 
           'UPDATE',
           actor,
           id,
-          `Factura SAT recibida desvinculada del gasto por administración.`
+          factura_id
+            ? `Factura SAT recibida (${factura_id}) desvinculada del gasto por administración.`
+            : `Factura(s) SAT recibida(s) desvinculada(s) del gasto por administración.`
         ]
       );
     } catch (_) {}

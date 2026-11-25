@@ -19,6 +19,7 @@ export interface ConciliadaItem {
     empleado_nombre: string;
     fecha_comprobante?: string;
     gasto_monto: number;
+    monto_aplicado?: number;
     monto_propina?: number;
     motivo_sin_factura?: string;
     gasto_status?: string;
@@ -91,6 +92,7 @@ export async function exportConciliacionSatToExcel(
     'Subcategoría',
     'Proyecto / Cliente',
     'Monto Pagado Gasto ($)',
+    'Monto Aplicado de Factura ($)',
     'Propina ($)',
     'Diferencia ($)',
     'Estatus Gasto'
@@ -100,7 +102,8 @@ export async function exportConciliacionSatToExcel(
     const totalSat = Number(item.sat.total || 0);
     const montoGasto = Number(item.gasto.gasto_monto || 0);
     const propina = Number(item.gasto.monto_propina || 0);
-    const diferencia = Math.max(0, montoGasto - propina - totalSat);
+    const montoAplicado = item.gasto.monto_aplicado !== undefined ? Number(item.gasto.monto_aplicado) : Math.max(0, montoGasto - propina);
+    const diferencia = Math.max(0, montoAplicado - totalSat);
 
     return [
       item.sat.uuid,
@@ -114,6 +117,7 @@ export async function exportConciliacionSatToExcel(
       item.gasto.subcategoria_nombre || '',
       item.gasto.cliente_nombre || item.gasto.venta_cliente || item.gasto.detalle_servicio_proyecto || 'General',
       montoGasto,
+      montoAplicado,
       propina,
       diferencia,
       item.gasto.gasto_status || 'APPROVED'
@@ -133,6 +137,7 @@ export async function exportConciliacionSatToExcel(
     { wch: 20 }, // Subcategoría
     { wch: 25 }, // Proyecto
     { wch: 20 }, // Monto Gasto
+    { wch: 22 }, // Monto Aplicado
     { wch: 14 }, // Propina
     { wch: 14 }, // Diferencia
     { wch: 15 }, // Estatus

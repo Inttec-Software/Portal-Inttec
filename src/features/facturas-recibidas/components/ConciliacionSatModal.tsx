@@ -705,7 +705,9 @@ export function ConciliacionSatModal({
                                   SAT: ${totalSat.toFixed(2)}
                                 </Text>
                                 <Text style={[styles.recordAmountGasto, { color: themeColors.text }]}>
-                                  Gasto: ${montoGasto.toFixed(2)}
+                                  {c.gasto.monto_aplicado !== undefined && Math.abs(Number(c.gasto.monto_aplicado) - montoGasto) > 0.05
+                                    ? `Aplicado: $${Number(c.gasto.monto_aplicado).toFixed(2)} de $${montoGasto.toFixed(2)}`
+                                    : `Gasto: $${montoGasto.toFixed(2)}`}
                                 </Text>
                                 {propina > 0 && (
                                   <Text style={{ fontSize: 11, color: '#f59e0b', fontWeight: '700' }}>

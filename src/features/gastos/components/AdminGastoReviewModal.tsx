@@ -1126,7 +1126,7 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                         </View>
 
                         {/* Vinculación Inteligente de Facturas SAT */}
-                        {(selectedGasto.facturado || selectedGasto.factura_recibida_rel || (!selectedGasto.facturado && !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE'))) && (
+                        {(selectedGasto.facturado || selectedGasto.factura_recibida_rel || (selectedGasto.facturas_recibidas_rel && selectedGasto.facturas_recibidas_rel.length > 0) || (!selectedGasto.facturado && !!selectedGasto.motivo_sin_factura && selectedGasto.motivo_sin_factura.toUpperCase().includes('PENDIENTE'))) && (
                           <SatFacturaLinker
                             gasto={selectedGasto}
                             themeColors={themeColors}

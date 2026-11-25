@@ -147,15 +147,16 @@ export const lookupFacturasRecibidas = async (req: Request, res: Response) => {
                   'empleado_nombre', g.empleado_nombre,
                   'monto', g.monto,
                   'monto_propina', COALESCE(g.monto_propina, 0),
-                  'monto_consumido', (COALESCE(g.monto, 0) - COALESCE(g.monto_propina, 0)),
+                  'monto_consumido', gf.monto_aplicado,
                   'es_factura_compartida', COALESCE(g.es_factura_compartida, false),
                   'status', g.status,
                   'justificacion', g.justificacion,
                   'fecha_comprobante', g.fecha_comprobante,
                   'created_at', g.created_at
                 )), '[]'::json)
-                FROM gastos g
-                WHERE g.factura_recibida_id = f.id
+                FROM gasto_facturas gf
+                JOIN gastos g ON g.id = gf.gasto_id
+                WHERE gf.factura_recibida_id = f.id
               ) as gastos_vinculados
        FROM facturas_recibidas f
        WHERE (
@@ -268,7 +269,7 @@ export const conciliarSatFacturas = async (req: Request, res: Response) => {
       portalFacturasMap.set(row.uuid, row);
     });
 
-    // 3. Consultar gastos vinculados que coincidan con estos UUIDs en la BDD
+    // 3. Consultar gastos vinculados que coincidan con estos UUIDs en la BDD (soporte N:M via gasto_facturas)
     const vinculadosRes = await pool.query(`
       SELECT 
         f.id AS factura_id,
@@ -283,6 +284,7 @@ export const conciliarSatFacturas = async (req: Request, res: Response) => {
         g.fecha_comprobante,
         g.created_at AS gasto_created_at,
         g.monto AS gasto_monto,
+        gf.monto_aplicado,
         COALESCE(g.monto_propina, 0) AS monto_propina,
         g.motivo_sin_factura,
         g.status AS gasto_status,
@@ -293,7 +295,8 @@ export const conciliarSatFacturas = async (req: Request, res: Response) => {
         (SELECT cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) AS cliente_nombre,
         (SELECT v.cliente FROM ventas v WHERE v.id = g.venta_id) AS venta_cliente
       FROM facturas_recibidas f
-      JOIN gastos g ON g.factura_recibida_id = f.id
+      JOIN gasto_facturas gf ON gf.factura_recibida_id = f.id
+      JOIN gastos g ON g.id = gf.gasto_id
       WHERE UPPER(f.uuid) = ANY($1)
     `, [uuidsArray]);
 
@@ -352,6 +355,7 @@ export const conciliarSatFacturas = async (req: Request, res: Response) => {
       WHERE COALESCE(g.fecha_comprobante::text, substring(g.created_at::text, 1, 10)) >= $1
         AND COALESCE(g.fecha_comprobante::text, substring(g.created_at::text, 1, 10)) <= $2
         AND g.factura_recibida_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM gasto_facturas gf WHERE gf.gasto_id = g.id)
         AND g.status != 'REJECTED'
       ORDER BY g.fecha_comprobante DESC, g.created_at DESC
     `, [fechaInicio, fechaFin]);

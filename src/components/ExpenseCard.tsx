@@ -116,11 +116,13 @@ function ExpenseCard({
         {/* Badges de Estado */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 1 }}>
           {/* Factura Badge */}
-          {(gasto.factura_recibida_rel || gasto.factura_recibida_id) ? (
+          {(gasto.factura_recibida_rel || gasto.factura_recibida_id || (gasto.facturas_recibidas_rel && gasto.facturas_recibidas_rel.length > 0)) ? (
             <View style={[styles.statusBadge, { backgroundColor: themeColors.success + '18' }]}>
               <Ionicons name="shield-checkmark" size={11} color={themeColors.success} />
               <Text style={[styles.statusText, { color: themeColors.success }]}>
-                CFDI SAT{gasto.es_factura_compartida ? ' (Comp)' : ''}
+                {gasto.facturas_recibidas_rel && gasto.facturas_recibidas_rel.length > 1
+                  ? `${gasto.facturas_recibidas_rel.length} CFDIs SAT`
+                  : `CFDI SAT${gasto.es_factura_compartida ? ' (Comp)' : ''}`}
               </Text>
             </View>
           ) : gasto.facturado ? (
@@ -270,6 +272,7 @@ const ExpenseCardMemo = React.memo(ExpenseCard, (prevProps, nextProps) => {
     prevProps.gasto.devuelto_por_factura === nextProps.gasto.devuelto_por_factura &&
     prevProps.gasto.factura_sugerida_id === nextProps.gasto.factura_sugerida_id &&
     prevProps.gasto.factura_recibida_id === nextProps.gasto.factura_recibida_id &&
+    (prevProps.gasto.facturas_recibidas_rel?.length || 0) === (nextProps.gasto.facturas_recibidas_rel?.length || 0) &&
     prevProps.gasto.monto_propina === nextProps.gasto.monto_propina &&
     prevProps.gasto.es_factura_compartida === nextProps.gasto.es_factura_compartida &&
     prevProps.showEmployeeName === nextProps.showEmployeeName
