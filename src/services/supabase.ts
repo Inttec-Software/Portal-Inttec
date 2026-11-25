@@ -631,6 +631,7 @@ export interface FleetGpsSnapshotItem {
   bateria_v?: number | null;
   direccion?: string | null;
   hora_reporte?: string | null;
+  hora_reporte_chihuahua?: string | null;
   timestamp?: number | null;
   diferencia_minutos?: number | null;
   distancia_empleado_m?: number | null;
@@ -643,6 +644,10 @@ export interface FleetGpsSnapshotItem {
 export interface CorroboracionFlotaResponse {
   fecha: string;
   hora_objetivo: string;
+  hora_oficina_chihuahua?: string;
+  utc_offset_empleado?: string;
+  desfase_horas_oficina?: number;
+  zona_horaria_detectada?: string;
   target_timestamp: number;
   empleado_nombre?: string | null;
   tipo_checada?: 'Entrada' | 'Salida';
@@ -681,10 +686,40 @@ export interface AusenciaAsistencia {
  */
 export const AsistenciaService = {
   /**
-   * Obtiene los componentes de fecha/hora desglosados en una zona horaria específica (ej. America/Tijuana, America/Cancun, etc.)
+   * Obtiene los componentes de fecha/hora desglosados en una zona horaria específica (ej. America/Chihuahua, America/Hermosillo, America/Ciudad_Juarez).
+   * Para husos mexicanos sin cambio de horario estacional (Chihuahua capital UTC-6 fijo, Sonora/Sinaloa UTC-7 fijo, Cancún UTC-5 fijo),
+   * calcula directamente desde UTC para blindar contra teléfonos con tablas de horario de verano/invierno desactualizadas.
    */
   getZonedParts(date: Date = new Date(), timeZone?: string) {
     const tz = timeZone || detectUserTimezone();
+
+    let fixedOffsetHours: number | null = null;
+    if (
+      tz === 'America/Chihuahua' ||
+      tz === 'America/Mexico_City' ||
+      tz === 'America/Monterrey' ||
+      tz === 'America/Merida'
+    ) {
+      fixedOffsetHours = -6;
+    } else if (tz === 'America/Hermosillo' || tz === 'America/Mazatlan') {
+      fixedOffsetHours = -7;
+    } else if (tz === 'America/Cancun') {
+      fixedOffsetHours = -5;
+    }
+
+    if (fixedOffsetHours !== null) {
+      const shifted = new Date(date.getTime() + fixedOffsetHours * 3600000);
+      return {
+        year: shifted.getUTCFullYear(),
+        month: shifted.getUTCMonth() + 1,
+        day: shifted.getUTCDate(),
+        hour: shifted.getUTCHours(),
+        minute: shifted.getUTCMinutes(),
+        second: shifted.getUTCSeconds(),
+        timeZone: tz,
+      };
+    }
+
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: tz,
       year: 'numeric',
@@ -702,7 +737,7 @@ export const AsistenciaService = {
       year: get('year'),
       month: get('month'),
       day: get('day'),
-      hour: get('hour'),
+      hour: get('hour') === 24 ? 0 : get('hour'),
       minute: get('minute'),
       second: get('second'),
       timeZone: tz,
@@ -1063,6 +1098,7 @@ export const AsistenciaService = {
    * de las 5 unidades GPS en el minuto exacto del evento.
    */
   async corroborarConFlotaGps(params: {
+    asistenciaId?: string | null;
     fecha: string;
     hora: string;
     empleadoLat?: number | null;
@@ -1074,6 +1110,7 @@ export const AsistenciaService = {
   }): Promise<CorroboracionFlotaResponse> {
     const headers = await getApiHeaders();
     const qs = new URLSearchParams();
+    if (params.asistenciaId) qs.append('asistencia_id', params.asistenciaId);
     qs.append('fecha', params.fecha);
     qs.append('hora', params.hora);
     if (params.empleadoLat !== undefined && params.empleadoLat !== null) {

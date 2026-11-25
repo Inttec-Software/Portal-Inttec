@@ -40,6 +40,7 @@ interface CorroborarAsistenciaGpsModalProps {
 export default function CorroborarAsistenciaGpsModal({
   visible,
   onClose,
+  asistenciaId,
   empleadoNombre,
   fecha,
   hora,
@@ -73,6 +74,7 @@ export default function CorroborarAsistenciaGpsModal({
       setError(null);
       try {
         const res = await AsistenciaService.corroborarConFlotaGps({
+          asistenciaId,
           fecha,
           hora,
           empleadoLat,
@@ -104,7 +106,7 @@ export default function CorroborarAsistenciaGpsModal({
     return () => {
       isMounted = false;
     };
-  }, [visible, fecha, hora, empleadoLat, empleadoLng, tipo, vehiculoId]);
+  }, [visible, asistenciaId, fecha, hora, empleadoLat, empleadoLng, tipo, vehiculoId]);
 
   const isChecadaOficina = useMemo(() => {
     if (snapshot?.empleado_en_oficina) return true;
@@ -319,6 +321,9 @@ export default function CorroborarAsistenciaGpsModal({
               <Text style={{ fontSize: 12, color: themeColors.textSecondary, marginTop: 2 }}>
                 {empleadoNombre} • <Text style={{ fontWeight: '700', color: themeColors.accent }}>{tipo}</Text> a las{' '}
                 {formatHoraDisplay(hora)} ({fecha})
+                {snapshot?.desfase_horas_oficina && snapshot.desfase_horas_oficina !== 0 && snapshot.hora_oficina_chihuahua
+                  ? ` • 🕒 ${formatHoraDisplay(snapshot.hora_oficina_chihuahua)} Hora Chihuahua`
+                  : ''}
                 {isChecadaOficina ? ' • 🏢 Checador de Oficina' : ''}
               </Text>
             </View>
@@ -383,6 +388,22 @@ export default function CorroborarAsistenciaGpsModal({
                     </Text>
                     <Text style={{ fontSize: 11, color: '#14532d', marginTop: 2 }}>
                       📍 {snapshot.empleado_direccion || `${snapshot.empleado_lat?.toFixed(5)}, ${snapshot.empleado_lng?.toFixed(5)}`}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Aviso de homologación de huso horario si el técnico estaba fuera de Chihuahua o su reloj tenía desfase */}
+              {snapshot.desfase_horas_oficina !== undefined && snapshot.desfase_horas_oficina !== 0 && (
+                <View style={[styles.alertBanner, { backgroundColor: '#eff6ff', borderColor: '#60a5fa' }]}>
+                  <Ionicons name="time" size={20} color="#1d4ed8" />
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#1e3a8a' }}>
+                      🕒 SINCRONIZACIÓN AUTOMÁTICA DE HUSO HORARIO ({snapshot.zona_horaria_detectada || snapshot.utc_offset_empleado})
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#1e40af', marginTop: 2 }}>
+                      La checada marcó las <Text style={{ fontWeight: '800' }}>{formatHoraDisplay(hora)}</Text> en el reloj del sitio/dispositivo ({snapshot.utc_offset_empleado}), lo que equivale exactamente a las{' '}
+                      <Text style={{ fontWeight: '800' }}>{formatHoraDisplay(snapshot.hora_oficina_chihuahua || hora)}</Text> en Hora Oficial de Oficina Chihuahua (UTC-6). El satélite GPS se consultó en el instante real exacto del reporte.
                     </Text>
                   </View>
                 </View>
@@ -554,6 +575,15 @@ export default function CorroborarAsistenciaGpsModal({
                             {unit.hora_reporte && (
                               <Text style={{ fontSize: 11, color: themeColors.textSecondary }}>
                                 🕒 Reportó: {unit.hora_reporte}
+                                {snapshot.desfase_horas_oficina !== undefined &&
+                                snapshot.desfase_horas_oficina !== 0 &&
+                                unit.hora_reporte_chihuahua &&
+                                unit.hora_reporte_chihuahua !== unit.hora_reporte
+                                  ? ` (${unit.hora_reporte_chihuahua} Chih.)`
+                                  : ''}
+                                {typeof unit.diferencia_minutos === 'number'
+                                  ? ` • ±${unit.diferencia_minutos} min`
+                                  : ''}
                               </Text>
                             )}
                           </View>

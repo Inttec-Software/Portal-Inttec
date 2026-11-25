@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
 import {
-  ensureGpsSchema,
   fetchEpcomGpsDevices,
   buildSimulatedTelemetryForVehicles,
   calculateDistanceMeters,
@@ -11,6 +10,80 @@ import {
 } from '../../services/epcomGpsService';
 
 let hikvisionHeartbeatCounter = 0;
+
+const OPTIONAL_ASISTENCIA_COLUMNS = new Set([
+  'timestamp_entrada',
+  'timestamp_salida',
+  'vehiculo_id',
+  'vehiculo_placas',
+  'gps_vehiculo_lat',
+  'gps_vehiculo_lng',
+  'gps_vehiculo_velocidad',
+  'gps_vehiculo_ignicion',
+  'gps_vehiculo_direccion',
+  'gps_vehiculo_distancia_m',
+  'gps_vehiculo_alerta',
+  'gps_salida_vehiculo_lat',
+  'gps_salida_vehiculo_lng',
+  'gps_salida_vehiculo_velocidad',
+  'gps_salida_vehiculo_distancia_m',
+  'gps_salida_vehiculo_alerta',
+]);
+
+const stripMissingOptionalCol = (data: Record<string, any>, err: any): boolean => {
+  if (err?.code !== '42703') return false;
+  const match = String(err?.message || '').match(/column "([^"]+)"/i);
+  const col = match?.[1];
+  if (col && OPTIONAL_ASISTENCIA_COLUMNS.has(col) && col in data) {
+    delete data[col];
+    return true;
+  }
+  return false;
+};
+
+const runInsertWithOptionalCols = async (pool: any, payload: Record<string, any>) => {
+  const data = { ...payload };
+  while (true) {
+    const keys = Object.keys(data);
+    const values = Object.values(data);
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+    try {
+      return await pool.query(
+        `INSERT INTO asistencias (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+        values
+      );
+    } catch (err: any) {
+      if (!stripMissingOptionalCol(data, err) || Object.keys(data).length === 0) {
+        throw err;
+      }
+    }
+  }
+};
+
+const runUpdateWithOptionalCols = async (
+  pool: any,
+  payload: Record<string, any>,
+  whereClauseBuilder: (nextParamIdx: number) => { clause: string; params: any[] }
+) => {
+  const data = { ...payload };
+  while (true) {
+    const keys = Object.keys(data);
+    if (keys.length === 0) return { rows: [] };
+    const values = Object.values(data);
+    const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
+    const { clause, params: whereParams } = whereClauseBuilder(keys.length + 1);
+    try {
+      return await pool.query(
+        `UPDATE asistencias SET ${setClause} WHERE ${clause} RETURNING *`,
+        [...values, ...whereParams]
+      );
+    } catch (err: any) {
+      if (!stripMissingOptionalCol(data, err)) {
+        throw err;
+      }
+    }
+  }
+};
 
 const formatAsistenciaRecord = (rec: any) => {
   if (!rec || typeof rec !== 'object') return rec;
@@ -71,8 +144,10 @@ export const registrarEntrada = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { env } = tenant;
-    await ensureGpsSchema(env);
     const payload = { ...req.body };
+    if (!payload.timestamp_entrada) {
+      payload.timestamp_entrada = new Date().toISOString();
+    }
 
     const poolInttec = getDbPool('inttec', env);
     const poolDaravisa = getDbPool('daravisa', env);
@@ -180,14 +255,9 @@ export const registrarEntrada = async (req: Request, res: Response) => {
       }
     }
 
-    const keys = Object.keys(payload);
-    const values = Object.values(payload);
-    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
-    const insertQuery = `INSERT INTO asistencias (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`;
-
     const [inttecRes, daravisaRes] = await Promise.allSettled([
-      poolInttec.query(insertQuery, values),
-      poolDaravisa.query(insertQuery, values),
+      runInsertWithOptionalCols(poolInttec, payload),
+      runInsertWithOptionalCols(poolDaravisa, payload),
     ]);
 
     const data =
@@ -218,8 +288,10 @@ export const registrarSalida = async (req: Request, res: Response) => {
     const tenant = (req as any).tenant;
     if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
     const { env } = tenant;
-    await ensureGpsSchema(env);
     const { id, empleado_id, fecha, ...payload } = req.body;
+    if (!payload.timestamp_salida) {
+      payload.timestamp_salida = new Date().toISOString();
+    }
 
     const poolInttec = getDbPool('inttec', env);
     const poolDaravisa = getDbPool('daravisa', env);
@@ -296,41 +368,24 @@ export const registrarSalida = async (req: Request, res: Response) => {
       console.warn('[Asistencia Salida GPS Check] Error:', gpsSalidaErr.message);
     }
 
-    const keys = Object.keys(payload);
-    const values = Object.values(payload);
-    const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
-
     // Actualizar en Inttec
-    let updateInttecPromise;
-    if (id) {
-      updateInttecPromise = poolInttec.query(
-        `UPDATE asistencias SET ${setClause} WHERE id = $${keys.length + 1} RETURNING *`,
-        [...values, id]
-      );
-    } else if (empleado_id && fecha) {
-      updateInttecPromise = poolInttec.query(
-        `UPDATE asistencias SET ${setClause} WHERE empleado_id = $${keys.length + 1} AND fecha = $${keys.length + 2} AND hora_salida IS NULL RETURNING *`,
-        [...values, empleado_id, fecha]
-      );
-    }
+    const inttecWhere = id
+      ? (idx: number) => ({ clause: `id = $${idx}`, params: [id] })
+      : empleado_id && fecha
+        ? (idx: number) => ({ clause: `empleado_id = $${idx} AND fecha = $${idx + 1} AND hora_salida IS NULL`, params: [empleado_id, fecha] })
+        : null;
 
     // Actualizar en Daravisa (por turno abierto del empleado y fecha)
-    let updateDaravisaPromise;
-    if (empleado_id && fecha) {
-      updateDaravisaPromise = poolDaravisa.query(
-        `UPDATE asistencias SET ${setClause} WHERE empleado_id = $${keys.length + 1} AND fecha = $${keys.length + 2} AND hora_salida IS NULL RETURNING *`,
-        [...values, empleado_id, fecha]
-      );
-    } else if (id) {
-      updateDaravisaPromise = poolDaravisa.query(
-        `UPDATE asistencias SET ${setClause} WHERE id = $${keys.length + 1} RETURNING *`,
-        [...values, id]
-      );
-    }
+    const daravisaWhere =
+      empleado_id && fecha
+        ? (idx: number) => ({ clause: `empleado_id = $${idx} AND fecha = $${idx + 1} AND hora_salida IS NULL`, params: [empleado_id, fecha] })
+        : id
+          ? (idx: number) => ({ clause: `id = $${idx}`, params: [id] })
+          : null;
 
     const [resI, resD] = await Promise.allSettled([
-      updateInttecPromise || Promise.resolve({ rows: [] }),
-      updateDaravisaPromise || Promise.resolve({ rows: [] }),
+      inttecWhere ? runUpdateWithOptionalCols(poolInttec, payload, inttecWhere) : Promise.resolve({ rows: [] }),
+      daravisaWhere ? runUpdateWithOptionalCols(poolDaravisa, payload, daravisaWhere) : Promise.resolve({ rows: [] }),
     ]);
 
     const data =
@@ -1401,6 +1456,7 @@ export const corroborarAsistenciaConFlota = async (req: Request, res: Response) 
     const { env } = tenant;
 
     const {
+      asistencia_id,
       fecha,
       hora,
       empleado_lat,
@@ -1410,6 +1466,7 @@ export const corroborarAsistenciaConFlota = async (req: Request, res: Response) 
       tipo_checada,
       vehiculo_id,
     } = req.query as {
+      asistencia_id?: string;
       fecha?: string;
       hora?: string;
       empleado_lat?: string;
@@ -1425,6 +1482,7 @@ export const corroborarAsistenciaConFlota = async (req: Request, res: Response) 
     }
 
     const snapshot = await fetchFleetSnapshotAtTime({
+      asistenciaId: asistencia_id || null,
       fecha,
       hora,
       empleadoLat: empleado_lat ? parseFloat(empleado_lat) : null,

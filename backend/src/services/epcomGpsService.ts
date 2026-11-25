@@ -22,7 +22,6 @@ export interface GpsConfig {
   configured: boolean;
 }
 
-const schemaInitialized = new Set<string>();
 let cachedDevices: { timestamp: number; devices: EpcomGpsDevice[]; source: 'EPCOM_LIVE' | 'WEBHOOK' | 'SIMULACION_DEMO' } | null = null;
 const webhookDevicesMap = new Map<string, EpcomGpsDevice>();
 
@@ -43,65 +42,9 @@ export function calculateDistanceMeters(lat1: number, lng1: number, lat2: number
 }
 
 /**
- * Garantiza que las columnas de GPS existan en `vehiculos`, `asistencias` y `app_settings`
- */
-export async function ensureGpsSchema(env: string = 'cloud'): Promise<void> {
-  if (schemaInitialized.has(env)) return;
-
-  const pools = [getDbPool('inttec', env as any), getDbPool('daravisa', env as any)];
-
-  const queries = [
-    `ALTER TABLE public.vehiculos
-      ADD COLUMN IF NOT EXISTS gps_imei VARCHAR(64),
-      ADD COLUMN IF NOT EXISTS gps_lat DOUBLE PRECISION,
-      ADD COLUMN IF NOT EXISTS gps_lng DOUBLE PRECISION,
-      ADD COLUMN IF NOT EXISTS gps_velocidad NUMERIC(6,2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS gps_rumbo NUMERIC(6,2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS gps_ignicion BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS gps_direccion TEXT,
-      ADD COLUMN IF NOT EXISTS gps_bateria_v NUMERIC(5,2),
-      ADD COLUMN IF NOT EXISTS gps_ultima_actualizacion TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS conductores_hoy_ids JSONB DEFAULT '[]'::jsonb,
-      ADD COLUMN IF NOT EXISTS conductores_hoy_fecha DATE;`,
-    `ALTER TABLE public.asistencias
-      ADD COLUMN IF NOT EXISTS vehiculo_id UUID,
-      ADD COLUMN IF NOT EXISTS vehiculo_placas VARCHAR(64),
-      ADD COLUMN IF NOT EXISTS gps_vehiculo_lat DOUBLE PRECISION,
-      ADD COLUMN IF NOT EXISTS gps_vehiculo_lng DOUBLE PRECISION,
-      ADD COLUMN IF NOT EXISTS gps_vehiculo_velocidad NUMERIC(6,2),
-      ADD COLUMN IF NOT EXISTS gps_vehiculo_ignicion BOOLEAN,
-      ADD COLUMN IF NOT EXISTS gps_vehiculo_direccion TEXT,
-      ADD COLUMN IF NOT EXISTS gps_vehiculo_distancia_m NUMERIC(10,2),
-      ADD COLUMN IF NOT EXISTS gps_vehiculo_alerta TEXT,
-      ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_lat DOUBLE PRECISION,
-      ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_lng DOUBLE PRECISION,
-      ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_velocidad NUMERIC(6,2),
-      ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_distancia_m NUMERIC(10,2),
-      ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_alerta TEXT;`,
-    `ALTER TABLE public.app_settings
-      ADD COLUMN IF NOT EXISTS epcom_gps_api_url TEXT,
-      ADD COLUMN IF NOT EXISTS epcom_gps_api_key TEXT;`
-  ];
-
-  for (const pool of pools) {
-    for (const q of queries) {
-      try {
-        await pool.query(q);
-      } catch (err: any) {
-        // Ignorar si alguna tabla secundaria no existe en un entorno local
-      }
-    }
-  }
-
-  schemaInitialized.add(env);
-}
-
-/**
  * Obtiene la configuración de EPCOM GPS desde variables de entorno o `app_settings`
  */
 export async function getGpsConfig(env: string = 'cloud'): Promise<GpsConfig> {
-  await ensureGpsSchema(env);
-
   let apiUrl = (process.env.EPCOM_GPS_API_URL || '').trim();
   let apiKey = (process.env.EPCOM_GPS_API_KEY || '').trim();
 
@@ -147,7 +90,6 @@ export function sanitizeEpcomToken(rawInput: string): string {
  * Guarda la configuración de EPCOM GPS en `app_settings` (Inttec y Daravisa)
  */
 export async function saveGpsConfig(apiUrl: string, apiKey: string, env: string = 'cloud'): Promise<GpsConfig> {
-  await ensureGpsSchema(env);
   const cleanUrl = (apiUrl || 'https://gps.epcom.net').trim().replace(/\/+$/, '');
   const cleanKey = sanitizeEpcomToken(apiKey);
 
@@ -677,17 +619,30 @@ export async function reverseGeocodeCoords(lat: number, lng: number): Promise<st
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
+function formatHoraWithOffset(unixSec: number, offsetHours: number = -6): string {
+  const shiftedMs = (unixSec + offsetHours * 3600) * 1000;
+  const d = new Date(shiftedMs);
+  if (isNaN(d.getTime())) return '--:--';
+  const h24 = d.getUTCHours();
+  const m = String(d.getUTCMinutes()).padStart(2, '0');
+  const ampm = h24 >= 12 ? 'p.m.' : 'a.m.';
+  const h12 = String(h24 % 12 || 12).padStart(2, '0');
+  return `${h12}:${m} ${ampm}`;
+}
+
+function formatHora24WithOffset(unixSec: number, offsetHours: number = -6): string {
+  const shiftedMs = (unixSec + offsetHours * 3600) * 1000;
+  const d = new Date(shiftedMs);
+  if (isNaN(d.getTime())) return '00:00:00';
+  const h = String(d.getUTCHours()).padStart(2, '0');
+  const m = String(d.getUTCMinutes()).padStart(2, '0');
+  const s = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
 function formatHoraLocalChihuahua(unixSec: number): string {
-  try {
-    return new Date(unixSec * 1000).toLocaleTimeString('es-MX', {
-      timeZone: 'America/Chihuahua',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
-  } catch {
-    return new Date(unixSec * 1000).toTimeString().slice(0, 5);
-  }
+  // Chihuahua Capital tiene horario fijo UTC-6 todo el año (sin cambio en invierno/verano)
+  return formatHoraWithOffset(unixSec, -6);
 }
 
 /**
@@ -1036,6 +991,7 @@ export interface FleetSnapshotUnit {
   bateria_v?: number | null;
   direccion?: string | null;
   hora_reporte?: string | null;
+  hora_reporte_chihuahua?: string | null;
   timestamp?: number | null;
   diferencia_minutos?: number | null;
   distancia_empleado_m?: number | null;
@@ -1048,6 +1004,10 @@ export interface FleetSnapshotUnit {
 export interface FleetSnapshotResponse {
   fecha: string;
   hora_objetivo: string;
+  hora_oficina_chihuahua: string;
+  utc_offset_empleado: string;
+  desfase_horas_oficina: number;
+  zona_horaria_detectada: string;
   target_timestamp: number;
   empleado_nombre?: string | null;
   tipo_checada?: 'Entrada' | 'Salida';
@@ -1070,10 +1030,181 @@ export interface FleetSnapshotResponse {
 }
 
 /**
+ * Determina el offset UTC real (en horas, ej. -6 para Chihuahua, -7 para Sonora/Sinaloa/Juárez invierno)
+ * a partir de la etiqueta [tz:...], la dirección física o las coordenadas GPS.
+ */
+function inferGeographicOffsetAndZone(
+  lat?: number | null,
+  lng?: number | null,
+  direccion?: string | null,
+  fechaStr?: string
+): { offsetHours: number; zoneLabel: string; matched: boolean } {
+  const rawDir = (direccion || '').trim();
+  const norm = rawDir.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  // Helper para determinar si una fecha está en horario de verano de la frontera norte de México / EE.UU.
+  // (Segundo domingo de marzo al primer domingo de noviembre)
+  const isUsBorderDst = (fStr?: string): boolean => {
+    try {
+      const d = fStr ? new Date(`${fStr}T12:00:00Z`) : new Date();
+      const month = d.getUTCMonth() + 1; // 1..12
+      if (month > 3 && month < 11) return true;
+      if (month < 3 || month > 11) return false;
+      const day = d.getUTCDate();
+      const dow = d.getUTCDay(); // 0 = Sun
+      if (month === 3) {
+        // Segundo domingo de marzo (día entre 8 y 14)
+        const prevSunday = day - dow;
+        return prevSunday >= 8;
+      }
+      if (month === 11) {
+        // Primer domingo de noviembre (día entre 1 y 7)
+        const prevSunday = day - dow;
+        return prevSunday < 1;
+      }
+    } catch {}
+    return false;
+  };
+
+  // 1. Etiqueta explícita [tz:...]
+  const tzMatch = rawDir.match(/\[tz:([^\]]+)\]/i);
+  const tzTag = tzMatch ? tzMatch[1].trim() : '';
+
+  if (tzTag) {
+    if (tzTag.includes('Hermosillo')) {
+      return { offsetHours: -7, zoneLabel: 'Sonora (UTC-7)', matched: true };
+    }
+    if (tzTag.includes('Mazatlan')) {
+      return { offsetHours: -7, zoneLabel: 'Pacífico / Sinaloa (UTC-7)', matched: true };
+    }
+    if (tzTag.includes('Tijuana')) {
+      const dst = isUsBorderDst(fechaStr);
+      return {
+        offsetHours: dst ? -7 : -8,
+        zoneLabel: dst ? 'Baja California (UTC-7 Verano)' : 'Baja California (UTC-8 Invierno)',
+        matched: true,
+      };
+    }
+    if (tzTag.includes('Juarez') || tzTag.includes('Ojinaga') || tzTag.includes('Denver') || tzTag.includes('El_Paso')) {
+      const dst = isUsBorderDst(fechaStr);
+      return {
+        offsetHours: dst ? -6 : -7,
+        zoneLabel: dst ? 'Cd. Juárez / Frontera (UTC-6 Verano)' : 'Cd. Juárez / Frontera (UTC-7 Invierno)',
+        matched: true,
+      };
+    }
+    if (tzTag.includes('Cancun')) {
+      return { offsetHours: -5, zoneLabel: 'Quintana Roo (UTC-5)', matched: true };
+    }
+    if (tzTag.includes('Madrid') || tzTag.includes('Europe')) {
+      const month = fechaStr ? parseInt(fechaStr.split('-')[1] || '11', 10) : 11;
+      const euDst = month >= 4 && month <= 10;
+      return {
+        offsetHours: euDst ? 2 : 1,
+        zoneLabel: euDst ? 'España (UTC+2)' : 'España (UTC+1)',
+        matched: true,
+      };
+    }
+    if (tzTag.includes('Chihuahua') || tzTag.includes('Mexico_City') || tzTag.includes('Monterrey') || tzTag.includes('Merida')) {
+      return { offsetHours: -6, zoneLabel: 'Chihuahua / Centro (UTC-6 Fijo)', matched: true };
+    }
+  }
+
+  // 2. Coincidencia por ciudad / estado en el texto de la dirección
+  if (norm) {
+    if (
+      norm.includes('sonora') ||
+      norm.includes('hermosillo') ||
+      norm.includes('obregon') ||
+      norm.includes('nogales') ||
+      norm.includes('guaymas') ||
+      norm.includes('navojoa') ||
+      norm.includes('caborca') ||
+      norm.includes('son.,')
+    ) {
+      return { offsetHours: -7, zoneLabel: 'Sonora (UTC-7)', matched: true };
+    }
+    if (
+      norm.includes('sinaloa') ||
+      norm.includes('mazatlan') ||
+      norm.includes('culiacan') ||
+      norm.includes('los mochis') ||
+      norm.includes('baja california sur') ||
+      norm.includes('la paz') ||
+      norm.includes('los cabos') ||
+      norm.includes('nayarit')
+    ) {
+      return { offsetHours: -7, zoneLabel: 'Pacífico (UTC-7)', matched: true };
+    }
+    if (norm.includes('tijuana') || norm.includes('mexicali') || norm.includes('ensenada') || (norm.includes('baja california') && !norm.includes('sur'))) {
+      const dst = isUsBorderDst(fechaStr);
+      return {
+        offsetHours: dst ? -7 : -8,
+        zoneLabel: dst ? 'Baja California (UTC-7 Verano)' : 'Baja California (UTC-8 Invierno)',
+        matched: true,
+      };
+    }
+    if (norm.includes('ciudad juarez') || norm.includes('cd juarez') || norm.includes('cd. juarez') || norm.includes('ojinaga')) {
+      const dst = isUsBorderDst(fechaStr);
+      return {
+        offsetHours: dst ? -6 : -7,
+        zoneLabel: dst ? 'Cd. Juárez / Frontera (UTC-6 Verano)' : 'Cd. Juárez / Frontera (UTC-7 Invierno)',
+        matched: true,
+      };
+    }
+    if (norm.includes('quintana roo') || norm.includes('cancun') || norm.includes('playa del carmen') || norm.includes('tulum')) {
+      return { offsetHours: -5, zoneLabel: 'Quintana Roo (UTC-5)', matched: true };
+    }
+  }
+
+  // 3. Coincidencia por coordenadas GPS reales (Bounding Box Geográfico)
+  if (typeof lat === 'number' && typeof lng === 'number' && Math.abs(lat) > 0.1 && Math.abs(lng) > 0.1) {
+    if (lat >= 35 && lat <= 44 && lng >= -10 && lng <= 5) {
+      const month = fechaStr ? parseInt(fechaStr.split('-')[1] || '11', 10) : 11;
+      const euDst = month >= 4 && month <= 10;
+      return { offsetHours: euDst ? 2 : 1, zoneLabel: euDst ? 'España (UTC+2)' : 'España (UTC+1)', matched: true };
+    }
+    if (lat >= 28 && lng <= -114.5) {
+      const dst = isUsBorderDst(fechaStr);
+      return { offsetHours: dst ? -7 : -8, zoneLabel: dst ? 'Baja California (UTC-7)' : 'Baja California (UTC-8)', matched: true };
+    }
+    if (lat >= 26.3 && lat <= 32.5 && lng > -115 && lng <= -108.6) {
+      return { offsetHours: -7, zoneLabel: 'Sonora (UTC-7)', matched: true };
+    }
+    if (lat >= 20.6 && lat <= 27.0 && lng >= -115 && lng <= -105.2) {
+      return { offsetHours: -7, zoneLabel: 'Pacífico (UTC-7)', matched: true };
+    }
+    if (lat >= 17.8 && lat <= 21.8 && lng >= -89.3 && lng <= -86.5) {
+      return { offsetHours: -5, zoneLabel: 'Quintana Roo (UTC-5)', matched: true };
+    }
+    if (lat >= 30.8 && lat <= 31.9 && lng >= -108.5 && lng <= -104.2) {
+      const dst = isUsBorderDst(fechaStr);
+      return { offsetHours: dst ? -6 : -7, zoneLabel: dst ? 'Cd. Juárez (UTC-6 Verano)' : 'Cd. Juárez (UTC-7 Invierno)', matched: true };
+    }
+  }
+
+  return { offsetHours: -6, zoneLabel: 'Oficina Chihuahua (UTC-6 Fijo)', matched: false };
+}
+
+function cleanHoraToHMS(rawHora?: string | null, fallback = '08:00:00'): string {
+  let cleanH = (rawHora || fallback).trim();
+  cleanH = cleanH.replace(/([+-]\d{2}(:\d{2})?)|Z$/g, '').trim();
+  if (cleanH.includes('T')) {
+    cleanH = cleanH.split('T')[1].replace(/([+-]\d{2}(:\d{2})?)|Z$/g, '').trim();
+  }
+  const parts = cleanH.split(':').map((p) => parseInt(p, 10));
+  const hh = isNaN(parts[0]) ? 8 : parts[0];
+  const mm = isNaN(parts[1]) ? 0 : parts[1];
+  const ss = isNaN(parts[2]) ? 0 : parts[2];
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+/**
  * Consulta la ubicación y telemetría histórica de las 5 unidades GPS en el minuto exacto
- * en que un empleado checó Entrada o Salida (hoy o días pasados).
+ * en que un empleado checó Entrada o Salida (hoy o días pasados), usando el instante atómico UTC real.
  */
 export async function fetchFleetSnapshotAtTime(params: {
+  asistenciaId?: string | null;
   fecha: string;
   hora: string;
   empleadoLat?: number | null;
@@ -1085,6 +1216,7 @@ export async function fetchFleetSnapshotAtTime(params: {
   env?: string;
 }): Promise<FleetSnapshotResponse> {
   const {
+    asistenciaId,
     fecha,
     hora,
     empleadoLat,
@@ -1096,44 +1228,158 @@ export async function fetchFleetSnapshotAtTime(params: {
     env = 'cloud',
   } = params;
 
-  // 1. Limpiar y calcular timestamp exacto en hora local Chihuahua (UTC-6)
-  const cleanFecha = (fecha || '').split('T')[0].trim() || new Date().toISOString().split('T')[0];
-  let cleanH = (hora || '08:00:00').trim();
-  cleanH = cleanH.replace(/([+-]\d{2}(:\d{2})?)|Z$/g, '').trim();
-  if (cleanH.includes('T')) {
-    cleanH = cleanH.split('T')[1].replace(/([+-]\d{2}(:\d{2})?)|Z$/g, '').trim();
-  }
-  const parts = cleanH.split(':').map((p) => parseInt(p, 10));
-  const hh = isNaN(parts[0]) ? 8 : parts[0];
-  const mm = isNaN(parts[1]) ? 0 : parts[1];
-  const ss = isNaN(parts[2]) ? 0 : parts[2];
-  const formattedHora = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
-
-  const d = new Date(`${cleanFecha}T${formattedHora}-06:00`);
-  const targetTs = isNaN(d.getTime()) ? Math.floor(Date.now() / 1000) : Math.floor(d.getTime() / 1000);
-
   const poolInttec = getDbPool('inttec', env as any);
 
-  let resolvedDireccion = empleadoDireccion || null;
+  const cleanFecha = (fecha || '').split('T')[0].trim() || new Date().toISOString().split('T')[0];
+  let formattedHora = cleanHoraToHMS(hora);
+  const requestedHM = formattedHora.slice(0, 5); // "HH:MM"
 
-  // Si no se proporcionó dirección explícita, consultar en la BD la checada real de ese empleado en esa fecha
-  if (!resolvedDireccion && empleadoNombre) {
-    try {
-      const aCheck = await poolInttec.query(
-        `SELECT a.direccion_entrada, a.direccion_salida, a.latitud_entrada, a.longitud_entrada
+  // 1. Buscar el registro real de asistencia en la BD para recuperar su timestamp atómico UTC (creado_en / timestamp_entrada / timestamp_salida),
+  //    la hora con segundos exactos y la etiqueta [tz:...] original antes de que fuera limpiada en la UI.
+  let dbRec: any = null;
+  try {
+    if (asistenciaId) {
+      const byId = await poolInttec.query('SELECT * FROM asistencias WHERE id = $1 LIMIT 1', [asistenciaId]);
+      if (byId.rows.length > 0) dbRec = byId.rows[0];
+    }
+    if (!dbRec && empleadoNombre) {
+      const byName = await poolInttec.query(
+        `SELECT a.*
          FROM asistencias a
          JOIN usuarios u ON u.id = a.empleado_id
          WHERE u.nombre ILIKE $1 AND a.fecha = $2
-         ORDER BY a.id DESC LIMIT 1`,
-        [`%${empleadoNombre}%`, cleanFecha]
+         ORDER BY a.creado_en DESC`,
+        [`%${empleadoNombre.trim()}%`, cleanFecha]
       );
-      if (aCheck.rows.length > 0) {
-        resolvedDireccion = tipoChecada === 'Salida'
-          ? (aCheck.rows[0].direccion_salida || aCheck.rows[0].direccion_entrada)
-          : (aCheck.rows[0].direccion_entrada || aCheck.rows[0].direccion_salida);
+      if (byName.rows.length > 0) {
+        dbRec =
+          byName.rows.find((r: any) => {
+            const candidate = tipoChecada === 'Salida' ? r.hora_salida : r.hora_entrada;
+            return candidate && cleanHoraToHMS(String(candidate)).startsWith(requestedHM);
+          }) || byName.rows[0];
       }
-    } catch {}
+    }
+  } catch (dbLookupErr: any) {
+    console.warn('[FleetSnapshot] Advertencia buscando registro en BD:', dbLookupErr.message);
   }
+
+  // Si el registro de BD tiene los segundos exactos de esa misma hora (ej. "08:35:19" cuando la UI envió "08:35"), usar la hora exacta
+  if (dbRec) {
+    const dbHoraRaw = tipoChecada === 'Salida' ? dbRec.hora_salida : dbRec.hora_entrada;
+    if (dbHoraRaw) {
+      const dbHoraClean = cleanHoraToHMS(String(dbHoraRaw));
+      if (dbHoraClean.startsWith(requestedHM)) {
+        formattedHora = dbHoraClean;
+      }
+    }
+  }
+
+  let resolvedDireccion =
+    (dbRec
+      ? tipoChecada === 'Salida'
+        ? dbRec.direccion_salida || empleadoDireccion || dbRec.direccion_entrada
+        : dbRec.direccion_entrada || empleadoDireccion || dbRec.direccion_salida
+      : empleadoDireccion) || null;
+
+  const resolvedEmpLat =
+    typeof empleadoLat === 'number' && Math.abs(empleadoLat) > 0.1
+      ? empleadoLat
+      : dbRec
+        ? Number((tipoChecada === 'Salida' ? dbRec.latitud_salida : dbRec.latitud_entrada) || 0) || null
+        : null;
+  const resolvedEmpLng =
+    typeof empleadoLng === 'number' && Math.abs(empleadoLng) > 0.1
+      ? empleadoLng
+      : dbRec
+        ? Number((tipoChecada === 'Salida' ? dbRec.longitud_salida : dbRec.longitud_entrada) || 0) || null
+        : null;
+
+  // 2. Resolver el instante atómico UTC real (targetTs) y el huso horario real del reporte
+  const nominalUtcMs = Date.parse(`${cleanFecha}T${formattedHora}Z`);
+  const nominalUtcSec = isNaN(nominalUtcMs) ? Math.floor(Date.now() / 1000) : Math.floor(nominalUtcMs / 1000);
+
+  const geoInfo = inferGeographicOffsetAndZone(
+    resolvedEmpLat,
+    resolvedEmpLng,
+    resolvedDireccion || (dbRec ? `${dbRec.direccion_entrada || ''} ${dbRec.direccion_salida || ''}` : null),
+    cleanFecha
+  );
+
+  let resolvedOffsetHours = geoInfo.offsetHours; // Por defecto -6 (Chihuahua) o el huso geográfico detectado (-7 Sonora, etc.)
+  let resolvedZoneLabel = geoInfo.zoneLabel;
+  let targetTs = nominalUtcSec - resolvedOffsetHours * 3600;
+
+  // Helper para validar si un TIMESTAMPTZ del servidor corresponde al instante real en que se hizo esa checada
+  // (diferencia entera de huso horario respecto a nominalUtcSec con tolerancia <= 10 minutos por subida de foto/red)
+  const checkAtomicTimestampMatch = (
+    rawServerTs: any,
+    refNominalUtcSec: number
+  ): { matched: boolean; tsSec: number; impliedOffsetHours: number } => {
+    if (!rawServerTs) return { matched: false, tsSec: 0, impliedOffsetHours: -6 };
+    const tsMs = new Date(rawServerTs).getTime();
+    if (isNaN(tsMs)) return { matched: false, tsSec: 0, impliedOffsetHours: -6 };
+    const tsSec = Math.floor(tsMs / 1000);
+    const diffSec = refNominalUtcSec - tsSec;
+    const impliedOffsetHours = Math.round(diffSec / 3600);
+    const remainderSec = Math.abs(diffSec - impliedOffsetHours * 3600);
+    if (impliedOffsetHours >= -12 && impliedOffsetHours <= 14 && remainderSec <= 600) {
+      return { matched: true, tsSec, impliedOffsetHours };
+    }
+    return { matched: false, tsSec, impliedOffsetHours: -6 };
+  };
+
+  if (dbRec) {
+    if (tipoChecada === 'Entrada') {
+      // Prioridad 1: timestamp_entrada o creado_en (sello UTC real del servidor al momento del reporte)
+      const atomicIn = checkAtomicTimestampMatch(
+        dbRec.timestamp_entrada || dbRec.creado_en,
+        nominalUtcSec
+      );
+      if (atomicIn.matched) {
+        targetTs = atomicIn.tsSec;
+        resolvedOffsetHours = atomicIn.impliedOffsetHours;
+        if (!geoInfo.matched && resolvedOffsetHours !== -6) {
+          const sign = resolvedOffsetHours >= 0 ? '+' : '';
+          resolvedZoneLabel = `Reloj Dispositivo (UTC${sign}${resolvedOffsetHours})`;
+        }
+      }
+    } else {
+      // Salida:
+      // Prioridad 1: timestamp_salida explícito
+      const atomicOut = checkAtomicTimestampMatch(dbRec.timestamp_salida, nominalUtcSec);
+      if (atomicOut.matched) {
+        targetTs = atomicOut.tsSec;
+        resolvedOffsetHours = atomicOut.impliedOffsetHours;
+        if (!geoInfo.matched && resolvedOffsetHours !== -6) {
+          const sign = resolvedOffsetHours >= 0 ? '+' : '';
+          resolvedZoneLabel = `Reloj Dispositivo (UTC${sign}${resolvedOffsetHours})`;
+        }
+      } else if (dbRec.hora_entrada && (dbRec.timestamp_entrada || dbRec.creado_en)) {
+        // Prioridad 2 para Salidas históricas: deducir el offset del celular ese mismo día comparando creado_en vs hora_entrada
+        const entradaHMS = cleanHoraToHMS(String(dbRec.hora_entrada));
+        const entradaNominalMs = Date.parse(`${cleanFecha}T${entradaHMS}Z`);
+        if (!isNaN(entradaNominalMs)) {
+          const atomicEntry = checkAtomicTimestampMatch(
+            dbRec.timestamp_entrada || dbRec.creado_en,
+            Math.floor(entradaNominalMs / 1000)
+          );
+          if (atomicEntry.matched) {
+            // Si no cambió de estado geográfico o coincide con el offset del teléfono de la mañana, usar ese mismo offset
+            resolvedOffsetHours = geoInfo.matched ? geoInfo.offsetHours : atomicEntry.impliedOffsetHours;
+            targetTs = nominalUtcSec - resolvedOffsetHours * 3600;
+            if (!geoInfo.matched && resolvedOffsetHours !== -6) {
+              const sign = resolvedOffsetHours >= 0 ? '+' : '';
+              resolvedZoneLabel = `Reloj Dispositivo (UTC${sign}${resolvedOffsetHours})`;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const horaOficinaChihuahua = formatHora24WithOffset(targetTs, -6);
+  const desfaseHorasOficina = resolvedOffsetHours - (-6); // ej. -7 - (-6) = -1 (1 hora atrás de Chihuahua)
+  const utcOffsetStr = `UTC${resolvedOffsetHours >= 0 ? '+' : ''}${resolvedOffsetHours}`;
 
   const rawDir = (resolvedDireccion || '').trim().toLowerCase();
   const esChecadaOficina =
@@ -1151,16 +1397,16 @@ export async function fetchFleetSnapshotAtTime(params: {
   const OFICINA_INTTEC_LNG = -106.0955;
 
   const empHasGps = !!(
-    typeof empleadoLat === 'number' &&
-    typeof empleadoLng === 'number' &&
-    Math.abs(empleadoLat) > 0.1 &&
-    Math.abs(empleadoLng) > 0.1
+    typeof resolvedEmpLat === 'number' &&
+    typeof resolvedEmpLng === 'number' &&
+    Math.abs(resolvedEmpLat) > 0.1 &&
+    Math.abs(resolvedEmpLng) > 0.1
   );
 
   // Coordenadas de referencia para medir distancias de la flota:
   // Si el empleado transmitió GPS se usa su GPS; si checó en checador de oficina se usan las coordenadas de la oficina
-  const refLat = empHasGps ? Number(empleadoLat) : (esChecadaOficina ? OFICINA_INTTEC_LAT : null);
-  const refLng = empHasGps ? Number(empleadoLng) : (esChecadaOficina ? OFICINA_INTTEC_LNG : null);
+  const refLat = empHasGps ? Number(resolvedEmpLat) : (esChecadaOficina ? OFICINA_INTTEC_LAT : null);
+  const refLng = empHasGps ? Number(resolvedEmpLng) : (esChecadaOficina ? OFICINA_INTTEC_LNG : null);
   const hasRefCoords = refLat !== null && refLng !== null;
 
   // 2. Obtener lista de vehículos activos que CUENTAN con localizador GPS instalado
@@ -1246,6 +1492,7 @@ export async function fetchFleetSnapshotAtTime(params: {
     let ignition = false;
     let batteryV: number | null = null;
     let horaReporte: string | null = null;
+    let horaReporteChihuahua: string | null = null;
     let msgTs: number | null = null;
     let gpsNombre: string | null = null;
 
@@ -1327,14 +1574,16 @@ export async function fetchFleetSnapshotAtTime(params: {
             }
 
             msgTs = Number(bestMsg.t || 0);
-            horaReporte = formatHoraLocalChihuahua(msgTs);
+            horaReporte = formatHoraWithOffset(msgTs, resolvedOffsetHours);
+            horaReporteChihuahua = formatHoraLocalChihuahua(msgTs);
           } else if (wUnit.pos && wUnit.pos.y && wUnit.pos.x) {
             // Posición de referencia de la unidad si no hubo mensajes en el rango
             lat = Number(wUnit.pos.y);
             lng = Number(wUnit.pos.x);
             speed = Math.max(0, Math.round(Number(wUnit.pos.s || 0)));
             msgTs = Number(wUnit.pos.t || targetTs);
-            horaReporte = formatHoraLocalChihuahua(msgTs);
+            horaReporte = formatHoraWithOffset(msgTs, resolvedOffsetHours);
+            horaReporteChihuahua = formatHoraLocalChihuahua(msgTs);
           }
         } catch (fetchErr: any) {
           console.warn(`[FleetSnapshot] Error cargando mensajes unidad ${v.placas}:`, fetchErr.message);
@@ -1350,7 +1599,8 @@ export async function fetchFleetSnapshotAtTime(params: {
       speed = sim.speed;
       ignition = sim.ignition;
       batteryV = sim.battery_voltage || null;
-      horaReporte = formattedHora;
+      horaReporte = formatHoraWithOffset(targetTs, resolvedOffsetHours);
+      horaReporteChihuahua = formatHoraLocalChihuahua(targetTs);
       msgTs = targetTs;
       gpsNombre = sim.name;
     }
@@ -1421,6 +1671,7 @@ export async function fetchFleetSnapshotAtTime(params: {
       bateria_v: batteryV,
       direccion,
       hora_reporte: horaReporte,
+      hora_reporte_chihuahua: horaReporteChihuahua,
       timestamp: msgTs,
       diferencia_minutos: diffMin,
       distancia_empleado_m: distM,
@@ -1485,6 +1736,10 @@ export async function fetchFleetSnapshotAtTime(params: {
   return {
     fecha: cleanFecha,
     hora_objetivo: formattedHora,
+    hora_oficina_chihuahua: horaOficinaChihuahua,
+    utc_offset_empleado: utcOffsetStr,
+    desfase_horas_oficina: desfaseHorasOficina,
+    zona_horaria_detectada: resolvedZoneLabel,
     target_timestamp: targetTs,
     empleado_nombre: empleadoNombre || null,
     tipo_checada: tipoChecada,

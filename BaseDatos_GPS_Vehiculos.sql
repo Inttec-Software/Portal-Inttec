@@ -27,7 +27,19 @@ ALTER TABLE public.asistencias
   ADD COLUMN IF NOT EXISTS gps_vehiculo_ignicion BOOLEAN,
   ADD COLUMN IF NOT EXISTS gps_vehiculo_direccion TEXT,
   ADD COLUMN IF NOT EXISTS gps_vehiculo_distancia_m NUMERIC(10,2),
-  ADD COLUMN IF NOT EXISTS gps_vehiculo_alerta TEXT;
+  ADD COLUMN IF NOT EXISTS gps_vehiculo_alerta TEXT,
+  ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_lat DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_lng DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_velocidad NUMERIC(6,2),
+  ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_distancia_m NUMERIC(10,2),
+  ADD COLUMN IF NOT EXISTS gps_salida_vehiculo_alerta TEXT,
+  ADD COLUMN IF NOT EXISTS timestamp_entrada TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS timestamp_salida TIMESTAMPTZ;
+
+-- Configuración de EPCOM GPS / Wialon en tabla `app_settings`
+ALTER TABLE public.app_settings
+  ADD COLUMN IF NOT EXISTS epcom_gps_api_url TEXT,
+  ADD COLUMN IF NOT EXISTS epcom_gps_api_key TEXT;
 
 -- Índices para búsqueda rápida por IMEI y por vehículo en asistencias
 CREATE INDEX IF NOT EXISTS idx_vehiculos_gps_imei ON public.vehiculos(gps_imei);

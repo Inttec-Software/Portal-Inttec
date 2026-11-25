@@ -103,6 +103,7 @@ export default function AdminAsistencia() {
   // Estado del modal de corroboración GPS con la flota
   const [corroborarModalVisible, setCorroborarModalVisible] = useState(false);
   const [corroborarData, setCorroborarData] = useState<{
+    asistenciaId?: string | null;
     fecha: string;
     hora: string;
     tipo: 'Entrada' | 'Salida';
@@ -409,12 +410,14 @@ export default function AdminAsistencia() {
       let gpsVehiculoLatHoy: number | null = null;
       let gpsVehiculoLngHoy: number | null = null;
       let gpsVehiculoVelocidadHoy: number | null = null;
+      let asistenciaIdHoy: string | null = null;
 
       if (asistenciasTargetDia.length > 0) {
         const sorted = [...asistenciasTargetDia].sort((a, b) =>
           (b.hora_entrada || '').localeCompare(a.hora_entrada || '')
         );
         const lastReg = sorted[0];
+        asistenciaIdHoy = lastReg.id || null;
         const tz = extractTimezoneFromRecord(lastReg);
         timezoneBadge = getTimezoneBadgeInfo(tz);
         vehiculoPlacasHoy = lastReg.vehiculo_placas || null;
@@ -463,11 +466,13 @@ export default function AdminAsistencia() {
 
       return {
         ...emp,
+        asistenciaIdHoy,
         estadoHoy: estadoDia,
         estadoDia,
         ultimaEntrada,
         ultimaSalida,
         isAutoCerrado,
+        direccionRawHoy: direccionDia || null,
         direccionHoy: direccionDia ? cleanAddressForDisplay(direccionDia) : null,
         fotoEntradaHoy: fotoEntradaDia,
         timezoneBadge,
@@ -1689,13 +1694,14 @@ export default function AdminAsistencia() {
                           onPress={(e) => {
                             e.stopPropagation();
                             setCorroborarData({
+                              asistenciaId: emp.asistenciaIdHoy,
                               fecha: emp.targetFecha,
                               hora: emp.ultimaEntrada || '08:00:00',
                               tipo: 'Entrada',
                               empleadoNombre: emp.nombre,
                               empleadoLat: emp.latitudHoy,
                               empleadoLng: emp.longitudHoy,
-                              empleadoDireccion: emp.direccionHoy,
+                              empleadoDireccion: emp.direccionRawHoy || emp.direccionHoy,
                               vehiculoId: emp.vehiculoIdHoy,
                               vehiculoPlacas: emp.vehiculoPlacasHoy,
                               gpsVehiculoAlerta: emp.gpsVehiculoAlertaHoy,
@@ -1875,6 +1881,7 @@ export default function AdminAsistencia() {
             setCorroborarModalVisible(false);
             setCorroborarData(null);
           }}
+          asistenciaId={corroborarData.asistenciaId || undefined}
           fecha={corroborarData.fecha}
           hora={corroborarData.hora}
           tipo={corroborarData.tipo}

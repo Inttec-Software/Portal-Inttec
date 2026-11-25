@@ -33,37 +33,77 @@ export interface TimezoneBadgeInfo {
 }
 
 /**
- * Detecta la zona horaria del usuario en base a su dispositivo, GPS o dirección
+ * Detecta la zona horaria del usuario priorizando la ubicación física real (coordenadas GPS y dirección)
+ * por encima de la configuración manual o desactualizada del sistema operativo del teléfono.
  */
 export function detectUserTimezone(
   lat?: number | null,
   lng?: number | null,
   address?: string | null
 ): string {
-  // 1. Si el dispositivo ya tiene una zona horaria mexicana o española reconocida, priorizarla
-  try {
-    const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (deviceTz && (KNOWN_TIMEZONES as readonly string[]).includes(deviceTz)) {
-      return deviceTz;
-    }
-  } catch {}
-
-  // 2. Si se proporciona dirección, buscar coincidencias por estado / ciudad
+  // 1. Si se proporciona dirección física, buscar coincidencias exactas por estado / ciudad
   if (address) {
     const norm = address.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    if (norm.includes('tijuana') || (norm.includes('baja california') && !norm.includes('sur'))) {
+    if (norm.includes('tijuana') || norm.includes('mexicali') || norm.includes('ensenada') || (norm.includes('baja california') && !norm.includes('sur'))) {
       return 'America/Tijuana';
     }
-    if (norm.includes('sonora') || norm.includes('hermosillo') || norm.includes('nogales')) {
+    if (
+      norm.includes('sonora') ||
+      norm.includes('hermosillo') ||
+      norm.includes('obregon') ||
+      norm.includes('nogales') ||
+      norm.includes('guaymas') ||
+      norm.includes('navojoa') ||
+      norm.includes('caborca') ||
+      norm.includes('agua prieta') ||
+      norm.includes('san luis rio colorado') ||
+      norm.includes('son.,') ||
+      norm.includes('son.')
+    ) {
       return 'America/Hermosillo';
     }
     if (norm.includes('quintana roo') || norm.includes('cancun') || norm.includes('playa del carmen') || norm.includes('tulum') || norm.includes('chetumal')) {
       return 'America/Cancun';
     }
-    if (norm.includes('sinaloa') || norm.includes('baja california sur') || norm.includes('nayarit') || norm.includes('la paz') || norm.includes('los cabos') || norm.includes('culiacan') || norm.includes('mazatlan')) {
+    if (
+      norm.includes('sinaloa') ||
+      norm.includes('baja california sur') ||
+      norm.includes('nayarit') ||
+      norm.includes('la paz') ||
+      norm.includes('los cabos') ||
+      norm.includes('culiacan') ||
+      norm.includes('mazatlan') ||
+      norm.includes('los mochis') ||
+      norm.includes('guasave') ||
+      norm.includes('tepic')
+    ) {
       return 'America/Mazatlan';
     }
-    if (norm.includes('chihuahua') || norm.includes('ciudad juarez') || norm.includes('cd juarez') || norm.includes('cd. juarez')) {
+    // Franja fronteriza de Chihuahua (Juárez / Ojinaga sí cambian horario en invierno/verano con EE.UU.)
+    if (
+      norm.includes('ciudad juarez') ||
+      norm.includes('cd juarez') ||
+      norm.includes('cd. juarez') ||
+      norm.includes('ojinaga') ||
+      norm.includes('praxedis') ||
+      norm.includes('guadalupe, chih') ||
+      norm.includes('janos') ||
+      norm.includes('ascension')
+    ) {
+      return 'America/Ciudad_Juarez';
+    }
+    // Chihuahua capital y resto del estado: UTC-6 fijo todo el año (sin horario de verano/invierno)
+    if (
+      norm.includes('chihuahua') ||
+      norm.includes('delicias') ||
+      norm.includes('cuauhtemoc') ||
+      norm.includes('parral') ||
+      norm.includes('camargo') ||
+      norm.includes('nuevo casas grandes') ||
+      norm.includes('meoqui') ||
+      norm.includes('jimenez') ||
+      norm.includes('chih.')
+    ) {
       return 'America/Chihuahua';
     }
     if (norm.includes('espana') || norm.includes('spain') || norm.includes('madrid') || norm.includes('barcelona')) {
@@ -71,21 +111,33 @@ export function detectUserTimezone(
     }
   }
 
-  // 3. Si se proporcionan coordenadas GPS, buscar por bounding box geográfico
-  if (typeof lat === 'number' && typeof lng === 'number' && lat !== 0 && lng !== 0) {
-    // Baja California
+  // 2. Si se proporcionan coordenadas GPS reales, buscar por bounding box geográfico
+  if (typeof lat === 'number' && typeof lng === 'number' && Math.abs(lat) > 0.1 && Math.abs(lng) > 0.1) {
+    // España / Europa
+    if (lat >= 35 && lat <= 44 && lng >= -10 && lng <= 5) return 'Europe/Madrid';
+    // Baja California Norte
     if (lat >= 28 && lng <= -114.5) return 'America/Tijuana';
-    // Sonora
-    if (lat >= 26.5 && lat <= 32.5 && lng > -115 && lng <= -108.5) return 'America/Hermosillo';
+    // Sonora (Hermosillo, Cd. Obregón, Nogales, Guaymas)
+    if (lat >= 26.3 && lat <= 32.5 && lng > -115 && lng <= -108.6) return 'America/Hermosillo';
     // Quintana Roo
     if (lat >= 17.8 && lat <= 21.8 && lng >= -89.3 && lng <= -86.5) return 'America/Cancun';
     // Sinaloa / BCS / Nayarit
-    if (lat >= 21.5 && lat <= 28 && lng >= -115 && lng <= -105) return 'America/Mazatlan';
-    // España
-    if (lat >= 35 && lat <= 44 && lng >= -10 && lng <= 5) return 'Europe/Madrid';
+    if (lat >= 20.6 && lat <= 27.0 && lng >= -115 && lng <= -105.2) return 'America/Mazatlan';
+    // Franja fronteriza norte de Chihuahua (Cd. Juárez / Ojinaga)
+    if (lat >= 30.8 && lat <= 31.9 && lng >= -108.5 && lng <= -104.2) return 'America/Ciudad_Juarez';
+    // Chihuahua Capital y centro/sur del estado (UTC-6 fijo)
+    if (lat >= 25.8 && lat < 30.8 && lng >= -108.6 && lng <= -103.8) return 'America/Chihuahua';
   }
 
-  // Fallback por defecto a la hora del centro de México
+  // 3. Fallback: Zona horaria reportada por el dispositivo si no hay GPS ni dirección
+  try {
+    const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (deviceTz && (KNOWN_TIMEZONES as readonly string[]).includes(deviceTz)) {
+      return deviceTz;
+    }
+  } catch {}
+
+  // Fallback por defecto a la hora oficial base (UTC-6 fijo)
   return COMPANY_BASE_TIMEZONE;
 }
 
@@ -100,9 +152,25 @@ export function getTimezoneOffsetDiffHours(
   try {
     const now = new Date();
     const getOffsetMinutes = (tz: string) => {
+      // Chihuahua Capital y Zona Centro de México tienen UTC-6 fijo todo el año desde oct 2022 (sin horario de verano).
+      // Forzamos -360 min para evitar que teléfonos con tzdata viejo apliquen UTC-7 en invierno a Chihuahua.
+      if (
+        tz === 'America/Chihuahua' ||
+        tz === 'America/Mexico_City' ||
+        tz === 'America/Monterrey' ||
+        tz === 'America/Merida'
+      ) {
+        return -360;
+      }
+      if (tz === 'America/Hermosillo' || tz === 'America/Mazatlan') {
+        return -420;
+      }
+      if (tz === 'America/Cancun') {
+        return -300;
+      }
       const formatted = now.toLocaleString('en-US', { timeZone: tz, timeZoneName: 'shortOffset' });
       const match = formatted.match(/GMT([+-]\d+)(?::(\d+))?/);
-      if (!match) return 0;
+      if (!match) return -360;
       const h = parseInt(match[1], 10);
       const m = match[2] ? parseInt(match[2], 10) : 0;
       return h * 60 + (h < 0 ? -m : m);
@@ -125,7 +193,13 @@ export function getTimezoneBadgeInfo(
   if (!recordTz || recordTz === baseTz) return null;
 
   const diff = getTimezoneOffsetDiffHours(recordTz, baseTz);
-  if (diff === 0 && (recordTz.includes('Mexico_City') || recordTz.includes('Monterrey') || recordTz.includes('Merida'))) {
+  if (
+    diff === 0 &&
+    (recordTz.includes('Mexico_City') ||
+      recordTz.includes('Monterrey') ||
+      recordTz.includes('Merida') ||
+      recordTz.includes('Chihuahua'))
+  ) {
     return null;
   }
 
@@ -172,13 +246,23 @@ export function getTimezoneBadgeInfo(
     };
   }
 
-  if (recordTz.includes('Chihuahua') || recordTz.includes('Juarez')) {
+  if (recordTz.includes('Juarez')) {
+    return {
+      label: 'Cd. Juárez',
+      diffText,
+      fullText: `Cd. Juárez (${diffText})`,
+      color: '#0284c7',
+      bgColor: '#e0f2fe',
+    };
+  }
+
+  if (recordTz.includes('Chihuahua')) {
     return {
       label: 'Chihuahua',
       diffText,
       fullText: `Chihuahua (${diffText})`,
-      color: '#b2bec3',
-      bgColor: '#f1f2f6',
+      color: '#64748b',
+      bgColor: '#f1f5f9',
     };
   }
 

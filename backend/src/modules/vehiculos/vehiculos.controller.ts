@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { getDbPool } from '../../config/database';
 import {
-  ensureGpsSchema,
   fetchEpcomGpsDevices,
   getGpsConfig,
   saveGpsConfig,
@@ -259,7 +258,6 @@ export const createRegistroGasolina = async (req: Request, res: Response) => {
 export const getFlotaGpsLive = async (req: Request, res: Response) => {
   try {
     const { company, env } = (req as any).tenant;
-    await ensureGpsSchema(env);
     const pool = getDbPool(company, env);
     const forceRefresh = req.query.force === 'true';
 
@@ -397,7 +395,6 @@ export const asignarConductoresDia = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { env } = (req as any).tenant;
-    await ensureGpsSchema(env);
 
     const { empleados_ids, gps_imei } = req.body;
     const cleanIds = Array.isArray(empleados_ids) ? empleados_ids.filter(Boolean) : [];
@@ -484,7 +481,6 @@ export const getHistorialRutaVehiculo = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { fecha } = req.query as { fecha?: string };
     const { company, env } = (req as any).tenant;
-    await ensureGpsSchema(env);
     const pool = getDbPool(company, env);
 
     const { rows } = await pool.query('SELECT * FROM vehiculos WHERE id = $1 LIMIT 1', [id]);

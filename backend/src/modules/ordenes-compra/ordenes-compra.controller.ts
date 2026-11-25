@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { Pool } from 'pg';
 import { getDbPool } from '../../config/database';
 
-const getTenantPool = (req: Request, res: Response): Pool | null => {
+const getTenantPool = async (req: Request, res: Response): Promise<Pool | null> => {
   const tenant = (req as any).tenant;
   if (!tenant) {
     res.status(400).json({ error: 'Tenant no especificado' });
@@ -69,29 +69,51 @@ const upsertProveedor = async (pool: Pool, proveedorData: any): Promise<string |
     }
 
     if (targetId) {
-      await pool.query(
-        `UPDATE proveedores
-         SET nombre = $1,
-             rfc = COALESCE($2, rfc),
-             correo_electronico = COALESCE($3, correo_electronico),
-             calle_numero = COALESCE($4, calle_numero),
-             colonia = COALESCE($5, colonia),
-             ciudad = COALESCE($6, ciudad),
-             estado = COALESCE($7, estado),
-             codigo_postal = COALESCE($8, codigo_postal)
-         WHERE id = $9`,
-        [nombre, rfc, correo, calleNumero, colonia, ciudad, estado, cp, targetId]
-      );
+      try {
+        await pool.query(
+          `UPDATE proveedores
+           SET nombre = $1,
+               rfc = COALESCE($2, rfc),
+               correo_electronico = COALESCE($3, correo_electronico),
+               calle_numero = COALESCE($4, calle_numero),
+               colonia = COALESCE($5, colonia),
+               ciudad = COALESCE($6, ciudad),
+               estado = COALESCE($7, estado),
+               codigo_postal = COALESCE($8, codigo_postal)
+           WHERE id = $9`,
+          [nombre, rfc, correo, calleNumero, colonia, ciudad, estado, cp, targetId]
+        );
+      } catch (colErr: any) {
+        if (colErr?.code === '42703') {
+          await pool.query(
+            `UPDATE proveedores SET nombre = $1, rfc = COALESCE($2, rfc) WHERE id = $3`,
+            [nombre, rfc, targetId]
+          );
+        } else {
+          throw colErr;
+        }
+      }
       return targetId;
     }
 
-    const ins = await pool.query(
-      `INSERT INTO proveedores (nombre, rfc, correo_electronico, calle_numero, colonia, ciudad, estado, codigo_postal)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id`,
-      [nombre, rfc, correo, calleNumero, colonia, ciudad, estado, cp]
-    );
-    return ins.rows[0]?.id || null;
+    try {
+      const ins = await pool.query(
+        `INSERT INTO proveedores (nombre, rfc, correo_electronico, calle_numero, colonia, ciudad, estado, codigo_postal)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id`,
+        [nombre, rfc, correo, calleNumero, colonia, ciudad, estado, cp]
+      );
+      return ins.rows[0]?.id || null;
+    } catch (colErr: any) {
+      if (colErr?.code === '42703') {
+        const ins = await pool.query(
+          `INSERT INTO proveedores (nombre, rfc) VALUES ($1, $2) RETURNING id`,
+          [nombre, rfc]
+        );
+        return ins.rows[0]?.id || null;
+      }
+      throw colErr;
+    }
   } catch (err) {
     console.warn('[OrdenesCompra] No se pudo hacer upsert del proveedor:', err);
     return proveedorData.id || null;

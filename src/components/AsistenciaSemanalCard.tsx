@@ -147,6 +147,7 @@ export default function AsistenciaSemanalCard({
   // Estado del modal de corroboración con Flota GPS
   const [corroborarModalVisible, setCorroborarModalVisible] = useState(false);
   const [corroborarData, setCorroborarData] = useState<{
+    asistenciaId?: string;
     fecha: string;
     hora: string;
     tipo: 'Entrada' | 'Salida';
@@ -965,13 +966,14 @@ export default function AsistenciaSemanalCard({
                               style={[styles.corroborarBtn, { backgroundColor: '#3b82f612', borderColor: '#3b82f635' }]}
                               onPress={() => {
                                 setCorroborarData({
+                                  asistenciaId: turno.id,
                                   fecha: dia.dateStr,
-                                  hora: turno.hora_entrada,
+                                  hora: turno.raw_item?.hora_entrada || turno.hora_entrada,
                                   tipo: 'Entrada',
                                   empleadoNombre,
                                   empleadoLat: turno.latitud_entrada,
                                   empleadoLng: turno.longitud_entrada,
-                                  empleadoDireccion: turno.direccion_entrada,
+                                  empleadoDireccion: turno.raw_item?.direccion_entrada || turno.direccion_entrada,
                                   vehiculoId: turno.vehiculo_id,
                                   vehiculoPlacas: turno.vehiculo_placas,
                                   gpsVehiculoAlerta: turno.gps_vehiculo_alerta,
@@ -1111,13 +1113,14 @@ export default function AsistenciaSemanalCard({
                                 style={[styles.corroborarBtn, { backgroundColor: '#3b82f612', borderColor: '#3b82f635', marginTop: 4 }]}
                                 onPress={() => {
                                   setCorroborarData({
+                                    asistenciaId: turno.id,
                                     fecha: dia.dateStr,
-                                    hora: turno.hora_salida || '18:00:00',
+                                    hora: turno.raw_item?.hora_salida || turno.hora_salida || '18:00:00',
                                     tipo: 'Salida',
                                     empleadoNombre,
                                     empleadoLat: turno.latitud_salida,
                                     empleadoLng: turno.longitud_salida,
-                                    empleadoDireccion: turno.direccion_salida,
+                                    empleadoDireccion: turno.raw_item?.direccion_salida || turno.direccion_salida,
                                     vehiculoId: turno.vehiculo_id,
                                     vehiculoPlacas: turno.vehiculo_placas,
                                     gpsVehiculoAlerta: turno.gps_salida_vehiculo_alerta,
@@ -1210,6 +1213,7 @@ export default function AsistenciaSemanalCard({
             setCorroborarModalVisible(false);
             setCorroborarData(null);
           }}
+          asistenciaId={corroborarData.asistenciaId}
           fecha={corroborarData.fecha}
           hora={corroborarData.hora}
           tipo={corroborarData.tipo}
