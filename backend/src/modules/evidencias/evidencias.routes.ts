@@ -6,7 +6,8 @@ import {
   getAdminEvidencias, 
   getMisEvidencias, 
   actualizarEvidencia, 
-  getAdminEvidenciaById 
+  getAdminEvidenciaById,
+  mejorarRedaccion
 } from './evidencias.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -19,6 +20,7 @@ router.use(tenantMiddleware);
 router.get('/catalogos', getCatalogos);
 router.get('/inventario-colaboradores', getInventarioColaboradores);
 router.get('/mis-evidencias', getMisEvidencias);
+router.post('/mejorar-redaccion', mejorarRedaccion);
 router.post('/', crearEvidencia);
 router.get('/admin/all', getAdminEvidencias);
 router.get('/admin/:id', getAdminEvidenciaById);

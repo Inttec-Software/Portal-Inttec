@@ -61,7 +61,6 @@ function EmpleadoLayoutContent() {
     if (lastPart === 'vehiculos') return 'Vehículos';
     if (lastPart === 'herramientas') return 'Herramientas';
     if (lastPart === 'documentos') return 'Documentos';
-    if (lastPart === 'chat-ia') return 'Chat IA';
     if (lastPart === 'asistencia') return 'Asistencia';
     if (lastPart === 'directorio-clientes') return 'Directorio de Clientes';
     if (lastPart === 'perfil') return 'Mi Perfil';
@@ -79,7 +78,6 @@ function EmpleadoLayoutContent() {
     { route: '/(empleado)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
     { route: '/(empleado)/documentos', icon: 'create-outline', color: '#0284c7', name: 'Documentos' },
     { route: '/(empleado)/directorio-clientes', icon: 'book-outline', color: '#0ea5e9', name: 'Directorio de Clientes' },
-    { route: '/(empleado)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },
     { route: '/(empleado)/perfil', icon: 'person-outline', color: '#5f27cd', name: 'Perfil' },
   ];
 

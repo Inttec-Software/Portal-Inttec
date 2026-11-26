@@ -143,7 +143,7 @@ export const evidenciasApi = {
    */
   async mejorarRedaccionIA(texto: string, tipo: 'situacion' | 'solucion'): Promise<string> {
     const headers = await getApiHeaders();
-    const res = await fetch(`${getApiUrl()}/api/chat-ia/mejorar-redaccion`, {
+    const res = await fetch(`${getApiUrl()}/api/evidencias/mejorar-redaccion`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ texto, tipo }),

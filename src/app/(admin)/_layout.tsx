@@ -105,7 +105,6 @@ function AdminLayoutContent() {
     { route: '/(admin)/auditoria-tarjeta', icon: 'shield-checkmark-outline', color: '#ff9f43', name: 'Auditoría' },
     { route: '/(admin)/documentos', icon: 'create-outline', color: '#0284c7', name: 'Documentos' },
     { route: '/(admin)/directorio-clientes', icon: 'book-outline', color: '#0ea5e9', name: 'Directorio de Clientes' },
-    { route: '/(admin)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },
   ];
 
   return (
