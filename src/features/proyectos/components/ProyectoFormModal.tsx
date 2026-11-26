@@ -48,6 +48,8 @@ export function ProyectoFormModal({
   const [status, setStatus] = useState<ProyectoStatus>('ACTIVO');
   const [notas, setNotas] = useState('');
   const [clienteSearch, setClienteSearch] = useState('');
+  const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
+  const [sucursalSearch, setSucursalSearch] = useState('');
 
   useEffect(() => {
     if (visible) {
@@ -65,6 +67,8 @@ export function ProyectoFormModal({
         setNotas('');
       }
       setClienteSearch('');
+      setShowSucursalDropdown(false);
+      setSucursalSearch('');
     }
   }, [visible, editingProyecto]);
 
@@ -445,7 +449,7 @@ export function ProyectoFormModal({
                 </View>
               </View>
 
-              {/* Sucursal */}
+              {/* Sucursal (Dropdown con buscador) */}
               {clienteId ? (
                 <View style={{ gap: 6 }}>
                   <Text
@@ -458,66 +462,167 @@ export function ProyectoFormModal({
                   >
                     Sucursal ({filteredSucursales.length})
                   </Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                    <TouchableOpacity
-                      onPress={() => setSucursalId('')}
-                      style={{
-                        paddingVertical: 6,
-                        paddingHorizontal: 10,
-                        borderRadius: BorderRadius.small,
-                        backgroundColor: !sucursalId
-                          ? themeColors.accent
-                          : themeColors.backgroundElement,
-                        borderWidth: 1,
-                        borderColor: !sucursalId
-                          ? themeColors.accent
-                          : themeColors.border,
-                      }}
-                    >
+
+                  <TouchableOpacity
+                    onPress={() => setShowSucursalDropdown(!showSucursalDropdown)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: themeColors.backgroundElement,
+                      borderWidth: 1,
+                      borderColor: showSucursalDropdown ? themeColors.accent : themeColors.border,
+                      borderRadius: BorderRadius.medium,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      <Ionicons
+                        name="business-outline"
+                        size={16}
+                        color={sucursalId ? themeColors.accent : themeColors.textSecondary}
+                      />
                       <Text
                         style={{
-                          fontSize: 12,
-                          fontWeight: '700',
-                          color: !sucursalId ? '#fff' : themeColors.text,
+                          fontSize: 13,
+                          fontWeight: sucursalId ? '700' : '600',
+                          color: themeColors.text,
+                          flex: 1,
                         }}
+                        numberOfLines={1}
                       >
-                        Sin sucursal específica
+                        {sucursalId
+                          ? filteredSucursales.find((s: any) => s.id === sucursalId)?.nombre || 'Sucursal seleccionada'
+                          : 'Sin sucursal específica'}
                       </Text>
-                    </TouchableOpacity>
+                    </View>
+                    <Ionicons
+                      name={showSucursalDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={themeColors.textSecondary}
+                    />
+                  </TouchableOpacity>
 
-                    {filteredSucursales.map((suc: any) => {
-                      const isSelected = sucursalId === suc.id;
-                      return (
-                        <TouchableOpacity
-                          key={suc.id}
-                          onPress={() => setSucursalId(suc.id)}
+                  {showSucursalDropdown && (
+                    <View
+                      style={{
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        borderRadius: BorderRadius.medium,
+                        backgroundColor: themeColors.backgroundElement,
+                        padding: 6,
+                        gap: 6,
+                      }}
+                    >
+                      {filteredSucursales.length > 5 && (
+                        <View
                           style={{
-                            paddingVertical: 6,
-                            paddingHorizontal: 10,
-                            borderRadius: BorderRadius.small,
-                            backgroundColor: isSelected
-                              ? themeColors.accent
-                              : themeColors.backgroundElement,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: themeColors.background,
                             borderWidth: 1,
-                            borderColor: isSelected
-                              ? themeColors.accent
-                              : themeColors.border,
+                            borderColor: themeColors.border,
+                            borderRadius: BorderRadius.small,
+                            paddingHorizontal: 8,
+                            height: 34,
                           }}
                         >
-                          <Text
+                          <Ionicons
+                            name="search-outline"
+                            size={14}
+                            color={themeColors.textSecondary}
+                            style={{ marginRight: 6 }}
+                          />
+                          <TextInput
+                            value={sucursalSearch}
+                            onChangeText={setSucursalSearch}
+                            placeholder="Buscar sucursal..."
+                            placeholderTextColor={themeColors.textSecondary}
+                            style={{ flex: 1, color: themeColors.text, fontSize: 12 }}
+                          />
+                          {sucursalSearch.length > 0 && (
+                            <TouchableOpacity onPress={() => setSucursalSearch('')}>
+                              <Ionicons name="close-circle" size={14} color={themeColors.textSecondary} />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      )}
+
+                      <ScrollView nestedScrollEnabled style={{ maxHeight: 160 }}>
+                        <View style={{ gap: 2 }}>
+                          <TouchableOpacity
+                            onPress={() => {
+                              setSucursalId('');
+                              setShowSucursalDropdown(false);
+                            }}
                             style={{
-                              fontSize: 12,
-                              fontWeight: '700',
-                              color: isSelected ? '#fff' : themeColors.text,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              paddingVertical: 8,
+                              paddingHorizontal: 10,
+                              borderRadius: BorderRadius.small,
+                              backgroundColor: !sucursalId ? themeColors.accent + '18' : 'transparent',
                             }}
                           >
-                            {isSelected ? '✓ ' : ''}
-                            {suc.nombre}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                fontWeight: !sucursalId ? '800' : '600',
+                                color: !sucursalId ? themeColors.accent : themeColors.textSecondary,
+                              }}
+                            >
+                              Sin sucursal específica
+                            </Text>
+                            {!sucursalId && (
+                              <Ionicons name="checkmark" size={16} color={themeColors.accent} />
+                            )}
+                          </TouchableOpacity>
+
+                          {filteredSucursales
+                            .filter((s: any) => {
+                              const q = sucursalSearch.trim().toLowerCase();
+                              return !q || (s.nombre && String(s.nombre).toLowerCase().includes(q));
+                            })
+                            .map((suc: any) => {
+                              const isSelected = sucursalId === suc.id;
+                              return (
+                                <TouchableOpacity
+                                  key={suc.id}
+                                  onPress={() => {
+                                    setSucursalId(suc.id);
+                                    setShowSucursalDropdown(false);
+                                  }}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    paddingVertical: 8,
+                                    paddingHorizontal: 10,
+                                    borderRadius: BorderRadius.small,
+                                    backgroundColor: isSelected ? themeColors.accent + '18' : 'transparent',
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      fontSize: 12,
+                                      fontWeight: isSelected ? '800' : '600',
+                                      color: isSelected ? themeColors.accent : themeColors.text,
+                                    }}
+                                  >
+                                    {suc.nombre}
+                                  </Text>
+                                  {isSelected && (
+                                    <Ionicons name="checkmark" size={16} color={themeColors.accent} />
+                                  )}
+                                </TouchableOpacity>
+                              );
+                            })}
+                        </View>
+                      </ScrollView>
+                    </View>
+                  )}
                 </View>
               ) : null}
 

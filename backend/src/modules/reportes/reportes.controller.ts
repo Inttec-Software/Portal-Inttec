@@ -294,7 +294,14 @@ export const getAdminReportes = async (req: Request, res: Response) => {
             COUNT(*) FILTER (WHERE g.status = 'APPROVED') AS count_aprobados,
             COALESCE(SUM(g.monto) FILTER (WHERE g.status = 'APPROVED'), 0) AS total_aprobados,
             COUNT(*) FILTER (WHERE g.status = 'PENDING' AND COALESCE(g.devuelto_por_factura, FALSE) = TRUE) AS count_devueltos_factura,
-            COUNT(*) FILTER (WHERE g.status = 'PENDING' AND (COALESCE(g.devuelto_por_factura, FALSE) = TRUE OR g.factura_sugerida_id IS NOT NULL)) AS count_con_factura_detectada
+            COUNT(*) FILTER (WHERE g.status = 'PENDING' AND (COALESCE(g.devuelto_por_factura, FALSE) = TRUE OR g.factura_sugerida_id IS NOT NULL)) AS count_con_factura_detectada,
+            COUNT(*) FILTER (WHERE ${OPERATIVO_SQL}) AS count_operativos,
+            COUNT(*) FILTER (
+              WHERE g.proyecto_id IS NULL
+                AND NOT ${OPERATIVO_SQL}
+                AND (g.tipo_gasto IS NULL OR g.status NOT IN ('PENDING', 'ACTION_REQUIRED'))
+                AND g.status IN ('APPROVED', 'REJECTED', 'ACTION_REQUIRED')
+            ) AS count_historico
           FROM gastos g
           ${baseWhereSql}
         `, baseParams),
@@ -354,6 +361,8 @@ export const getAdminReportes = async (req: Request, res: Response) => {
           countAprobados: Number(totalsRow.count_aprobados) || 0,
           countDevueltosFactura: Number(totalsRow.count_devueltos_factura) || 0,
           countConFacturaDetectada: Number(totalsRow.count_con_factura_detectada) || 0,
+          countOperativos: Number(totalsRow.count_operativos) || 0,
+          countHistorico: Number(totalsRow.count_historico) || 0,
         },
         ...(skipCatalogs ? {} : {
           usuarios: usersRes?.rows || [],

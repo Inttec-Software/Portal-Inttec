@@ -111,6 +111,8 @@ export function useAdminGastos() {
     countAprobados: number;
     countDevueltosFactura?: number;
     countConFacturaDetectada?: number;
+    countOperativos?: number;
+    countHistorico?: number;
   } | null>(null);
   const catalogsLoadedRef = React.useRef(false);
   const handledGastoIdRef = React.useRef<string | null>(null);
@@ -539,8 +541,7 @@ export function useAdminGastos() {
           ? 'operativos'
           : 'historial';
 
-      const effectiveLimit =
-        activeTab === 'operativos' ? '200' : String(pageSize);
+      const effectiveLimit = String(pageSize);
 
       const queryParams = new URLSearchParams({
         page: String(currentPage),

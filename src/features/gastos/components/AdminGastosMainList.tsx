@@ -563,13 +563,21 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
           },
           {
             key: 'operativos' as const,
-            label: `3. Operativos (${operativosGastos.length})`,
-            shortLabel: `Operativos (${operativosGastos.length})`,
+            label: `3. Operativos (${
+              backendTotals?.countOperativos ?? operativosGastos.length
+            })`,
+            shortLabel: `Operativos (${
+              backendTotals?.countOperativos ?? operativosGastos.length
+            })`,
           },
           {
             key: 'historial' as const,
-            label: `4. Histórico / Sin proy. (${historyGastos.length})`,
-            shortLabel: `Histórico (${historyGastos.length})`,
+            label: `4. Histórico / Sin proy. (${
+              backendTotals?.countHistorico ?? historyGastos.length
+            })`,
+            shortLabel: `Histórico (${
+              backendTotals?.countHistorico ?? historyGastos.length
+            })`,
           },
         ].map((tabItem) => {
           const isActive = activeTab === tabItem.key;
@@ -1432,6 +1440,20 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
                   </Text>
                 </View>
 
+                <PaginationControls
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={totalCount}
+                  itemsPerPage={pageSize}
+                  onPageChange={(p) => setCurrentPage(p)}
+                  onItemsPerPageChange={(s) => {
+                    setPageSize(s);
+                    setCurrentPage(1);
+                  }}
+                  isLoading={isLoading}
+                  style={{ marginBottom: Spacing.two }}
+                />
+
                 <View
                   style={[
                     styles.tableHeaderRow,
@@ -1799,6 +1821,21 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
                     No hay gastos operativos registrados.
                   </Text>
                 </View>
+              }
+              ListFooterComponent={
+                <PaginationControls
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={totalCount}
+                  itemsPerPage={pageSize}
+                  onPageChange={(p) => setCurrentPage(p)}
+                  onItemsPerPageChange={(s) => {
+                    setPageSize(s);
+                    setCurrentPage(1);
+                  }}
+                  isLoading={isLoading}
+                  style={{ marginTop: Spacing.two, marginBottom: Spacing.four }}
+                />
               }
               refreshing={isLoading}
               onRefresh={refreshData}
