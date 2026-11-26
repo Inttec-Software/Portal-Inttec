@@ -84,12 +84,13 @@ for COMP in "${COMPANIES[@]}"; do
     echo "[3/4] Preparando base local '$DB_NAME'..."
 
     docker exec -i inttec_db_local psql -U postgres -d postgres -c "CREATE ROLE $DB_USER WITH LOGIN SUPERUSER PASSWORD '01_inTTec_db';" >/dev/null 2>&1 || true
-    docker exec -i inttec_db_local psql -U postgres -d postgres -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;" >/dev/null 2>&1 || true
-    docker exec -i inttec_db_local psql -U postgres -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;" >/dev/null 2>&1 || true
+    docker exec -i inttec_db_local psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS $DB_NAME WITH (FORCE);" >/dev/null 2>&1
+    docker exec -i inttec_db_local psql -U postgres -d postgres -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;" >/dev/null 2>&1
+    docker exec -i inttec_db_local psql -U postgres -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;" >/dev/null 2>&1
 
     echo "[4/4] Extrayendo '$DB_NAME' desde Lightsail vía SSH..."
     ssh -i "$KEY_PATH" -o IdentitiesOnly=yes -o PubkeyAcceptedKeyTypes=+ssh-rsa -o HostKeyAlgorithms=+ssh-rsa -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$SSH_USER@$HOST_IP" \
-        "sudo -u postgres pg_dump -d $DB_NAME --clean --if-exists --no-owner --no-privileges" \
+        "sudo -u postgres pg_dump -d $DB_NAME --no-owner --no-privileges" \
         | docker exec -i inttec_db_local psql -U postgres -d "$DB_NAME" || true
 
     TABLE_COUNT=$(docker exec -i inttec_db_local psql -U postgres -d "$DB_NAME" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo "0")

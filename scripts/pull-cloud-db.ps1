@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Clona la base de datos de AWS Lightsail hacia el contenedor Docker PostgreSQL local vía SSH.
 .DESCRIPTION
@@ -135,15 +135,16 @@ foreach ($comp in $companiesToSync) {
     # Asegurar que el usuario administrador exista en PostgreSQL local
     docker exec -i inttec_db_local psql -U postgres -d postgres -c "CREATE ROLE $dbUser WITH LOGIN SUPERUSER PASSWORD '01_inTTec_db';" 2>$null
 
-    # Asegurar que la base de datos exista en PostgreSQL local
-    docker exec -i inttec_db_local psql -U postgres -d postgres -c "CREATE DATABASE $dbName OWNER $dbUser;" 2>$null
-    docker exec -i inttec_db_local psql -U postgres -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE $dbName TO $dbUser;" 2>$null
+    # Recrear la base de datos local limpia para evitar conflictos de dependencias/tablas huérfanas
+    docker exec -i inttec_db_local psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS $dbName WITH (FORCE);"
+    docker exec -i inttec_db_local psql -U postgres -d postgres -c "CREATE DATABASE $dbName OWNER $dbUser;"
+    docker exec -i inttec_db_local psql -U postgres -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE $dbName TO $dbUser;"
 
     Write-Host "[3/4] Extrayendo '$dbName' desde Lightsail vía SSH..." -ForegroundColor Cyan
     Write-Host "      Esto puede tomar unos segundos dependiendo del tamaño de los datos..." -ForegroundColor Gray
 
     # Comando de volcado remoto (ejecutado como superusuario postgres para bypass de peer auth)
-    $remoteDumpCmd = "sudo -u postgres pg_dump -d $dbName --clean --if-exists --no-owner --no-privileges"
+    $remoteDumpCmd = "sudo -u postgres pg_dump -d $dbName --no-owner --no-privileges"
 
     # Streaming SSH directo hacia docker psql local
     $sshCmd = "ssh -i `"$KeyPath`" -o IdentitiesOnly=yes -o PubkeyAcceptedKeyTypes=+ssh-rsa -o HostKeyAlgorithms=+ssh-rsa -o StrictHostKeyChecking=no -o ConnectTimeout=10 $SshUser@$HostIp `"$remoteDumpCmd`" | docker exec -i inttec_db_local psql -U postgres -d $dbName"
