@@ -912,7 +912,7 @@ export const updateGasto = async (req: Request, res: Response) => {
     if (inTx) {
       try { await client.query('ROLLBACK'); } catch (_) {}
     }
-    const isValidationError = error.message?.includes('Fecha') || error.message?.includes('hospedaje');
+    const isValidationError = error.statusCode === 400 || error.message?.includes('Fecha') || error.message?.includes('hospedaje');
     return res.status(isValidationError ? 400 : 500).json({ error: error.message });
   } finally {
     client.release();
@@ -1397,7 +1397,7 @@ export const createGastos = async (req: Request, res: Response) => {
       if (inTx) {
         try { await client.query('ROLLBACK'); } catch (_) {}
       }
-      const isValidationError = error.message?.includes('Fecha') || error.message?.includes('hospedaje');
+      const isValidationError = error.statusCode === 400 || error.message?.includes('Fecha') || error.message?.includes('hospedaje');
       return res.status(isValidationError ? 400 : 500).json({ error: error.message });
     } finally {
       client.release();

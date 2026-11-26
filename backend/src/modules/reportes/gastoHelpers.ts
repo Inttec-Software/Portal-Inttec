@@ -307,6 +307,17 @@ export const formatGasto = (g: any) => {
   };
 };
 
+const isLocalDeviceUri = (url: string): boolean => {
+  const lower = url.trim().toLowerCase();
+  return (
+    lower.startsWith('file://') ||
+    lower.startsWith('content://') ||
+    lower.startsWith('/data/') ||
+    lower.startsWith('ph://') ||
+    lower.startsWith('assets-library://')
+  );
+};
+
 export const sanitizeGastoWritePayload = (raw: Record<string, any>): Record<string, any> => {
   const sanitized: Record<string, any> = {};
   for (const [key, value] of Object.entries(raw || {})) {
@@ -317,6 +328,15 @@ export const sanitizeGastoWritePayload = (raw: Record<string, any>): Record<stri
       sanitized[key] = value ? String(value).trim().toUpperCase() : null;
     } else if (key === 'tipo_gasto') {
       sanitized[key] = value ? String(value).trim().toUpperCase() : null;
+    } else if ((key === 'foto_url' || key === 'factura_url') && typeof value === 'string') {
+      const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+      const validParts = parts.filter(p => !isLocalDeviceUri(p));
+      if (parts.length > 0 && validParts.length === 0 && key === 'foto_url') {
+        const err: any = new Error('La fotografía del ticket no se subió al servidor (ruta local del dispositivo). Vuelve a seleccionarla e intenta de nuevo.');
+        err.statusCode = 400;
+        throw err;
+      }
+      sanitized[key] = validParts.length > 0 ? validParts.join(',') : null;
     } else {
       sanitized[key] = value;
     }

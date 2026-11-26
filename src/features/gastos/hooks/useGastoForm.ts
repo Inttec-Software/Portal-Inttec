@@ -1378,6 +1378,85 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
     }
   };
 
+  const isLocalDeviceUri = (uri?: string | null): boolean => {
+    if (!uri) return false;
+    const lower = uri.trim().toLowerCase();
+    return (
+      lower.startsWith('file://') ||
+      lower.startsWith('content://') ||
+      lower.startsWith('/data/') ||
+      lower.startsWith('ph://') ||
+      lower.startsWith('assets-library://')
+    );
+  };
+
+  const uploadTicketFilesForGasto = async (userId: string): Promise<string | null> => {
+    const publicTicketUrls: string[] = [];
+
+    const uploadSingleBase64 = async (b64: string, ext: string, indexLabel: string): Promise<string> => {
+      const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
+      const fileName = `${userId}/${Date.now()}_${indexLabel}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('tickets')
+        .upload(fileName, b64, { contentType, upsert: true });
+
+      if (uploadError) {
+        const msg = typeof uploadError === 'string' ? uploadError : (uploadError as any)?.message;
+        throw new Error(msg || 'No se pudo subir la fotografía del ticket al servidor.');
+      }
+
+      const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
+      if (!urlData?.publicUrl || isLocalDeviceUri(urlData.publicUrl)) {
+        throw new Error('No se pudo obtener la URL pública del ticket subido.');
+      }
+      return urlData.publicUrl;
+    };
+
+    const resolveLocalBase64 = async (uri: string, existingB64?: string): Promise<string> => {
+      if (existingB64 && existingB64.trim().length > 0) return existingB64;
+      if (Platform.OS !== 'web' && uri && (uri.startsWith('file://') || uri.startsWith('content://'))) {
+        try {
+          const readB64 = await FileSystem.readAsStringAsync(uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          if (readB64 && readB64.trim().length > 0) return readB64;
+        } catch (readErr) {
+          console.warn('Fallback readAsStringAsync failed:', readErr);
+        }
+      }
+      return '';
+    };
+
+    if (ticketFiles.length > 0) {
+      for (let i = 0; i < ticketFiles.length; i++) {
+        const tf = ticketFiles[i];
+        if (tf.uri && (tf.uri.startsWith('http://') || tf.uri.startsWith('https://'))) {
+          publicTicketUrls.push(tf.uri);
+          continue;
+        }
+        const b64 = await resolveLocalBase64(tf.uri, tf.base64);
+        if (!b64) {
+          throw new Error('No se pudo procesar la fotografía local del ticket. Vuelve a seleccionarla e intenta de nuevo.');
+        }
+        const uploadedUrl = await uploadSingleBase64(b64, tf.ext || 'jpg', `ticket_${i}`);
+        publicTicketUrls.push(uploadedUrl);
+      }
+    } else if (imageUri) {
+      if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
+        publicTicketUrls.push(imageUri);
+      } else {
+        const b64 = await resolveLocalBase64(imageUri, imageBase64 || undefined);
+        if (!b64) {
+          throw new Error('No se pudo procesar la fotografía local del ticket. Vuelve a seleccionarla e intenta de nuevo.');
+        }
+        const uploadedUrl = await uploadSingleBase64(b64, imageExt || 'jpg', 'ticket_0');
+        publicTicketUrls.push(uploadedUrl);
+      }
+    }
+
+    return publicTicketUrls.join(',') || null;
+  };
+
   const handleSaveGasto = async () => {
     if (!currentUser) return;
     if (isSubmittingRef.current || isSubmitting) return;
@@ -1717,61 +1796,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
         const netState = await NetInfo.fetch();
 
         if (netState.isConnected) {
-          let publicTicketUrls: string[] = [];
-          if (ticketFiles.length > 0) {
-            for (let i = 0; i < ticketFiles.length; i++) {
-              const tf = ticketFiles[i];
-              let fileUrl = tf.uri;
-              if (tf.base64) {
-                try {
-                  const ext = tf.ext || 'jpg';
-                  const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-                  const fileName = `${currentUser.id}/ticket_${Date.now()}_${i}.${ext}`;
-                  const { error: uploadError } = await supabase.storage
-                    .from('tickets')
-                    .upload(fileName, tf.base64, { contentType, upsert: true });
-
-                  if (!uploadError) {
-                    const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-                    if (urlData?.publicUrl) {
-                      fileUrl = urlData.publicUrl;
-                    }
-                  } else {
-                    console.warn(`Supabase ticket [${i}] upload failed:`, uploadError);
-                  }
-                } catch (stErr) {
-                  console.warn(`Storage upload ticket [${i}] exception:`, stErr);
-                }
-              }
-              if (fileUrl) {
-                publicTicketUrls.push(fileUrl);
-              }
-            }
-          } else if (imageUri) {
-            if (imageBase64) {
-              const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
-              const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
-              const { error: uploadError } = await supabase.storage
-                .from('tickets')
-                .upload(fileName, imageBase64, { contentType, upsert: true });
-
-              if (uploadError) {
-                throw new Error(uploadError.message || 'No se pudo subir la fotografía del ticket al servidor.');
-              }
-
-              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-              if (urlData?.publicUrl) {
-                publicTicketUrls.push(urlData.publicUrl);
-              } else {
-                throw new Error('No se pudo obtener la URL pública del ticket subido.');
-              }
-            } else if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
-              publicTicketUrls.push(imageUri);
-            } else {
-              throw new Error('No se pudo procesar la fotografía local del ticket. Vuelve a seleccionarla e intenta de nuevo.');
-            }
-          }
-          const publicUrl = publicTicketUrls.join(',') || null;
+          const publicUrl = await uploadTicketFilesForGasto(currentUser.id);
 
           let publicInvoiceUrl = '';
           if (facturado && facturaPdf?.base64) {
@@ -2111,48 +2136,7 @@ export function useGastoForm({ role, mode, gastoId }: UseGastoFormOptions) {
           return;
         }
 
-        let publicTicketUrls: string[] = [];
-        if (ticketFiles.length > 0) {
-          for (let i = 0; i < ticketFiles.length; i++) {
-            const tf = ticketFiles[i];
-            if (tf.isRemote && tf.uri) {
-              publicTicketUrls.push(tf.uri);
-            } else if (tf.base64) {
-              const ext = tf.ext || 'jpg';
-              const contentType = ext === 'pdf' ? 'application/pdf' : 'image/jpeg';
-              const fileName = `${currentUser.id}/${Date.now()}_ticket_${i}.${ext}`;
-              const { error: uploadError } = await supabase.storage
-                .from('tickets')
-                .upload(fileName, tf.base64, { contentType, upsert: true });
-
-              if (uploadError) throw uploadError;
-
-              const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-              if (urlData?.publicUrl) publicTicketUrls.push(urlData.publicUrl);
-            } else if (tf.uri && (tf.uri.startsWith('http://') || tf.uri.startsWith('https://'))) {
-              publicTicketUrls.push(tf.uri);
-            }
-          }
-        } else if (imageUri) {
-          if (imageBase64) {
-            const contentType = imageExt === 'pdf' ? 'application/pdf' : 'image/jpeg';
-            const fileName = `${currentUser.id}/${Date.now()}.${imageExt}`;
-            const { error: uploadError } = await supabase.storage
-              .from('tickets')
-              .upload(fileName, imageBase64, { contentType, upsert: true });
-
-            if (uploadError) throw uploadError;
-
-            const { data: urlData } = supabase.storage.from('tickets').getPublicUrl(fileName);
-            if (urlData?.publicUrl) publicTicketUrls.push(urlData.publicUrl);
-          } else if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
-            publicTicketUrls.push(imageUri);
-          } else {
-            throw new Error('No se pudo procesar la fotografía local del ticket. Vuelve a seleccionarla e intenta de nuevo.');
-          }
-        }
-
-        const finalFotoUrl = publicTicketUrls.join(',') || null;
+        const finalFotoUrl = await uploadTicketFilesForGasto(currentUser.id);
 
         let publicInvoiceUrl: string | null = null;
         if (facturado && facturaPdf) {
