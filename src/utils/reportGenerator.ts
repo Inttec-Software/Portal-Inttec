@@ -3856,9 +3856,17 @@ export const ReportGenerator = {
     const totalUtilidadReal = totalFacturado - totalCostoReal;
     const margenRealConsolidado = totalFacturado > 0 ? (totalUtilidadReal / totalFacturado) * 100 : 0;
 
+    const formatDateOnly = (val: any): string => {
+      if (!val) return '';
+      if (typeof val === 'string') return val.includes('T') ? val.split('T')[0] : val.slice(0, 10);
+      if (val instanceof Date && !isNaN(val.getTime())) return val.toISOString().split('T')[0];
+      return String(val).slice(0, 10);
+    };
+
     let tableRows = '';
     ventas.forEach((v) => {
-      const fecha = v.fecha || (v.created_at ? v.created_at.split('T')[0] : '');
+      const fechaCreacion = formatDateOnly(v.created_at) || 'N/A';
+      const fechaVenta = formatDateOnly(v.fecha) || 'N/A';
       const precioFacturado = Number(v.precio_total_facturado || v.total || 0);
       const costoPartidas = Number(v.costo_total || 0);
       const gastosVinc = Number(v.gastos_vinculados_total || 0);
@@ -3878,7 +3886,8 @@ export const ReportGenerator = {
 
       tableRows += `
         <tr>
-          <td>${fecha}</td>
+          <td>${fechaCreacion}</td>
+          <td>${fechaVenta}</td>
           <td>
             <div style="font-weight: bold;">${v.cliente_nombre || v.cliente || 'N/A'}</div>
             ${v.factura_referencia ? `<span style="font-size: 9px; color: #777;">Ref: ${v.factura_referencia}</span>` : ''}
@@ -4032,16 +4041,17 @@ export const ReportGenerator = {
         <table>
           <thead>
             <tr>
-              <th style="width: 8%">Fecha</th>
-              <th style="width: 15%">Cliente / Ref</th>
-              <th style="width: 8%">Tipo</th>
-              <th style="width: 8%">Sucursal</th>
-              <th style="width: 9%">Proveedor</th>
+              <th style="width: 7%">Fecha Creación</th>
+              <th style="width: 7%">Fecha Venta</th>
+              <th style="width: 13%">Cliente / Ref</th>
+              <th style="width: 7%">Tipo</th>
+              <th style="width: 7%">Sucursal</th>
+              <th style="width: 8%">Proveedor</th>
               <th style="width: 9%; text-align: right;">Venta</th>
               <th style="width: 8%; text-align: right;">Insumos</th>
               <th style="width: 9%; text-align: right;">Gastos Vinc.</th>
               <th style="width: 9%; text-align: right;">Costo Real</th>
-              <th style="width: 9%; text-align: right;">Util. Real</th>
+              <th style="width: 8%; text-align: right;">Util. Real</th>
               <th style="width: 8%; text-align: right;">Margen</th>
             </tr>
           </thead>
@@ -5284,10 +5294,17 @@ export const ReportGenerator = {
             if (ventas.length === 0) {
               throw new Error('No hay ventas para exportar.');
             }
+            const formatDateOnly = (val: any): string => {
+              if (!val) return '';
+              if (typeof val === 'string') return val.includes('T') ? val.split('T')[0] : val.slice(0, 10);
+              if (val instanceof Date && !isNaN(val.getTime())) return val.toISOString().split('T')[0];
+              return String(val).slice(0, 10);
+            };
             const headers = [
               'ID',
               'Folio',
               'Fecha Creación',
+              'Fecha Venta',
               'Cliente',
               'Vendedor',
               'Estatus',
@@ -5319,7 +5336,8 @@ export const ReportGenerator = {
               return [
                 v.id, 
                 v.folio || 'S/F', 
-                v.created_at ? v.created_at.split('T')[0] : (v.fecha || ''), 
+                formatDateOnly(v.created_at), 
+                formatDateOnly(v.fecha), 
                 v.cliente_nombre || v.cliente || 'Desconocido', 
                 v.vendedor_nombre || v.vendedor || 'Desconocido', 
                 v.estatus || v.estado_pago || v.cfdi_estado || '', 
