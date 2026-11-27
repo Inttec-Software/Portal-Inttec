@@ -107,50 +107,6 @@ export default function EvidenciaFormView({ form, isEditing = false }: Evidencia
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.container, { backgroundColor: themeColors.background }]}
     >
-      {/* Switch de Empresa */}
-      <View
-        style={[
-          styles.companySwitch,
-          {
-            backgroundColor:
-              scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
-          },
-        ]}
-      >
-        <TouchableOpacity
-          onPress={() => company !== 'inttec' && changeCompany && changeCompany('inttec')}
-          style={[
-            styles.companyTab,
-            { backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent' },
-          ]}
-        >
-          <Text
-            style={[
-              styles.companyText,
-              { color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary },
-            ]}
-          >
-            INTTEC
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => company !== 'daravisa' && changeCompany && changeCompany('daravisa')}
-          style={[
-            styles.companyTab,
-            { backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent' },
-          ]}
-        >
-          <Text
-            style={[
-              styles.companyText,
-              { color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary },
-            ]}
-          >
-            DARAVISA
-          </Text>
-        </TouchableOpacity>
-      </View>
-
       {/* Sugerencia de Borrador Reciente */}
       {pendingDraftPrompt && (
         <View

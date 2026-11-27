@@ -184,6 +184,7 @@ export function ProyectosTabView({
                   key={tab.key}
                   onPress={() => onChangeStatusFilter(tab.key)}
                   style={{
+                    flex: isDesktop ? undefined : 1,
                     paddingVertical: 9,
                     paddingHorizontal: 14,
                     backgroundColor: active
@@ -196,9 +197,11 @@ export function ProyectosTabView({
                   }}
                 >
                   <Text
+                    numberOfLines={1}
                     style={{
                       fontSize: 12,
                       fontWeight: active ? '800' : '600',
+                      textAlign: 'center',
                       color: active
                         ? themeColors.primary
                         : themeColors.textSecondary,
@@ -211,53 +214,15 @@ export function ProyectosTabView({
             })}
           </View>
 
-          {/* Buscador de proyectos + Botón Nuevo Proyecto */}
+          {/* Botones de Recargar y Nuevo Proyecto */}
           <View
             style={{
               flexDirection: 'row',
               alignItems: 'center',
+              justifyContent: isDesktop ? 'flex-end' : 'space-between',
               gap: 8,
-              flex: isDesktop ? 1 : undefined,
-              maxWidth: isDesktop ? 560 : undefined,
             }}
           >
-            <View
-              style={{
-                flex: 1,
-                flexDirection: 'row',
-                alignItems: 'center',
-                backgroundColor: themeColors.backgroundElement,
-                borderRadius: BorderRadius.medium,
-                borderWidth: 1,
-                borderColor: themeColors.border,
-                paddingHorizontal: 10,
-                height: 40,
-              }}
-            >
-              <Ionicons
-                name="search-outline"
-                size={16}
-                color={themeColors.textSecondary}
-                style={{ marginRight: 6 }}
-              />
-              <TextInput
-                value={proyectoSearch}
-                onChangeText={onChangeProyectoSearch}
-                placeholder="Buscar proyecto, cliente o sucursal..."
-                placeholderTextColor={themeColors.textSecondary}
-                style={{ flex: 1, color: themeColors.text, fontSize: 13 }}
-              />
-              {proyectoSearch.length > 0 && (
-                <TouchableOpacity onPress={() => onChangeProyectoSearch('')}>
-                  <Ionicons
-                    name="close-circle"
-                    size={16}
-                    color={themeColors.textSecondary}
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
-
             <TouchableOpacity
               onPress={onRefreshProyectos}
               style={{
@@ -277,8 +242,10 @@ export function ProyectosTabView({
             <TouchableOpacity
               onPress={onOpenNewProyecto}
               style={{
+                flex: isDesktop ? undefined : 1,
                 flexDirection: 'row',
                 alignItems: 'center',
+                justifyContent: 'center',
                 gap: 6,
                 height: 40,
                 paddingHorizontal: 14,

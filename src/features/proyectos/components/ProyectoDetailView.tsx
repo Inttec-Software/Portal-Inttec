@@ -5,6 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Spacing, BorderRadius } from '@/constants/theme';
@@ -116,6 +117,7 @@ export function ProyectoDetailView({
   const [statusFilter, setStatusFilter] = useState<
     'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'
   >('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
   const [collapsedDays, setCollapsedDays] = useState<Record<string, boolean>>({});
 
   const toggleDayCollapse = (dayKey: string) => {
@@ -228,8 +230,9 @@ export function ProyectoDetailView({
     [hospedajeGaps]
   );
 
-  // Gastos filtrados según el bloque y subfiltro seleccionado
+  // Gastos filtrados según el bloque, subfiltro y búsqueda
   const filteredGastos = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return gastos.filter((g) => {
       if (statusFilter === 'PENDING') {
         if (g.status !== 'PENDING' && g.status !== 'ACTION_REQUIRED')
@@ -238,6 +241,29 @@ export function ProyectoDetailView({
         if (g.status !== 'APPROVED') return false;
       } else if (statusFilter === 'REJECTED') {
         if (g.status !== 'REJECTED') return false;
+      }
+
+      if (q) {
+        const prov = (GastoHelper.getProveedor(g) || '').toLowerCase();
+        const cat = (GastoHelper.getCategoria(g) || '').toLowerCase();
+        const subcat = (GastoHelper.getSubcategoria(g) || '').toLowerCase();
+        const emp = (g.empleado_nombre || '').toLowerCase();
+        const justif = (g.justificacion || '').toLowerCase();
+        const detalle = (g.detalle_servicio_proyecto || '').toLowerCase();
+        const montoStr = String(g.monto ?? '').toLowerCase();
+        const fechaStr = String(g.fecha_comprobante || g.created_at || '').toLowerCase();
+        const uuid = String((g as any).factura_uuid || (g as any).uuid || '').toLowerCase();
+        const matchesSearch =
+          prov.includes(q) ||
+          cat.includes(q) ||
+          subcat.includes(q) ||
+          emp.includes(q) ||
+          justif.includes(q) ||
+          detalle.includes(q) ||
+          montoStr.includes(q) ||
+          fechaStr.includes(q) ||
+          uuid.includes(q);
+        if (!matchesSearch) return false;
       }
 
       if (selectedCategory === 'ALL') return true;
@@ -264,7 +290,7 @@ export function ProyectoDetailView({
 
       return true;
     });
-  }, [gastos, selectedCategory, transporteSubFilter, statusFilter]);
+  }, [gastos, selectedCategory, transporteSubFilter, statusFilter, searchQuery]);
 
   // Agrupación cronológica por día para mostrar desglose diario en cualquier categoría
   const groupedByDay = useMemo(() => {
@@ -1505,6 +1531,44 @@ export function ProyectoDetailView({
               );
             })}
           </View>
+        </View>
+
+        {/* Buscador de gastos del proyecto */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: themeColors.background,
+            borderRadius: BorderRadius.medium,
+            borderWidth: 1,
+            borderColor: themeColors.border,
+            paddingHorizontal: Spacing.two,
+            height: 40,
+            marginBottom: Spacing.two,
+          }}
+        >
+          <Ionicons
+            name="search-outline"
+            size={17}
+            color={themeColors.textSecondary}
+            style={{ marginRight: 8 }}
+          />
+          <TextInput
+            placeholder="Buscar por empleado, proveedor, categoría, concepto o monto..."
+            placeholderTextColor={themeColors.textSecondary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            style={{ flex: 1, color: themeColors.text, fontSize: 13 }}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons
+                name="close-circle"
+                size={18}
+                color={themeColors.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
         </View>
 
         {isLoading ? (

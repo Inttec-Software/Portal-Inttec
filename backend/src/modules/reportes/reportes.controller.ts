@@ -751,7 +751,7 @@ export const getExportData = async (req: Request, res: Response) => {
       } else if (scope === 'OPERATIVOS') {
         conditions.push(OPERATIVO_GASTO_SQL);
       } else if (scope === 'HISTORICO') {
-        conditions.push(`g.proyecto_id IS NULL AND NOT ${OPERATIVO_GASTO_SQL}`);
+        conditions.push(`g.status IN ('APPROVED', 'REJECTED', 'ACTION_REQUIRED')`);
       }
       if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');

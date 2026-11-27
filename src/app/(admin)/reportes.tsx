@@ -2958,54 +2958,6 @@ export default function ReportesScreen() {
                 Exporta e imprime la información financiera, de personal y operativa.
               </Text>
             </View>
-
-            {/* Selector de Empresa */}
-            <View style={{
-              flexDirection: 'row',
-              backgroundColor: scheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
-              borderRadius: 20,
-              padding: 2,
-              alignItems: 'center',
-              width: 230,
-              alignSelf: isMobile ? 'center' : 'auto',
-            }}>
-              <TouchableOpacity
-                onPress={() => company !== 'inttec' && handleToggleCompany('inttec')}
-                style={{
-                  flex: 1,
-                  paddingVertical: 6,
-                  borderRadius: 18,
-                  backgroundColor: company === 'inttec' ? themeColors.accent : 'transparent',
-                  alignItems: 'center',
-                }}
-              >
-                <Text style={{
-                  fontSize: 12,
-                  fontWeight: '700',
-                  color: company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
-                }}>
-                  INTTEC
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => company !== 'daravisa' && handleToggleCompany('daravisa')}
-                style={{
-                  flex: 1,
-                  paddingVertical: 6,
-                  borderRadius: 18,
-                  backgroundColor: company === 'daravisa' ? themeColors.accent : 'transparent',
-                  alignItems: 'center',
-                }}
-              >
-                <Text style={{
-                  fontSize: 12,
-                  fontWeight: '700',
-                  color: company === 'daravisa' ? '#ffffff' : themeColors.textSecondary,
-                }}>
-                  DARAVISA
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
 
           {/* Panel de Filtro de Período y Rango de Fechas */}

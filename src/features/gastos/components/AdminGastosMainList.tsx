@@ -211,82 +211,6 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
 
   const renderScreenHeader = () => (
     <View>
-      {/* Switch de Empresa - Fila Dedicada */}
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'center',
-          alignItems: 'center',
-          paddingHorizontal: Spacing.four,
-          marginBottom: Spacing.two,
-        }}
-      >
-        <View
-          style={{
-            flexDirection: 'row',
-            backgroundColor:
-              scheme === 'dark'
-                ? 'rgba(255, 255, 255, 0.08)'
-                : 'rgba(0, 0, 0, 0.05)',
-            borderRadius: 20,
-            padding: 2,
-            alignItems: 'center',
-            width: 220,
-          }}
-        >
-          <TouchableOpacity
-            onPress={() =>
-              company !== 'inttec' && handleToggleCompany('inttec')
-            }
-            style={{
-              flex: 1,
-              paddingVertical: 6,
-              borderRadius: 18,
-              backgroundColor:
-                company === 'inttec' ? themeColors.accent : 'transparent',
-              alignItems: 'center',
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: '700',
-                color:
-                  company === 'inttec' ? '#ffffff' : themeColors.textSecondary,
-              }}
-            >
-              INTTEC
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() =>
-              company !== 'daravisa' && handleToggleCompany('daravisa')
-            }
-            style={{
-              flex: 1,
-              paddingVertical: 6,
-              borderRadius: 18,
-              backgroundColor:
-                company === 'daravisa' ? themeColors.accent : 'transparent',
-              alignItems: 'center',
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: '700',
-                color:
-                  company === 'daravisa'
-                    ? '#ffffff'
-                    : themeColors.textSecondary,
-              }}
-            >
-              DARAVISA
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
       {/* Resumen Cards */}
       <View style={styles.summaryContainer}>
         <View
@@ -392,61 +316,75 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
         </View>
       </View>
 
-      {/* BARRA DE BÚSQUEDA Y FILTRO DE CALENDARIO DE FECHAS (Oculta cuando estamos en la pestaña de Proyectos) */}
-      {activeTab !== 'proyectos' && (
+      {/* BARRA DE BÚSQUEDA Y FILTRO DE CALENDARIO DE FECHAS */}
+      <View
+        style={{
+          paddingHorizontal: Spacing.three,
+          marginBottom: Spacing.two,
+          gap: Spacing.one,
+        }}
+      >
         <View
           style={{
-            paddingHorizontal: Spacing.three,
-            marginBottom: Spacing.two,
+            flexDirection: 'row',
             gap: Spacing.one,
+            alignItems: 'center',
           }}
         >
+          {/* Campo de Búsqueda */}
           <View
             style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden',
               flexDirection: 'row',
-              gap: Spacing.one,
               alignItems: 'center',
+              backgroundColor: themeColors.backgroundElement,
+              borderRadius: BorderRadius.medium,
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              paddingHorizontal: Spacing.two,
+              height: 42,
             }}
           >
-            {/* Campo de Búsqueda */}
-            <View
-              style={{
-                flex: 1,
-                flexDirection: 'row',
-                alignItems: 'center',
-                backgroundColor: themeColors.backgroundElement,
-                borderRadius: BorderRadius.medium,
-                borderWidth: 1,
-                borderColor: themeColors.border,
-                paddingHorizontal: Spacing.two,
-                height: 42,
-              }}
-            >
-              <Ionicons
-                name="search-outline"
-                size={18}
-                color={themeColors.textSecondary}
-                style={{ marginRight: 8 }}
-              />
-              <TextInput
-                placeholder="Buscar por empleado, proyecto, proveedor, UUID, cliente, sucursal o monto..."
-                placeholderTextColor={themeColors.textSecondary}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                style={{ flex: 1, color: themeColors.text, fontSize: 13 }}
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <Ionicons
-                    name="close-circle"
-                    size={18}
-                    color={themeColors.textSecondary}
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
+            <Ionicons
+              name="search-outline"
+              size={18}
+              color={themeColors.textSecondary}
+              style={{ marginRight: 8 }}
+            />
+            <TextInput
+              placeholder={
+                activeTab === 'proyectos'
+                  ? 'Buscar proyecto, cliente o sucursal...'
+                  : 'Buscar por empleado, proyecto, proveedor, UUID, cliente, sucursal o monto...'
+              }
+              placeholderTextColor={themeColors.textSecondary}
+              value={activeTab === 'proyectos' ? proyectoSearchQuery : searchQuery}
+              onChangeText={
+                activeTab === 'proyectos' ? setProyectoSearchQuery : setSearchQuery
+              }
+              style={{ flex: 1, minWidth: 0, width: '100%', color: themeColors.text, fontSize: 13 }}
+            />
+            {(activeTab === 'proyectos' ? proyectoSearchQuery : searchQuery).length > 0 && (
+              <TouchableOpacity
+                onPress={() =>
+                  activeTab === 'proyectos'
+                    ? setProyectoSearchQuery('')
+                    : setSearchQuery('')
+                }
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={18}
+                  color={themeColors.textSecondary}
+                />
+              </TouchableOpacity>
+            )}
+          </View>
 
-            {/* Botón de Calendario / Filtro de Fechas */}
+          {/* Botón de Calendario / Filtro de Fechas (solo en pestañas de gastos) */}
+          {activeTab !== 'proyectos' && (
             <TouchableOpacity
               onPress={() => setDateFilterModalVisible(true)}
               style={{
@@ -495,10 +433,11 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
                   : 'Fechas'}
               </Text>
             </TouchableOpacity>
-          </View>
+          )}
+        </View>
 
-          {/* Indicador de Fechas Activas */}
-          {(startDateFilter || endDateFilter) && (
+        {/* Indicador de Fechas Activas */}
+        {activeTab !== 'proyectos' && (startDateFilter || endDateFilter) && (
             <View
               style={{
                 flexDirection: 'row',
@@ -533,8 +472,7 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
               </TouchableOpacity>
             </View>
           )}
-        </View>
-      )}
+      </View>
 
       {/* Segmented Control: LAS 4 PESTAÑAS DE ADMINISTRACIÓN */}
       <View
@@ -568,7 +506,7 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
           },
           {
             key: 'historial' as const,
-            label: `4. Histórico / Sin proy. (${historyGastos.length})`,
+            label: `4. Histórico (${historyGastos.length})`,
             shortLabel: `Histórico (${historyGastos.length})`,
           },
         ].map((tabItem) => {
@@ -608,6 +546,7 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
           );
         })}
       </View>
+      {(activeTab === 'operativos' || activeTab === 'historial') && renderFacturaFilterBar()}
     </View>
   );
 
@@ -762,13 +701,14 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
     );
   }
 
-  const renderFacturaFilterBar = () => (
+  function renderFacturaFilterBar() {
+    return (
     <View
       style={{
         flexDirection: 'row',
         marginHorizontal: Spacing.three,
         marginBottom: Spacing.two,
-        marginTop: Spacing.one,
+        marginTop: 0,
         backgroundColor: themeColors.backgroundElement,
         borderRadius: BorderRadius.medium,
         overflow: 'hidden',
@@ -894,7 +834,8 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
         </Text>
       </TouchableOpacity>
     </View>
-  );
+    );
+  }
 
   return (
     <View style={{ flex: 1 }}>
@@ -1346,9 +1287,9 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
               windowSize={5}
               removeClippedSubviews={true}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
+              contentContainerStyle={{ paddingBottom: Spacing.seven }}
               renderItem={({ item }) => (
-                <View style={{ marginBottom: 4 }}>
+                <View style={{ marginBottom: 4, paddingHorizontal: Spacing.three }}>
                   <View
                     style={{
                       flexDirection: 'row',
@@ -1399,7 +1340,6 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
       {/* ===================================================================== */}
       {activeTab === 'operativos' && (
         <>
-          {renderFacturaFilterBar()}
           {isDesktop ? (
             <ScrollView style={{ flex: 1 }}>
               {renderScreenHeader()}
@@ -1758,9 +1698,9 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
               ListHeaderComponent={renderScreenHeader()}
               data={operativosGastos}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
+              contentContainerStyle={{ paddingBottom: Spacing.seven }}
               renderItem={({ item }) => (
-                <View style={{ marginBottom: 6 }}>
+                <View style={{ marginBottom: 6, paddingHorizontal: Spacing.three }}>
                   <View
                     style={{
                       flexDirection: 'row',
@@ -1812,7 +1752,6 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
       {/* ===================================================================== */}
       {activeTab === 'historial' && (
         <>
-          {renderFacturaFilterBar()}
           {isDesktop ? (
             <ScrollView style={{ flex: 1 }}>
               {renderScreenHeader()}
@@ -2316,9 +2255,9 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
               windowSize={5}
               removeClippedSubviews={true}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
+              contentContainerStyle={{ paddingBottom: Spacing.seven }}
               renderItem={({ item }) => (
-                <View style={{ marginBottom: 6 }}>
+                <View style={{ marginBottom: 6, paddingHorizontal: Spacing.three }}>
                   <View
                     style={{
                       flexDirection: 'row',
