@@ -60,6 +60,8 @@ function AdminLayoutContent() {
     if (lastPart === 'facturas-recibidas') return 'Facturas Recibidas';
     if (lastPart === 'asistencia') return 'Asistencia';
     if (lastPart === 'reportes') return 'Reportes';
+    if (pathname.includes('/guias/editor')) return 'Editor de Guía';
+    if (lastPart === 'guias') return 'Guías';
     if (lastPart === 'auditoria-tarjeta') return 'Auditoría';
     return lastPart.charAt(0).toUpperCase() + lastPart.slice(1).replace(/-/g, ' ');
   };
@@ -103,6 +105,7 @@ function AdminLayoutContent() {
     { route: '/(admin)/catalogos', icon: 'list-outline', color: '#5f27cd', name: 'Catálogos' },
     { route: '/(admin)/auditoria-tarjeta', icon: 'shield-checkmark-outline', color: '#ff9f43', name: 'Auditoría' },
     { route: '/(admin)/documentos', icon: 'create-outline', color: '#0284c7', name: 'Documentos' },
+    { route: '/(admin)/guias', icon: 'book-outline', color: '#0ea5e9', name: 'Guías' },
     { route: '/(admin)/chat-ia', icon: 'sparkles-outline', color: '#2e86de', name: 'Chat IA' },
   ];
 
@@ -133,6 +136,9 @@ function AdminLayoutContent() {
               } else if (pathname.includes('agregar-evidencia') || pathname.includes('editar-evidencia')) {
                 if (router.canGoBack()) router.back();
                 else router.replace('/(admin)/evidencias');
+              } else if (pathname.includes('/guias/editor')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(admin)/guias' as any);
               } else {
                 // En cualquier pantalla de módulo principal (cotizaciones, gastos, inventario, etc.), volver directamente al Inicio
                 router.replace('/(admin)/dashboard');
