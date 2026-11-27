@@ -4,6 +4,7 @@ import {
   getProyectoById,
   createProyecto,
   updateProyecto,
+  getVentasDisponibles,
 } from './proyectos.controller';
 import { verifyToken } from '../../middlewares/auth.middleware';
 import { tenantMiddleware } from '../../middlewares/tenant.middleware';
@@ -21,6 +22,7 @@ const proyectosMutate = (_req: any, _res: any, next: any) => {
 };
 
 router.get('/', cacheMiddleware(15), getProyectos);
+router.get('/ventas-disponibles', cacheMiddleware(10), getVentasDisponibles);
 router.get('/:id', cacheMiddleware(15), getProyectoById);
 router.post('/', proyectosMutate, createProyecto);
 router.put('/:id', proyectosMutate, updateProyecto);

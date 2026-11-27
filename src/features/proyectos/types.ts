@@ -25,11 +25,29 @@ export interface GastoHospedajeDia {
   created_at?: string;
 }
 
+export interface ProyectoVentaRel {
+  id: string;
+  folio?: string | null;
+  cliente?: string | null;
+  fecha?: string | null;
+  sucursal?: string | null;
+  tipo_proyecto?: string | null;
+  factura_referencia?: string | null;
+  precio_total_facturado?: number | null;
+}
+
+export interface VentaDisponibleItem extends ProyectoVentaRel {
+  proyecto_vinculado_id?: string | null;
+  proyecto_vinculado_nombre?: string | null;
+}
+
 export interface ProyectoRel {
   id: string;
   nombre: string;
   cliente_nombre?: string | null;
   sucursal_nombre?: string | null;
+  venta_id?: string | null;
+  venta_rel?: ProyectoVentaRel | null;
   status?: ProyectoStatus;
 }
 
@@ -51,6 +69,7 @@ export interface Proyecto {
   sucursal_id?: string | null;
   sucursal_nombre?: string | null;
   venta_id?: string | null;
+  venta_rel?: ProyectoVentaRel | null;
   status: ProyectoStatus;
   notas?: string | null;
   created_by?: string | null;

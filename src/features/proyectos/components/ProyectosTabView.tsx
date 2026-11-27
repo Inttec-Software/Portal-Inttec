@@ -499,6 +499,36 @@ export function ProyectosTabView({
                           </Text>
                         </View>
                       )}
+
+                      {(proy.venta_rel || proy.venta_id) && (
+                        <View
+                          style={{
+                            backgroundColor: '#0284c718',
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 10,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 4,
+                          }}
+                        >
+                          <Ionicons name="cart-outline" size={11} color="#0284c7" />
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: '800',
+                              color: '#0284c7',
+                            }}
+                            numberOfLines={1}
+                          >
+                            {proy.venta_rel?.folio
+                              ? `Venta ${proy.venta_rel.folio}`
+                              : proy.venta_rel?.cliente
+                                ? `Venta: ${proy.venta_rel.cliente}`
+                                : 'Venta vinculada'}
+                          </Text>
+                        </View>
+                      )}
                     </View>
 
                     <TouchableOpacity

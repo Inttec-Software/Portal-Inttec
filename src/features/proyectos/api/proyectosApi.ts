@@ -6,6 +6,7 @@ import {
   ProyectoResumen,
   ProyectoStatus,
   TipoGasto,
+  VentaDisponibleItem,
   computeProyectoResumenFromGastos,
   getOrComputeHospedajeDias,
 } from '../types';
@@ -28,6 +29,7 @@ function normalizeProyectoResumen(raw: any): ProyectoResumen {
       raw?.sucursales_cliente?.nombre ||
       null,
     venta_id: raw?.venta_id || null,
+    venta_rel: raw?.venta_rel || null,
     status: (raw?.status === 'CERRADO' ? 'CERRADO' : 'ACTIVO') as ProyectoStatus,
     notas: raw?.notas || null,
     created_by: raw?.created_by || null,
@@ -52,6 +54,14 @@ function normalizeProyectoResumen(raw: any): ProyectoResumen {
 }
 
 export const proyectosApi = {
+  async getVentasDisponibles(): Promise<VentaDisponibleItem[]> {
+    const headers = await getApiHeaders();
+    const res = await fetch(`${getApiUrl()}/api/proyectos/ventas-disponibles`, { headers });
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => ({}));
+    return data?.ventas || [];
+  },
+
   async fetchProyectos(
     status: 'ACTIVO' | 'CERRADO' | 'ALL' = 'ALL'
   ): Promise<ProyectoResumen[]> {

@@ -607,6 +607,29 @@ export function ProyectoDetailView({
                   </Text>
                 </TouchableOpacity>
               )}
+
+              {(proyecto.venta_rel || proyecto.venta_id) && (
+                <View
+                  style={{
+                    backgroundColor: '#0284c718',
+                    borderColor: '#0284c750',
+                    borderWidth: 1,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <Ionicons name="cart-outline" size={12} color="#0284c7" />
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: '#0284c7' }}>
+                    {proyecto.venta_rel
+                      ? `Venta 1:1${proyecto.venta_rel.folio ? ` (${proyecto.venta_rel.folio})` : ''}: ${proyecto.venta_rel.cliente || ''} • ${formatCurrency(Number(proyecto.venta_rel.precio_total_facturado || 0))}`
+                      : `Venta vinculada #${proyecto.venta_id?.slice(0, 8)}`}
+                  </Text>
+                </View>
+              )}
             </View>
 
             <Text

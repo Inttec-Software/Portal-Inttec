@@ -5,13 +5,43 @@ import {
   buildProyectoResumenFromGastos,
   formatGasto,
 } from '../reportes/gastoHelpers';
+import { recalculateVentaTotalsInternal } from '../reportes/reportes.controller';
 
 const PROYECTO_SELECT_SQL = `
   SELECT pr.*,
     (SELECT cl.nombre FROM clientes cl WHERE cl.id = pr.cliente_id) AS cliente_nombre,
-    (SELECT sc.nombre FROM sucursales_cliente sc WHERE sc.id = pr.sucursal_id) AS sucursal_nombre
+    (SELECT sc.nombre FROM sucursales_cliente sc WHERE sc.id = pr.sucursal_id) AS sucursal_nombre,
+    (SELECT row_to_json(v_obj) FROM (
+      SELECT v.id, v.folio, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto,
+             v.factura_referencia, v.precio_total_facturado
+      FROM ventas v WHERE v.id = pr.venta_id
+    ) v_obj) AS venta_rel
   FROM proyectos pr
 `;
+
+export const getVentasDisponibles = async (req: Request, res: Response) => {
+  try {
+    const tenant = (req as any).tenant;
+    if (!tenant) return res.status(400).json({ error: 'Tenant no especificado' });
+    const { company, env } = tenant;
+    const pool = getDbPool(company, env);
+
+    const { rows } = await pool.query(`
+      SELECT v.id, v.folio, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto,
+             v.factura_referencia, v.precio_total_facturado,
+             pr.id AS proyecto_vinculado_id,
+             pr.nombre AS proyecto_vinculado_nombre
+      FROM ventas v
+      LEFT JOIN proyectos pr ON pr.venta_id = v.id
+      ORDER BY v.fecha DESC NULLS LAST, v.created_at DESC NULLS LAST
+      LIMIT 1500
+    `);
+
+    return res.json({ ventas: rows || [] });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
 
 export const getProyectos = async (req: Request, res: Response) => {
   try {
@@ -144,12 +174,28 @@ export const createProyecto = async (req: Request, res: Response) => {
     const cleanNotas = typeof notas === 'string' && notas.trim() ? notas.trim() : null;
     const createdBy = req.user?.id || req.body?.created_by || null;
 
+    if (cleanVentaId) {
+      const dupVentaRes = await pool.query(
+        'SELECT id, nombre FROM proyectos WHERE venta_id = $1 LIMIT 1',
+        [cleanVentaId]
+      );
+      if (dupVentaRes.rows.length > 0) {
+        return res.status(409).json({
+          error: `Esta venta ya está vinculada al proyecto "${dupVentaRes.rows[0].nombre}" (relación 1 a 1).`,
+        });
+      }
+    }
+
     const insertRes = await pool.query(
       `INSERT INTO proyectos (nombre, cliente_id, sucursal_id, venta_id, status, notas, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
       [cleanNombre, cleanClienteId, cleanSucursalId, cleanVentaId, cleanStatus, cleanNotas, createdBy]
     );
+
+    if (cleanVentaId) {
+      try { await recalculateVentaTotalsInternal(pool, cleanVentaId); } catch (_) {}
+    }
 
     const newId = insertRes.rows[0].id;
     const fullRes = await pool.query(`${PROYECTO_SELECT_SQL} WHERE pr.id = $1`, [newId]);
@@ -172,10 +218,11 @@ export const updateProyecto = async (req: Request, res: Response) => {
     const pool = getDbPool(company, env);
 
     const { id } = req.params;
-    const existingRes = await pool.query('SELECT id FROM proyectos WHERE id = $1', [id]);
+    const existingRes = await pool.query('SELECT id, venta_id FROM proyectos WHERE id = $1', [id]);
     if (existingRes.rows.length === 0) {
       return res.status(404).json({ error: 'Proyecto no encontrado' });
     }
+    const oldVentaId: string | null = existingRes.rows[0].venta_id || null;
 
     const updates: string[] = [];
     const values: any[] = [];
@@ -207,8 +254,22 @@ export const updateProyecto = async (req: Request, res: Response) => {
     if (req.body.sucursal_id !== undefined) {
       pushField('sucursal_id', req.body.sucursal_id && String(req.body.sucursal_id).trim() ? String(req.body.sucursal_id).trim() : null);
     }
+    let nextVentaId: string | null = oldVentaId;
     if (req.body.venta_id !== undefined) {
-      pushField('venta_id', req.body.venta_id && String(req.body.venta_id).trim() ? String(req.body.venta_id).trim() : null);
+      const cleanVentaId = req.body.venta_id && String(req.body.venta_id).trim() ? String(req.body.venta_id).trim() : null;
+      if (cleanVentaId) {
+        const dupVentaRes = await pool.query(
+          'SELECT id, nombre FROM proyectos WHERE venta_id = $1 AND id != $2 LIMIT 1',
+          [cleanVentaId, id]
+        );
+        if (dupVentaRes.rows.length > 0) {
+          return res.status(409).json({
+            error: `Esta venta ya está vinculada al proyecto "${dupVentaRes.rows[0].nombre}" (relación 1 a 1).`,
+          });
+        }
+      }
+      nextVentaId = cleanVentaId;
+      pushField('venta_id', cleanVentaId);
     }
     if (req.body.notas !== undefined) {
       pushField('notas', typeof req.body.notas === 'string' && req.body.notas.trim() ? req.body.notas.trim() : null);
@@ -221,6 +282,15 @@ export const updateProyecto = async (req: Request, res: Response) => {
         `UPDATE proyectos SET ${updates.join(', ')} WHERE id = $${values.length}`,
         values
       );
+    }
+
+    if (oldVentaId !== nextVentaId) {
+      if (oldVentaId) {
+        try { await recalculateVentaTotalsInternal(pool, oldVentaId); } catch (_) {}
+      }
+      if (nextVentaId) {
+        try { await recalculateVentaTotalsInternal(pool, nextVentaId); } catch (_) {}
+      }
     }
 
     const fullRes = await pool.query(`${PROYECTO_SELECT_SQL} WHERE pr.id = $1`, [id]);

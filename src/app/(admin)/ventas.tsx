@@ -380,6 +380,7 @@ export default function VentasScreen() {
   const [selectedVenta, setSelectedVenta] = useState<VentaConPago | null>(null);
   const [selectedVentaPartidas, setSelectedVentaPartidas] = useState<VentaPartida[]>([]);
   const [selectedVentaGastos, setSelectedVentaGastos] = useState<any[]>([]);
+  const [selectedVentaProyecto, setSelectedVentaProyecto] = useState<any | null>(null);
   const [isLoadingPartidas, setIsLoadingPartidas] = useState(false);
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [editingVentaId, setEditingVentaId] = useState<string | null>(null);
@@ -773,6 +774,7 @@ const handleRefreshHistorial = () => {
     try {
       let partidasLoaded: VentaPartida[] = [];
       let gastosLoaded: any[] = [];
+      let proyectoLoaded: any = null;
       try {
         const headers = await getApiHeaders();
         const res = await fetch(`${getApiUrl()}/api/ventas/${venta.id}/detalle`, { headers });
@@ -780,6 +782,7 @@ const handleRefreshHistorial = () => {
           const data = await res.json();
           partidasLoaded = data.partidas || [];
           gastosLoaded = data.gastos || [];
+          proyectoLoaded = data.proyecto || null;
         }
       } catch (_) {}
 
@@ -795,6 +798,7 @@ const handleRefreshHistorial = () => {
 
       setSelectedVentaPartidas(partidasLoaded);
       setSelectedVentaGastos(gastosLoaded);
+      setSelectedVentaProyecto(proyectoLoaded);
 
       // Cargar pagos
       await loadPagosForSelectedVenta(venta.id, venta);
@@ -3451,9 +3455,16 @@ const handleRefreshHistorial = () => {
                 {selectedVentaGastos.length > 0 && (
                   <View style={[styles.modalCard, { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border }]}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <Text style={[styles.modalSectionTitle, { color: themeColors.danger, marginBottom: 0 }]}>
-                        Gastos Operativos Vinculados ({selectedVentaGastos.length})
-                      </Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.modalSectionTitle, { color: themeColors.danger, marginBottom: 0 }]}>
+                          Gastos Vinculados ({selectedVentaGastos.length})
+                        </Text>
+                        {selectedVentaProyecto && (
+                          <Text style={{ fontSize: 11, color: '#0284c7', fontWeight: '700', marginTop: 2 }}>
+                            Proyecto 1:1 vinculado: {selectedVentaProyecto.nombre}
+                          </Text>
+                        )}
+                      </View>
                       <TouchableOpacity
                         onPress={() => {
                           if (selectedVenta) {
@@ -3527,23 +3538,25 @@ const handleRefreshHistorial = () => {
                                   <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '700' }}>Ver Gasto</Text>
                                 </TouchableOpacity>
 
-                                <TouchableOpacity
-                                  onPress={() => handleUnlinkGastoFromVenta(gasto)}
-                                  style={{
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    gap: 4,
-                                    backgroundColor: themeColors.danger + '15',
-                                    paddingVertical: 3,
-                                    paddingHorizontal: 8,
-                                    borderRadius: BorderRadius.small,
-                                    borderWidth: 1,
-                                    borderColor: themeColors.danger + '40',
-                                  }}
-                                >
-                                  <Ionicons name="link-outline" size={13} color={themeColors.danger} />
-                                  <Text style={{ color: themeColors.danger, fontSize: 11, fontWeight: '700' }}>Desvincular</Text>
-                                </TouchableOpacity>
+                                {!gasto.proyecto_id && (
+                                  <TouchableOpacity
+                                    onPress={() => handleUnlinkGastoFromVenta(gasto)}
+                                    style={{
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
+                                      gap: 4,
+                                      backgroundColor: themeColors.danger + '15',
+                                      paddingVertical: 3,
+                                      paddingHorizontal: 8,
+                                      borderRadius: BorderRadius.small,
+                                      borderWidth: 1,
+                                      borderColor: themeColors.danger + '40',
+                                    }}
+                                  >
+                                    <Ionicons name="link-outline" size={13} color={themeColors.danger} />
+                                    <Text style={{ color: themeColors.danger, fontSize: 11, fontWeight: '700' }}>Desvincular</Text>
+                                  </TouchableOpacity>
+                                )}
                               </View>
                             </View>
                           </View>

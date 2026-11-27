@@ -499,7 +499,7 @@ export const updateGastoStatus = async (req: Request, res: Response) => {
     const { status, payload, actor_id, monto, force_unlink_venta } = req.body;
 
     const oldGastoRes = await pool.query(
-      'SELECT venta_id, factura_sugerida_id, devuelto_por_factura, facturado FROM gastos WHERE id = $1',
+      'SELECT venta_id, proyecto_id, factura_sugerida_id, devuelto_por_factura, facturado FROM gastos WHERE id = $1',
       [id]
     );
     const oldGasto = oldGastoRes.rows[0];
@@ -527,13 +527,22 @@ export const updateGastoStatus = async (req: Request, res: Response) => {
       
       await pool.query(`UPDATE gastos SET ${setClause} WHERE id = $${keys.length + 1}`, [...values, id]);
 
-      // Recalcular totales de venta si el gasto estaba o quedó vinculado a una venta
+      // Recalcular totales de venta si el gasto estaba o quedó vinculado a una venta (o a un proyecto con venta)
       const targetVentaId = finalPayload.venta_id !== undefined ? finalPayload.venta_id : oldGasto?.venta_id;
+      const targetProyectoId = finalPayload.proyecto_id !== undefined ? finalPayload.proyecto_id : oldGasto?.proyecto_id;
       if (oldGasto?.venta_id && oldGasto.venta_id !== targetVentaId) {
         try { await recalculateVentaTotalsInternal(pool, oldGasto.venta_id); } catch (_) {}
       }
       if (targetVentaId) {
         try { await recalculateVentaTotalsInternal(pool, targetVentaId); } catch (_) {}
+      }
+      if (targetProyectoId) {
+        try {
+          const prV = await pool.query('SELECT venta_id FROM proyectos WHERE id = $1', [targetProyectoId]);
+          if (prV.rows[0]?.venta_id && prV.rows[0].venta_id !== targetVentaId) {
+            await recalculateVentaTotalsInternal(pool, prV.rows[0].venta_id);
+          }
+        } catch (_) {}
       }
     }
 
@@ -895,16 +904,11 @@ export const updateGasto = async (req: Request, res: Response) => {
     await client.query('COMMIT');
     inTx = false;
 
-    if (payload.venta_id !== undefined && payload.venta_id !== oldGasto?.venta_id) {
-      if (oldGasto && oldGasto.venta_id) {
-        await recalculateVentaTotalsInternal(pool, oldGasto.venta_id);
-      }
-      if (payload.venta_id) {
-        await recalculateVentaTotalsInternal(pool, payload.venta_id);
-      }
-    } else if (oldGasto && oldGasto.venta_id) {
-      await recalculateVentaTotalsInternal(pool, oldGasto.venta_id);
-    }
+    await recalculateVentasForGastoRefs(
+      pool,
+      [oldGasto?.venta_id, payload.venta_id],
+      [oldGasto?.proyecto_id, payload.proyecto_id]
+    );
 
     // Disparar conciliación inmediata si el gasto quedó con factura pendiente
     const isNowPendiente =
@@ -938,11 +942,12 @@ export const assignGastoProyecto = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { proyecto_id, tipo_gasto, actor_id } = req.body;
 
-    const gastoRes = await pool.query('SELECT id, proyecto_id, tipo_gasto, justificacion, detalle_servicio_proyecto FROM gastos WHERE id = $1', [id]);
+    const gastoRes = await pool.query('SELECT id, proyecto_id, venta_id, tipo_gasto, justificacion, detalle_servicio_proyecto FROM gastos WHERE id = $1', [id]);
     const gasto = gastoRes.rows[0];
     if (!gasto) {
       return res.status(404).json({ error: 'Gasto no encontrado' });
     }
+    const oldProyectoId: string | null = gasto.proyecto_id || null;
 
     const newProyectoId =
       proyecto_id && typeof proyecto_id === 'string' && proyecto_id.trim()
@@ -977,9 +982,25 @@ export const assignGastoProyecto = async (req: Request, res: Response) => {
     const updatedDetalle = proyectoInfo?.nombre || gasto.detalle_servicio_proyecto || null;
 
     await pool.query(
-      'UPDATE gastos SET proyecto_id = $1, tipo_gasto = $2, justificacion = $3, detalle_servicio_proyecto = $4 WHERE id = $5',
+      'UPDATE gastos SET proyecto_id = $1::uuid, tipo_gasto = $2, justificacion = $3, detalle_servicio_proyecto = $4, venta_id = CASE WHEN $1::uuid IS NOT NULL THEN NULL ELSE venta_id END WHERE id = $5',
       [newProyectoId, newTipoGasto, cleanedJust, updatedDetalle, id]
     );
+
+    const ventaIdsToRecalc = new Set<string>();
+    if (oldProyectoId) {
+      const oldPr = await pool.query('SELECT venta_id FROM proyectos WHERE id = $1', [oldProyectoId]);
+      if (oldPr.rows[0]?.venta_id) ventaIdsToRecalc.add(oldPr.rows[0].venta_id);
+    }
+    if (newProyectoId) {
+      const newPr = await pool.query('SELECT venta_id FROM proyectos WHERE id = $1', [newProyectoId]);
+      if (newPr.rows[0]?.venta_id) ventaIdsToRecalc.add(newPr.rows[0].venta_id);
+    }
+    if (gasto.venta_id) {
+      ventaIdsToRecalc.add(gasto.venta_id);
+    }
+    for (const vId of ventaIdsToRecalc) {
+      try { await recalculateVentaTotalsInternal(pool, vId); } catch (_) {}
+    }
 
     try {
       const actor = req.user?.id || actor_id || null;
@@ -1025,11 +1046,17 @@ export const relinkGastoVenta = async (req: Request, res: Response) => {
     const newVentaId = (venta_id && typeof venta_id === 'string' && venta_id.trim()) ? venta_id.trim() : null;
 
     // Obtener el gasto actual
-    const gastoRes = await pool.query('SELECT id, venta_id, monto, status FROM gastos WHERE id = $1', [id]);
+    const gastoRes = await pool.query('SELECT id, venta_id, proyecto_id, tipo_gasto, monto, status FROM gastos WHERE id = $1', [id]);
     const gasto = gastoRes.rows[0];
 
     if (!gasto) {
       return res.status(404).json({ error: 'Gasto no encontrado' });
+    }
+
+    if (gasto.proyecto_id) {
+      return res.status(400).json({
+        error: 'Este gasto pertenece a un proyecto. Los gastos de proyecto heredan la venta directamente desde el Proyecto (relación 1 a 1); solo los gastos operativos pueden vincularse manualmente a una venta.',
+      });
     }
 
     const oldVentaId = gasto.venta_id;
@@ -1103,6 +1130,43 @@ export const relinkGastoVenta = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Recalcula la utilidad bruta de todas las ventas vinculadas directa o indirectamente
+ * (vía proyecto_id) a un gasto.
+ */
+const recalculateVentasForGastoRefs = async (
+  pool: any,
+  ventaIds: Array<string | null | undefined>,
+  proyectoIds: Array<string | null | undefined>
+) => {
+  const uniqueVentaIds = new Set<string>(
+    ventaIds.filter((v): v is string => Boolean(v && String(v).trim()))
+  );
+  const uniqueProyectoIds = Array.from(
+    new Set<string>(
+      proyectoIds.filter((p): p is string => Boolean(p && String(p).trim()))
+    )
+  );
+  if (uniqueProyectoIds.length > 0) {
+    try {
+      const prRes = await pool.query(
+        'SELECT venta_id FROM proyectos WHERE id = ANY($1::text[]) AND venta_id IS NOT NULL',
+        [uniqueProyectoIds]
+      );
+      for (const row of prRes.rows) {
+        if (row.venta_id) uniqueVentaIds.add(row.venta_id);
+      }
+    } catch (_) {}
+  }
+  for (const vId of uniqueVentaIds) {
+    try {
+      await recalculateVentaTotalsInternal(pool, vId);
+    } catch (e: any) {
+      console.warn(`[recalculateVentasForGastoRefs] Error recalculando venta ${vId}:`, e.message);
+    }
+  }
+};
+
 export const recalculateVentaTotalsInternal = async (pool: any, id: string) => {
   await ensureGastosConciliacionSchema(pool);
 
@@ -1117,7 +1181,12 @@ export const recalculateVentaTotalsInternal = async (pool: any, id: string) => {
 
   // Incluir gastos APPROVED y también aquellos temporalmente en PENDING porque fueron devueltos por detección de factura
   const gastosRes = await pool.query(
-    `SELECT monto FROM gastos WHERE venta_id = $1 AND (status = 'APPROVED' OR (status = 'PENDING' AND COALESCE(devuelto_por_factura, FALSE) = TRUE))`,
+    `SELECT monto FROM gastos g
+     WHERE (
+       g.proyecto_id IN (SELECT pr.id FROM proyectos pr WHERE pr.venta_id = $1)
+       OR (g.proyecto_id IS NULL AND g.venta_id = $1)
+     )
+     AND (g.status = 'APPROVED' OR (g.status = 'PENDING' AND COALESCE(g.devuelto_por_factura, FALSE) = TRUE))`,
     [id]
   );
   const gastos = gastosRes.rows;
@@ -1161,8 +1230,19 @@ export const deleteGasto = async (req: Request, res: Response) => {
     const pool = getDbPool(company, env);
 
     const { id } = req.params;
+    const oldRes = await pool.query('SELECT venta_id, proyecto_id FROM gastos WHERE id = $1', [id]);
+    const oldGasto = oldRes.rows[0];
 
     await pool.query('DELETE FROM gastos WHERE id = $1', [id]);
+
+    if (oldGasto?.proyecto_id) {
+      const prRes = await pool.query('SELECT venta_id FROM proyectos WHERE id = $1', [oldGasto.proyecto_id]);
+      if (prRes.rows[0]?.venta_id) {
+        try { await recalculateVentaTotalsInternal(pool, prRes.rows[0].venta_id); } catch (_) {}
+      }
+    } else if (oldGasto?.venta_id) {
+      try { await recalculateVentaTotalsInternal(pool, oldGasto.venta_id); } catch (_) {}
+    }
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -1625,13 +1705,7 @@ export const attachSatFacturaToGasto = async (req: Request, res: Response) => {
       ]
     );
 
-    if (gasto.venta_id) {
-      try {
-        await recalculateVentaTotalsInternal(pool, gasto.venta_id);
-      } catch (e: any) {
-        console.warn('[attachSatFacturaToGasto] Error recalculando venta:', e.message);
-      }
-    }
+    await recalculateVentasForGastoRefs(pool, [gasto.venta_id], [gasto.proyecto_id]);
 
     try {
       let diffAudit = '';
@@ -1766,13 +1840,7 @@ export const detachSatFacturaFromGasto = async (req: Request, res: Response) => 
       }
     }
 
-    if (gasto.venta_id) {
-      try {
-        await recalculateVentaTotalsInternal(pool, gasto.venta_id);
-      } catch (e: any) {
-        console.warn('[detachSatFacturaFromGasto] Error recalculando venta:', e.message);
-      }
-    }
+    await recalculateVentasForGastoRefs(pool, [gasto.venta_id], [gasto.proyecto_id]);
 
     try {
       const actor = req.user?.id || actor_id;

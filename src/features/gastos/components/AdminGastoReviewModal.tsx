@@ -575,6 +575,7 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                           ) : null}
                         </View>
 
+                        {!isOperativo && (
                         <TouchableOpacity
                           onPress={() => handleOpenAssignProyecto(selectedGasto)}
                           style={[
@@ -601,6 +602,7 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                             {proyName ? 'Cambiar' : 'Asignar'}
                           </Text>
                         </TouchableOpacity>
+                        )}
                       </View>
 
                       {!proyName && !isOperativo && !!proySugerido && (
@@ -880,55 +882,102 @@ export function AdminGastoReviewModal({ vm }: AdminGastoReviewModalProps) {
                   </View>
                 )}
 
-                {/* Venta / Proyecto Vinculado */}
-                <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
-                  <View style={{ flex: 1, marginRight: Spacing.two }}>
-                    <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>Venta / Proyecto Vinculado</Text>
-                    {selectedGasto.venta_rel || selectedGasto.venta_id ? (
-                      <View style={{ marginTop: 2 }}>
-                        <Text style={[styles.detailValue, { color: themeColors.primary, fontWeight: '700' }]}>
-                          {selectedGasto.venta_rel?.cliente
-                            ? `${selectedGasto.venta_rel.cliente} (${selectedGasto.venta_rel.fecha || 'Sin fecha'})`
-                            : `Venta ID: ${selectedGasto.venta_id}`}
+                {/* Venta Vinculada (Heredada si es de Proyecto; Oculta si es Operativo; Editable si es Histórico sin proyecto) */}
+                {(() => {
+                  const hasProyecto = Boolean(selectedGasto.proyecto_id || selectedGasto.proyecto_rel?.id);
+                  const isOperativoGasto =
+                    selectedGasto.tipo_gasto === 'OPERATIVO' ||
+                    (!hasProyecto &&
+                      (selectedGasto.tipo_servicio_proyecto || '').toLowerCase() === 'operativo');
+
+                  if (isOperativoGasto) {
+                    return null;
+                  }
+
+                  const proyectoVenta = selectedGasto.proyecto_rel?.venta_rel;
+
+                  if (hasProyecto) {
+                    return (
+                      <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>
+                            Venta Heredada del Proyecto (1 a 1)
+                          </Text>
+                          {proyectoVenta ? (
+                            <View style={{ marginTop: 2 }}>
+                              <Text style={[styles.detailValue, { color: '#0284c7', fontWeight: '700' }]}>
+                                {proyectoVenta.folio ? `${proyectoVenta.folio} • ` : ''}
+                                {proyectoVenta.cliente || 'Venta'} ({proyectoVenta.fecha || 'Sin fecha'})
+                              </Text>
+                              {proyectoVenta.precio_total_facturado ? (
+                                <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '600', marginTop: 1 }}>
+                                  Total Venta: {formatCurrency(proyectoVenta.precio_total_facturado)}
+                                </Text>
+                              ) : null}
+                            </View>
+                          ) : (
+                            <Text style={[styles.detailValue, { color: themeColors.textSecondary, fontStyle: 'italic', marginTop: 2 }]}>
+                              El proyecto asignado aún no tiene venta vinculada
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  }
+
+                  return (
+                    <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                      <View style={{ flex: 1, marginRight: Spacing.two }}>
+                        <Text style={[styles.detailLabel, { color: themeColors.textSecondary }]}>
+                          {selectedGasto.tipo_gasto === 'OPERATIVO' ? 'Venta Vinculada (Gasto Operativo)' : 'Venta Vinculada'}
                         </Text>
-                        {selectedGasto.venta_rel?.tipo_proyecto ? (
-                          <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 1 }}>
-                            Proyecto: {selectedGasto.venta_rel.tipo_proyecto} {selectedGasto.venta_rel.sucursal ? `| ${selectedGasto.venta_rel.sucursal}` : ''}
+                        {selectedGasto.venta_rel || selectedGasto.venta_id ? (
+                          <View style={{ marginTop: 2 }}>
+                            <Text style={[styles.detailValue, { color: themeColors.primary, fontWeight: '700' }]}>
+                              {selectedGasto.venta_rel?.cliente
+                                ? `${selectedGasto.venta_rel.cliente} (${selectedGasto.venta_rel.fecha || 'Sin fecha'})`
+                                : `Venta ID: ${selectedGasto.venta_id}`}
+                            </Text>
+                            {selectedGasto.venta_rel?.tipo_proyecto ? (
+                              <Text style={{ color: themeColors.textSecondary, fontSize: 12, marginTop: 1 }}>
+                                Tipo: {selectedGasto.venta_rel.tipo_proyecto} {selectedGasto.venta_rel.sucursal ? `| ${selectedGasto.venta_rel.sucursal}` : ''}
+                              </Text>
+                            ) : null}
+                            {selectedGasto.venta_rel?.precio_total_facturado ? (
+                              <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '600', marginTop: 1 }}>
+                                Total Venta: {formatCurrency(selectedGasto.venta_rel.precio_total_facturado)}
+                              </Text>
+                            ) : null}
+                          </View>
+                        ) : (
+                          <Text style={[styles.detailValue, { color: themeColors.textSecondary, fontStyle: 'italic', marginTop: 2 }]}>
+                            Sin venta vinculada
                           </Text>
-                        ) : null}
-                        {selectedGasto.venta_rel?.precio_total_facturado ? (
-                          <Text style={{ color: themeColors.accent, fontSize: 11, fontWeight: '600', marginTop: 1 }}>
-                            Total Venta: {formatCurrency(selectedGasto.venta_rel.precio_total_facturado)}
+                        )}
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                        <TouchableOpacity
+                          onPress={() => handleOpenRelinkSaleModal(selectedGasto)}
+                          style={styles.quickFieldBtn}
+                        >
+                          <Ionicons name="swap-horizontal-outline" size={14} color={themeColors.accent} />
+                          <Text style={styles.quickFieldBtnText}>
+                            {selectedGasto.venta_id ? 'Cambiar' : 'Vincular'}
                           </Text>
+                        </TouchableOpacity>
+                        {selectedGasto.venta_id ? (
+                          <TouchableOpacity
+                            onPress={() => handleDirectUnlinkSale(selectedGasto)}
+                            style={[styles.quickFieldBtn, { borderColor: themeColors.danger + '40', backgroundColor: themeColors.danger + '10' }]}
+                          >
+                            <Ionicons name="link-outline" size={14} color={themeColors.danger} />
+                            <Text style={[styles.quickFieldBtnText, { color: themeColors.danger }]}>Desvincular</Text>
+                          </TouchableOpacity>
                         ) : null}
                       </View>
-                    ) : (
-                      <Text style={[styles.detailValue, { color: themeColors.textSecondary, fontStyle: 'italic', marginTop: 2 }]}>
-                        Sin venta vinculada (Gasto general no asignado)
-                      </Text>
-                    )}
-                  </View>
-                  <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                    <TouchableOpacity
-                      onPress={() => handleOpenRelinkSaleModal(selectedGasto)}
-                      style={styles.quickFieldBtn}
-                    >
-                      <Ionicons name="swap-horizontal-outline" size={14} color={themeColors.accent} />
-                      <Text style={styles.quickFieldBtnText}>
-                        {selectedGasto.venta_id ? 'Cambiar' : 'Vincular'}
-                      </Text>
-                    </TouchableOpacity>
-                    {selectedGasto.venta_id ? (
-                      <TouchableOpacity
-                        onPress={() => handleDirectUnlinkSale(selectedGasto)}
-                        style={[styles.quickFieldBtn, { borderColor: themeColors.danger + '40', backgroundColor: themeColors.danger + '10' }]}
-                      >
-                        <Ionicons name="link-outline" size={14} color={themeColors.danger} />
-                        <Text style={[styles.quickFieldBtnText, { color: themeColors.danger }]}>Desvincular</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                </View>
+                    </View>
+                  );
+                })()}
 
                 {/* Cliente / Sucursal */}
                 <View style={[styles.detailItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>

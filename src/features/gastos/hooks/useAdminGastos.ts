@@ -429,6 +429,7 @@ export function useAdminGastos() {
     nombre: string;
     cliente_id: string | null;
     sucursal_id: string | null;
+    venta_id: string | null;
     status: ProyectoStatus;
     notas: string | null;
   }) => {
@@ -1092,6 +1093,11 @@ export function useAdminGastos() {
     // Si el gasto fue devuelto de Historial por detección de factura recibida, enviarlo aprobado directamente conservando su venta_id
     if (selectedGasto.devuelto_por_factura) {
       executeApproveGasto(selectedGasto.venta_id || null);
+      return;
+    }
+    // Si el gasto está vinculado a un proyecto, aprobar directamente sin preguntar si se vincula a una venta
+    if (selectedGasto.proyecto_id || selectedGasto.proyecto_rel?.id) {
+      executeApproveGasto(null);
       return;
     }
     setIsRelinkingSaleMode(false);

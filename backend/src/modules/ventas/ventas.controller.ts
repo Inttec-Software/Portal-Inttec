@@ -182,7 +182,7 @@ export const getVentaDetalle = async (req: Request, res: Response) => {
 
 
 
-    const [partidasRes, gastosRes, pagosRes] = await Promise.all([
+    const [partidasRes, gastosRes, pagosRes, proyectoRes] = await Promise.all([
       pool.query('SELECT * FROM ventas_partidas WHERE venta_id = $1', [id]),
       pool.query(`
         SELECT g.*,
@@ -195,9 +195,14 @@ export const getVentaDetalle = async (req: Request, res: Response) => {
           (SELECT row_to_json(cl_obj) FROM (SELECT cl.id, cl.nombre FROM clientes cl WHERE cl.id = g.cliente_id) cl_obj) as cliente_rel,
           (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel
         FROM gastos g
-        WHERE g.venta_id = $1 AND (g.status = 'APPROVED' OR (g.status = 'PENDING' AND COALESCE(g.devuelto_por_factura, FALSE) = TRUE))
+        WHERE (
+          g.proyecto_id IN (SELECT pr.id FROM proyectos pr WHERE pr.venta_id = $1)
+          OR (g.proyecto_id IS NULL AND g.venta_id = $1)
+        )
+        AND (g.status = 'APPROVED' OR (g.status = 'PENDING' AND COALESCE(g.devuelto_por_factura, FALSE) = TRUE))
       `, [id]),
       pool.query('SELECT * FROM ventas_pagos WHERE venta_id = $1 ORDER BY fecha_pago DESC', [id]),
+      pool.query('SELECT id, nombre, status, cliente_id, sucursal_id FROM proyectos WHERE venta_id = $1 LIMIT 1', [id]),
     ]);
 
     // Sync payment status in the background
@@ -211,6 +216,7 @@ export const getVentaDetalle = async (req: Request, res: Response) => {
       gastos: gastosRes.rows || [],
       pagos: pagos,
       totalPagado,
+      proyecto: proyectoRes.rows[0] || null,
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });

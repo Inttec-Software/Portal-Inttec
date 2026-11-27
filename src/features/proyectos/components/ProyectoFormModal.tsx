@@ -13,7 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Spacing, BorderRadius } from '@/constants/theme';
 import CustomButton from '@/components/CustomButton';
 import CustomInput from '@/components/CustomInput';
-import { Proyecto, ProyectoStatus } from '../types';
+import { Proyecto, ProyectoStatus, VentaDisponibleItem } from '../types';
+import { proyectosApi } from '../api/proyectosApi';
 
 interface ProyectoFormModalProps {
   visible: boolean;
@@ -27,6 +28,7 @@ interface ProyectoFormModalProps {
     nombre: string;
     cliente_id: string | null;
     sucursal_id: string | null;
+    venta_id: string | null;
     status: ProyectoStatus;
     notas: string | null;
   }) => void;
@@ -45,11 +47,15 @@ export function ProyectoFormModal({
   const [nombre, setNombre] = useState('');
   const [clienteId, setClienteId] = useState<string>('');
   const [sucursalId, setSucursalId] = useState<string>('');
+  const [ventaId, setVentaId] = useState<string>('');
   const [status, setStatus] = useState<ProyectoStatus>('ACTIVO');
   const [notas, setNotas] = useState('');
   const [clienteSearch, setClienteSearch] = useState('');
   const [showSucursalDropdown, setShowSucursalDropdown] = useState(false);
   const [sucursalSearch, setSucursalSearch] = useState('');
+  const [ventasList, setVentasList] = useState<VentaDisponibleItem[]>([]);
+  const [showVentaDropdown, setShowVentaDropdown] = useState(false);
+  const [ventaSearch, setVentaSearch] = useState('');
 
   useEffect(() => {
     if (visible) {
@@ -57,18 +63,23 @@ export function ProyectoFormModal({
         setNombre(editingProyecto.nombre || '');
         setClienteId(editingProyecto.cliente_id || '');
         setSucursalId(editingProyecto.sucursal_id || '');
+        setVentaId(editingProyecto.venta_id || '');
         setStatus(editingProyecto.status || 'ACTIVO');
         setNotas(editingProyecto.notas || '');
       } else {
         setNombre('');
         setClienteId('');
         setSucursalId('');
+        setVentaId('');
         setStatus('ACTIVO');
         setNotas('');
       }
       setClienteSearch('');
       setShowSucursalDropdown(false);
       setSucursalSearch('');
+      setShowVentaDropdown(false);
+      setVentaSearch('');
+      proyectosApi.getVentasDisponibles().then(setVentasList).catch(() => {});
     }
   }, [visible, editingProyecto]);
 
@@ -95,6 +106,7 @@ export function ProyectoFormModal({
       nombre: nombre.trim(),
       cliente_id: clienteId || null,
       sucursal_id: sucursalId || null,
+      venta_id: ventaId || null,
       status,
       notas: notas.trim() || null,
     });
@@ -625,6 +637,205 @@ export function ProyectoFormModal({
                   )}
                 </View>
               ) : null}
+
+              {/* Venta vinculada (1 a 1) */}
+              <View style={{ gap: 6 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontWeight: '800',
+                      color: themeColors.textSecondary,
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    Venta Vinculada (1 a 1)
+                  </Text>
+                  {ventaId ? (
+                    <TouchableOpacity onPress={() => { setVentaId(''); setShowVentaDropdown(false); }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.danger }}>
+                        Desvincular venta
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => setShowVentaDropdown(!showVentaDropdown)}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: themeColors.backgroundElement,
+                    borderWidth: 1,
+                    borderColor: showVentaDropdown ? themeColors.accent : themeColors.border,
+                    borderRadius: BorderRadius.medium,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Ionicons
+                      name="cart-outline"
+                      size={16}
+                      color={ventaId ? themeColors.accent : themeColors.textSecondary}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: ventaId ? '700' : '600',
+                        color: themeColors.text,
+                        flex: 1,
+                      }}
+                      numberOfLines={1}
+                    >
+                      {(() => {
+                        if (!ventaId) return 'Sin venta vinculada (opcional)';
+                        const vObj = ventasList.find((v) => v.id === ventaId) || editingProyecto?.venta_rel;
+                        if (!vObj) return `Venta #${ventaId.slice(0, 8)}`;
+                        const folioTxt = vObj.folio ? `${vObj.folio} • ` : '';
+                        return `${folioTxt}${vObj.cliente || 'Venta'} (${vObj.fecha || 'S/F'})`;
+                      })()}
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name={showVentaDropdown ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={themeColors.textSecondary}
+                  />
+                </TouchableOpacity>
+
+                {showVentaDropdown && (
+                  <View
+                    style={{
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                      borderRadius: BorderRadius.medium,
+                      backgroundColor: themeColors.backgroundElement,
+                      padding: 6,
+                      gap: 6,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: themeColors.background,
+                        borderWidth: 1,
+                        borderColor: themeColors.border,
+                        borderRadius: BorderRadius.small,
+                        paddingHorizontal: 8,
+                        height: 34,
+                      }}
+                    >
+                      <Ionicons
+                        name="search-outline"
+                        size={14}
+                        color={themeColors.textSecondary}
+                        style={{ marginRight: 6 }}
+                      />
+                      <TextInput
+                        value={ventaSearch}
+                        onChangeText={setVentaSearch}
+                        placeholder="Buscar venta por cliente, folio, factura o fecha..."
+                        placeholderTextColor={themeColors.textSecondary}
+                        style={{ flex: 1, color: themeColors.text, fontSize: 12 }}
+                      />
+                      {ventaSearch.length > 0 && (
+                        <TouchableOpacity onPress={() => setVentaSearch('')}>
+                          <Ionicons name="close-circle" size={14} color={themeColors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    <ScrollView nestedScrollEnabled style={{ maxHeight: 180 }}>
+                      <View style={{ gap: 2 }}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setVentaId('');
+                            setShowVentaDropdown(false);
+                          }}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            paddingVertical: 8,
+                            paddingHorizontal: 10,
+                            borderRadius: BorderRadius.small,
+                            backgroundColor: !ventaId ? themeColors.accent + '18' : 'transparent',
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontWeight: !ventaId ? '800' : '600',
+                              color: !ventaId ? themeColors.accent : themeColors.textSecondary,
+                            }}
+                          >
+                            Sin venta vinculada
+                          </Text>
+                          {!ventaId && <Ionicons name="checkmark" size={16} color={themeColors.accent} />}
+                        </TouchableOpacity>
+
+                        {ventasList
+                          .filter((v) => {
+                            const q = ventaSearch.trim().toLowerCase();
+                            if (!q) return true;
+                            const text = `${v.folio || ''} ${v.cliente || ''} ${v.factura_referencia || ''} ${v.fecha || ''} ${v.sucursal || ''}`.toLowerCase();
+                            return text.includes(q);
+                          })
+                          .slice(0, 60)
+                          .map((v) => {
+                            const isSelected = ventaId === v.id;
+                            const isOccupiedByOther = Boolean(
+                              v.proyecto_vinculado_id && v.proyecto_vinculado_id !== editingProyecto?.id
+                            );
+                            return (
+                              <TouchableOpacity
+                                key={v.id}
+                                disabled={isOccupiedByOther}
+                                onPress={() => {
+                                  setVentaId(v.id);
+                                  setShowVentaDropdown(false);
+                                }}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  paddingVertical: 8,
+                                  paddingHorizontal: 10,
+                                  borderRadius: BorderRadius.small,
+                                  opacity: isOccupiedByOther ? 0.5 : 1,
+                                  backgroundColor: isSelected ? themeColors.accent + '18' : 'transparent',
+                                }}
+                              >
+                                <View style={{ flex: 1 }}>
+                                  <Text
+                                    style={{
+                                      fontSize: 12,
+                                      fontWeight: isSelected ? '800' : '600',
+                                      color: isSelected ? themeColors.accent : themeColors.text,
+                                    }}
+                                    numberOfLines={1}
+                                  >
+                                    {v.folio ? `${v.folio} • ` : ''}{v.cliente || 'Sin cliente'}
+                                  </Text>
+                                  <Text style={{ fontSize: 10, color: themeColors.textSecondary }} numberOfLines={1}>
+                                    {v.fecha || 'S/F'} • ${Number(v.precio_total_facturado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                    {v.factura_referencia ? ` • Fac: ${v.factura_referencia}` : ''}
+                                    {isOccupiedByOther ? ` • Ocupada (${v.proyecto_vinculado_nombre})` : ''}
+                                  </Text>
+                                </View>
+                                {isSelected && <Ionicons name="checkmark" size={16} color={themeColors.accent} />}
+                                {isOccupiedByOther && <Ionicons name="lock-closed" size={14} color={themeColors.textSecondary} />}
+                              </TouchableOpacity>
+                            );
+                          })}
+                      </View>
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
 
               {/* Notas */}
               <View style={{ gap: 4 }}>

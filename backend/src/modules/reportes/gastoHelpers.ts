@@ -140,9 +140,13 @@ export const GASTO_RELATIONS_SELECT_SQL = `
   (SELECT row_to_json(sc_obj) FROM (SELECT sc.id, sc.nombre FROM sucursales_cliente sc WHERE sc.id = g.sucursal_id) sc_obj) as sucursal_rel,
   (SELECT row_to_json(v_obj) FROM (SELECT v.id, v.cliente, v.fecha, v.sucursal, v.tipo_proyecto, v.factura_referencia, v.precio_total_facturado FROM ventas v WHERE v.id = g.venta_id) v_obj) as venta_rel,
   (SELECT row_to_json(pr_obj) FROM (
-    SELECT pr.id, pr.nombre, pr.cliente_id, pr.sucursal_id, pr.status,
+    SELECT pr.id, pr.nombre, pr.cliente_id, pr.sucursal_id, pr.venta_id, pr.status,
            (SELECT cl.nombre FROM clientes cl WHERE cl.id = pr.cliente_id) as cliente_nombre,
-           (SELECT sc.nombre FROM sucursales_cliente sc WHERE sc.id = pr.sucursal_id) as sucursal_nombre
+           (SELECT sc.nombre FROM sucursales_cliente sc WHERE sc.id = pr.sucursal_id) as sucursal_nombre,
+           (SELECT row_to_json(pv_obj) FROM (
+             SELECT v.id, v.folio, v.cliente, v.fecha, v.precio_total_facturado
+             FROM ventas v WHERE v.id = pr.venta_id
+           ) pv_obj) as venta_rel
     FROM proyectos pr WHERE pr.id = g.proyecto_id
   ) pr_obj) as proyecto_rel,
   COALESCE((
