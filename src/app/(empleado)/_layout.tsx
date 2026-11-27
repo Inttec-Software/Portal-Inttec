@@ -60,6 +60,8 @@ function EmpleadoLayoutContent() {
     if (lastPart === 'devoluciones') return 'Devoluciones';
     if (lastPart === 'vehiculos') return 'Vehículos';
     if (lastPart === 'herramientas') return 'Herramientas';
+    if (pathname.includes('/guias/') && isUuid) return 'Detalle de Guía';
+    if (lastPart === 'guias') return 'Guías';
     if (lastPart === 'documentos') return 'Documentos';
     if (lastPart === 'asistencia') return 'Asistencia';
     if (lastPart === 'directorio-clientes') return 'Directorio de Clientes';
@@ -78,6 +80,7 @@ function EmpleadoLayoutContent() {
     { route: '/(empleado)/tareas', icon: 'checkbox-outline', color: '#f39c12', name: 'Tareas' },
     { route: '/(empleado)/documentos', icon: 'create-outline', color: '#0284c7', name: 'Documentos' },
     { route: '/(empleado)/directorio-clientes', icon: 'book-outline', color: '#0ea5e9', name: 'Directorio de Clientes' },
+    { route: '/(empleado)/guias', icon: 'book-outline', color: '#0ea5e9', name: 'Guías' },
     { route: '/(empleado)/perfil', icon: 'person-outline', color: '#5f27cd', name: 'Perfil' },
   ];
 
@@ -125,6 +128,9 @@ function EmpleadoLayoutContent() {
               } else if (pathname.includes('formulario') || pathname.includes('editar-gasto')) {
                 if (router.canGoBack()) router.back();
                 else router.replace('/(empleado)/gastos');
+              } else if (pathname.includes('/guias/') && !pathname.endsWith('/guias')) {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(empleado)/guias' as any);
               } else {
                 router.replace('/(empleado)/gastos');
               }

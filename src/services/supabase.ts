@@ -712,40 +712,10 @@ export interface AusenciaAsistencia {
  */
 export const AsistenciaService = {
   /**
-   * Obtiene los componentes de fecha/hora desglosados en una zona horaria específica (ej. America/Chihuahua, America/Hermosillo, America/Ciudad_Juarez).
-   * Para husos mexicanos sin cambio de horario estacional (Chihuahua capital UTC-6 fijo, Sonora/Sinaloa UTC-7 fijo, Cancún UTC-5 fijo),
-   * calcula directamente desde UTC para blindar contra teléfonos con tablas de horario de verano/invierno desactualizadas.
+   * Obtiene los componentes de fecha/hora desglosados en una zona horaria específica (ej. America/Tijuana, America/Cancun, etc.)
    */
   getZonedParts(date: Date = new Date(), timeZone?: string) {
     const tz = timeZone || detectUserTimezone();
-
-    let fixedOffsetHours: number | null = null;
-    if (
-      tz === 'America/Chihuahua' ||
-      tz === 'America/Mexico_City' ||
-      tz === 'America/Monterrey' ||
-      tz === 'America/Merida'
-    ) {
-      fixedOffsetHours = -6;
-    } else if (tz === 'America/Hermosillo' || tz === 'America/Mazatlan') {
-      fixedOffsetHours = -7;
-    } else if (tz === 'America/Cancun') {
-      fixedOffsetHours = -5;
-    }
-
-    if (fixedOffsetHours !== null) {
-      const shifted = new Date(date.getTime() + fixedOffsetHours * 3600000);
-      return {
-        year: shifted.getUTCFullYear(),
-        month: shifted.getUTCMonth() + 1,
-        day: shifted.getUTCDate(),
-        hour: shifted.getUTCHours(),
-        minute: shifted.getUTCMinutes(),
-        second: shifted.getUTCSeconds(),
-        timeZone: tz,
-      };
-    }
-
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: tz,
       year: 'numeric',
@@ -763,7 +733,7 @@ export const AsistenciaService = {
       year: get('year'),
       month: get('month'),
       day: get('day'),
-      hour: get('hour') === 24 ? 0 : get('hour'),
+      hour: get('hour'),
       minute: get('minute'),
       second: get('second'),
       timeZone: tz,
@@ -1124,7 +1094,7 @@ export const AsistenciaService = {
    * de las 5 unidades GPS en el minuto exacto del evento.
    */
   async corroborarConFlotaGps(params: {
-    asistenciaId?: string | null;
+    asistenciaId?: string;
     fecha: string;
     hora: string;
     empleadoLat?: number | null;

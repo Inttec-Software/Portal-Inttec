@@ -29,6 +29,7 @@ import herramientasRoutes from './modules/herramientas/herramientas.routes';
 import proyectosRoutes from './modules/proyectos/proyectos.routes';
 import queryRoutes from './modules/query/query.routes';
 import directorioClientesRoutes from './modules/directorio-clientes/directorio-clientes.routes';
+import guiasRoutes from './modules/guias/guias.routes';
 
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -172,6 +173,7 @@ app.use('/api/herramientas', herramientasRoutes);
 app.use('/api/proyectos', proyectosRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/directorio-clientes', directorioClientesRoutes);
+app.use('/api/guias', guiasRoutes);
 
 // Ruta de prueba para verificar conexión a la base de datos PostgreSQL pura
 import { getDbPool } from './config/database';

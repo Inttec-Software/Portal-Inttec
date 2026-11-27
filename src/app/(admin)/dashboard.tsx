@@ -47,6 +47,7 @@ const MODULES: ModuleConfig[] = [
   { id: 'auditoria', name: 'Auditoría', icon: 'shield-checkmark', route: '/(admin)/auditoria-tarjeta', color: '#ff9f43' },
   { id: 'documentos', name: 'Documentos', icon: 'create-outline', route: '/(admin)/documentos', color: '#0284c7' },
   { id: 'directorio_clientes', name: 'Directorio Clientes', icon: 'book', route: '/(admin)/directorio-clientes', color: '#0ea5e9' },
+  { id: 'guias', name: 'Guías', icon: 'book-outline', route: '/(admin)/guias', color: '#0ea5e9' },
 ];
 
 export default function AdminDashboardGrid() {

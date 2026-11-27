@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portal INTTEC / DARAVISA — Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Apple SF Pro substitute: Inter + system-ui, calibrated with Apple typography metrics -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    /* ==========================================================================
+       TOKENS FROM apple-DESIGN.md
+       ========================================================================== */
+    :root {
+      /* Colors */
+      --color-primary: #0066cc;
+      --color-primary-focus: #0071e3;
+      --color-primary-on-dark: #2997ff;
+      --color-ink: #1d1d1f;
+      --color-body: #1d1d1f;
+      --color-body-on-dark: #ffffff;
+      --color-body-muted: #cccccc;
+      --color-ink-muted-80: #333333;
+      --color-ink-muted-48: #7a7a7a;
+      --color-divider-soft: #f0f0f0;
+      --color-hairline: #e0e0e0;
+      --color-canvas: #ffffff;
+      --color-canvas-parchment: #f5f5f7;
+      --color-surface-pearl: #fafafc;
+      --color-surface-tile-1: #272729;
+      --color-surface-tile-2: #2a2a2c;
+      --color-surface-chip-translucent: rgba(210, 210, 215, 0.4);
+      --color-on-primary: #ffffff;
+      --color-on-dark: #ffffff;
+
+      /* Spacing Scale */
+      --spacing-xxs: 4px;
+      --spacing-xs: 8px;
+      --spacing-sm: 12px;
+      --spacing-md: 17px;
+      --spacing-lg: 24px;
+      --spacing-xl: 32px;
+      --spacing-xxl: 48px;
+      --spacing-section: 80px;
+
+      /* Border Radii (Apple Squircle Aesthetics) */
+      --radius-xs: 5px;
+      --radius-sm: 8px;
+      --radius-md: 11px;
+      --radius-lg: 18px;
+      --radius-pill: 9999px;
+      --radius-full: 9999px;
+
+      /* Typography according to apple-DESIGN.md tokens */
+      --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', system-ui, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-family);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      background-color: var(--color-canvas-parchment);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ==========================================================================
+       TOP BAR (Matches the exact layout and controls of dashboard.tsx)
+       ========================================================================== */
+    header.apple-top-bar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(245, 245, 247, 0.85);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+      padding: 12px 28px;
+    }
+
+    .top-bar-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    /* User Profile Info on Left */
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .user-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #0284c7;
+      color: #ffffff;
+      font-weight: 600;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+      flex-shrink: 0;
+    }
+
+    .user-details {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.25;
+      min-width: 0;
+    }
+
+    .user-greeting {
+      font-size: 12px;
+      color: var(--color-ink-muted-48);
+      letter-spacing: -0.12px;
+    }
+
+    .user-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--color-ink);
+      letter-spacing: -0.224px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .user-role {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--color-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    /* Actions Right Side */
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    /* Company Switcher Pill (INTTEC / DARAVISA) */
+    .company-switcher {
+      display: inline-flex;
+      background: rgba(0, 0, 0, 0.06);
+      padding: 3px;
+      border-radius: var(--radius-pill);
+      width: 176px;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+
+    .company-btn {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--color-ink-muted-48);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 6px 0;
+      border-radius: var(--radius-pill);
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      letter-spacing: 0.2px;
+    }
+
+    .company-btn.active {
+      background: #ffffff;
+      color: var(--color-ink);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Action Buttons (Popover Notificaciones, Checador, Perfil, Salir) */
+    .action-icon-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(0, 102, 204, 0.08);
+      color: var(--color-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .action-icon-btn:hover {
+      background: rgba(0, 102, 204, 0.15);
+      transform: scale(1.04);
+    }
+
+    .action-icon-btn.checador {
+      background: rgba(29, 209, 161, 0.12);
+      color: #10ac84;
+    }
+    .action-icon-btn.checador:hover {
+      background: rgba(29, 209, 161, 0.22);
+    }
+
+    .action-icon-btn.danger {
+      background: rgba(235, 77, 75, 0.1);
+      color: #eb4d4b;
+    }
+    .action-icon-btn.danger:hover {
+      background: rgba(235, 77, 75, 0.18);
+    }
+
+    .badge-dot {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #f0932b;
+      border: 2px solid #ffffff;
+    }
+
+    /* ==========================================================================
+       MAIN SCROLL AREA (Max width 1200px matching dashboard.tsx)
+       ========================================================================== */
+    main.apple-main {
+      flex: 1;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: var(--spacing-xl) var(--spacing-lg) var(--spacing-xxl);
+    }
+
+    /* Mobile switcher row shown only on small screens */
+    .mobile-company-bar {
+      display: none;
+      justify-content: center;
+      margin-bottom: var(--spacing-md);
+    }
+
+    /* ==========================================================================
+       MODULES GRID (Strictly contains the items from dashboard.tsx MODULES array)
+       ========================================================================== */
+    .modules-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap: 16px;
+      width: 100%;
+    }
+
+    /* Apple-styled Module Card */
+    .module-card {
+      background: var(--color-canvas);
+      border-radius: var(--radius-lg);
+      padding: var(--spacing-lg) 16px 20px;
+      aspect-ratio: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      cursor: pointer;
+      position: relative;
+      border: 1px solid rgba(0, 0, 0, 0.04);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      user-select: none;
+    }
+
+    .module-card:hover {
+      transform: translateY(-4px) scale(1.02);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+      border-color: rgba(0, 102, 204, 0.15);
+    }
+
+    .module-card:active {
+      transform: scale(0.98);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    /* Squircle Icon Container with Apple Smooth Shadow */
+    .icon-container {
+      width: 60px;
+      height: 60px;
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+      transition: transform 0.25s ease;
+      color: #ffffff;
+      box-shadow: 0 6px 14px -2px rgba(0, 0, 0, 0.16);
+    }
+
+    .module-card:hover .icon-container {
+      transform: scale(1.08);
+    }
+
+    .module-name {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--color-ink);
+      text-align: center;
+      letter-spacing: -0.224px;
+      line-height: 1.25;
+      max-width: 130px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Pending Tasks Popover (Simulating PendingTasksPopover from dashboard.tsx) */
+    .tasks-popover {
+      position: fixed;
+      top: 68px;
+      right: 32px;
+      width: 330px;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.14);
+      padding: 18px;
+      z-index: 200;
+      opacity: 0;
+      transform: translateY(-8px) scale(0.97);
+      pointer-events: none;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .tasks-popover.open {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .popover-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--color-divider-soft);
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+    }
+
+    .popover-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--color-ink);
+      letter-spacing: -0.2px;
+    }
+
+    .popover-close {
+      background: none;
+      border: none;
+      color: var(--color-ink-muted-48);
+      cursor: pointer;
+      padding: 2px;
+    }
+
+    .task-item {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--color-divider-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .task-item:last-child {
+      border-bottom: none;
+    }
+
+    .task-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--color-ink);
+    }
+
+    .task-meta {
+      font-size: 11px;
+      color: var(--color-ink-muted-48);
+    }
+
+    /* Toast Notification */
+    .apple-toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(29, 29, 31, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      color: #ffffff;
+      padding: 10px 20px;
+      border-radius: var(--radius-pill);
+      font-size: 13.5px;
+      font-weight: 500;
+      letter-spacing: -0.2px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 999;
+    }
+
+    .apple-toast.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      pointer-events: auto;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 600px) {
+      .header-company-switcher {
+        display: none;
+      }
+      .mobile-company-bar {
+        display: flex;
+      }
+      .modules-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+      }
+      .module-card {
+        padding: 16px 10px;
+      }
+      .icon-container {
+        width: 52px;
+        height: 52px;
+        margin-bottom: 8px;
+      }
+      .module-name {
+        font-size: 12.5px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Bar para Perfil, Empresa y Salir -->
+  <header class="apple-top-bar">
+    <div class="top-bar-inner">
+      <!-- Info Usuario -->
+      <div class="user-info">
+        <div class="user-avatar" id="avatar-circle">A</div>
+        <div class="user-details">
+          <span class="user-greeting">Bienvenido,</span>
+          <span class="user-name" id="user-display-name">Administrador</span>
+          <span class="user-role" id="user-display-role">Superadmin</span>
+        </div>
+      </div>
+
+      <!-- Acciones de Cabecera -->
+      <div class="top-actions">
+        <!-- Switch de Empresa en Pantallas Grandes -->
+        <div class="company-switcher header-company-switcher">
+          <button class="company-btn active" id="btn-inttec-header" onclick="setCompany('inttec')">INTTEC</button>
+          <button class="company-btn" id="btn-daravisa-header" onclick="setCompany('daravisa')">DARAVISA</button>
+        </div>
+
+        <!-- Notificaciones de Tareas Pendientes -->
+        <button class="action-icon-btn" title="Tareas pendientes" onclick="toggleTasksPopover()">
+          <i data-lucide="bell" size="19"></i>
+          <span class="badge-dot" id="task-badge"></span>
+        </button>
+
+        <!-- Checador (Asistencia) -->
+        <button class="action-icon-btn checador" title="Asistencia / Checador" onclick="navigateTo('/(admin)/asistencia', 'Asistencia (Checador)')">
+          <i data-lucide="fingerprint" size="19"></i>
+        </button>
+
+        <!-- Perfil -->
+        <button class="action-icon-btn" title="Mi Perfil" onclick="navigateTo('/(admin)/perfil', 'Perfil')">
+          <i data-lucide="user" size="19"></i>
+        </button>
+
+        <!-- Salir -->
+        <button class="action-icon-btn danger" title="Cerrar Sesión" onclick="handleLogout()">
+          <i data-lucide="log-out" size="18"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Grid Content -->
+  <main class="apple-main">
+
+    <!-- Switch de Empresa sólo en Móvil (idéntico a isMobile de dashboard.tsx) -->
+    <div class="mobile-company-bar">
+      <div class="company-switcher">
+        <button class="company-btn active" id="btn-inttec-mobile" onclick="setCompany('inttec')">INTTEC</button>
+        <button class="company-btn" id="btn-daravisa-mobile" onclick="setCompany('daravisa')">DARAVISA</button>
+      </div>
+    </div>
+
+    <!-- Grid de Módulos (Únicamente la lista oficial de MODULES de dashboard.tsx) -->
+    <div class="modules-grid" id="grid-container">
+      <!-- Rendered dynamically matching MODULES -->
+    </div>
+
+  </main>
+
+  <!-- Popover de Tareas Pendientes (PendingTasksPopover) -->
+  <div class="tasks-popover" id="tasks-popover">
+    <div class="popover-header">
+      <div class="popover-title">Tareas Pendientes</div>
+      <button class="popover-close" onclick="toggleTasksPopover(false)">
+        <i data-lucide="x" size="16"></i>
+      </button>
+    </div>
+    <div class="task-item">
+      <span class="task-title">Revisar comprobante de viáticos #104</span>
+      <span class="task-meta">Asignado a: Administrador · Vence hoy</span>
+    </div>
+    <div class="task-item">
+      <span class="task-title">Validar alta de nuevo empleado (Operaciones)</span>
+      <span class="task-meta">Corresponsable · Pendiente</span>
+    </div>
+    <div class="task-item">
+      <span class="task-title">Aprobar cotización CFDI #921 (INTTEC)</span>
+      <span class="task-meta">Comercial · Urgente</span>
+    </div>
+  </div>
+
+  <!-- Toast Feed -->
+  <div class="apple-toast" id="toast">
+    <i data-lucide="check" size="16" style="color: #2997ff;"></i>
+    <span id="toast-text">Acción realizada</span>
+  </div>
+
+  <script>
+    // EXACT MODULE LIST FROM src/app/(admin)/dashboard.tsx
+    const MODULES = [
+      { id: 'ventas', name: 'Ventas', icon: 'shopping-cart', route: '/(admin)/ventas', color: '#ff6b6b' },
+      { id: 'facturacion', name: 'Facturación CFDI', icon: 'file-text', route: '/(admin)/facturacion', color: '#0984e3' },
+      { id: 'gastos', name: 'Gastos', icon: 'banknote', route: '/(admin)/gastos', color: '#feca57' },
+      { id: 'facturas_recibidas', name: 'Facturas Recibidas', icon: 'receipt', route: '/(admin)/facturas-recibidas', color: '#2e86de' },
+      { id: 'cotizaciones', name: 'Cotizaciones', icon: 'file-text', route: '/(admin)/cotizaciones', color: '#54a0ff' },
+      { id: 'tareas', name: 'Tareas', icon: 'check-square', route: '/(admin)/tareas', color: '#f39c12' },
+      { id: 'inventario', name: 'Inventario', icon: 'box', route: '/(admin)/inventario', color: '#48dbfb' },
+      { id: 'empleados', name: 'Empleados', icon: 'users', route: '/(admin)/empleados', color: '#1dd1a1' },
+      { id: 'asistencia', name: 'Asistencia', icon: 'clock', route: '/(admin)/asistencia', color: '#2ed573' },
+      { id: 'vehiculos', name: 'Flota', icon: 'car', route: '/(admin)/vehiculos', color: '#ff9ff3' },
+      { id: 'herramientas', name: 'Herramientas', icon: 'wrench', route: '/(admin)/herramientas', color: '#00cec9' },
+      { id: 'evidencias', name: 'Evidencias', icon: 'briefcase', route: '/(admin)/evidencias', color: '#ff5252' },
+      { id: 'reportes', name: 'Reportes', icon: 'file-spreadsheet', route: '/(admin)/reportes', color: '#10ac84' },
+      { id: 'catalogos', name: 'Catálogos', icon: 'list', route: '/(admin)/catalogos', color: '#5f27cd' },
+      { id: 'auditoria', name: 'Auditoría', icon: 'shield-check', route: '/(admin)/auditoria-tarjeta', color: '#ff9f43' },
+      { id: 'documentos', name: 'Documentos', icon: 'folder', route: '/(admin)/documentos', color: '#0284c7' },
+      { id: 'ia', name: 'Chat IA', icon: 'sparkles', route: '/(admin)/chat-ia', color: '#2e86de' },
+    ];
+
+    let currentCompany = 'inttec';
+
+    function renderModules() {
+      const container = document.getElementById('grid-container');
+      container.innerHTML = MODULES.map(mod => `
+        <div class="module-card" onclick="navigateTo('${mod.route}', '${mod.name}')">
+          <div class="icon-container" style="background-color: ${mod.color};">
+            <i data-lucide="${mod.icon}" size="28" stroke-width="2.1"></i>
+          </div>
+          <span class="module-name" title="${mod.name}">${mod.name}</span>
+        </div>
+      `).join('');
+
+      lucide.createIcons();
+    }
+
+    function setCompany(comp) {
+      currentCompany = comp;
+      ['header', 'mobile'].forEach(view => {
+        const inttecBtn = document.getElementById(`btn-inttec-${view}`);
+        const daraBtn = document.getElementById(`btn-daravisa-${view}`);
+        if (inttecBtn) inttecBtn.classList.toggle('active', comp === 'inttec');
+        if (daraBtn) daraBtn.classList.toggle('active', comp === 'daravisa');
+      });
+      showToast(`Empresa cambiada a ${comp.toUpperCase()}`);
+    }
+
+    function toggleTasksPopover(forceState) {
+      const popover = document.getElementById('tasks-popover');
+      if (typeof forceState === 'boolean') {
+        popover.classList.toggle('open', forceState);
+      } else {
+        popover.classList.toggle('open');
+      }
+      // Ocultar dot si se abrió
+      if (popover.classList.contains('open')) {
+        const dot = document.getElementById('task-badge');
+        if (dot) dot.style.display = 'none';
+      }
+    }
+
+    function navigateTo(route, name) {
+      showToast(`Navegando a ${name} (${route})`);
+    }
+
+    function handleLogout() {
+      showToast('Cerrando sesión...');
+      setTimeout(() => {
+        showToast('Sesión cerrada');
+      }, 1000);
+    }
+
+    let toastTimer;
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      const text = document.getElementById('toast-text');
+      text.innerText = msg;
+      toast.classList.add('visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        toast.classList.remove('visible');
+      }, 2500);
+    }
+
+    // Cerrar popover al dar clic fuera
+    document.addEventListener('click', (e) => {
+      const popover = document.getElementById('tasks-popover');
+      const target = e.target;
+      if (!popover.contains(target) && !target.closest('.action-icon-btn')) {
+        popover.classList.remove('open');
+      }
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      renderModules();
+    });
+  </script>
+</body>
+</html>

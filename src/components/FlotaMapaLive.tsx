@@ -71,13 +71,6 @@ export default function FlotaMapaLive({ onVehiculoUpdated }: FlotaMapaLiveProps)
   const [selectedImei, setSelectedImei] = useState<string>('');
   const [isSavingAsignacion, setIsSavingAsignacion] = useState(false);
 
-  // Modal de Configuración de API Key de EPCOM GPS
-  const [configModalVisible, setConfigModalVisible] = useState(false);
-  const [apiUrlInput, setApiUrlInput] = useState('https://gps.epcom.net');
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [maskedKey, setMaskedKey] = useState('');
-  const [isSavingConfig, setIsSavingConfig] = useState(false);
-
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
       window.alert(`${title}\n\n${message}`);
@@ -91,7 +84,6 @@ export default function FlotaMapaLive({ onVehiculoUpdated }: FlotaMapaLiveProps)
     try {
       const data = await VehiculoService.getFlotaGpsLive(force);
       setGpsResponse(data);
-      if (data.apiUrl) setApiUrlInput(data.apiUrl);
       setSelectedVehiculo((prev) => {
         if (!prev && data.vehiculos.length > 0) return data.vehiculos[0];
         if (prev) {
@@ -424,39 +416,6 @@ export default function FlotaMapaLive({ onVehiculoUpdated }: FlotaMapaLiveProps)
     }
   };
 
-  const handleOpenConfigModal = async () => {
-    try {
-      const cfg = await VehiculoService.getGpsConfig();
-      setApiUrlInput(cfg.apiUrl || 'https://gps.epcom.net');
-      setMaskedKey(cfg.maskedKey || '');
-    } catch {}
-    setConfigModalVisible(true);
-  };
-
-  const handleSaveGpsConfig = async () => {
-    if (!apiKeyInput.trim()) {
-      showAlert('Atención', 'Ingresa el Token generado en tu cuenta de EPCOM GPS.');
-      return;
-    }
-    setIsSavingConfig(true);
-    try {
-      const res = await VehiculoService.saveGpsConfig(apiUrlInput.trim(), apiKeyInput.trim());
-      setConfigModalVisible(false);
-      setApiKeyInput('');
-      await fetchFlotaLive(true, false);
-      showAlert(
-        'EPCOM GPS Conectado',
-        res.devicesFound > 0
-          ? `Conexión exitosa. Se detectaron ${res.devicesFound} localizadores Ruptela en tiempo real.`
-          : 'Token guardado correctamente.'
-      );
-    } catch (err: any) {
-      showAlert('Error', err.message || 'No se pudo guardar la configuración.');
-    } finally {
-      setIsSavingConfig(false);
-    }
-  };
-
   if (isLoading) {
     return (
       <View
@@ -537,19 +496,6 @@ export default function FlotaMapaLive({ onVehiculoUpdated }: FlotaMapaLiveProps)
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <TouchableOpacity
-            onPress={handleOpenConfigModal}
-            style={[
-              styles.actionChip,
-              { backgroundColor: themeColors.background, borderColor: themeColors.border },
-            ]}
-          >
-            <Ionicons name="key-outline" size={14} color={themeColors.accent} />
-            <Text style={{ fontSize: 11, fontWeight: '700', color: themeColors.accent }}>
-              API EPCOM
-            </Text>
-          </TouchableOpacity>
-
           <TouchableOpacity
             onPress={() => {
               if (mapMode === 'ROUTE' && selectedVehiculo) {
@@ -1393,115 +1339,6 @@ export default function FlotaMapaLive({ onVehiculoUpdated }: FlotaMapaLiveProps)
                 ) : (
                   <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>
                     Guardar Asignación de Hoy
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* MODAL 2: Configurar API Key de EPCOM GPS */}
-      <Modal
-        visible={configModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setConfigModalVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalBox, { backgroundColor: themeColors.background, borderColor: themeColors.border }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: themeColors.text }}>
-                Conectar Plataforma EPCOM GPS
-              </Text>
-              <TouchableOpacity onPress={() => setConfigModalVisible(false)}>
-                <Ionicons name="close" size={22} color={themeColors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <View
-              style={{
-                backgroundColor: themeColors.backgroundElement,
-                padding: 12,
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor: themeColors.border,
-                marginBottom: 12,
-              }}
-            >
-              <Text style={{ fontSize: 12, fontWeight: '800', color: themeColors.text, marginBottom: 4 }}>
-                ¿Cómo sacar el Token en tu panel de EPCOM GPS?
-              </Text>
-              <Text style={{ fontSize: 11, color: themeColors.textSecondary, lineHeight: 17 }}>
-                1. Haz clic en el botón azul <Text style={{ fontWeight: '700' }}>&quot;Obtener Token con mi usuario Inttec&quot;</Text>.{'\n'}
-                2. Inicia sesión con tu usuario <Text style={{ fontWeight: '700' }}>Inttec</Text> y tu contraseña de EPCOM GPS.{'\n'}
-                3. Copia el código (<Text style={{ fontWeight: '700' }}>access_token</Text>) y pégalo abajo.
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  const tokenGenUrl =
-                    'https://hosting.wialon.com/login.html?client_id=PortalInttec&access_type=-1&activation_time=0&duration=0&flags=1&redirect_uri=https://hosting.wialon.com/login.html';
-                  if (Platform.OS === 'web') {
-                    window.open(tokenGenUrl, '_blank');
-                  } else {
-                    Linking.openURL(tokenGenUrl);
-                  }
-                }}
-                style={{
-                  marginTop: 8,
-                  backgroundColor: '#2563eb',
-                  paddingVertical: 8,
-                  paddingHorizontal: 12,
-                  borderRadius: 8,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                }}
-              >
-                <Ionicons name="open-outline" size={15} color="#fff" />
-                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>
-                  Obtener Token con mi usuario Inttec
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.text, marginBottom: 4 }}>
-              Token / API Key de EPCOM GPS {maskedKey ? `(Actual: ${maskedKey})` : ''}
-            </Text>
-            <TextInput
-              value={apiKeyInput}
-              onChangeText={setApiKeyInput}
-              placeholder="Pega aquí tu Token de EPCOM GPS..."
-              placeholderTextColor={themeColors.textSecondary}
-              style={[
-                styles.inputField,
-                { color: themeColors.text, borderColor: themeColors.border, backgroundColor: themeColors.backgroundElement },
-              ]}
-            />
-
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
-              <TouchableOpacity
-                onPress={() => setConfigModalVisible(false)}
-                style={[
-                  styles.modalBtn,
-                  { backgroundColor: themeColors.backgroundElement, borderColor: themeColors.border, borderWidth: 1 },
-                ]}
-              >
-                <Text style={{ fontSize: 12, fontWeight: '700', color: themeColors.textSecondary }}>
-                  Cancelar
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleSaveGpsConfig}
-                disabled={isSavingConfig}
-                style={[styles.modalBtn, { flex: 1, backgroundColor: themeColors.accent }]}
-              >
-                {isSavingConfig ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>
-                    Guardar y Sincronizar GPS
                   </Text>
                 )}
               </TouchableOpacity>
