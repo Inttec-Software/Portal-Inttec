@@ -572,7 +572,7 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
           },
           {
             key: 'historial' as const,
-            label: `4. Histórico / Sin proy. (${
+            label: `4. Histórico (${
               backendTotals?.countHistorico ?? historyGastos.length
             })`,
             shortLabel: `Histórico (${
@@ -1845,7 +1845,7 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
       )}
 
       {/* ===================================================================== */}
-      {/* PESTAÑA 4: HISTÓRICO / SIN PROYECTO (CON BOTÓN "ASIGNAR A PROYECTO")  */}
+      {/* PESTAÑA 4: HISTÓRICO (TODOS LOS GASTOS APROBADOS)                     */}
       {/* ===================================================================== */}
       {activeTab === 'historial' && (
         <>
@@ -1881,14 +1881,14 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
                     <Text
                       style={{ fontWeight: '800', color: themeColors.warning }}
                     >
-                      Histórico / Sin proyecto:{' '}
+                      Histórico:{' '}
                     </Text>
-                    Gastos anteriores conservados intactos con sus facturas SAT y
-                    registros de gasolina. Usa el botón{' '}
+                    Todos los gastos aprobados del sistema (de proyectos,
+                    operativos e históricos sin proyecto). Usa el botón{' '}
                     <Text style={{ fontWeight: '800' }}>
                       &quot;Asignar a proyecto&quot;
                     </Text>{' '}
-                    para mover gastos recientes a su proyecto.
+                    cuando necesites mover un gasto sin proyecto.
                   </Text>
                 </View>
 
@@ -2049,7 +2049,7 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
                           { color: themeColors.textSecondary },
                         ]}
                       >
-                        No hay registros históricos sin proyecto en esta página.
+                        No hay gastos aprobados en el historial para esta página.
                       </Text>
                     </View>
                   ) : (
@@ -2227,42 +2227,66 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
                             )}
                           </View>
 
-                          {/* Botón Rápido "Asignar a proyecto" */}
+                          {/* Botón Rápido "Asignar a proyecto" (solo para históricos sin proyecto ni operativos) */}
                           <View style={{ width: '13%', paddingRight: 4 }}>
-                            <TouchableOpacity
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                handleOpenAssignProyecto(item);
-                              }}
-                              style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 4,
-                                backgroundColor: themeColors.primary + '18',
-                                borderColor: themeColors.primary + '50',
-                                borderWidth: 1,
-                                paddingVertical: 4,
-                                paddingHorizontal: 8,
-                                borderRadius: BorderRadius.small,
-                                alignSelf: 'flex-start',
-                              }}
-                            >
-                              <Ionicons
-                                name="folder-open-outline"
-                                size={12}
-                                color={themeColors.primary}
-                              />
-                              <Text
-                                style={{
-                                  fontSize: 10,
-                                  fontWeight: '800',
-                                  color: themeColors.primary,
-                                }}
-                                numberOfLines={1}
-                              >
-                                Asignar a proyecto
-                              </Text>
-                            </TouchableOpacity>
+                            {(() => {
+                              const isOp =
+                                item.tipo_gasto === 'OPERATIVO' ||
+                                (!item.proyecto_id &&
+                                  (item.tipo_servicio_proyecto || '').toLowerCase() === 'operativo');
+                              const hasProy = Boolean(item.proyecto_id || item.proyecto_rel?.id);
+                              if (isOp || hasProy) {
+                                return (
+                                  <Text
+                                    style={{
+                                      fontSize: 11,
+                                      color: themeColors.textSecondary,
+                                    }}
+                                    numberOfLines={1}
+                                  >
+                                    {hasProy
+                                      ? getProyectoNombreFromGasto(item, proyectos) || 'Con proyecto'
+                                      : 'Operativo'}
+                                  </Text>
+                                );
+                              }
+                              return (
+                                <TouchableOpacity
+                                  onPress={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenAssignProyecto(item);
+                                  }}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    backgroundColor: themeColors.primary + '18',
+                                    borderColor: themeColors.primary + '50',
+                                    borderWidth: 1,
+                                    paddingVertical: 4,
+                                    paddingHorizontal: 8,
+                                    borderRadius: BorderRadius.small,
+                                    alignSelf: 'flex-start',
+                                  }}
+                                >
+                                  <Ionicons
+                                    name="folder-open-outline"
+                                    size={12}
+                                    color={themeColors.primary}
+                                  />
+                                  <Text
+                                    style={{
+                                      fontSize: 10,
+                                      fontWeight: '800',
+                                      color: themeColors.primary,
+                                    }}
+                                    numberOfLines={1}
+                                  >
+                                    Asignar a proyecto
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })()}
                           </View>
 
                           <Text
@@ -2365,35 +2389,40 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
                       marginBottom: 4,
                     }}
                   >
-                    <TouchableOpacity
-                      onPress={() => handleOpenAssignProyecto(item)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 5,
-                        backgroundColor: themeColors.primary + '18',
-                        borderColor: themeColors.primary + '50',
-                        borderWidth: 1,
-                        paddingVertical: 4,
-                        paddingHorizontal: 10,
-                        borderRadius: BorderRadius.small,
-                      }}
-                    >
-                      <Ionicons
-                        name="folder-open-outline"
-                        size={13}
-                        color={themeColors.primary}
-                      />
-                      <Text
-                        style={{
-                          fontSize: 11,
-                          fontWeight: '800',
-                          color: themeColors.primary,
-                        }}
-                      >
-                        Asignar a proyecto
-                      </Text>
-                    </TouchableOpacity>
+                    {!item.proyecto_id &&
+                      !item.proyecto_rel?.id &&
+                      item.tipo_gasto !== 'OPERATIVO' &&
+                      (item.tipo_servicio_proyecto || '').toLowerCase() !== 'operativo' && (
+                        <TouchableOpacity
+                          onPress={() => handleOpenAssignProyecto(item)}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 5,
+                            backgroundColor: themeColors.primary + '18',
+                            borderColor: themeColors.primary + '50',
+                            borderWidth: 1,
+                            paddingVertical: 4,
+                            paddingHorizontal: 10,
+                            borderRadius: BorderRadius.small,
+                          }}
+                        >
+                          <Ionicons
+                            name="folder-open-outline"
+                            size={13}
+                            color={themeColors.primary}
+                          />
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              fontWeight: '800',
+                              color: themeColors.primary,
+                            }}
+                          >
+                            Asignar a proyecto
+                          </Text>
+                        </TouchableOpacity>
+                      )}
 
                     {item.detalle_servicio_proyecto ? (
                       <Text
@@ -2434,7 +2463,7 @@ export function AdminGastosMainList({ vm }: AdminGastosMainListProps) {
                       { color: themeColors.textSecondary },
                     ]}
                   >
-                    No hay registros históricos sin proyecto.
+                    No hay gastos aprobados en el historial.
                   </Text>
                 </View>
               }

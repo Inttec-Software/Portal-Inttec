@@ -35,6 +35,34 @@ async function syncPaymentStatusInternal(pool: any, ventaId: string) {
   }
 }
 
+const buildEstadoPagoFilterSql = (estadoPago: string): string | null => {
+  const paidExpr = `(
+    (COALESCE(v.precio_total_facturado, 0) > 0 AND COALESCE(v.total_pagado, 0) >= COALESCE(v.precio_total_facturado, 0) - 0.01)
+    OR UPPER(TRIM(COALESCE(v.estado_pago, ''))) IN ('PAGADO', 'PAGADA', 'PAGADO (CON IVA)', 'PAGADA (CON IVA)', 'PAGADO COMPLETO', 'LIQUIDADA', 'LIQUIDADO', 'PAID')
+  )`;
+  const partialExpr = `(
+    (COALESCE(v.total_pagado, 0) > 0 AND COALESCE(v.total_pagado, 0) < COALESCE(v.precio_total_facturado, 0) - 0.01)
+    OR UPPER(TRIM(COALESCE(v.estado_pago, ''))) IN ('PAGO PARCIAL', 'PARCIAL', 'PAGADO PARCIALMENTE', 'ABONADA', 'ABONADO')
+  )`;
+  const sinPrecioExpr = `(
+    (COALESCE(v.precio_total_facturado, 0) <= 0 AND COALESCE(v.total_pagado, 0) <= 0 AND UPPER(TRIM(COALESCE(v.estado_pago, ''))) NOT IN ('PAGADO', 'PAGADA'))
+    OR UPPER(TRIM(COALESCE(v.estado_pago, ''))) IN ('SIN PRECIO', 'SIN MONTO', 'COTIZACION')
+  )`;
+
+  switch (estadoPago) {
+    case 'PAGADO':
+      return paidExpr;
+    case 'PAGO PARCIAL':
+      return `(NOT ${paidExpr} AND ${partialExpr})`;
+    case 'SIN PRECIO':
+      return `(NOT ${paidExpr} AND NOT ${partialExpr} AND ${sinPrecioExpr})`;
+    case 'PENDIENTE DE PAGO':
+      return `(NOT ${paidExpr} AND NOT ${partialExpr} AND NOT ${sinPrecioExpr})`;
+    default:
+      return null;
+  }
+};
+
 // === GET /api/ventas/historial ===
 export const getVentasHistorial = async (req: Request, res: Response) => {
   try {
@@ -50,12 +78,18 @@ export const getVentasHistorial = async (req: Request, res: Response) => {
 
     const search = (req.query.search as string || '').trim();
     const fecha = (req.query.fecha as string || '').trim();
+    const estadoPagoFilter = (req.query.estadoPago as string || '').trim().toUpperCase();
 
     // Filtro base: Excluir registros generados como Factura Directa que no corresponden a ventas operativas
     const conditions: string[] = [
       `NOT (v.tipo_proyecto = 'Factura Directa' AND (TRIM(COALESCE(v.factura_referencia, '')) = '' OR TRIM(COALESCE(v.factura_referencia, '')) = TRIM(COALESCE(v.folio, ''))))`
     ];
     const params: any[] = [];
+
+    const estadoPagoSql = buildEstadoPagoFilterSql(estadoPagoFilter);
+    if (estadoPagoSql) {
+      conditions.push(estadoPagoSql);
+    }
 
     if (fecha) {
       params.push(`${fecha}%`);

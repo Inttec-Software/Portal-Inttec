@@ -367,6 +367,7 @@ export default function VentasScreen() {
   const [isRefreshingHistorial, setIsRefreshingHistorial] = useState(false);
   const [historialSearch, setHistorialSearch] = useState('');
   const [filterDate, setFilterDate] = useState<Date | null>(null);
+  const [filterEstadoPago, setFilterEstadoPago] = useState<'TODOS' | EstadoPagoVenta>('TODOS');
   const [showFilterDatePicker, setShowFilterDatePicker] = useState(false);
 
   // === Paginación Historial ===
@@ -542,6 +543,9 @@ export default function VentasScreen() {
           search: debouncedHistorialSearch,
           fecha: formattedDate,
         });
+        if (filterEstadoPago !== 'TODOS') {
+          queryParams.set('estadoPago', filterEstadoPago);
+        }
         const res = await fetch(`${getApiUrl()}/api/ventas/historial?${queryParams.toString()}`, { headers });
         if (res.ok) {
           const data = await res.json();
@@ -596,7 +600,7 @@ const handleRefreshHistorial = () => {
     if (currentUser && activeTab === 'historial') {
       loadHistorial();
     }
-  }, [currentUser, activeTab, currentPage, pageSize, debouncedHistorialSearch, filterDate]);
+  }, [currentUser, activeTab, currentPage, pageSize, debouncedHistorialSearch, filterDate, filterEstadoPago]);
 
   const loadPagosForSelectedVenta = async (ventaId: string, currentVentaObj?: VentaConPago) => {
     setIsLoadingPagos(true);
@@ -1145,6 +1149,14 @@ const handleRefreshHistorial = () => {
       filtradas = filtradas.filter(v => v.fecha?.startsWith(formattedFilterDate));
     }
 
+    if (filterEstadoPago !== 'TODOS') {
+      filtradas = filtradas.filter(v => {
+        const totalPag = Number(v.total_pagado) || 0;
+        const est = getNormalizedEstadoPago(v.estado_pago, v.precio_total_facturado, totalPag);
+        return est === filterEstadoPago;
+      });
+    }
+
     const rawQuery = normalizeSearchText(historialSearch);
     if (rawQuery) {
       const queryTokens = rawQuery.split(/\s+/).filter(Boolean);
@@ -1157,7 +1169,7 @@ const handleRefreshHistorial = () => {
     }
     
     return filtradas;
-  }, [ventasHistorial, historialSearch, filterDate]);
+  }, [ventasHistorial, historialSearch, filterDate, filterEstadoPago]);
 
   // === Calcular totales de las partidas ===
   const calculatedTotals = useMemo(() => {
@@ -2508,6 +2520,57 @@ const handleRefreshHistorial = () => {
           </HoverTooltip>
         )}
       </View>
+
+      {/* Filtro rápido por Estado de Pago */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0, marginTop: Spacing.one, marginBottom: Spacing.two }}
+        contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: Spacing.three, paddingVertical: 2 }}
+      >
+        {(
+          [
+            { key: 'TODOS', label: 'Todos' },
+            { key: 'PENDIENTE DE PAGO', label: 'Pendiente' },
+            { key: 'PAGO PARCIAL', label: 'Parcial' },
+            { key: 'PAGADO', label: 'Pagado' },
+            { key: 'SIN PRECIO', label: 'Sin precio' },
+          ] as Array<{ key: 'TODOS' | EstadoPagoVenta; label: string }>
+        ).map((opt) => {
+          const isSelected = filterEstadoPago === opt.key;
+          const statusStyle = opt.key === 'TODOS' ? null : getEstadoPagoStyle(opt.key);
+          const activeBg = statusStyle ? statusStyle.bg : themeColors.accent + '20';
+          const activeBorder = statusStyle ? statusStyle.border : themeColors.accent;
+          const activeText = statusStyle ? statusStyle.text : themeColors.accent;
+          return (
+            <TouchableOpacity
+              key={opt.key}
+              onPress={() => {
+                setFilterEstadoPago(opt.key);
+                setCurrentPage(1);
+              }}
+              style={{
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+                borderRadius: 999,
+                borderWidth: 1,
+                borderColor: isSelected ? activeBorder : themeColors.border,
+                backgroundColor: isSelected ? activeBg : themeColors.backgroundElement,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: isSelected ? '700' : '500',
+                  color: isSelected ? activeText : themeColors.textSecondary,
+                }}
+              >
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
       
       {showFilterDatePicker && Platform.OS !== 'web' && (
         <DateTimePicker
@@ -2539,7 +2602,7 @@ const handleRefreshHistorial = () => {
             <VentasCardsListSkeleton count={5} />
           </ScrollView>
         )
-      ) : ventasHistorial.length === 0 ? (
+      ) : ventasHistorial.length === 0 && !historialSearch && !filterDate && filterEstadoPago === 'TODOS' ? (
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ flexGrow: 1 }}
@@ -2568,6 +2631,7 @@ const handleRefreshHistorial = () => {
                 onPress={() => {
                   setHistorialSearch('');
                   setFilterDate(null);
+                  setFilterEstadoPago('TODOS');
                   setCurrentPage(1);
                 }}
                 style={{ marginTop: Spacing.two, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: themeColors.accent + '20', borderRadius: 8 }}

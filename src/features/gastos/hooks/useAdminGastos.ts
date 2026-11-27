@@ -559,8 +559,6 @@ export function useAdminGastos() {
 
       if (activeTab === 'operativos') {
         queryParams.set('tipo_gasto', 'OPERATIVO');
-      } else if (activeTab === 'historial') {
-        queryParams.set('sin_proyecto', 'true');
       }
 
       const fetchUrl = `${apiUrl}/api/reportes/admin/all?${queryParams.toString()}`;
@@ -2653,7 +2651,7 @@ export function useAdminGastos() {
         PROYECTOS: 'Reporte de Gastos por Proyecto',
         PROYECTO: 'Reporte de Proyecto',
         OPERATIVOS: 'Reporte de Gastos Operativos',
-        HISTORICO: 'Reporte Histórico / Sin Proyecto',
+        HISTORICO: 'Reporte Histórico (Gastos Aprobados)',
       };
       const periodoStr =
         startDateFilter || endDateFilter
@@ -2972,21 +2970,11 @@ export function useAdminGastos() {
     });
   }, [activeTab, gastos, filteredGastos, matchesFacturaFilter]);
 
-  // Pestaña 4 — "Histórico / Sin proyecto" (gastos con proyecto_id = NULL y no operativos)
+  // Pestaña 4 — "Histórico" (todos los gastos con status = 'APPROVED', con o sin proyecto u operativos)
   const historyGastos = useMemo(() => {
     const source = activeTab === 'historial' ? gastos : filteredGastos;
     return source.filter((g) => {
-      if (g.proyecto_id || g.proyecto_rel?.id) return false;
-      const isOp =
-        g.tipo_gasto === 'OPERATIVO' ||
-        (!g.proyecto_id &&
-          (g.tipo_servicio_proyecto || '').toLowerCase() === 'operativo');
-      if (isOp) return false;
-      const isHistoryStatus =
-        g.status === 'APPROVED' ||
-        g.status === 'REJECTED' ||
-        g.status === 'ACTION_REQUIRED';
-      if (!isHistoryStatus && activeTab !== 'historial') return false;
+      if (g.status !== 'APPROVED') return false;
       return matchesFacturaFilter(g);
     });
   }, [activeTab, gastos, filteredGastos, matchesFacturaFilter]);

@@ -245,10 +245,6 @@ export const getAdminReportes = async (req: Request, res: Response) => {
         viewConditions.push(`g.proyecto_id = $${viewParams.length}`);
       } else if (sinProyectoFilter) {
         viewConditions.push(`g.proyecto_id IS NULL`);
-        if (tab === 'historial') {
-          viewConditions.push(`NOT ${OPERATIVO_SQL}`);
-          viewConditions.push(`(g.tipo_gasto IS NULL OR g.status NOT IN ('PENDING', 'ACTION_REQUIRED'))`);
-        }
       }
 
       const appendFacturaFilter = () => {
@@ -275,7 +271,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
       } else if (tab === 'operativos') {
         appendFacturaFilter();
       } else if (tab === 'historial') {
-        viewConditions.push(`g.status IN ('APPROVED', 'REJECTED', 'ACTION_REQUIRED')`);
+        viewConditions.push(`g.status = 'APPROVED'`);
         appendFacturaFilter();
       }
 
@@ -296,12 +292,7 @@ export const getAdminReportes = async (req: Request, res: Response) => {
             COUNT(*) FILTER (WHERE g.status = 'PENDING' AND COALESCE(g.devuelto_por_factura, FALSE) = TRUE) AS count_devueltos_factura,
             COUNT(*) FILTER (WHERE g.status = 'PENDING' AND (COALESCE(g.devuelto_por_factura, FALSE) = TRUE OR g.factura_sugerida_id IS NOT NULL)) AS count_con_factura_detectada,
             COUNT(*) FILTER (WHERE ${OPERATIVO_SQL}) AS count_operativos,
-            COUNT(*) FILTER (
-              WHERE g.proyecto_id IS NULL
-                AND NOT ${OPERATIVO_SQL}
-                AND (g.tipo_gasto IS NULL OR g.status NOT IN ('PENDING', 'ACTION_REQUIRED'))
-                AND g.status IN ('APPROVED', 'REJECTED', 'ACTION_REQUIRED')
-            ) AS count_historico
+            COUNT(*) FILTER (WHERE g.status = 'APPROVED') AS count_historico
           FROM gastos g
           ${baseWhereSql}
         `, baseParams),
@@ -776,7 +767,7 @@ export const getExportData = async (req: Request, res: Response) => {
       } else if (scope === 'OPERATIVOS') {
         conditions.push(OPERATIVO_GASTO_SQL);
       } else if (scope === 'HISTORICO') {
-        conditions.push(`g.proyecto_id IS NULL AND NOT ${OPERATIVO_GASTO_SQL}`);
+        conditions.push(`g.status = 'APPROVED'`);
       }
       if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');
